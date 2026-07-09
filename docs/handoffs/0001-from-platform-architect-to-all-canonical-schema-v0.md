@@ -66,7 +66,19 @@ ADR-0009's walking skeleton needs one shared schema contract so Ingestion (Go), 
 ## Verification Evidence
 - Wire contract + topic registry exist at `contracts/` (this repo, this commit).
 - Schema contract reviewed against ADR-0003/0004/0006/0007 by the Platform Architect (author of this handoff).
-- Live-stack verification (migrations applied to a real TimescaleDB) is pending — Docker is unavailable in the authoring environment; the migration runner and SQL must be validated by the first environment with Docker, and this handoff must be updated with that evidence before the schema is declared Done.
+- **2026-07-09 — live-verified against the Compose stack** (Docker available for the first time):
+  - Full stack booted healthy: apache/kafka:3.9.1 (KRaft), timescale/timescaledb:latest-pg16, apicurio-registry:3.0.6, MinIO, Prometheus, Grafana — 6/6 healthchecks green.
+  - `db/migrate.py` applied all 9 migrations to real TimescaleDB; re-run reported "up to date: 9 migration(s) already applied" (idempotent).
+  - `canonical.vehicle_positions` confirmed a real hypertable via `timescaledb_information.hypertables`.
+  - Immutability proven by attack: `UPDATE`/`DELETE` on `raw.records` → `ERROR: raw.records is immutable`; `UPDATE` on `audit.events` → `ERROR: audit.events is append-only`; the inserted record survived intact.
+  - Defect found in verification: a `DATABASE_URL` built from a password containing `@`/special characters breaks URL parsing — credentials must be percent-encoded (fixed in the session by encoding; `db/README.md` and the compose placeholder need the note; migrate.py accepting libpq `PG*` env vars is the robust follow-up).
+- **2026-07-09 — end-to-end run against live MBTA feeds (public GTFS + GTFS-RT, zero onboarding per ADR-0009):**
+  - Go ingestion container (first Docker build of the image) produced GTFS-RT frames every 30s and landed the 24 MB GTFS static zip in MinIO; the zip's content-addressed `record_id` was identical across a container restart (content addressing proven on real data).
+  - Transform consumed both topics from Kafka (host listener 127.0.0.1:29092) → real TimescaleDB: 114 raw.records, 403 canonical.routes, 112,578 canonical.trips, 59,317 canonical.vehicle_positions, 172,298 lineage.edges, **0 dq.issues from normalization**.
+  - Calc runner over the day's period: loaded 59,317 positions, found 122 real telemetry gaps per metric (collection cold-start artifacts + genuine GPS dropouts, e.g. subway tunnels), **refused to persist both VRM and VRH** (`value: null`) and routed **244 blocking dq.issues** — the fail-loudly guardrail exercised end-to-end on real data.
+  - API served the DQ queue live (local-account login → bearer token → `GET /dq/issues`): 244 open issues, plain-language descriptions naming vehicle/trip/timestamps and citing content-addressed source record ids.
+  - Provisioning gaps found & fixed in-session (compose bootstrap follow-up): Kafka topics needed explicit creation; MinIO bucket needed creation; kafka-python-ng needed `python-snappy` to read franz-go's snappy-compressed batches (transform `kafka` extra must declare it).
+  - Product learning: vrm_v0/vrh_v0's all-or-nothing gap refusal means any realistic full-fleet window refuses; the per-group exclusion + coverage-reporting policy (an NTD & Compliance decision, verified against FTA guidance) is the necessary next calc increment before a live metric can persist and the lineage-traversal endpoint can be demonstrated on real data (it is proven in tests).
 
 ## Response — backend-engineer
 
