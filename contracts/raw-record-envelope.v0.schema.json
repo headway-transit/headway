@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://headway.dev/contracts/raw-record-envelope.v0.schema.json",
+  "title": "Headway Raw Record Envelope v0",
+  "description": "The envelope every connector wraps a raw record in before producing to Kafka (ADR-0006). record_id is the lowercase hex SHA-256 of the exact raw payload bytes (content-addressed, ADR-0007). Raw records are immutable after landing.",
+  "type": "object",
+  "required": [
+    "envelope_version",
+    "record_id",
+    "source",
+    "connector",
+    "connector_version",
+    "fetched_at",
+    "content_type",
+    "payload_encoding",
+    "payload",
+    "parse_status"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "envelope_version": {
+      "const": 0,
+      "description": "Envelope contract version. Consumers MUST reject unknown versions."
+    },
+    "record_id": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$",
+      "description": "Lowercase hex SHA-256 of the exact raw payload bytes as received. Content-addressed identity; anchors the lineage graph."
+    },
+    "source": {
+      "type": "string",
+      "description": "Source system type, e.g. gtfs_static, gtfs_rt, tides, apc, farebox, j1939, obd2, ev_charging, paratransit, maintenance, manual.",
+      "minLength": 1
+    },
+    "connector": {
+      "type": "string",
+      "description": "Connector implementation identifier, e.g. headway-gtfs-rt.",
+      "minLength": 1
+    },
+    "connector_version": {
+      "type": "string",
+      "description": "Semantic version of the producing connector.",
+      "minLength": 1
+    },
+    "agency_id": {
+      "type": "string",
+      "description": "Optional agency identifier for multi-feed deployments. In database-per-agency hosted mode (ADR-0004) the pipeline is already agency-scoped; this field disambiguates multi-agency feeds only."
+    },
+    "feed_url": {
+      "type": "string",
+      "description": "Optional URL or locator the payload was fetched from."
+    },
+    "fetched_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "UTC instant the connector fetched/received the payload."
+    },
+    "content_type": {
+      "type": "string",
+      "description": "MIME type of the raw payload, e.g. application/x-protobuf, application/zip, application/json.",
+      "minLength": 1
+    },
+    "payload_encoding": {
+      "type": "string",
+      "enum": ["base64", "object_ref"],
+      "description": "base64: payload holds the raw bytes base64-encoded (small records). object_ref: payload holds an object-store key (large records, e.g. GTFS static zips); the object's bytes hash to record_id."
+    },
+    "payload": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Raw payload bytes base64-encoded, or the object-store key, per payload_encoding."
+    },
+    "parse_status": {
+      "type": "string",
+      "enum": ["ok", "malformed"],
+      "description": "ok: payload parsed against its source spec at the connector. malformed: it did not — the record is still landed (never dropped) and a data-quality issue MUST be raised downstream (fail loudly)."
+    },
+    "parse_error": {
+      "type": "string",
+      "description": "Human-readable parse failure detail. Required in practice when parse_status is malformed."
+    }
+  }
+}

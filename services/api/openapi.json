@@ -1,0 +1,761 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Headway API",
+    "description": "Serves computed transit metrics with full lineage, the DQ resolution workflow, and the audited certification action. This API never computes a reported figure; it serves what the calculation library produced, joined to its provenance. Reported values are JSON strings (exact NUMERIC, never float). Auth: local accounts (ADR-0011); the native OIDC relying party is the next increment behind the same {sub, username, role} claim set.",
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/auth/login": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Login",
+        "operationId": "login_auth_login_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoginResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/metrics/values": {
+      "get": {
+        "tags": [
+          "metrics"
+        ],
+        "summary": "List Metric Values",
+        "operationId": "list_metric_values_metrics_values_get",
+        "parameters": [
+          {
+            "name": "metric",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "e.g. 'vrm' or 'vrh'",
+              "title": "Metric"
+            },
+            "description": "e.g. 'vrm' or 'vrh'"
+          },
+          {
+            "name": "period_start",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Period Start"
+            }
+          },
+          {
+            "name": "period_end",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Period End"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/MetricValue"
+                  },
+                  "title": "Response List Metric Values Metrics Values Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/metrics/values/{metric_value_id}/lineage": {
+      "get": {
+        "tags": [
+          "metrics"
+        ],
+        "summary": "Explain Metric Value",
+        "description": "\"Explain this number\": the full provenance tree from the reported\nfigure down to the raw records that produced it (ADR-0007).",
+        "operationId": "explain_metric_value_metrics_values__metric_value_id__lineage_get",
+        "parameters": [
+          {
+            "name": "metric_value_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Metric Value Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LineageNode"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/certifications": {
+      "post": {
+        "tags": [
+          "certification"
+        ],
+        "summary": "Certify",
+        "operationId": "certify_certifications_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CertificationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CertificationResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/dq/issues": {
+      "get": {
+        "tags": [
+          "data-quality"
+        ],
+        "summary": "List Issues",
+        "operationId": "list_issues_dq_issues_get",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/DqIssue"
+                  },
+                  "title": "Response List Issues Dq Issues Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/dq/issues/{issue_id}/resolve": {
+      "post": {
+        "tags": [
+          "data-quality"
+        ],
+        "summary": "Resolve Issue",
+        "operationId": "resolve_issue_dq_issues__issue_id__resolve_post",
+        "parameters": [
+          {
+            "name": "issue_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Issue Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResolveRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResolveResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "CertificationRequest": {
+        "properties": {
+          "metric_value_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Metric Value Ids"
+          },
+          "attestation": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Attestation"
+          }
+        },
+        "type": "object",
+        "required": [
+          "metric_value_ids",
+          "attestation"
+        ],
+        "title": "CertificationRequest"
+      },
+      "CertificationResponse": {
+        "properties": {
+          "certification_id": {
+            "type": "string",
+            "title": "Certification Id"
+          },
+          "metric_value_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Metric Value Ids"
+          },
+          "certified_by": {
+            "type": "string",
+            "title": "Certified By"
+          },
+          "certified_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Certified At"
+          },
+          "attestation": {
+            "type": "string",
+            "title": "Attestation"
+          },
+          "audit_event_id": {
+            "type": "integer",
+            "title": "Audit Event Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "certification_id",
+          "metric_value_ids",
+          "certified_by",
+          "certified_at",
+          "attestation",
+          "audit_event_id"
+        ],
+        "title": "CertificationResponse"
+      },
+      "DqIssue": {
+        "properties": {
+          "issue_id": {
+            "type": "string",
+            "title": "Issue Id"
+          },
+          "issue_type": {
+            "type": "string",
+            "title": "Issue Type"
+          },
+          "severity": {
+            "type": "string",
+            "title": "Severity"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "owner": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "source_record_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Record Ids"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "resolved_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved At"
+          },
+          "resolution": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolution"
+          }
+        },
+        "type": "object",
+        "required": [
+          "issue_id",
+          "issue_type",
+          "severity",
+          "status",
+          "owner",
+          "title",
+          "description",
+          "source_record_ids",
+          "created_at",
+          "resolved_at",
+          "resolution"
+        ],
+        "title": "DqIssue"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "LineageNode": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "transform_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Transform Name"
+          },
+          "transform_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Transform Version"
+          },
+          "inputs": {
+            "items": {
+              "$ref": "#/components/schemas/LineageNode"
+            },
+            "type": "array",
+            "title": "Inputs",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "id"
+        ],
+        "title": "LineageNode",
+        "description": "One node of the provenance tree.\n\n``transform_name``/``transform_version`` describe the transform that\nPRODUCED this node from its ``inputs`` (per lineage.edges). Raw records\nare leaves: no transform, no inputs."
+      },
+      "LoginRequest": {
+        "properties": {
+          "username": {
+            "type": "string",
+            "title": "Username"
+          },
+          "password": {
+            "type": "string",
+            "title": "Password"
+          }
+        },
+        "type": "object",
+        "required": [
+          "username",
+          "password"
+        ],
+        "title": "LoginRequest"
+      },
+      "LoginResponse": {
+        "properties": {
+          "access_token": {
+            "type": "string",
+            "title": "Access Token"
+          },
+          "token_type": {
+            "type": "string",
+            "title": "Token Type",
+            "default": "bearer"
+          },
+          "expires_in": {
+            "type": "integer",
+            "title": "Expires In"
+          },
+          "username": {
+            "type": "string",
+            "title": "Username"
+          },
+          "role": {
+            "type": "string",
+            "title": "Role"
+          }
+        },
+        "type": "object",
+        "required": [
+          "access_token",
+          "expires_in",
+          "username",
+          "role"
+        ],
+        "title": "LoginResponse"
+      },
+      "MetricValue": {
+        "properties": {
+          "metric_value_id": {
+            "type": "string",
+            "title": "Metric Value Id"
+          },
+          "metric": {
+            "type": "string",
+            "title": "Metric"
+          },
+          "unit": {
+            "type": "string",
+            "title": "Unit"
+          },
+          "period_start": {
+            "type": "string",
+            "format": "date",
+            "title": "Period Start"
+          },
+          "period_end": {
+            "type": "string",
+            "format": "date",
+            "title": "Period End"
+          },
+          "scope": {
+            "type": "string",
+            "title": "Scope"
+          },
+          "value": {
+            "type": "string",
+            "title": "Value"
+          },
+          "calc_name": {
+            "type": "string",
+            "title": "Calc Name"
+          },
+          "calc_version": {
+            "type": "string",
+            "title": "Calc Version"
+          },
+          "computed_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Computed At"
+          },
+          "certification_status": {
+            "type": "string",
+            "title": "Certification Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "metric_value_id",
+          "metric",
+          "unit",
+          "period_start",
+          "period_end",
+          "scope",
+          "value",
+          "calc_name",
+          "calc_version",
+          "computed_at",
+          "certification_status"
+        ],
+        "title": "MetricValue"
+      },
+      "ResolveRequest": {
+        "properties": {
+          "resolution": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Resolution"
+          }
+        },
+        "type": "object",
+        "required": [
+          "resolution"
+        ],
+        "title": "ResolveRequest"
+      },
+      "ResolveResponse": {
+        "properties": {
+          "issue_id": {
+            "type": "string",
+            "title": "Issue Id"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "resolved_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Resolved At"
+          },
+          "resolution": {
+            "type": "string",
+            "title": "Resolution"
+          },
+          "audit_event_id": {
+            "type": "integer",
+            "title": "Audit Event Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "issue_id",
+          "status",
+          "resolved_at",
+          "resolution",
+          "audit_event_id"
+        ],
+        "title": "ResolveResponse"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      }
+    }
+  }
+}

@@ -1,0 +1,23 @@
+# Headway — minimal Prometheus configuration for the single-box stack.
+# App-service scrape targets are added as each service lands (next slice waves).
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # Prometheus scrapes itself so the stack has a known-good target on day one.
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  # --- Placeholders: uncomment as each Headway service exposes /metrics ------
+  # - job_name: ingestion
+  #   static_configs:
+  #     - targets: ["ingestion:2112"]
+  # - job_name: transform
+  #   static_configs:
+  #     - targets: ["transform:8001"]
+  # - job_name: api
+  #   static_configs:
+  #     - targets: ["api:8000"]

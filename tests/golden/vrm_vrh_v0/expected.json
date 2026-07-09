@@ -1,0 +1,63 @@
+{
+  "basis": "Synthetic hand-worked example (see BASIS.md). NOT an FTA-certified figure; regression anchor only.",
+  "clean_subset": {
+    "comment": "All positions EXCEPT trip-C (the gapped group). Unassigned rec-x-* positions are present but ignored (trip_id null).",
+    "excluded_trip_ids": [
+      "trip-C"
+    ],
+    "vrm": {
+      "value": "12.44",
+      "unit": "miles",
+      "per_group": {
+        "veh-101|trip-A": "6.22",
+        "veh-202|trip-B": "6.22"
+      }
+    },
+    "vrh": {
+      "value": "0.45",
+      "unit": "hours",
+      "per_group": {
+        "veh-101|trip-A": "0.15",
+        "veh-202|trip-B": "0.30"
+      }
+    },
+    "input_record_ids": [
+      "rec-a-00",
+      "rec-a-01",
+      "rec-a-02",
+      "rec-a-03",
+      "rec-a-04",
+      "rec-a-05",
+      "rec-a-06",
+      "rec-a-07",
+      "rec-a-08",
+      "rec-a-09",
+      "rec-b-00",
+      "rec-b-01",
+      "rec-b-02",
+      "rec-b-03",
+      "rec-b-04",
+      "rec-b-05",
+      "rec-b-06",
+      "rec-b-07",
+      "rec-b-08",
+      "rec-b-09"
+    ]
+  },
+  "full_fixture": {
+    "comment": "The full fixture includes trip-C, which contains a 400s gap (> 300s threshold): both calcs must refuse (value null) and report the blocking issue.",
+    "vrm_value": null,
+    "vrh_value": null,
+    "blocking_issue": {
+      "issue_type": "telemetry_gap",
+      "source_record_ids": [
+        "rec-c-01",
+        "rec-c-02"
+      ]
+    },
+    "ignored_unassigned_record_ids": [
+      "rec-x-00",
+      "rec-x-01"
+    ]
+  }
+}

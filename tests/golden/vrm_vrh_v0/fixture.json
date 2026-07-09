@@ -1,0 +1,214 @@
+{
+  "description": "Synthetic golden fixture for vrm_v0/vrh_v0. See BASIS.md. NOT an FTA-certified figure; regression anchor only.",
+  "gap_threshold_seconds": 300,
+  "positions": [
+    {
+      "time": "2026-01-15T12:00:00+00:00",
+      "vehicle_id": "veh-101",
+      "trip_id": "trip-A",
+      "latitude": 40.0,
+      "longitude": -75.0,
+      "source_record_id": "rec-a-00"
+    },
+    {
+      "time": "2026-01-15T12:01:00+00:00",
+      "vehicle_id": "veh-101",
+      "trip_id": "trip-A",
+      "latitude": 40.01,
+      "longitude": -75.0,
+      "source_record_id": "rec-a-01"
+    },
+    {
+      "time": "2026-01-15T12:02:00+00:00",
+      "vehicle_id": "veh-101",
+      "trip_id": "trip-A",
+      "latitude": 40.02,
+      "longitude": -75.0,
+      "source_record_id": "rec-a-02"
+    },
+    {
+      "time": "2026-01-15T12:03:00+00:00",
+      "vehicle_id": "veh-101",
+      "trip_id": "trip-A",
+      "latitude": 40.03,
+      "longitude": -75.0,
+      "source_record_id": "rec-a-03"
+    },
+    {
+      "time": "2026-01-15T12:04:00+00:00",
+      "vehicle_id": "veh-101",
+      "trip_id": "trip-A",
+      "latitude": 40.04,
+      "longitude": -75.0,
+      "source_record_id": "rec-a-04"
+    },
+    {
+      "time": "2026-01-15T12:05:00+00:00",
+      "vehicle_id": "veh-101",
+      "trip_id": "trip-A",
+      "latitude": 40.05,
+      "longitude": -75.0,
+      "source_record_id": "rec-a-05"
+    },
+    {
+      "time": "2026-01-15T12:06:00+00:00",
+      "vehicle_id": "veh-101",
+      "trip_id": "trip-A",
+      "latitude": 40.06,
+      "longitude": -75.0,
+      "source_record_id": "rec-a-06"
+    },
+    {
+      "time": "2026-01-15T12:07:00+00:00",
+      "vehicle_id": "veh-101",
+      "trip_id": "trip-A",
+      "latitude": 40.07,
+      "longitude": -75.0,
+      "source_record_id": "rec-a-07"
+    },
+    {
+      "time": "2026-01-15T12:08:00+00:00",
+      "vehicle_id": "veh-101",
+      "trip_id": "trip-A",
+      "latitude": 40.08,
+      "longitude": -75.0,
+      "source_record_id": "rec-a-08"
+    },
+    {
+      "time": "2026-01-15T12:09:00+00:00",
+      "vehicle_id": "veh-101",
+      "trip_id": "trip-A",
+      "latitude": 40.09,
+      "longitude": -75.0,
+      "source_record_id": "rec-a-09"
+    },
+    {
+      "time": "2026-01-15T12:00:00+00:00",
+      "vehicle_id": "veh-202",
+      "trip_id": "trip-B",
+      "latitude": 0.0,
+      "longitude": -75.0,
+      "source_record_id": "rec-b-00"
+    },
+    {
+      "time": "2026-01-15T12:02:00+00:00",
+      "vehicle_id": "veh-202",
+      "trip_id": "trip-B",
+      "latitude": 0.0,
+      "longitude": -74.99,
+      "source_record_id": "rec-b-01"
+    },
+    {
+      "time": "2026-01-15T12:04:00+00:00",
+      "vehicle_id": "veh-202",
+      "trip_id": "trip-B",
+      "latitude": 0.0,
+      "longitude": -74.98,
+      "source_record_id": "rec-b-02"
+    },
+    {
+      "time": "2026-01-15T12:06:00+00:00",
+      "vehicle_id": "veh-202",
+      "trip_id": "trip-B",
+      "latitude": 0.0,
+      "longitude": -74.97,
+      "source_record_id": "rec-b-03"
+    },
+    {
+      "time": "2026-01-15T12:08:00+00:00",
+      "vehicle_id": "veh-202",
+      "trip_id": "trip-B",
+      "latitude": 0.0,
+      "longitude": -74.96,
+      "source_record_id": "rec-b-04"
+    },
+    {
+      "time": "2026-01-15T12:10:00+00:00",
+      "vehicle_id": "veh-202",
+      "trip_id": "trip-B",
+      "latitude": 0.0,
+      "longitude": -74.95,
+      "source_record_id": "rec-b-05"
+    },
+    {
+      "time": "2026-01-15T12:12:00+00:00",
+      "vehicle_id": "veh-202",
+      "trip_id": "trip-B",
+      "latitude": 0.0,
+      "longitude": -74.94,
+      "source_record_id": "rec-b-06"
+    },
+    {
+      "time": "2026-01-15T12:14:00+00:00",
+      "vehicle_id": "veh-202",
+      "trip_id": "trip-B",
+      "latitude": 0.0,
+      "longitude": -74.93,
+      "source_record_id": "rec-b-07"
+    },
+    {
+      "time": "2026-01-15T12:16:00+00:00",
+      "vehicle_id": "veh-202",
+      "trip_id": "trip-B",
+      "latitude": 0.0,
+      "longitude": -74.92,
+      "source_record_id": "rec-b-08"
+    },
+    {
+      "time": "2026-01-15T12:18:00+00:00",
+      "vehicle_id": "veh-202",
+      "trip_id": "trip-B",
+      "latitude": 0.0,
+      "longitude": -74.91,
+      "source_record_id": "rec-b-09"
+    },
+    {
+      "time": "2026-01-15T13:00:00+00:00",
+      "vehicle_id": "veh-202",
+      "trip_id": "trip-C",
+      "latitude": 0.1,
+      "longitude": -75.0,
+      "source_record_id": "rec-c-00"
+    },
+    {
+      "time": "2026-01-15T13:01:00+00:00",
+      "vehicle_id": "veh-202",
+      "trip_id": "trip-C",
+      "latitude": 0.11,
+      "longitude": -75.0,
+      "source_record_id": "rec-c-01"
+    },
+    {
+      "time": "2026-01-15T13:07:40+00:00",
+      "vehicle_id": "veh-202",
+      "trip_id": "trip-C",
+      "latitude": 0.12,
+      "longitude": -75.0,
+      "source_record_id": "rec-c-02"
+    },
+    {
+      "time": "2026-01-15T13:08:40+00:00",
+      "vehicle_id": "veh-202",
+      "trip_id": "trip-C",
+      "latitude": 0.13,
+      "longitude": -75.0,
+      "source_record_id": "rec-c-03"
+    },
+    {
+      "time": "2026-01-15T11:58:00+00:00",
+      "vehicle_id": "veh-101",
+      "trip_id": null,
+      "latitude": 39.98,
+      "longitude": -75.0,
+      "source_record_id": "rec-x-00"
+    },
+    {
+      "time": "2026-01-15T11:59:00+00:00",
+      "vehicle_id": "veh-101",
+      "trip_id": null,
+      "latitude": 39.99,
+      "longitude": -75.0,
+      "source_record_id": "rec-x-01"
+    }
+  ]
+}

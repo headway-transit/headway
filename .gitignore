@@ -1,0 +1,47 @@
+# --- Secrets / local env (never commit; .env.example IS committed) ---
+.env
+.env.*
+!.env.example
+
+# --- Go ---
+vendor/
+*.exe
+*.test
+*.out
+coverage.out
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# --- Node ---
+node_modules/
+.pnpm-store/
+*.tsbuildinfo
+.npm/
+
+# --- Build / dist artifacts ---
+dist/
+build/
+out/
+*.log
+
+# --- IDE / editor ---
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Claude Code local settings (user-local, not project governance)
+.claude/settings.local.json*

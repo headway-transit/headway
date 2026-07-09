@@ -1,0 +1,297 @@
+# Headway — single-box Docker Compose stack (source of truth, ADR-0005).
+#
+# This file stands up the full open dependency set on one commodity Linux box:
+# Kafka (KRaft), TimescaleDB, Apicurio Registry, MinIO, Prometheus, Grafana —
+# plus the Headway app services under the `app` profile as they land.
+#
+# Parity guardrail: everything here is open source and runs identically
+# on-prem and in gov-cloud from the same images. No cloud-only anything.
+#
+# Usage:
+#   cp .env.example .env    # edit values; never commit .env
+#   docker compose up -d    # infra only
+#   docker compose --profile app up -d --build   # infra + app services
+#
+# VERIFICATION STATUS: authored per ADR-0002/0005/0006/0011 and YAML-validated;
+# live `docker compose up` is PENDING (Docker unavailable in the authoring
+# environment). See README.md "Verification status".
+
+name: headway
+
+networks:
+  headway:
+    name: headway
+
+volumes:
+  kafka-data:
+  timescaledb-data:
+  minio-data:
+  prometheus-data:
+  grafana-data:
+
+services:
+  # ---------------------------------------------------------------------------
+  # Apache Kafka, KRaft mode (single node, combined broker+controller).
+  # Official Apache image; Apache-2.0; no ZooKeeper (ADR-0002).
+  # ---------------------------------------------------------------------------
+  kafka:
+    image: apache/kafka:3.9.1
+    restart: unless-stopped
+    networks: [headway]
+    ports:
+      # Host-side listener for local development/debugging only.
+      # In-cluster clients use kafka:9092 and never need this mapping.
+      - "127.0.0.1:29092:29092"
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093,PLAINTEXT_HOST://:29092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      # Single-node: replication factors must be 1.
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      # Small-box heap pin. Kafka's JVM is the heaviest single tenant of this
+      # stack (ADR-0002); 512 MiB is a STARTING POINT for the small-agency
+      # box, to be measured against real fleet-telemetry load and revised in
+      # the published sizing guidance — not a validated ceiling.
+      KAFKA_HEAP_OPTS: -Xms256m -Xmx512m
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 >/dev/null 2>&1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+
+  # ---------------------------------------------------------------------------
+  # PostgreSQL 16 + TimescaleDB — telemetry, canonical model, reporting store.
+  # ---------------------------------------------------------------------------
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    restart: unless-stopped
+    networks: [headway]
+    ports:
+      - "127.0.0.1:5432:5432"
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-headway}
+      POSTGRES_USER: ${POSTGRES_USER:-headway}
+      # Fail loudly if unset: no baked-in default password (parity with the
+      # fail-loudly guardrail; secrets are injected at runtime).
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in deploy/compose/.env}
+    volumes:
+      - timescaledb-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-headway} -d ${POSTGRES_DB:-headway}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  # ---------------------------------------------------------------------------
+  # Apicurio Registry — schema authority for the connector wire contract
+  # (ADR-0006; Apache-2.0, NOT Confluent Schema Registry).
+  #
+  # Storage choice: kafkasql. Schemas persist into a compacted Kafka topic on
+  # the broker that already exists in this stack — so registry state survives
+  # container restarts WITHOUT adding a second database dependency. In-memory
+  # storage was rejected: losing registered contract schemas on every restart
+  # is not acceptable for the component that governs the certification surface.
+  # ---------------------------------------------------------------------------
+  apicurio:
+    image: apicurio/apicurio-registry:3.0.6
+    restart: unless-stopped
+    networks: [headway]
+    depends_on:
+      kafka:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8081:8080"
+    environment:
+      APICURIO_STORAGE_KIND: kafkasql
+      APICURIO_KAFKASQL_BOOTSTRAP_SERVERS: kafka:9092
+      QUARKUS_HTTP_PORT: 8080
+    healthcheck:
+      # Quarkus liveness endpoint. NOTE: relies on curl being present in the
+      # image; confirm at first live boot and swap for a java-based probe if
+      # absent (recorded as pending in README "Verification status").
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/health/live >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 45s
+
+  # ---------------------------------------------------------------------------
+  # MinIO — S3-compatible object store (raw payload objects, GTFS zips).
+  # Stands in identically for S3 on-prem and in gov-cloud (parity guardrail).
+  # ---------------------------------------------------------------------------
+  minio:
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    restart: unless-stopped
+    networks: [headway]
+    command: server /data --console-address ":9001"
+    ports:
+      - "127.0.0.1:9000:9000"   # S3 API
+      - "127.0.0.1:9001:9001"   # web console
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-headway}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in deploy/compose/.env}
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9000/minio/health/live >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  # ---------------------------------------------------------------------------
+  # Prometheus — metrics scraping/storage.
+  # ---------------------------------------------------------------------------
+  prometheus:
+    image: prom/prometheus:v3.4.1
+    restart: unless-stopped
+    networks: [headway]
+    ports:
+      - "127.0.0.1:9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:9090/-/healthy || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  # ---------------------------------------------------------------------------
+  # Grafana — dashboards over Prometheus.
+  # ---------------------------------------------------------------------------
+  grafana:
+    image: grafana/grafana-oss:12.0.2
+    restart: unless-stopped
+    networks: [headway]
+    depends_on:
+      - prometheus
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD in deploy/compose/.env}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - grafana-data:/var/lib/grafana
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:3000/api/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  # ===========================================================================
+  # Headway app services — profile `app`.
+  # Build contexts point into the monorepo (ADR-0010); services land in slice
+  # waves, so only what exists is uncommented.
+  # ===========================================================================
+  ingestion:
+    profiles: [app]
+    build:
+      context: ../../services/ingestion
+    restart: unless-stopped
+    networks: [headway]
+    depends_on:
+      kafka:
+        condition: service_healthy
+      apicurio:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    environment:
+      # Env surface matches services/ingestion/cmd/headway-ingest (the service
+      # is the source of truth for its config; see its README).
+      KAFKA_BROKERS: kafka:9092
+      SCHEMA_REGISTRY_URL: http://apicurio:8080 # not yet read by the service; schema registration is a next increment (ADR-0006)
+      S3_ENDPOINT: minio:9000
+      S3_ACCESS_KEY: ${MINIO_ROOT_USER:-headway}
+      S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in deploy/compose/.env}
+      S3_BUCKET: ${S3_BUCKET:-headway-raw}
+      S3_USE_SSL: "false" # in-network MinIO; TLS termination is a hardening increment (Security role)
+      # GTFS/GTFS-RT source feeds for the walking-skeleton connector.
+      GTFS_STATIC_URL: ${GTFS_STATIC_URL:-}
+      GTFS_RT_VEHICLE_POSITIONS_URL: ${GTFS_RT_VEHICLE_POSITIONS_URL:-}
+      GTFS_RT_TRIP_UPDATES_URL: ${GTFS_RT_TRIP_UPDATES_URL:-}
+      GTFS_RT_ALERTS_URL: ${GTFS_RT_ALERTS_URL:-}
+      POLL_INTERVAL: ${POLL_INTERVAL:-30s}
+      AGENCY_ID: ${AGENCY_ID:-}
+
+  # --- Next slice waves (placeholders; uncomment as each service lands) ------
+  #
+  # transform:                                  # Python normalization + dbt
+  #   profiles: [app]
+  #   build:
+  #     context: ../../services/transform
+  #   restart: unless-stopped
+  #   networks: [headway]
+  #   depends_on:
+  #     kafka:
+  #       condition: service_healthy
+  #     timescaledb:
+  #       condition: service_healthy
+  #   environment:
+  #     KAFKA_BROKERS: kafka:9092
+  #     DATABASE_URL: postgres://${POSTGRES_USER:-headway}:${POSTGRES_PASSWORD}@timescaledb:5432/${POSTGRES_DB:-headway}
+  #
+  # api:                                        # Python FastAPI backend
+  #   profiles: [app]
+  #   build:
+  #     context: ../../services/api
+  #   restart: unless-stopped
+  #   networks: [headway]
+  #   ports:
+  #     - "127.0.0.1:8000:8000"
+  #   depends_on:
+  #     timescaledb:
+  #       condition: service_healthy
+  #   environment:
+  #     DATABASE_URL: postgres://${POSTGRES_USER:-headway}:${POSTGRES_PASSWORD}@timescaledb:5432/${POSTGRES_DB:-headway}
+  #
+  # web:                                        # TypeScript/React frontend
+  #   profiles: [app]
+  #   build:
+  #     context: ../../web
+  #   restart: unless-stopped
+  #   networks: [headway]
+  #   ports:
+  #     - "127.0.0.1:8080:80"
+
+  # ===========================================================================
+  # Optional profile `sso-broker` — Keycloak (ADR-0011).
+  #
+  # NOT part of the default stack: the API is a native OIDC relying party with
+  # local accounts, so Entra ID / Google / Okta work with zero extra
+  # infrastructure. Enable this profile only for agencies that need SAML-only
+  # IdPs or IdP aggregation; the API then simply treats Keycloak as its OIDC
+  # provider (config change, not code change). Uncomment to use:
+  #
+  # keycloak:
+  #   profiles: [sso-broker]
+  #   image: quay.io/keycloak/keycloak:26.2
+  #   restart: unless-stopped
+  #   networks: [headway]
+  #   command: start --http-enabled=true --hostname-strict=false
+  #   ports:
+  #     - "127.0.0.1:8180:8080"
+  #   environment:
+  #     KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN_USER:-admin}
+  #     KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?set KEYCLOAK_ADMIN_PASSWORD in deploy/compose/.env}
+  #   depends_on:
+  #     timescaledb:
+  #       condition: service_healthy
+  # ===========================================================================

@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "headway-api"
+version = "0.1.0"
+description = "Headway API: computed transit metrics with lineage, DQ workflow, and the audited certification action. Never originates a figure."
+requires-python = ">=3.12"
+license = { text = "Apache-2.0" }
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn>=0.29",
+    "psycopg[binary]>=3.1",
+    "PyJWT>=2.8",         # MIT
+    "bcrypt>=4.1",        # Apache-2.0 — password hashing choice (ADR-0001: OSI permissive)
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=8",
+    "httpx>=0.27",        # required by fastapi.testclient
+]
+
+[tool.setuptools.packages.find]
+include = ["headway_api*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
