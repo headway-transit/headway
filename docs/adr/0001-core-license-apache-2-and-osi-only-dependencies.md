@@ -51,6 +51,14 @@ The walking-skeleton build surfaced the first concrete case the original text un
 
 Precedent entries for the allowlist: `psycopg` (LGPL-3.0-with-exception; unmodified driver import; the standard PostgreSQL adapter for Python). The CI license gate implements exactly these tiers: permissive passes, weak-copyleft passes only if allowlisted, everything else fails the build.
 
+## Amendment 2 — Public-domain dedications in dev-only scope (2026-07-08)
+
+The first full-tree gate run surfaced `mdn-data` (CC0-1.0), a dev-only transitive of the web test environment (jsdom → css-tree → mdn-data). CC0 is a public-domain dedication — free by any practical standard (FSF-approved) — but it is not OSI-approved: its OSI review was withdrawn over the dedication's explicit reservation of patent rights, so the tier system correctly read it as tier 4. That patent concern applies to code Headway *ships*; it has no force for tooling that never enters a release artifact. Clarification:
+
+5. **Public-domain dedications (CC0-1.0 and equivalents): permitted for dev/test/build-only dependencies that are never distributed in release artifacts**, via the same reviewed allowlist — each such entry must carry `scope = "dev"`, asserting the reviewer confirmed the dependency does not ship. For **runtime/shipped** dependencies, public-domain dedications remain excluded pending case-by-case ADR review (the patent question is real for shipped code).
+
+Precedent entry: `mdn-data` (CC0-1.0; dev-only transitive of the jsdom test environment; never present in `dist/` or any release artifact).
+
 ## Links
 
 - Relates to and governs ADR-0002 (broker license call) and ADR-0006 (schema-registry license call).

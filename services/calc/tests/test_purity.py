@@ -19,6 +19,14 @@ FORBIDDEN_ROOTS = {
     "asyncio", "subprocess", "os",
 }
 
+#: The ONE declared process boundary: headway_calc._cli reads argv and
+#: HEADWAY_DATABASE_URL (os) and imports the psycopg driver (guarded) to run
+#: the runner against a live database. It contains no calculation logic —
+#: everything it calls (runner and below) stays under this guardrail. Any
+#: other module needing env/driver access must NOT be added here; route it
+#: through _cli or keep it out of headway_calc.
+CLI_BOUNDARY_MODULES = {"_cli.py"}
+
 
 def _import_roots(path: Path) -> set[str]:
     tree = ast.parse(path.read_text())
@@ -34,6 +42,8 @@ def _import_roots(path: Path) -> set[str]:
 def test_core_modules_import_only_stdlib_and_self():
     stdlib = sys.stdlib_module_names
     for module_path in sorted(PACKAGE_DIR.glob("*.py")):
+        if module_path.name in CLI_BOUNDARY_MODULES:
+            continue
         roots = _import_roots(module_path)
         for root in roots:
             assert root == "headway_calc" or root in stdlib, (

@@ -1,0 +1,79 @@
+# ADR-0001 Amendment 1, tier 3 — reviewed weak-copyleft dependency allowlist.
+#
+# Every entry is an *unmodified, dynamically-linked/imported* library
+# dependency under a weak-copyleft license (LGPL*, MPL-2.0, EPL-class),
+# recorded here with a one-line rationale per the ADR. Entries can only
+# rescue the weak-copyleft tier: the gate (scripts/license_gate.py) never
+# consults this file for strong-copyleft (GPL/AGPL), non-OSI (BSL, SSPL,
+# Confluent Community License), or unknown licenses — those always fail.
+#
+# Copying an allowlisted project's source into the Headway tree, or
+# modifying and vendoring it, is NOT covered by these entries and requires
+# a new ADR-level decision.
+#
+# Review discipline: re-review entries on dependency bumps (licenses change);
+# remove entries that no longer appear in any dependency tree.
+
+[[allow]]
+package = "psycopg"
+ecosystem = "python"
+license = "LGPL-3.0-with-exception"
+rationale = "Precedent entry from ADR-0001 Amendment 1: the standard PostgreSQL adapter for Python; unmodified driver import, never vendored."
+
+[[allow]]
+package = "psycopg-binary"
+ecosystem = "python"
+license = "LGPL-3.0-with-exception"
+rationale = "Prebuilt binary wheel companion of psycopg (same upstream, same license, same unmodified-import usage); pulled in by the psycopg[binary] extra."
+
+[[allow]]
+package = "psycopg-pool"
+ecosystem = "python"
+license = "LGPL-3.0-with-exception"
+rationale = "Connection-pool companion of psycopg (same upstream project and license); unmodified import if/when the pool extra is enabled."
+
+[[allow]]
+package = "certifi"
+ecosystem = "python"
+license = "MPL-2.0"
+rationale = "Mozilla CA certificate bundle, transitive via httpx/httpcore; MPL-2.0 file-level copyleft on an unmodified data package we only import."
+
+[[allow]]
+package = "hypothesis"
+ecosystem = "python"
+license = "MPL-2.0"
+rationale = "Property-based testing framework, test-only extra of services/calc; unmodified import, never shipped in runtime artifacts."
+
+[[allow]]
+package = "axe-core"
+ecosystem = "node"
+license = "MPL-2.0"
+rationale = "Deque accessibility-testing engine, devDependency only, backing the WCAG 2.1 AA guardrail checks; unmodified import, never bundled into shipped frontend assets."
+
+[[allow]]
+package = "lightningcss"
+ecosystem = "node"
+license = "MPL-2.0"
+rationale = "CSS transformer used by Vite at build time (devDependency); unmodified build tool, its code is not distributed in Headway artifacts."
+
+# Platform-specific prebuilt binaries of lightningcss (same upstream project,
+# same MPL-2.0 license, one npm package name per OS/arch). Glob is supported
+# by the gate for exactly this shared-upstream case.
+[[allow]]
+package = "lightningcss-*"
+ecosystem = "node"
+license = "MPL-2.0"
+rationale = "Prebuilt per-platform binaries of lightningcss (same upstream, same license, same build-time-only usage)."
+
+# --- ADR-0001 Amendment 2: public-domain dedications, dev-only scope --------
+# Entries below are tier 3b: CC0-class public-domain dedications permitted
+# ONLY for dev/test/build-only dependencies that never ship in a release
+# artifact. Each entry MUST carry scope = "dev" — the reviewer's assertion
+# that the package does not appear in any distributed artifact.
+
+[[allow]]
+package = "mdn-data"
+ecosystem = "node"
+license = "CC0-1.0"
+scope = "dev"
+rationale = "Precedent entry from ADR-0001 Amendment 2: dev-only transitive of the jsdom test environment (jsdom -> css-tree -> mdn-data); never present in dist/ or any release artifact."

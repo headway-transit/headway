@@ -1,0 +1,378 @@
+/* Headway design tokens — every fg/bg pair below is WCAG 2.1 AA verified by
+   scripts/check-contrast.mjs (npm run check:contrast). If you change a token,
+   update that script and re-run it. Single light theme for the walking
+   skeleton; theming is a later design-system increment. */
+
+:root {
+  --color-bg: #ffffff;
+  --color-surface: #f6f8fa;
+  --color-text: #1f2328; /* 15.80:1 on --color-bg */
+  --color-text-muted: #57606a; /* 6.39:1 on --color-bg */
+  --color-accent: #0b57d0; /* links, primary actions, focus: 6.39:1 on bg */
+  --color-accent-text: #ffffff; /* 6.39:1 on --color-accent */
+  --color-border: #d0d7de;
+  --color-input-border: #57606a; /* 6.39:1 (>= 3:1 non-text) on bg */
+
+  --color-danger-text: #9f1b1b; /* 6.85:1 on --color-danger-bg */
+  --color-danger-bg: #fdeaea;
+  --color-warning-text: #664b00; /* 7.39:1 on --color-warning-bg */
+  --color-warning-bg: #fff3d1;
+  --color-info-text: #1d4e89; /* 7.29:1 on --color-info-bg */
+  --color-info-bg: #e7f0fa;
+  --color-success-text: #1c632f; /* 6.50:1 on --color-success-bg */
+  --color-success-bg: #e8f5eb;
+
+  --focus-ring: 3px solid var(--color-accent);
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 1rem;
+  --space-4: 1.5rem;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-size: 1rem;
+  line-height: 1.5;
+  color: var(--color-text);
+  background: var(--color-bg);
+}
+
+/* Visible focus everywhere (WCAG 2.4.7). */
+:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: 2px;
+}
+main:focus {
+  outline: none; /* programmatic focus target on route change, not interactive */
+}
+
+a {
+  color: var(--color-accent);
+}
+
+h1 {
+  font-size: 1.5rem;
+}
+h2 {
+  font-size: 1.2rem;
+}
+
+/* ---- layout ---- */
+
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  background: var(--color-accent);
+  color: var(--color-accent-text);
+  padding: var(--space-2) var(--space-3);
+  z-index: 10;
+}
+.skip-link:focus {
+  left: 0;
+}
+
+.app-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface);
+}
+.app-header .brand {
+  font-weight: 700;
+}
+.app-header nav ul {
+  display: flex;
+  gap: var(--space-3);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.app-header .session-info {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--color-text-muted);
+  font-size: 0.9rem;
+}
+
+main {
+  max-width: 70rem;
+  margin: 0 auto;
+  padding: var(--space-3);
+}
+
+/* ---- forms & buttons ---- */
+
+label {
+  display: block;
+  font-weight: 600;
+  margin-bottom: var(--space-1);
+}
+
+input[type="text"],
+input[type="password"],
+textarea {
+  display: block;
+  width: 100%;
+  max-width: 28rem;
+  padding: var(--space-2);
+  font: inherit;
+  color: var(--color-text);
+  border: 1px solid var(--color-input-border);
+  border-radius: 4px;
+  margin-bottom: var(--space-3);
+}
+textarea {
+  max-width: 36rem;
+  min-height: 6rem;
+}
+
+button {
+  font: inherit;
+  padding: var(--space-2) var(--space-3);
+  border-radius: 4px;
+  border: 1px solid var(--color-input-border);
+  background: var(--color-surface);
+  color: var(--color-text);
+  cursor: pointer;
+}
+button.primary {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  color: var(--color-accent-text);
+}
+button.link-like {
+  background: none;
+  border: none;
+  color: var(--color-accent);
+  text-decoration: underline;
+  padding: var(--space-1);
+}
+
+/* ---- messages ---- */
+
+.alert,
+.status,
+.banner {
+  padding: var(--space-2) var(--space-3);
+  border-radius: 4px;
+  margin: var(--space-3) 0;
+  border: 1px solid currentColor;
+}
+.alert {
+  background: var(--color-danger-bg);
+  color: var(--color-danger-text);
+}
+.status {
+  background: var(--color-success-bg);
+  color: var(--color-success-text);
+}
+.banner {
+  background: var(--color-warning-bg);
+  color: var(--color-warning-text);
+}
+
+/* ---- table ---- */
+
+.table-wrap {
+  overflow-x: auto;
+}
+table {
+  border-collapse: collapse;
+  width: 100%;
+}
+caption {
+  text-align: left;
+  font-weight: 600;
+  margin-bottom: var(--space-2);
+}
+th,
+td {
+  text-align: left;
+  padding: var(--space-2);
+  border-bottom: 1px solid var(--color-border);
+  vertical-align: top;
+}
+th {
+  background: var(--color-surface);
+}
+td.figure {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.tag {
+  display: inline-block;
+  padding: 0 var(--space-2);
+  border-radius: 4px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.tag.certified {
+  background: var(--color-success-bg);
+  color: var(--color-success-text);
+}
+.tag.uncertified {
+  background: var(--color-surface);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+}
+.tag.pre-verification {
+  background: var(--color-warning-bg);
+  color: var(--color-warning-text);
+}
+
+/* ---- severity (text + icon + color — never color alone) ---- */
+
+.severity {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 0 var(--space-2);
+  border-radius: 4px;
+  font-weight: 600;
+}
+.severity svg {
+  flex: none;
+}
+.severity.blocking {
+  background: var(--color-danger-bg);
+  color: var(--color-danger-text);
+}
+.severity.warning {
+  background: var(--color-warning-bg);
+  color: var(--color-warning-text);
+}
+.severity.info {
+  background: var(--color-info-bg);
+  color: var(--color-info-text);
+}
+
+/* ---- DQ issue cards ---- */
+
+.issue-list {
+  list-style: none;
+  padding: 0;
+  display: grid;
+  gap: var(--space-3);
+}
+.issue {
+  border: 1px solid var(--color-border);
+  border-left: 6px solid var(--color-border);
+  border-radius: 4px;
+  padding: var(--space-3);
+}
+.issue.blocking {
+  border-left-color: var(--color-danger-text);
+  background: var(--color-danger-bg);
+}
+.issue.blocking h2,
+.issue.blocking p,
+.issue.blocking dd,
+.issue.blocking dt {
+  color: var(--color-danger-text);
+}
+.issue dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: var(--space-1) var(--space-3);
+  margin: var(--space-2) 0;
+}
+.issue dt {
+  font-weight: 600;
+}
+.issue dd {
+  margin: 0;
+}
+
+/* ---- lineage tree ---- */
+
+.lineage-tree,
+.lineage-tree ul {
+  list-style: none;
+  padding-left: 0;
+}
+.lineage-tree ul {
+  margin-left: var(--space-4);
+  border-left: 2px solid var(--color-border);
+  padding-left: var(--space-3);
+}
+.lineage-node {
+  margin: var(--space-2) 0;
+}
+.lineage-node .node-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+.lineage-node .kind {
+  font-weight: 700;
+}
+.lineage-node .node-id {
+  font-family: ui-monospace, monospace;
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+  overflow-wrap: anywhere;
+}
+.lineage-node .transform {
+  color: var(--color-text-muted);
+}
+
+/* ---- modal ---- */
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(31, 35, 40, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-3);
+}
+.modal {
+  background: var(--color-bg);
+  border-radius: 6px;
+  padding: var(--space-4);
+  max-width: 44rem;
+  width: 100%;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+.modal ul {
+  padding-left: 1.2rem;
+}
+.modal .modal-actions {
+  display: flex;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.login-page {
+  max-width: 28rem;
+  margin: 10vh auto 0;
+  padding: var(--space-3);
+}

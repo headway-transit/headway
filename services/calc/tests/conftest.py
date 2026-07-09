@@ -1,4 +1,12 @@
-"""Shared test helpers: golden fixture loading."""
+"""Shared test helpers: golden fixture loading + a recording fake connection.
+
+The RecordingConnection below is the shared fake-DB used by the reader/dq/
+runner tests: it records every executed statement and every commit/rollback
+boundary, serves canned canonical.vehicle_positions rows to SELECTs, and
+returns deterministic generated ids (issue-0001, mv-0001, ...) so whole
+RunReports are reproducible. It can be told to fail on a specific INSERT
+target to simulate a mid-run persist failure.
+"""
 
 from __future__ import annotations
 
@@ -36,3 +44,75 @@ def golden_fixture() -> dict:
 @pytest.fixture(scope="session")
 def golden_expected() -> dict:
     return json.loads((GOLDEN_DIR / "expected.json").read_text())
+
+
+def positions_to_rows(positions: list[VehiclePosition]) -> list[tuple]:
+    """Render VehiclePositions as canonical.vehicle_positions result rows,
+    in the reader's SQL order (vehicle_id, time, source_record_id) — the fake
+    stands in for the database, so it honors the ORDER BY."""
+    ordered = sorted(positions, key=lambda p: (p.vehicle_id, p.time, p.source_record_id))
+    return [
+        (p.time, p.vehicle_id, p.trip_id, p.latitude, p.longitude, p.source_record_id)
+        for p in ordered
+    ]
+
+
+class RecordingCursor:
+    def __init__(self, conn: "RecordingConnection"):
+        self._conn = conn
+        self._pending_one: tuple | None = None
+        self._pending_all: list[tuple] = []
+
+    def execute(self, sql, params=None):
+        conn = self._conn
+        conn.executed.append((sql, params))
+        self._pending_one = None
+        self._pending_all = []
+        if sql.lstrip().upper().startswith("SELECT"):
+            self._pending_all = list(conn.position_rows)
+        elif "INSERT INTO dq.issues" in sql:
+            if conn.fail_on == "dq.issues":
+                raise RuntimeError("simulated dq.issues insert failure")
+            conn.issue_seq += 1
+            self._pending_one = (f"issue-{conn.issue_seq:04d}",)
+        elif "INSERT INTO computed.metric_values" in sql:
+            if conn.fail_on == "computed.metric_values":
+                raise RuntimeError("simulated metric_values insert failure")
+            conn.mv_seq += 1
+            self._pending_one = (f"mv-{conn.mv_seq:04d}",)
+        # lineage.edges: no RETURNING, nothing to stage.
+
+    def fetchone(self):
+        return self._pending_one
+
+    def fetchall(self):
+        return self._pending_all
+
+
+class RecordingConnection:
+    """DB-API-shaped fake that records statements and transaction boundaries."""
+
+    def __init__(self, position_rows: list[tuple] | None = None, fail_on: str | None = None):
+        self.position_rows = position_rows or []
+        self.fail_on = fail_on
+        self.executed: list[tuple[str, tuple | None]] = []
+        # Each commit records how many statements were executed at that point,
+        # so tests can assert exactly which statements a transaction covered.
+        self.commits: list[int] = []
+        self.rollback_count = 0
+        self.issue_seq = 0
+        self.mv_seq = 0
+
+    def cursor(self):
+        return RecordingCursor(self)
+
+    def commit(self):
+        self.commits.append(len(self.executed))
+
+    def rollback(self):
+        self.rollback_count += 1
+
+    # Convenience views for assertions -------------------------------------
+
+    def statements_matching(self, fragment: str) -> list[tuple[str, tuple | None]]:
+        return [(sql, params) for sql, params in self.executed if fragment in sql]
