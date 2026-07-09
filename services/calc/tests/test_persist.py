@@ -1,18 +1,20 @@
 """Unit tests for headway_calc.persist with a fake DB-API connection.
 
 No live database: the fake captures every SQL statement + params so the
-INSERTs can be asserted against the handoff-0001 schema exactly.
+INSERTs can be asserted against the handoff-0001 schema (plus the
+migration-0010 detail column, handoff 0002) exactly.
 """
 
 from __future__ import annotations
 
+import json
 from datetime import date
 from decimal import Decimal
 
 import pytest
 
 from headway_calc.persist import persist_result
-from headway_calc.types import BlockingIssue, CalcResult
+from headway_calc.types import BlockingIssue, CalcResult, CoverageDetail, Finding
 
 FAKE_METRIC_VALUE_ID = "11111111-2222-3333-4444-555555555555"
 
@@ -47,6 +49,17 @@ def _ok_result():
     )
 
 
+def _detail():
+    return CoverageDetail(
+        coverage=Decimal("0.6667"),
+        total_groups=3,
+        excluded_groups=1,
+        clean_position_share=Decimal("0.8333"),
+        gap_threshold_seconds=300.0,
+        coverage_threshold=Decimal("0.5"),
+    )
+
+
 def test_persist_writes_metric_value_and_lineage_edges():
     conn = FakeConnection()
     metric_value_id = persist_result(
@@ -60,9 +73,11 @@ def test_persist_writes_metric_value_and_lineage_edges():
     mv_sql, mv_params = executed[0]
     assert "INSERT INTO computed.metric_values" in mv_sql
     assert (
-        "(metric, unit, period_start, period_end, scope, value, calc_name, calc_version)"
+        "(metric, unit, period_start, period_end, scope, value, calc_name, calc_version, detail)"
         in mv_sql
     )
+    # detail is bound as text and cast in SQL — driver-independent JSONB write.
+    assert "%s::jsonb" in mv_sql
     assert "RETURNING metric_value_id" in mv_sql
     assert mv_params == (
         "vrm",
@@ -73,6 +88,7 @@ def test_persist_writes_metric_value_and_lineage_edges():
         Decimal("12.44"),
         "vrm_v0",
         "0.1.0",
+        "{}",  # detail-less (0.1.0) result writes the column default
     )
     # value passes through as Decimal, never float
     assert isinstance(mv_params[5], Decimal)
@@ -93,6 +109,69 @@ def test_persist_writes_metric_value_and_lineage_edges():
             "raw.records",
             record_id,
         )
+
+
+def test_persist_writes_coverage_detail_jsonb_exactly():
+    """A 0.2.0 result's CoverageDetail lands as JSON: ratios as strings
+    (Decimal-safe), counts as ints — parseable back to the exact dict."""
+    conn = FakeConnection()
+    result = CalcResult(
+        value=Decimal("12.44"),
+        unit="miles",
+        calc_name="vrm_v0",
+        calc_version="0.2.0",
+        input_record_ids=("rec-a-00",),
+        blocking_issues=(),
+        warnings=(
+            Finding(
+                issue_type="telemetry_gap_excluded",
+                title="excluded group",
+                description="excluded group",
+                source_record_ids=("rec-c-00", "rec-c-01"),
+                severity="warning",
+            ),
+        ),
+        detail=_detail(),
+    )
+    persist_result(conn, result, date(2026, 1, 1), date(2026, 1, 31))
+    _, mv_params = conn._cursor.executed[0]
+    assert json.loads(mv_params[8]) == {
+        "coverage": "0.6667",
+        "total_groups": 3,
+        "excluded_groups": 1,
+        "clean_position_share": "0.8333",
+        "gap_threshold_seconds": 300.0,
+        "coverage_threshold": "0.5",
+    }
+
+
+def test_persist_accepts_result_with_warnings():
+    """Warning findings never refuse persistence — the figure stands, the
+    exclusions live in dq.issues (routed by the runner)."""
+    conn = FakeConnection()
+    result = CalcResult(
+        value=Decimal("0.45"),
+        unit="hours",
+        calc_name="vrh_v0",
+        calc_version="0.2.0",
+        input_record_ids=("rec-a-00",),
+        blocking_issues=(),
+        warnings=(
+            Finding(
+                issue_type="telemetry_gap_excluded",
+                title="excluded group",
+                description="excluded group",
+                source_record_ids=("rec-c-00",),
+                severity="warning",
+            ),
+        ),
+        detail=_detail(),
+    )
+    metric_value_id = persist_result(conn, result, date(2026, 1, 1), date(2026, 1, 31))
+    assert metric_value_id == FAKE_METRIC_VALUE_ID
+    # Lineage covers input_record_ids only — never the excluded records.
+    edge_ids = [params[5] for sql, params in conn._cursor.executed[1:]]
+    assert edge_ids == ["rec-a-00"]
 
 
 def test_persist_vrh_metric_mapping():
@@ -131,6 +210,32 @@ def test_persist_refuses_result_with_blocking_issues():
     with pytest.raises(ValueError, match="blocking issue"):
         persist_result(conn, blocked, date(2026, 1, 1), date(2026, 1, 31))
     assert conn._cursor.executed == []  # nothing written
+
+
+def test_persist_refuses_coverage_blocked_result():
+    """The 0.2.0 certifiability line composes with the persist guardrail:
+    a coverage-blocked result is refused exactly like any blocked result."""
+    conn = FakeConnection()
+    blocked = CalcResult(
+        value=None,
+        unit="miles",
+        calc_name="vrm_v0",
+        calc_version="0.2.0",
+        input_record_ids=("rec-a-00",),
+        blocking_issues=(
+            Finding(
+                issue_type="coverage_below_threshold",
+                title="coverage below threshold",
+                description="coverage below threshold",
+                source_record_ids=("rec-c-00",),
+                severity="blocking",
+            ),
+        ),
+        detail=_detail(),
+    )
+    with pytest.raises(ValueError, match="blocking issue"):
+        persist_result(conn, blocked, date(2026, 1, 1), date(2026, 1, 31))
+    assert conn._cursor.executed == []
 
 
 def test_persist_refuses_none_value():

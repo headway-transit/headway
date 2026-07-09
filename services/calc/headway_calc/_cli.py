@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import os
 from datetime import date
+from decimal import Decimal
 
 from headway_calc.runner import run_period
 
@@ -50,6 +51,19 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
             "default, 300s). The value used is recorded in the RunReport."
         ),
     )
+    parser.add_argument(
+        "--coverage-threshold",
+        type=Decimal,
+        default=None,
+        help=(
+            "Override the coverage certifiability threshold (default: the "
+            "library default, 0.95 — an engineering placeholder, not an FTA "
+            "number; see REGULATORY_TRACKER.md). A run whose "
+            "clean-group coverage falls below it is blocked (one "
+            "coverage_below_threshold dq issue, nothing persisted). The "
+            "value used is recorded in the RunReport."
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -77,6 +91,7 @@ def main(argv: list[str] | None = None) -> int:
             period_start=args.period_start,
             period_end=args.period_end,
             gap_threshold_seconds=args.gap_threshold_seconds,
+            coverage_threshold=args.coverage_threshold,
         )
 
     print(report.to_json())

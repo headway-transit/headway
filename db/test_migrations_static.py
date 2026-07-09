@@ -75,6 +75,16 @@ def test_metric_value_is_numeric_not_float():
     assert match, "computed.metric_values.value must be NUMERIC NOT NULL"
 
 
+def test_metric_values_detail_jsonb_not_null_default_empty():
+    # Handoff 0002 / migration 0010: calc-0.2.0 coverage detail column.
+    sql = all_sql()
+    assert re.search(
+        r"ALTER TABLE\s+computed\.metric_values\s+"
+        r"ADD COLUMN\s+detail\s+JSONB\s+NOT NULL\s+DEFAULT\s+'\{\}'::jsonb",
+        sql,
+    ), "computed.metric_values.detail must be added as JSONB NOT NULL DEFAULT '{}'::jsonb"
+
+
 def test_vehicle_positions_is_hypertable_with_unique_index():
     sql = all_sql()
     assert "create_hypertable('canonical.vehicle_positions', 'time')" in sql

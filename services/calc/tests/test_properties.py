@@ -1,8 +1,13 @@
-"""Hypothesis property tests for vrm_v0 / vrh_v0.
+"""Hypothesis property tests for vrm_v0 / vrh_v0 CALC_VERSION 0.1.0.
 
 Invariants: non-negativity, additivity across group partitions (no gaps),
 determinism, and gap-refusal. Hypothesis is test-only — the library itself
 contains no randomness.
+
+Pinned to the RETAINED 0.1.0 functions (compute_vrm_v0_1/compute_vrh_v0_1 —
+all-or-nothing gap refusal), aliased to the names below so the test bodies are
+byte-identical to the 0.1.0 originals. The 0.2.0 gap-policy invariants live in
+test_properties_v02.py.
 """
 
 from __future__ import annotations
@@ -15,8 +20,8 @@ from hypothesis import strategies as st
 
 from headway_calc._grouping import GAP_THRESHOLD_SECONDS
 from headway_calc.types import VehiclePosition
-from headway_calc.vrh import compute_vrh
-from headway_calc.vrm import compute_vrm
+from headway_calc.vrh import compute_vrh_v0_1 as compute_vrh
+from headway_calc.vrm import compute_vrm_v0_1 as compute_vrm
 
 T0 = datetime(2026, 1, 15, 12, 0, 0, tzinfo=timezone.utc)
 

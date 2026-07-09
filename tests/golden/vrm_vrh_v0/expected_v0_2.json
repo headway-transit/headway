@@ -1,0 +1,90 @@
+{
+  "basis": "Synthetic hand-worked example (see BASIS.md, calc 0.2.0 section). NOT an FTA-certified figure; regression anchor only. Pins vrm_v0/vrh_v0 CALC_VERSION 0.2.0 (gap policy: per-group exclusion + coverage, handoff 0002) over the SAME fixture.json as the 0.1.0 expectations.",
+  "gap_threshold_seconds": 300,
+  "default_coverage_threshold": {
+    "comment": "Full fixture at the DEFAULT coverage_threshold 0.95 (an engineering placeholder, not an FTA number): trip-C is excluded (warning), coverage 2/3 < 0.95, so both calcs refuse with ONE blocking coverage_below_threshold finding and value null. Nothing is persisted.",
+    "coverage_threshold": "0.95",
+    "vrm_value": null,
+    "vrh_value": null,
+    "blocking_issue": {
+      "issue_type": "coverage_below_threshold",
+      "severity": "blocking",
+      "source_record_ids": [
+        "rec-c-00",
+        "rec-c-01",
+        "rec-c-02",
+        "rec-c-03"
+      ]
+    },
+    "warning": {
+      "issue_type": "telemetry_gap_excluded",
+      "severity": "warning",
+      "source_record_ids": [
+        "rec-c-00",
+        "rec-c-01",
+        "rec-c-02",
+        "rec-c-03"
+      ]
+    },
+    "detail": {
+      "coverage": "0.6667",
+      "total_groups": 3,
+      "excluded_groups": 1,
+      "clean_position_share": "0.8333",
+      "gap_threshold_seconds": 300.0,
+      "coverage_threshold": "0.95"
+    }
+  },
+  "lowered_coverage_threshold": {
+    "comment": "Full fixture with an EXPLICIT coverage_threshold 0.5: coverage 2/3 >= 0.5, so the gapped trip-C group is excluded (one warning finding citing all four rec-c records) and the figure equals the clean-group values. input_record_ids cover included groups ONLY.",
+    "coverage_threshold": "0.5",
+    "vrm": {
+      "value": "12.44",
+      "unit": "miles"
+    },
+    "vrh": {
+      "value": "0.45",
+      "unit": "hours"
+    },
+    "warning": {
+      "issue_type": "telemetry_gap_excluded",
+      "severity": "warning",
+      "source_record_ids": [
+        "rec-c-00",
+        "rec-c-01",
+        "rec-c-02",
+        "rec-c-03"
+      ]
+    },
+    "detail": {
+      "coverage": "0.6667",
+      "total_groups": 3,
+      "excluded_groups": 1,
+      "clean_position_share": "0.8333",
+      "gap_threshold_seconds": 300.0,
+      "coverage_threshold": "0.5"
+    },
+    "input_record_ids": [
+      "rec-a-00",
+      "rec-a-01",
+      "rec-a-02",
+      "rec-a-03",
+      "rec-a-04",
+      "rec-a-05",
+      "rec-a-06",
+      "rec-a-07",
+      "rec-a-08",
+      "rec-a-09",
+      "rec-b-00",
+      "rec-b-01",
+      "rec-b-02",
+      "rec-b-03",
+      "rec-b-04",
+      "rec-b-05",
+      "rec-b-06",
+      "rec-b-07",
+      "rec-b-08",
+      "rec-b-09"
+    ]
+  }
+}

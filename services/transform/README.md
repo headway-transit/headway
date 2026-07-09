@@ -76,6 +76,7 @@ cd services/transform && python3 -m pytest tests/ -q
 | gtfs-realtime-bindings 2.1.0 | Apache-2.0 | GTFS-RT protobuf bindings |
 | protobuf (transitive) | BSD-3-Clause | protobuf runtime |
 | kafka-python-ng (optional `kafka` extra) | Apache-2.0 | Kafka client |
+| python-snappy (optional `kafka` extra) | BSD | snappy codec — required in practice: the Go ingestion's franz-go producer snappy-compresses by default, and kafka-python-ng cannot decode those batches without it (2026-07-09 live-run finding, handoff 0001) |
 | psycopg (optional `db` extra) | LGPL-3.0 with exception | DB driver only; core logic takes any DB-API connection |
 | pytest (test only) | MIT | test runner |
 

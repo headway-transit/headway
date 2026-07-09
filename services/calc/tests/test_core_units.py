@@ -9,7 +9,13 @@ from decimal import Decimal
 import pytest
 
 from headway_calc.distance import EARTH_RADIUS_MILES, haversine_miles, miles_to_decimal
-from headway_calc.types import BlockingIssue, CalcResult, VehiclePosition
+from headway_calc.types import (
+    BlockingIssue,
+    CalcResult,
+    CoverageDetail,
+    Finding,
+    VehiclePosition,
+)
 
 
 def test_haversine_zero_distance():
@@ -79,3 +85,81 @@ def test_calc_result_rejects_float_value():
             input_record_ids=(),
             blocking_issues=(),
         )
+
+
+# --- Finding severity + 0.2.0 result fields (handoff 0002) -------------------
+
+
+def test_blocking_issue_is_a_finding_with_blocking_default_severity():
+    issue = BlockingIssue("telemetry_gap", "t", "d", ("rec-1",))
+    assert BlockingIssue is Finding  # 0.1.0 name kept importable
+    assert issue.severity == "blocking"
+
+
+def test_finding_rejects_unknown_severity():
+    with pytest.raises(ValueError, match="severity"):
+        Finding("telemetry_gap_excluded", "t", "d", ("rec-1",), severity="fatal")
+
+
+def _warning():
+    return Finding(
+        "telemetry_gap_excluded", "t", "d", ("rec-c-00",), severity="warning"
+    )
+
+
+def test_calc_result_allows_value_alongside_warnings():
+    """The blocking-implies-None invariant binds BLOCKING findings only."""
+    result = CalcResult(
+        value=Decimal("12.44"),
+        unit="miles",
+        calc_name="vrm_v0",
+        calc_version="0.2.0",
+        input_record_ids=("rec-a-00",),
+        blocking_issues=(),
+        warnings=(_warning(),),
+    )
+    assert result.value == Decimal("12.44")
+
+
+def test_calc_result_rejects_warning_severity_in_blocking_issues():
+    with pytest.raises(ValueError, match="blocking_issues"):
+        CalcResult(
+            value=None,
+            unit="miles",
+            calc_name="vrm_v0",
+            calc_version="0.2.0",
+            input_record_ids=(),
+            blocking_issues=(_warning(),),
+        )
+
+
+def test_calc_result_rejects_blocking_severity_in_warnings():
+    with pytest.raises(ValueError, match="warnings"):
+        CalcResult(
+            value=Decimal("1.00"),
+            unit="miles",
+            calc_name="vrm_v0",
+            calc_version="0.2.0",
+            input_record_ids=(),
+            blocking_issues=(),
+            warnings=(BlockingIssue("telemetry_gap", "t", "d", ("rec-1",)),),
+        )
+
+
+def test_coverage_detail_to_dict_renders_ratios_as_strings():
+    detail = CoverageDetail(
+        coverage=Decimal("0.6667"),
+        total_groups=3,
+        excluded_groups=1,
+        clean_position_share=Decimal("0.8333"),
+        gap_threshold_seconds=300.0,
+        coverage_threshold=Decimal("0.95"),
+    )
+    assert detail.to_dict() == {
+        "coverage": "0.6667",
+        "total_groups": 3,
+        "excluded_groups": 1,
+        "clean_position_share": "0.8333",
+        "gap_threshold_seconds": 300.0,
+        "coverage_threshold": "0.95",
+    }

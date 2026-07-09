@@ -9,7 +9,19 @@ targeting PostgreSQL 16 + TimescaleDB. One database per agency; there is no
 
 ```sh
 pip install -r db/requirements.txt      # psycopg v3, the only dependency
-export DATABASE_URL=postgres://user:pass@host:5432/agency_db
+
+# Preferred: libpq-style variables — passed to psycopg as keyword arguments,
+# so credentials with special characters need no encoding.
+export PGHOST=localhost PGPORT=5432
+export PGUSER=headway PGPASSWORD='anything, verbatim' PGDATABASE=agency_db
+python3 db/migrate.py
+
+# Alternative: a single URL. If DATABASE_URL is set it wins and is used
+# unchanged — its credentials MUST be percent-encoded. The 2026-07-09 live
+# verification (handoff 0001) hit exactly this: a password containing '@'
+# broke URL parsing until encoded (e.g. '@' → '%40', via Python's
+# urllib.parse.quote). The PG* form above avoids the trap entirely.
+export DATABASE_URL=postgres://user:percent%40encoded%3Apass@host:5432/agency_db
 python3 db/migrate.py
 ```
 
@@ -54,11 +66,14 @@ Per the shared constraint **verification before assertion**:
 - **Verified (this environment, 2026-07-08):**
   - `pytest db/test_migrations_static.py -q` — all static checks pass.
   - `python3 -m py_compile db/migrate.py` — runner compiles cleanly.
+- **Verified (live TimescaleDB, 2026-07-09 — handoff 0001 "Verification
+  Evidence"):**
+  - `db/migrate.py` applied all migrations to a real TimescaleDB container;
+    re-run reported idempotent no-op.
+  - `canonical.vehicle_positions` confirmed a real hypertable.
+  - Immutability proven by attack: UPDATE/DELETE on `raw.records` and UPDATE
+    on `audit.events` raised the expected exceptions.
 - **PENDING — not yet verified:**
-  - Live apply against a real PostgreSQL 16 + TimescaleDB instance. Docker
-    and PostgreSQL are unavailable in the authoring environment, so the
-    migrations have **not** been executed against a live database. The first
-    Docker-capable environment must run `python3 db/migrate.py` against a
-    TimescaleDB container, exercise the triggers (attempt UPDATE/DELETE on
-    `raw.records` and `audit.events`, expect exceptions), and append the
-    evidence to the handoff document before this schema is declared Done.
+  - Live run of `migrate.py` via the new `PG*` connection path (added
+    2026-07-09 in response to the percent-encoding finding; verified only by
+    `py_compile` and static tests so far).

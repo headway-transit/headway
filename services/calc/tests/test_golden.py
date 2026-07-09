@@ -1,7 +1,12 @@
-"""Golden-dataset regression tests for vrm_v0 / vrh_v0.
+"""Golden-dataset regression tests for vrm_v0 / vrh_v0 CALC_VERSION 0.1.0.
 
 Fixture basis: synthetic hand-worked example (tests/golden/vrm_vrh_v0/BASIS.md)
 — NOT an FTA-certified figure; regression anchor only.
+
+Pinned to the RETAINED 0.1.0 functions (compute_vrm_v0_1/compute_vrh_v0_1 —
+all-or-nothing gap refusal), aliased to the names below so the test bodies are
+byte-identical to the 0.1.0 originals; historical submissions recompute
+bit-for-bit. The 0.2.0 gap policy has its own goldens in test_golden_v02.py.
 """
 
 from __future__ import annotations
@@ -10,8 +15,8 @@ from decimal import Decimal
 
 from conftest import load_positions
 
-from headway_calc.vrh import compute_vrh
-from headway_calc.vrm import compute_vrm
+from headway_calc.vrh import compute_vrh_v0_1 as compute_vrh
+from headway_calc.vrm import compute_vrm_v0_1 as compute_vrm
 
 
 def _clean_subset(fixture, expected):

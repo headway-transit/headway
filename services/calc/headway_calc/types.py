@@ -10,6 +10,12 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
 
+#: Finding severities — mirror dq.issues.severity exactly.
+SEVERITY_BLOCKING = "blocking"
+SEVERITY_WARNING = "warning"
+
+_ALLOWED_SEVERITIES = (SEVERITY_BLOCKING, SEVERITY_WARNING)
+
 
 @dataclass(frozen=True)
 class VehiclePosition:
@@ -49,19 +55,71 @@ class VehiclePosition:
 
 
 @dataclass(frozen=True)
-class BlockingIssue:
-    """A blocking data-quality issue.
+class Finding:
+    """A data-quality finding raised by a calculation.
 
-    The presence of any BlockingIssue on a CalcResult means the calculation
-    REFUSED to emit a value (value is None). Maps onto dq.issues with
-    severity='blocking'. ``source_record_ids`` identifies the raw records
-    bounding/causing the issue.
+    ``severity`` mirrors dq.issues.severity:
+
+    - ``'blocking'`` — the calculation REFUSED to emit a value; the presence of
+      any blocking finding on a CalcResult means value is None (never a guessed
+      number). E.g. 0.1.0's 'telemetry_gap', 0.2.0's 'coverage_below_threshold'.
+    - ``'warning'`` — documented and owned, but the figure stands. E.g. 0.2.0's
+      'telemetry_gap_excluded': a gapped (vehicle_id, trip_id) group excluded
+      from the summed figure, reported via coverage.
+
+    ``source_record_ids`` identifies the raw records bounding/causing the
+    finding. For an excluded group this is ALL of that group's records —
+    excluded groups' records are cited by their finding instead of appearing in
+    input_record_ids/lineage (handoff 0002, rule 5).
     """
 
     issue_type: str
     title: str
     description: str
     source_record_ids: tuple[str, ...] = field(default_factory=tuple)
+    severity: str = SEVERITY_BLOCKING
+
+    def __post_init__(self) -> None:
+        if self.severity not in _ALLOWED_SEVERITIES:
+            raise ValueError(
+                f"Finding.severity must be one of {_ALLOWED_SEVERITIES}; got "
+                f"{self.severity!r} (issue_type={self.issue_type!r})"
+            )
+
+
+#: 0.1.0 compatibility name: a BlockingIssue is a Finding whose severity
+#: defaults to 'blocking'. Kept importable unchanged so 0.1.0 call sites (and
+#: historical-submission recomputes) keep working bit-for-bit.
+BlockingIssue = Finding
+
+
+@dataclass(frozen=True)
+class CoverageDetail:
+    """Coverage detail of one calc-0.2.0 run (handoff 0002, rule 6).
+
+    Persisted verbatim into computed.metric_values.detail (JSONB, migration
+    0010). Ratios are Decimal, quantized by the calculation (0.0001,
+    ROUND_HALF_EVEN — an engineering convention, documented, pre-verification);
+    ``to_dict`` renders every Decimal as a string so JSON never coerces a
+    reported ratio through binary float.
+    """
+
+    coverage: Decimal
+    total_groups: int
+    excluded_groups: int
+    clean_position_share: Decimal
+    gap_threshold_seconds: float
+    coverage_threshold: Decimal
+
+    def to_dict(self) -> dict:
+        return {
+            "coverage": str(self.coverage),
+            "total_groups": self.total_groups,
+            "excluded_groups": self.excluded_groups,
+            "clean_position_share": str(self.clean_position_share),
+            "gap_threshold_seconds": self.gap_threshold_seconds,
+            "coverage_threshold": str(self.coverage_threshold),
+        }
 
 
 @dataclass(frozen=True)
@@ -70,8 +128,12 @@ class CalcResult:
 
     ``value`` is a Decimal (never float) — or None when ``blocking_issues`` is
     non-empty: a calculation never emits a certifiable value over an unresolved
-    gap. ``input_record_ids`` lists the source_record_ids actually consumed,
-    in deterministic order — these feed lineage.edges (one edge per id).
+    gap. The invariant binds BLOCKING findings only: ``warnings`` (severity
+    'warning', e.g. 0.2.0's excluded-group findings) coexist with a value.
+    ``input_record_ids`` lists the source_record_ids actually consumed by the
+    figure, in deterministic order — these feed lineage.edges (one edge per
+    id); records of excluded groups appear ONLY in their warning findings.
+    ``detail`` carries the 0.2.0 coverage detail (None for 0.1.0 results).
     """
 
     value: Decimal | None
@@ -79,7 +141,9 @@ class CalcResult:
     calc_name: str
     calc_version: str
     input_record_ids: tuple[str, ...]
-    blocking_issues: tuple[BlockingIssue, ...]
+    blocking_issues: tuple[Finding, ...]
+    warnings: tuple[Finding, ...] = ()
+    detail: CoverageDetail | None = None
 
     def __post_init__(self) -> None:
         if self.blocking_issues and self.value is not None:
@@ -91,3 +155,17 @@ class CalcResult:
             raise TypeError(
                 f"CalcResult.value must be Decimal or None, got {type(self.value).__name__}"
             )
+        for finding in self.blocking_issues:
+            if finding.severity != SEVERITY_BLOCKING:
+                raise ValueError(
+                    f"CalcResult.blocking_issues must all carry severity "
+                    f"'{SEVERITY_BLOCKING}'; got {finding.severity!r} "
+                    f"(issue_type={finding.issue_type!r})"
+                )
+        for finding in self.warnings:
+            if finding.severity != SEVERITY_WARNING:
+                raise ValueError(
+                    f"CalcResult.warnings must all carry severity "
+                    f"'{SEVERITY_WARNING}'; got {finding.severity!r} "
+                    f"(issue_type={finding.issue_type!r})"
+                )

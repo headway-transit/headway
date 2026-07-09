@@ -62,3 +62,56 @@ for both `vrm_v0` and `vrh_v0`:
 
 The two unassigned positions (`rec-x-00`, `rec-x-01`) must never appear in
 `input_record_ids` and must not contribute distance or time.
+
+## Calc 0.2.0 — gap policy: per-group exclusion + coverage (`expected_v0_2.json`)
+
+Same fixture, `vrm_v0`/`vrh_v0` **CALC_VERSION 0.2.0** (handoff 0002): a group
+containing a gap > 300 s is **excluded** from the figure (one
+`telemetry_gap_excluded` **warning** finding citing all of the group's
+records) instead of refusing the whole run; the run refuses only when
+coverage falls below the explicit `coverage_threshold` input (default 0.95 —
+an engineering placeholder, **not an FTA number**).
+
+Hand-worked coverage over the full fixture (in-trip groups only; the
+unassigned `rec-x-*` positions are outside the revenue-service proxy and
+count toward neither ratio):
+
+- groups: trip-A (clean), trip-B (clean), trip-C (**gapped → excluded**)
+  → `total_groups = 3`, `excluded_groups = 1`, `clean_groups = 2`
+- `coverage = 2/3 = 0.6666…` → quantized to 0.0001 (ROUND_HALF_EVEN, a
+  documented engineering convention) = **`0.6667`**
+- `clean_position_share = (10 + 10) / (10 + 10 + 4) = 20/24 = 0.8333…` →
+  **`0.8333`**
+
+The threshold comparison itself is exact (integer cross-multiplication,
+`clean < threshold × total`), never the quantized ratio.
+
+### Case A — default `coverage_threshold = 0.95`: blocked
+
+`2 < 0.95 × 3 = 2.85` → coverage below threshold. Expected for both calcs:
+
+- `value = None`, **nothing persisted**;
+- exactly one **blocking** finding, `issue_type = "coverage_below_threshold"`,
+  citing the excluded records `rec-c-00..rec-c-03`;
+- one **warning** finding, `issue_type = "telemetry_gap_excluded"`, citing
+  `rec-c-00..rec-c-03` (the whole excluded group, not just the gap bounds);
+- `detail = {coverage: "0.6667", total_groups: 3, excluded_groups: 1,
+  clean_position_share: "0.8333", gap_threshold_seconds: 300.0,
+  coverage_threshold: "0.95"}`;
+- `input_record_ids` = included groups only (`rec-a-*`, `rec-b-*`) — excluded
+  records are cited by the warning, never by lineage.
+
+### Case B — explicit `coverage_threshold = 0.5`: persists clean-group values
+
+`2 ≥ 0.5 × 3 = 1.5` → coverage passes. The figure is the sum over the
+included groups — exactly the clean-subset values hand-worked above:
+
+- **VRM `12.44` miles**, **VRH `0.45` hours** (`calc_version = "0.2.0"`);
+- one `telemetry_gap_excluded` **warning** (citing `rec-c-00..rec-c-03`), no
+  blocking finding;
+- same `detail` as Case A except `coverage_threshold: "0.5"`;
+- `input_record_ids` = `rec-a-00..09`, `rec-b-00..09` only.
+
+The 0.1.0 expectations above are untouched: they pin the retained
+`compute_vrm_v0_1`/`compute_vrh_v0_1` functions (all-or-nothing gap refusal)
+so historical submissions recompute bit-for-bit.

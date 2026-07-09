@@ -54,7 +54,16 @@ async def lifespan(app: FastAPI):
             # Imported lazily so the test suite never needs libpq at import time.
             import psycopg
 
-            opened_here = psycopg.connect(dsn)
+            # autocommit=True is REQUIRED, not a style choice. With psycopg3's
+            # default (autocommit=False) the first plain execute() on this
+            # long-lived connection opens an implicit transaction that nothing
+            # ever commits, and every router `with db.transaction():` block
+            # then nests as a SAVEPOINT inside it — writes never reach disk,
+            # yet the API returns 2xx. Found live 2026-07-10: a certification
+            # returned 201 while cert.certifications stayed empty. With
+            # autocommit=True, single statements commit immediately and
+            # transaction() blocks are genuine BEGIN/COMMIT atomic units.
+            opened_here = psycopg.connect(dsn, autocommit=True)
             app.state.db = opened_here
     try:
         yield

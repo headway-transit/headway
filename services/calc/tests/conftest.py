@@ -46,6 +46,13 @@ def golden_expected() -> dict:
     return json.loads((GOLDEN_DIR / "expected.json").read_text())
 
 
+@pytest.fixture(scope="session")
+def golden_expected_v0_2() -> dict:
+    """Expectations for CALC_VERSION 0.2.0 (gap policy: per-group exclusion +
+    coverage) over the SAME fixture.json — see BASIS.md, calc 0.2.0 section."""
+    return json.loads((GOLDEN_DIR / "expected_v0_2.json").read_text())
+
+
 def positions_to_rows(positions: list[VehiclePosition]) -> list[tuple]:
     """Render VehiclePositions as canonical.vehicle_positions result rows,
     in the reader's SQL order (vehicle_id, time, source_record_id) — the fake

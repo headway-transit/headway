@@ -21,6 +21,11 @@ dependencies = [
 kafka = [
     # kafka-python-ng (Apache-2.0), maintained fork of kafka-python.
     "kafka-python-ng>=2.2",
+    # Snappy codec (BSD). Required, not optional: the Go ingestion service's
+    # franz-go producer snappy-compresses batches by default, and
+    # kafka-python-ng cannot decode snappy without this package — confirmed
+    # in the 2026-07-09 live run (handoff 0001 Verification Evidence).
+    "python-snappy>=0.7",
 ]
 # Production DB driver (LGPL-3.0 with linking exception; driver only, not
 # linked into core logic — writer takes any DB-API connection).

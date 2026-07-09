@@ -12,9 +12,12 @@
 #   docker compose up -d    # infra only
 #   docker compose --profile app up -d --build   # infra + app services
 #
-# VERIFICATION STATUS: authored per ADR-0002/0005/0006/0011 and YAML-validated;
-# live `docker compose up` is PENDING (Docker unavailable in the authoring
-# environment). See README.md "Verification status".
+# VERIFICATION STATUS: authored per ADR-0002/0005/0006/0011 and YAML-validated.
+# 2026-07-09: full stack live-booted healthy (6/6 healthchecks) and ran the
+# MBTA end-to-end walking skeleton — see handoff 0001 Verification Evidence.
+# The bootstrap-* init services below were added AFTER that run (they close
+# the manual topic/bucket provisioning gap it found); their live execution is
+# PENDING the next `docker compose up`. See README.md "Verification status".
 
 name: headway
 
@@ -196,6 +199,59 @@ services:
       start_period: 15s
 
   # ===========================================================================
+  # Bootstrap — one-shot provisioning (default profile, runs on plain
+  # `docker compose up`). The 2026-07-09 live run (handoff 0001, Verification
+  # Evidence) found Kafka topics and the MinIO bucket had to be created by
+  # hand; these init containers close that gap. Both are idempotent: safe on
+  # every `up`, exit 0 when everything already exists.
+  # ===========================================================================
+
+  # Creates the four v0 topics from contracts/topics.v0.md via the official
+  # Kafka image's kafka-topics.sh (--if-not-exists). Adding a topic here
+  # requires a contracts change first (Platform Architect governance).
+  bootstrap-kafka:
+    image: apache/kafka:3.9.1
+    restart: "no"
+    networks: [headway]
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        for topic in \
+          raw.gtfs_static.feed \
+          raw.gtfs_rt.vehicle_positions \
+          raw.gtfs_rt.trip_updates \
+          raw.gtfs_rt.alerts
+        do
+          /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 \
+            --create --if-not-exists --topic "$$topic" \
+            --partitions 1 --replication-factor 1
+        done
+        echo "bootstrap-kafka: all v0 topics present"
+
+  # Creates the raw-payload bucket via the standard minio/mc init-container
+  # pattern (mc mb --ignore-existing is idempotent).
+  bootstrap-minio:
+    image: minio/mc:RELEASE.2025-04-16T18-13-26Z
+    restart: "no"
+    networks: [headway]
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-headway}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in deploy/compose/.env}
+      S3_BUCKET: ${S3_BUCKET:-headway-raw}
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        mc alias set headway http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD"
+        mc mb --ignore-existing "headway/$$S3_BUCKET"
+        echo "bootstrap-minio: bucket $$S3_BUCKET present"
+
+  # ===========================================================================
   # Headway app services — profile `app`.
   # Build contexts point into the monorepo (ADR-0010); services land in slice
   # waves, so only what exists is uncommented.
@@ -213,6 +269,12 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
+      # Topics and bucket must exist before the connector produces
+      # (2026-07-09 live-run finding; see bootstrap services above).
+      bootstrap-kafka:
+        condition: service_completed_successfully
+      bootstrap-minio:
+        condition: service_completed_successfully
     environment:
       # Env surface matches services/ingestion/cmd/headway-ingest (the service
       # is the source of truth for its config; see its README).
@@ -246,6 +308,11 @@ services:
   #       condition: service_healthy
   #   environment:
   #     KAFKA_BROKERS: kafka:9092
+  #     # NOTE (2026-07-09 live-run finding): credentials interpolated into a
+  #     # URL must be percent-encoded — a password containing '@' or other
+  #     # reserved characters breaks URL parsing. Prefer the libpq-style
+  #     # PGHOST/PGPORT/PGUSER/PGPASSWORD/PGDATABASE variables (supported by
+  #     # db/migrate.py and psycopg), which avoid the encoding trap entirely.
   #     DATABASE_URL: postgres://${POSTGRES_USER:-headway}:${POSTGRES_PASSWORD}@timescaledb:5432/${POSTGRES_DB:-headway}
   #
   # api:                                        # Python FastAPI backend
@@ -260,6 +327,7 @@ services:
   #     timescaledb:
   #       condition: service_healthy
   #   environment:
+  #     # Same percent-encoding caveat as the transform placeholder above.
   #     DATABASE_URL: postgres://${POSTGRES_USER:-headway}:${POSTGRES_PASSWORD}@timescaledb:5432/${POSTGRES_DB:-headway}
   #
   # web:                                        # TypeScript/React frontend

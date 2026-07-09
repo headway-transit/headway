@@ -1,19 +1,26 @@
-"""Thin, injectable persistence for CalcResults. Matches handoff 0001 schema.
+"""Thin, injectable persistence for CalcResults. Matches handoff 0001 schema
+plus the migration-0010 detail column (handoff 0002).
 
-Writes one computed.metric_values row plus one lineage.edges row per consumed
-input_record_id (ADR-0007: every reported value is traceable to its raw
-records). Takes any DB-API 2.0 connection (paramstyle 'format'/'pyformat',
-i.e. %s placeholders — psycopg-compatible); unit-testable with a fake
-connection, no live database required. psycopg is an OPTIONAL extra
-(``headway-calc[persist]``) — this module itself is stdlib-only.
+Writes one computed.metric_values row (including the result's coverage detail
+as JSONB — '{}' for detail-less 0.1.0 results, matching the column default)
+plus one lineage.edges row per consumed input_record_id (ADR-0007: every
+reported value is traceable to its raw records; for calc 0.2.0 the consumed
+ids cover INCLUDED groups only — excluded groups' records are cited by their
+warning findings in dq.issues, never by lineage). Takes any DB-API 2.0
+connection (paramstyle 'format'/'pyformat', i.e. %s placeholders —
+psycopg-compatible); unit-testable with a fake connection, no live database
+required. psycopg is an OPTIONAL extra (``headway-calc[persist]``) — this
+module itself is stdlib-only.
 
 Fail loudly: a result with value=None or any blocking issue is REFUSED —
 persisting a guessed or gap-crossing number is never possible through this
-path.
+path. Warning findings do NOT block persistence (they are routed to dq.issues
+by the runner with their own severity).
 """
 
 from __future__ import annotations
 
+import json
 from datetime import date
 
 from headway_calc.types import CalcResult
@@ -25,10 +32,12 @@ _METRIC_BY_CALC_NAME = {
     "vrh_v0": "vrh",
 }
 
+#: detail is bound as text and cast to JSONB in SQL (%s::jsonb) so the write
+#: works identically across DB-API drivers without a JSON adapter.
 _INSERT_METRIC_VALUE_SQL = (
     "INSERT INTO computed.metric_values "
-    "(metric, unit, period_start, period_end, scope, value, calc_name, calc_version) "
-    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s) "
+    "(metric, unit, period_start, period_end, scope, value, calc_name, calc_version, detail) "
+    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb) "
     "RETURNING metric_value_id"
 )
 
@@ -50,7 +59,10 @@ def persist_result(
 
     Refuses (raises ValueError) if the result carries blocking issues or has
     no value — blocking issues belong in dq.issues, never in
-    computed.metric_values. Refuses unknown calc_names (no metric mapping).
+    computed.metric_values. Warning findings never refuse: the figure stands,
+    the exclusions live in dq.issues. Refuses unknown calc_names (no metric
+    mapping). The result's detail (coverage etc., calc 0.2.0) is written as
+    JSONB; a detail-less (0.1.0) result writes '{}', the column default.
 
     Emits one lineage.edges row per input_record_id:
     output_kind='computed.metric_values', output_id=<metric_value_id>,
@@ -79,6 +91,9 @@ def persist_result(
             f"metric mapping registered."
         )
 
+    detail_json = (
+        "{}" if result.detail is None else json.dumps(result.detail.to_dict(), sort_keys=True)
+    )
     cur = conn.cursor()
     cur.execute(
         _INSERT_METRIC_VALUE_SQL,
@@ -91,6 +106,7 @@ def persist_result(
             result.value,
             result.calc_name,
             result.calc_version,
+            detail_json,
         ),
     )
     metric_value_id = str(cur.fetchone()[0])
