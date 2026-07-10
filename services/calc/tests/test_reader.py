@@ -1,9 +1,10 @@
 """Unit tests for headway_calc.reader with the recording fake connection.
 
 Asserts the SQL shape (columns per handoff 0001 plus the trips.block_id LEFT
-JOIN per handoff 0003, half-open bounds, deterministic ORDER BY), the
-UTC-datetime parameter binding, and the row → VehiclePosition mapping. No
-live database.
+JOIN per handoff 0003 and the handoff-0005 canonical.passenger_events /
+operated-trips queries, half-open bounds, deterministic ORDER BY), the
+UTC-datetime parameter binding, and the row → dataclass mapping. No live
+database.
 """
 
 from __future__ import annotations
@@ -11,9 +12,19 @@ from __future__ import annotations
 from datetime import date, datetime, timezone
 
 import pytest
-from conftest import RecordingConnection, load_positions, positions_to_rows
+from conftest import (
+    RecordingConnection,
+    events_to_rows,
+    load_events,
+    load_positions,
+    positions_to_rows,
+)
 
-from headway_calc.reader import load_vehicle_positions
+from headway_calc.reader import (
+    load_operated_trip_ids,
+    load_passenger_events,
+    load_vehicle_positions,
+)
 
 PERIOD_START = date(2026, 1, 1)
 PERIOD_END = date(2026, 2, 1)
@@ -105,6 +116,72 @@ def test_reader_refuses_empty_or_inverted_period(start, end):
     conn = RecordingConnection(position_rows=[])
     with pytest.raises(ValueError, match="empty/inverted period"):
         load_vehicle_positions(conn, start, end)
+    assert conn.executed == []  # refused before touching the database
+
+
+def test_passenger_events_sql_columns_bounds_and_order_match_handoff_0005():
+    conn = RecordingConnection()
+    load_passenger_events(conn, date(2026, 6, 1), date(2026, 7, 1))
+
+    assert len(conn.executed) == 1
+    sql, params = conn.executed[0]
+    # Columns per the handoff-0005 canonical.passenger_events contract
+    # (migration 0012), in contract order.
+    assert (
+        "SELECT event_timestamp, service_date, passenger_event_id, vehicle_id, "
+        "trip_id, trip_stop_sequence, event_type, event_count, source, "
+        "source_record_id" in sql
+    )
+    assert "FROM canonical.passenger_events" in sql
+    # Half-open on event_timestamp, UTC-midnight datetime binding.
+    assert "WHERE event_timestamp >= %s AND event_timestamp < %s" in sql
+    assert "<=" not in sql.split("WHERE", 1)[1]
+    assert "ORDER BY event_timestamp, passenger_event_id, source_record_id" in sql
+    assert params == (
+        datetime(2026, 6, 1, tzinfo=timezone.utc),
+        datetime(2026, 7, 1, tzinfo=timezone.utc),
+    )
+
+
+def test_passenger_events_roundtrip_golden_fixture(upt_golden_fixture):
+    """Golden events rendered as DB rows map back to identical dataclasses,
+    NULLs (trip_id, event_count) passing through untouched."""
+    expected_events = load_events(upt_golden_fixture["blocked_case"])
+    conn = RecordingConnection(passenger_event_rows=events_to_rows(expected_events))
+    loaded = load_passenger_events(conn, PERIOD_START, PERIOD_END)
+    assert sorted(loaded, key=lambda e: e.passenger_event_id) == sorted(
+        expected_events, key=lambda e: e.passenger_event_id
+    )
+    # NULL preservation: the fixture's NULL-count and unassigned events
+    # arrive as None, never coalesced.
+    by_id = {e.passenger_event_id: e for e in loaded}
+    assert by_id["pe-a-07"].event_count is None
+    assert by_id["pe-a-08"].trip_id is None
+
+
+def test_operated_trip_ids_sql_and_mapping():
+    conn = RecordingConnection(operated_trip_rows=[("trip-1",), ("trip-2",)])
+    trips = load_operated_trip_ids(conn, date(2026, 6, 1), date(2026, 7, 1))
+
+    assert trips == ["trip-1", "trip-2"]
+    sql, params = conn.executed[0]
+    assert "SELECT DISTINCT trip_id FROM canonical.vehicle_positions" in sql
+    assert "trip_id IS NOT NULL" in sql
+    assert "time >= %s AND time < %s" in sql
+    assert "ORDER BY trip_id" in sql
+    assert params == (
+        datetime(2026, 6, 1, tzinfo=timezone.utc),
+        datetime(2026, 7, 1, tzinfo=timezone.utc),
+    )
+
+
+@pytest.mark.parametrize(
+    "loader", [load_passenger_events, load_operated_trip_ids]
+)
+def test_new_loaders_refuse_empty_or_inverted_period(loader):
+    conn = RecordingConnection()
+    with pytest.raises(ValueError, match="empty/inverted period"):
+        loader(conn, date(2026, 6, 1), date(2026, 6, 1))
     assert conn.executed == []  # refused before touching the database
 
 

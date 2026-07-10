@@ -9,9 +9,12 @@
 //	GTFS_RT_TRIP_UPDATES_URL       poll this trip-updates feed (optional)
 //	GTFS_RT_ALERTS_URL             poll this alerts feed (optional)
 //	GTFS_STATIC_URL                fetch this GTFS static zip once (optional)
+//	TIDES_DROP_DIR                 scan this directory once for TIDES passenger_events*.csv (optional)
+//	TIDES_SOURCE                   envelope source for TIDES drops, default "tides";
+//	                               simulator drops MUST set "tides_simulated" (handoff 0005)
 //	POLL_INTERVAL                  Go duration, default 30s
 //	AGENCY_ID                      optional envelope agency_id
-//	S3_ENDPOINT                    MinIO/S3 endpoint host:port (required with GTFS_STATIC_URL)
+//	S3_ENDPOINT                    MinIO/S3 endpoint host:port (required with GTFS_STATIC_URL or TIDES_DROP_DIR)
 //	S3_ACCESS_KEY, S3_SECRET_KEY   credentials (from the secret store; never logged)
 //	S3_BUCKET                      target bucket, default headway-raw
 //	S3_USE_SSL                     "true" to use TLS, default false (on-prem MinIO)
@@ -34,6 +37,7 @@ import (
 
 	"github.com/headway-transit/headway/services/ingestion/connectors/gtfsrt"
 	"github.com/headway-transit/headway/services/ingestion/connectors/gtfsstatic"
+	"github.com/headway-transit/headway/services/ingestion/connectors/tides"
 	"github.com/headway-transit/headway/services/ingestion/internal/producer"
 )
 
@@ -112,10 +116,11 @@ func run(log *slog.Logger) error {
 	}
 
 	if staticURL := os.Getenv("GTFS_STATIC_URL"); staticURL != "" {
-		store, err := minioStoreFromEnv()
+		client, bucket, err := minioFromEnv("GTFS_STATIC_URL")
 		if err != nil {
 			return err
 		}
+		store := gtfsstatic.NewMinioStore(client, bucket)
 		fetcher := &gtfsstatic.Fetcher{
 			URL:      staticURL,
 			AgencyID: agencyID,
@@ -135,8 +140,32 @@ func run(log *slog.Logger) error {
 		}()
 	}
 
+	if dropDir := os.Getenv("TIDES_DROP_DIR"); dropDir != "" {
+		client, bucket, err := minioFromEnv("TIDES_DROP_DIR")
+		if err != nil {
+			return err
+		}
+		scanner := &tides.Scanner{
+			Dir:      dropDir,
+			Source:   os.Getenv("TIDES_SOURCE"), // empty → tides.DefaultSource
+			AgencyID: agencyID,
+			Store:    tides.NewMinioStore(client, bucket),
+			Producer: kafka,
+			Log:      log,
+		}
+		started++
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			log.Info("tides drop-dir scan started", "dir", dropDir)
+			if err := scanner.ScanOnce(ctx); err != nil && ctx.Err() == nil {
+				log.Error("tides drop-dir scan failed", "error", err)
+			}
+		}()
+	}
+
 	if started == 0 {
-		return fmt.Errorf("no connectors configured: set GTFS_RT_*_URL and/or GTFS_STATIC_URL")
+		return fmt.Errorf("no connectors configured: set GTFS_RT_*_URL, GTFS_STATIC_URL, and/or TIDES_DROP_DIR")
 	}
 
 	log.Info("headway-ingest running", "connectors", started)
@@ -147,15 +176,17 @@ func run(log *slog.Logger) error {
 	return nil
 }
 
-func minioStoreFromEnv() (*gtfsstatic.MinioStore, error) {
+// minioFromEnv builds the shared S3/MinIO client and target bucket from the
+// environment; requiredBy names the connector env var that made it needed.
+func minioFromEnv(requiredBy string) (*minio.Client, string, error) {
 	endpoint := os.Getenv("S3_ENDPOINT")
 	if endpoint == "" {
-		return nil, fmt.Errorf("S3_ENDPOINT is required when GTFS_STATIC_URL is set")
+		return nil, "", fmt.Errorf("S3_ENDPOINT is required when %s is set", requiredBy)
 	}
 	accessKey := os.Getenv("S3_ACCESS_KEY")
 	secretKey := os.Getenv("S3_SECRET_KEY")
 	if accessKey == "" || secretKey == "" {
-		return nil, fmt.Errorf("S3_ACCESS_KEY and S3_SECRET_KEY are required when GTFS_STATIC_URL is set")
+		return nil, "", fmt.Errorf("S3_ACCESS_KEY and S3_SECRET_KEY are required when %s is set", requiredBy)
 	}
 	bucket := os.Getenv("S3_BUCKET")
 	if bucket == "" {
@@ -168,7 +199,7 @@ func minioStoreFromEnv() (*gtfsstatic.MinioStore, error) {
 		Secure: useSSL,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("minio client: %w", err)
+		return nil, "", fmt.Errorf("minio client: %w", err)
 	}
-	return gtfsstatic.NewMinioStore(client, bucket), nil
+	return client, bucket, nil
 }

@@ -4,7 +4,8 @@ Headway's deterministic calculation library — **the only place any reported
 number originates** (walking skeleton per ADR-0009, schema contract per
 handoff `docs/handoffs/0001`, gap policy per handoff `docs/handoffs/0002`,
 block-aware VRH per handoff `docs/handoffs/0003`, trip-level excision per
-handoff `docs/handoffs/0004`).
+handoff `docs/handoffs/0004`, Unlinked Passenger Trips over TIDES passenger
+events per handoff `docs/handoffs/0005`).
 Pure, versioned functions: stdlib-only core, no network, no clock reads, no
 randomness, no hidden state; time comes exclusively from inputs, and results
 are `Decimal`, never float.
@@ -12,7 +13,10 @@ are `Decimal`, never float.
 ## Contents
 
 - `headway_calc/types.py` — frozen dataclasses: `VehiclePosition` (now
-  carrying the trip's GTFS `block_id`, joined by the reader), `CalcResult`
+  carrying the trip's GTFS `block_id`, joined by the reader),
+  `PassengerEvent` (canonical.passenger_events per handoff 0005 — TIDES
+  vocabulary; `event_count` NULL preserved as None, never coalesced),
+  `CalcResult`
   (carries `input_record_ids` for lineage, `blocking_issues`, `warnings`,
   `infos`, and the coverage `detail`; invariant: blocking findings ⇒
   `value=None` — warnings/infos never force None), `Finding` (with
@@ -21,7 +25,9 @@ are `Decimal`, never float.
   `CoverageDetail`, `BlockCoverageDetail` (0.3.0: adds
   `layover_max_seconds` provenance), `TripExcisionCoverageDetail` (0.4.0:
   trip-denominated coverage + `total_trips`/`trips_excised`/
-  `blocks_touched`/`layover_intervals_dropped`).
+  `blocks_touched`/`layover_intervals_dropped`), `UptDetail` (upt_v0:
+  counted boardings, operated/missing trips, missing share, applied factor,
+  source mix, both thresholds).
 - `headway_calc/distance.py` — haversine miles (float per leg, one final
   Decimal quantization to 0.01 mi, ROUND_HALF_EVEN — rule documented in the
   module, pre-verification).
@@ -33,6 +39,10 @@ are `Decimal`, never float.
   trip-level excision, handoff 0004), `compute_vrh_v0_3` (0.3.0, block-level
   exclusion, retained unchanged), `compute_vrh_v0_2` (0.2.0,
   retained unchanged) and `compute_vrh_v0_1` (0.1.0, retained unchanged).
+- `headway_calc/upt.py` — `upt_v0`: `compute_upt` (0.1.0 — Unlinked
+  Passenger Trips over TIDES passenger events, handoff 0005; the p. 146
+  missing-trip rule with the REAL FTA 2% threshold; see "Unlinked Passenger
+  Trips" below).
 - `headway_calc/_blocks.py` — internal 0.3.0/0.4.0 machinery: block
   grouping, layover accounting, the block gap policy (0.3.0), the
   trip-excision policy (0.4.0), and the `block_unavailable`
@@ -43,14 +53,19 @@ are `Decimal`, never float.
   0010) + one `lineage.edges` row per consumed raw record (ADR-0007; for
   0.2.0 that means included groups only). Refuses results carrying blocking
   issues or `value=None`; warnings never refuse.
-- `headway_calc/reader.py` — injectable DB-API reader for
-  `canonical.vehicle_positions` over a **half-open UTC period**
-  `[period_start, period_end)` (`time >= start AND time < end`; DATE bounds
-  bound as timezone-aware UTC midnights so the comparison never depends on
-  the DB session time zone), ordered by `(vehicle_id, time,
+- `headway_calc/reader.py` — injectable DB-API readers over a **half-open
+  UTC period** `[period_start, period_end)` (`time >= start AND time < end`;
+  DATE bounds bound as timezone-aware UTC midnights so the comparison never
+  depends on the DB session time zone): `load_vehicle_positions`
+  (`canonical.vehicle_positions` ordered by `(vehicle_id, time,
   source_record_id)`, with `canonical.trips.block_id` LEFT JOINed onto every
-  position (handoff 0003 / migration 0011; NULL when unassigned/absent,
-  never a dropped row).
+  position — handoff 0003 / migration 0011; NULL when unassigned/absent,
+  never a dropped row), `load_passenger_events`
+  (`canonical.passenger_events` per handoff 0005 / migration 0012, half-open
+  on `event_timestamp`, ordered by `(event_timestamp, passenger_event_id,
+  source_record_id)`; NULLs pass through) and `load_operated_trip_ids`
+  (`SELECT DISTINCT trip_id` from the positions table — the operated-trips
+  denominator of the upt_v0 missing-trip rule).
 - `headway_calc/dq.py` — routes `Finding`s into `dq.issues` with **each
   finding's own severity** (warning stays warning, blocking stays blocking;
   one row per finding, status `'open'`, description naming the calc, version,
@@ -60,27 +75,82 @@ are `Decimal`, never float.
   runner's).
 - `headway_calc/runner.py` — `run_period(conn, start, end,
   gap_threshold_seconds=None, coverage_threshold=None,
-  layover_max_seconds=None)`: closes the canonical→computed loop (reader →
-  compute_vrm 0.2.0 / compute_vrh 0.4.0 → dq routing → persist) and returns
-  a frozen `RunReport` carrying all three inputs and per-metric coverage
-  detail. See "Runner" below.
+  layover_max_seconds=None, missing_trip_threshold=None,
+  imbalance_threshold=None)`: closes the canonical→computed loop (reader →
+  compute_vrm 0.2.0 / compute_vrh 0.4.0 / compute_upt 0.1.0 → dq routing →
+  persist) and returns a frozen `RunReport` carrying all five inputs and
+  per-metric detail. See "Runner" below.
 - `headway_calc/_cli.py` — the ONE process boundary (argv, env, psycopg);
   exempt from the stdlib-purity guardrail, contains no calculation logic.
 - `REGULATORY_TRACKER.md` — calc/version → citation → verification status.
   VRM/VRH/deadhead/layover definitions are VERIFIED against the 2026 NTD
   Policy Manual (quoted in the tracker); divergence D1 (layover inclusion)
-  is CLOSED by vrh_v0 0.3.0 and retained by 0.4.0; **no figure is
-  reportable** pending the remaining divergences D2–D6 and the flagged
+  is CLOSED by vrh_v0 0.3.0 and retained by 0.4.0; UPT definitions
+  (pp. 143/146/151) are VERIFIED and quoted for upt_v0 0.1.0 with the TIDES
+  enum citation; **no figure is
+  reportable** pending the remaining divergences D2–D6, the flagged
   `coverage_threshold` 0.95 engineering placeholder (`layover_max_seconds`
   1800 is now data-informed and exhibit-aligned per handoff 0004, per-agency
-  configurable).
+  configurable), and — for UPT — the simulated-only data and the pp. 147–148
+  APC certification workflow.
 - Golden dataset: `tests/golden/vrm_vrh_v0/` (repo root) — synthetic
   hand-worked example (see its `BASIS.md`); regression anchor only, not an
   FTA-certified figure. `expected.json` pins 0.1.0; `expected_v0_2.json`
   pins the 0.2.0 gap policy over the same fixture; `fixture_block.json` +
   `expected_v0_3.json` pin the 0.3.0 block case (600 s layover included);
   `fixture_block_v04.json` + `expected_v0_4.json` pin the 0.4.0 trip-level
-  excision case (three-trip block, middle trip gapped).
+  excision case (three-trip block, middle trip gapped). For UPT:
+  `tests/golden/upt_v0/` pins the blocked case (missing share 1/3 > 2%) and
+  the factored case (share exactly 0.02 → 98 × 50/49 = 100), hand-worked in
+  its `BASIS.md`.
+
+## Unlinked Passenger Trips — upt_v0 0.1.0
+
+Per handoff 0005, `compute_upt(events, operated_trip_ids, *,
+missing_trip_threshold=Decimal("0.02"), imbalance_threshold=Decimal("0.10"))`
+computes UPT from TIDES passenger events (2026 NTD Policy Manual p. 143:
+"the number of boardings on public transportation vehicles"):
+
+- **Verified TIDES vocabulary.** Boardings are events with the verbatim
+  `event_type` `"Passenger boarded"` (alightings: `"Passenger alighted"`) —
+  verified 2026-07-10 against TIDES-transit/TIDES
+  `spec/passenger_events.schema.json` (repo HEAD `7ddaa7ab`, schema file
+  last changed `d887d42c`; citation in `REGULATORY_TRACKER.md`). Bike
+  boardings are not passengers per p. 143 and are never counted.
+- **Base count.** Sum of `event_count` over boarding events with a trip
+  assignment (`trip_id` not None — the same revenue-service proxy as
+  vrm/vrh, a documented approximation). A NULL `event_count` contributes 0
+  and one `apc_null_count` **warning** citing the record — never coalesced
+  to the TIDES default 1, and cited by the warning instead of lineage.
+- **p. 151 validations** ("agencies may flag trips or blocks where the
+  difference between boardings and alightings is greater than 10 percent,
+  or trips where the passenger load drops below zero"): per trip,
+  |boardings − alightings| > `imbalance_threshold` × boardings → one
+  `apc_count_imbalance` **warning**; the running load (events ordered by
+  `trip_stop_sequence` then `event_timestamp`; NULL sequence last —
+  documented convention) dropping below zero → one `apc_negative_load`
+  **warning** citing the record of the first drop. The figure stands.
+- **p. 146 missing-trip rule** (the 0.02 default is a REAL FTA threshold,
+  not a placeholder): operated trips (distinct `trip_id`s observed in
+  `canonical.vehicle_positions` over the period) with ZERO passenger events
+  are missing. Share ≤ 2% → **deterministic, FTA-sanctioned factor-up**:
+  `UPT = counted × operated/(operated − missing)`, computed from the exact
+  fraction and quantized to whole boardings (Decimal 1, ROUND_HALF_EVEN — a
+  documented engineering rounding; the manual prescribes none), with the
+  factor and all inputs recorded in the `UptDetail` JSONB. Share > 2% → ONE
+  **blocking** `apc_missing_trips_above_fta_threshold` and `value=None` —
+  the statistician-approved factoring the manual requires is a human
+  workflow, never guessed.
+- **Simulated-source rule (binding, handoff 0005).** Any event with
+  `source != "tides"` (e.g. `"tides_simulated"`) yields ONE
+  `simulated_source_data` **info** finding listing the sources; the
+  `source_mix` (event counts per source) is ALWAYS in the detail — a
+  certifiable figure containing simulated records is a contradiction the DQ
+  trail must make visible.
+- **Lineage**: `input_record_ids` are the distinct records of counted
+  boarding events; NULL-count and unassigned events never appear there.
+- **Fleet-wide limitation**: the factor-up is fleet-wide in v0, not per
+  mode/TOS (handoff 0005 open question; see `REGULATORY_TRACKER.md`).
 
 ## Trip-level excision — 0.4.0 (default for VRH)
 
@@ -195,17 +265,22 @@ functions.
 export HEADWAY_DATABASE_URL=postgresql://…/agency_db
 python -m headway_calc.runner --period-start 2026-06-01 --period-end 2026-07-01
 # optional: --gap-threshold-seconds 300 --coverage-threshold 0.95 \
-#           --layover-max-seconds 1800
+#           --layover-max-seconds 1800 --missing-trip-threshold 0.02 \
+#           --imbalance-threshold 0.10
 ```
 
-Loads `canonical.vehicle_positions` (with `block_id` joined) for the
+Loads `canonical.vehicle_positions` (with `block_id` joined),
+`canonical.passenger_events` and the operated trip_ids for the
 **half-open** period `[period-start, period-end)` (UTC — June is
 `[2026-06-01, 2026-07-01)`, so consecutive months tile with no
-double-counted and no dropped instant), runs `vrm_v0` at CALC_VERSION 0.2.0
-and `vrh_v0` at CALC_VERSION 0.4.0 (block-aware with trip-level excision;
+double-counted and no dropped instant), runs `vrm_v0` at CALC_VERSION 0.2.0,
+`vrh_v0` at CALC_VERSION 0.4.0 (block-aware with trip-level excision;
 `--layover-max-seconds` passes through; the per-metric `detail` in the
 report carries the trip coverage plus `trips_excised`/`blocks_touched`/
-`layover_intervals_dropped`), and prints the `RunReport` as JSON (all three
+`layover_intervals_dropped`) and `upt_v0` at CALC_VERSION 0.1.0
+(`--missing-trip-threshold`/`--imbalance-threshold` pass through; its
+`detail` carries the counted boardings, missing share, applied factor and
+source mix), and prints the `RunReport` as JSON (all five
 inputs recorded). Per metric:
 
 - **every finding is routed to `dq.issues` with its own severity** —
@@ -259,22 +334,22 @@ handoff 0001).
 
 ```
 $ cd services/calc && python3 -m pytest tests/ -q
-........................................................................ [ 62%]
-...........................................                              [100%]
-115 passed in 5.49s
+........................................................................ [ 45%]
+........................................................................ [ 91%]
+.............                                                            [100%]
+157 passed in 10.25s
 ```
 
-0.4.0 golden tests explicitly (trip-excision case per handoff 0004,
-hand-worked in `tests/golden/vrm_vrh_v0/BASIS.md`, calc 0.4.0 section):
+upt_v0 golden tests explicitly (handoff 0005, hand-worked in
+`tests/golden/upt_v0/BASIS.md`):
 
 ```
-$ python3 -m pytest tests/test_golden_v04.py -v
-tests/test_golden_v04.py::test_golden_v04_middle_trip_excision_keeps_clean_remainder PASSED [ 20%]
-tests/test_golden_v04.py::test_golden_v04_default_threshold_blocks_at_trip_coverage PASSED [ 40%]
-tests/test_golden_v04.py::test_golden_v04_retained_v03_excludes_the_whole_block PASSED [ 60%]
-tests/test_golden_v04.py::test_golden_v04_retained_v02_matches_on_this_fixture PASSED [ 80%]
-tests/test_golden_v04.py::test_golden_v04_clean_block_reproduces_v03_value_exactly PASSED [100%]
-5 passed in 0.11s
+$ python3 -m pytest tests/test_golden_upt.py -v
+tests/test_golden_upt.py::test_golden_blocked_case_refuses_above_fta_threshold PASSED [ 25%]
+tests/test_golden_upt.py::test_golden_factored_case_factors_up_at_exactly_two_percent PASSED [ 50%]
+tests/test_golden_upt.py::test_golden_factored_value_within_fta_factor_bounds PASSED [ 75%]
+tests/test_golden_upt.py::test_golden_blocked_case_becomes_factored_when_threshold_raised PASSED [100%]
+4 passed in 0.10s
 ```
 
 Coverage: everything from 0.1.0/0.2.0/0.3.0 (all prior golden
@@ -303,7 +378,33 @@ structural equality; blocking ⇔ the exact coverage threshold line over
 TRIPS with blocking-implies-None retained); runner end-to-end now asserting
 the vrh 0.4.0 detail JSONB (trip coverage + trips_excised/blocks_touched/
 layover_intervals_dropped + layover_max_seconds). Migrations 0010+0011 are
-statically asserted by `db/test_migrations_static.py` (9 passed).
+statically asserted by `db/test_migrations_static.py`.
+
+NEW for upt_v0 0.1.0 (handoff 0005) — golden fixture `tests/golden/upt_v0/`
+(blocked case: 3 operated trips, 1 missing → share 1/3 > the FTA 2%
+threshold → ONE blocking finding, value None, with the p. 151 imbalance/
+negative-load defects and the NULL-count row asserted as warnings and the
+all-simulated source mix as the info finding; factored case: 50 operated
+trips, 49 covered → share exactly 0.02 → 98 counted × 50/49 = 100,
+hand-worked in BASIS.md); upt unit tests (verified-enum counting incl. bike
+exclusion, NULL-count warning + lineage exclusion, imbalance boundary
+exactly-10%-passes, negative-load stop-sequence ordering with the
+NULL-sequence-last convention, missing-rule boundaries at exactly 2% /
+above 2% / all-missing / zero-operated degenerate, whole-boarding
+ROUND_HALF_EVEN, simulated source mix); upt Hypothesis properties
+(determinism and order-independence as full structural equality;
+monotonicity — adding a boarding event to a covered trip never decreases
+the reported UPT, and the counted base never decreases on any input, with
+the documented factor-replacement exception pinned by its own test;
+factor-up bounds counted ≤ reported ≤ quantize(counted/(1−0.02));
+blocking ⇔ the exact p. 146 threshold line with blocking-implies-None;
+lineage = counted boardings exactly, source_mix totals, NULL-count warnings
+never in lineage); reader tests for `load_passenger_events` /
+`load_operated_trip_ids` (contract columns, half-open UTC bounds,
+deterministic order, NULL passthrough); runner end-to-end for the UPT
+golden through `run_period` (factored persists with 49 lineage edges;
+blocked routes info/warnings/blocking with their own severities and
+persists no upt value while vrm/vrh persist independently).
 
 ### What is PENDING
 
@@ -328,3 +429,11 @@ statically asserted by `db/test_migrations_static.py` (9 passed).
   package's. Whether excluded-group warnings auto-resolve when a later
   replay fills the gap is an open handoff-0002 question (owner: Data
   Engineer, slice 2).
+- **UPT reportability** — upt_v0 definitions are VERIFIED (pp. 143/146/151
+  quoted in the tracker; TIDES enum verified against the live spec repo),
+  but NOT REPORTABLE: all current passenger events are simulated
+  (`source = "tides_simulated"`, flagged per run), APC certification per
+  pp. 147–148 is an agency workflow, and the p. 146 factor-up is fleet-wide
+  in v0 (mode-awareness limitation, handoff 0005 open question). The live
+  run against ingested simulator output is the orchestrator's job once
+  migration 0012 + the TIDES connector land (parallel handoff-0005 work).

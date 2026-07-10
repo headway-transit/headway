@@ -223,7 +223,8 @@ services:
           raw.gtfs_static.feed \
           raw.gtfs_rt.vehicle_positions \
           raw.gtfs_rt.trip_updates \
-          raw.gtfs_rt.alerts
+          raw.gtfs_rt.alerts \
+          raw.tides.passenger_events
         do
           /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 \
             --create --if-not-exists --topic "$$topic" \
@@ -292,6 +293,14 @@ services:
       GTFS_RT_ALERTS_URL: ${GTFS_RT_ALERTS_URL:-}
       POLL_INTERVAL: ${POLL_INTERVAL:-30s}
       AGENCY_ID: ${AGENCY_ID:-}
+      # TIDES file-drop connector (handoff 0005). Drop passenger_events*.csv
+      # into ./tides-drop on the host. SIMULATED data must use source
+      # tides_simulated (binding rule, contracts/topics.v0.md).
+      TIDES_DROP_DIR: /data/tides-drop
+      TIDES_SOURCE: ${TIDES_SOURCE:-tides_simulated}
+    volumes:
+      # Writable: the connector moves handled files to processed/ inside it.
+      - ./tides-drop:/data/tides-drop
 
   # --- Next slice waves (placeholders; uncomment as each service lands) ------
   #

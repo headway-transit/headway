@@ -16,6 +16,7 @@ are never deleted or rewritten.
 | vrh_v0 | 0.2.0 | Gap policy per handoff 0002: same duration semantics as 0.1.0 with per-group exclusion + coverage identical to vrm_v0 0.2.0 (warning 'telemetry_gap_excluded' per excluded group; blocking 'coverage_below_threshold' below coverage_threshold, default 0.95 — ENGINEERING PLACEHOLDER; detail JSONB with coverage/threshold provenance; lineage over included groups only); 0.1.0 retained runnable (compute_vrh_v0_1) | FTA NTD definitions of Vehicle Revenue Miles/Hours and completeness/sampling expectations — 2025 NTD Full Reporting Policy Manual (current reporting year) | DEFINITIONS VERIFIED, NOT REPORTABLE — definitions verified and quoted (see "Verified definitions"). **Material divergence D1: FTA includes layover/recovery time in VRH (Exhibit 35; typically 10–20% of running time); per-trip grouping drops it → VRH systematically undercounts.** Closure requires block-aware grouping (GTFS block_id, calc v0.3). D2 (rail passenger-car measure) also applies. coverage_threshold 0.95 remains an engineering placeholder. | 2026 NTD Policy Manual (Full Reporting), pp. 128–136 + 2025 NTD Full Reporting Policy Manual (identical text) / verified 2026-07-10 |
 | vrh_v0 | 0.3.0 | Block-aware VRH per handoff 0003: a vehicle's trips sharing a GTFS block_id (canonical.trips.block_id, migration 0011; trips.txt optional field per the GTFS Schedule Reference, gtfs.org — "many sequential trips made using the same vehicle") form ONE VRH group, and the inter-trip interval is layover BY DEFINITION and INCLUDED, up to layover_max_seconds (explicit input, default 1800 s — ENGINEERING PLACEHOLDER, see below; over-cap interval NOT counted + warning 'layover_exceeds_max'). NULL-block trips fall back to per-trip grouping (0.2.0 semantics) with one info 'block_unavailable' per vehicle-day (documented undercount). Within-trip gap rule unchanged (gap_threshold_seconds, default 300 s), exclusion unit now the block group; coverage/threshold machinery unchanged over block groups (blocking 'coverage_below_threshold' below coverage_threshold, default 0.95 — ENGINEERING PLACEHOLDER); detail JSONB adds layover_max_seconds provenance; lineage covers all positions of included block groups; VRM stays 0.2.0 (layover miles N/A per Exhibit 35); 0.2.0/0.1.0 retained runnable (compute_vrh_v0_2, compute_vrh_v0_1) | FTA inclusion of layover/recovery time in VRH — 2026 NTD Policy Manual (Full Reporting), Exhibit 35 (p. 133: layover at end of route → Vehicle Revenue Hours **Yes**, miles N/A) and pp. 128–133 ("Revenue hours … include … Layover/recovery time"; "Layover time typically ranges from 10 to 20 percent of the running time" — descriptive, not a cap); already quoted under "Verified definitions" | DEFINITIONS VERIFIED — **D1 CLOSED (block-aware layover inclusion)**; NOT REPORTABLE — remaining divergences D2–D6 unchanged (rail passenger-car measure D2 foremost). ENGINEERING PLACEHOLDERS flagged: layover_max_seconds 1800 s (pending observed MBTA inter-trip layover distributions; ultimately per-agency config) and coverage_threshold 0.95 (pending FTA completeness verification). Live v0.2-vs-v0.3 comparison DONE 2026-07-10 (MBTA, 2026-07-09..11, 850,928 positions): over the identical included set (3,302 clean block groups) layover recovery = +72.56 h = **+1.4% of running time** — far below the manual's descriptive 10–20% because MBTA GTFS-RT assigns the next trip_id during layover, so per-trip grouping already captured most layover inside trip groups; D1 real but empirically small on this feed. Caveats recorded: clean-subset selection bias (vehicles dark at layover are in the excluded blocks) and the 1800 s layover cap need the observed inter-trip distribution. Naive cross-version comparison is confounded (block-level exclusion: 802/4,104 groups → coverage 0.8046 vs per-trip 0.9122; v0.4 candidate: excise only the gapped trip + adjacent layovers instead of the whole block — open design question, owner NTD role). | 2026 NTD Policy Manual (Full Reporting), pp. 128–136 + 2025 NTD Full Reporting Policy Manual (identical text) / verified 2026-07-10; GTFS Schedule Reference trips.txt block_id (gtfs.org) / verified 2026-07-09 |
 | vrh_v0 | 0.4.0 | Trip-level excision per handoff 0004: grouping and layover accounting UNCHANGED from 0.3.0 (block-aware; NULL-block per-trip fallback + info 'block_unavailable' per vehicle-day; inter-trip interval is layover BY DEFINITION, included up to layover_max_seconds, default 1800 s — see status; over-cap interval NOT counted + warning 'layover_exceeds_max'), but the EXCLUSION UNIT is refined from the block group to the gapped trip plus its adjacent layover intervals: a within-trip gap (> gap_threshold_seconds, default 300 s) excises ONLY that trip's running time and the inter-trip layover intervals immediately adjacent to it (both sides, where present — a layover interval counts only when BOTH bounding trips are clean; an excised trip is never bridged); the block's remaining clean trips and their other layover intervals stay in the figure; one warning 'telemetry_gap_excluded' PER EXCISED TRIP citing that trip's records. Coverage returns to TRIP denomination: clean_trips/total_trips (directly comparable to 0.2.0's group coverage; blocking 'coverage_below_threshold' below coverage_threshold, default 0.95 — ENGINEERING PLACEHOLDER); detail JSONB carries the trip coverage, the block statistics (blocks_touched, trips_excised, layover_intervals_dropped) and all three thresholds; lineage covers INCLUDED positions only (excised trips' records cited by their findings); VRM stays 0.2.0; 0.3.0/0.2.0/0.1.0 retained runnable (compute_vrh_v0_3, compute_vrh_v0_2, compute_vrh_v0_1) | Exhibit 35 BOTH directions — 2026 NTD Policy Manual (Full Reporting), p. 133: layover at end of route → Vehicle Revenue Hours **Yes** (inclusion, as 0.3.0), AND "Bus arrives at the end of the route, parks, and goes out of service… → Vehicle Revenue Hours: **No**" (out-of-service exclusion — the justification for capping long inter-trip intervals); pp. 128–133 ("Revenue hours … include … Layover/recovery time"; "Layover time typically ranges from 10 to 20 percent of the running time" — descriptive, not a cap); measured MBTA inter-trip interval distribution (2026-07-10, 7,400 in-block intervals): p50 = 30 s, p90 = 109 s, p99 = 7,124 s, 2.7% > 1,800 s, 49 negative overlaps — the long tail is out-of-service parking | DEFINITIONS VERIFIED — D1 remains CLOSED (layover inclusion retained); NOT REPORTABLE — remaining divergences **D2–D6 unchanged** (rail passenger-car measure D2 foremost). layover_max_seconds 1800 s is now **data-informed and exhibit-aligned** (the measured distribution shows 97.3% of in-block intervals under the cap and a long tail of out-of-service parking that Exhibit 35 excludes), **per-agency configurable** — no longer a bare placeholder, still not an FTA-published number. coverage_threshold 0.95 remains an ENGINEERING PLACEHOLDER (pending FTA completeness verification). Open question (handoff 0004): partial retention of an excised trip's layover intervals when the gap is provably outside the layover-adjacent running segments — deferred; the conservative both-sides drop stands. Live v0.2/v0.3/v0.4 re-run on the MBTA dataset PENDING — orchestrator (expected: trip-level coverage ≈ 0.91; v0.4 ≥ v0.2 and v0.4 ≥ v0.3 on identical input — property-tested). | 2026 NTD Policy Manual (Full Reporting), pp. 128–136 + 2025 NTD Full Reporting Policy Manual (identical text) / verified 2026-07-10; MBTA inter-trip interval distribution measured 2026-07-10 (handoff 0004) |
+| upt_v0 | 0.1.0 | Unlinked Passenger Trips per handoff 0005: deterministic sum of `event_count` over TIDES boarding events (`event_type = "Passenger boarded"`, verified enum — see citation; bike boardings are NOT passengers per the p. 143 definition) with a trip assignment (`trip_id` from `trip_id_performed` — the same revenue-service proxy as vrm/vrh, documented approximation); NULL `event_count` contributes 0 + one warning `apc_null_count` citing the record (never coalesced to the TIDES default 1); p. 151 validations AS QUOTED: per-trip \|boardings−alightings\| > imbalance_threshold × boardings (explicit input, default 0.10 — the manual's example figure) → warning `apc_count_imbalance`; running load (ordered by trip_stop_sequence then event_timestamp, NULL sequence last — documented convention) dropping below zero → warning `apc_negative_load`; **missing-trip rule (p. 146)**: operated trips (SELECT DISTINCT trip_id FROM canonical.vehicle_positions over the period) with zero passenger events are missing; missing/operated ≤ missing_trip_threshold (explicit input, default 0.02 — **a REAL FTA threshold, not a placeholder**; exact comparison, never the quantized share) → deterministic factor-up UPT = counted × operated/(operated−missing) from the exact fraction, quantized to whole boardings (Decimal 1, ROUND_HALF_EVEN — engineering rounding convention, the manual prescribes none), factor + inputs in detail JSONB; share > threshold → ONE blocking `apc_missing_trips_above_fta_threshold`, value None (statistician approval is a human workflow); simulated-source rule (handoff 0005): any `source != "tides"` → ONE info `simulated_source_data`, source_mix always in detail; lineage over counted boarding events only | UPT definition — 2026 NTD Policy Manual (Full Reporting) p. 143 ("Unlinked Passenger Trips (UPT) are the number of boardings…"); missing-trip 2% rule — p. 146; APC validation examples — p. 151 (all quoted under "Verified definitions — UPT" below); TIDES `event_type` enum — TIDES-transit/TIDES `spec/passenger_events.schema.json`, main branch (repo HEAD `7ddaa7ab820eeca1cc7a681ba9ae79a72ba10af1`, schema file last changed `d887d42ce081f3fb6155664a3c486101d62ec52b` 2023-12-11), verified 2026-07-10 | DEFINITIONS VERIFIED (p. 143/146/151 quoted below; TIDES enum verified against the live spec repo) — **NOT REPORTABLE**: (1) all current passenger events are SIMULATED (`source = "tides_simulated"`; every consuming run carries the `simulated_source_data` info finding — a certifiable figure containing simulated records is a contradiction); (2) APC use for NTD reporting requires FTA approval/benchmarking per pp. 147–148 (±5% vs manual counts, discard rate < 50%, next benchmarking RY 2028) — an agency workflow outside calc logic; (3) factor-up is FLEET-WIDE in v0, not per mode/TOS (handoff 0005 open question — mode-awareness increment, owner NTD role); (4) the p. 149 sampling floor (95% confidence, ±10% precision) is a future sampling path, unused here | 2026 NTD Policy Manual (Full Reporting), pp. 143–151 (PDF pp. 161–169) / verified 2026-07-10; TIDES passenger_events schema (github.com/TIDES-transit/TIDES) / verified 2026-07-10 |
 
 ## Verified definitions — FTA NTD Policy Manual (verified 2026-07-10)
 
@@ -33,6 +34,65 @@ Exact quotes (2026 manual):
 - **Accuracy requirement** (p. 135): "Transit agencies must report accurate, true statistics for VRM (i.e., no estimates)."
 - **Exhibit 35** (p. 133, bus): layover at end of route → Vehicle Revenue Hours **Yes** (miles N/A); route operated with no passengers boarding → revenue **Yes**; all deadhead legs → revenue **No**.
 - **Exhibit 35, out-of-service row** (p. 133, bus; verified for calc vrh_v0 0.4.0, handoff 0004): "Bus arrives at the end of the route, parks, and goes out of service… → Vehicle Revenue Hours: **No**" — the exhibit-side justification for capping long inter-trip intervals (`layover_max_seconds`): the measured long tail of in-block intervals is out-of-service parking, not layover.
+
+## Verified definitions — UPT (calc upt_v0, handoff 0005; verified 2026-07-10)
+
+Source: **2026 NTD Policy Manual, Full Reporting**
+(`docs/reference/National Transit Database 2026 Policy Manual_ Full
+Reporting.pdf`), chapter "Service Data Requirements" → "Service Consumed" and
+"Collecting Service Consumed Data", manual pp. 143–151 (PDF pp. 161–169).
+
+Exact quotes (2026 manual):
+
+- **UPT definition** (p. 143): "Unlinked Passenger Trips (UPT) are the number
+  of boardings on public transportation vehicles during the fiscal year.
+  Transit agencies must count passengers each time they board vehicles, no
+  matter how many vehicles they use to travel from their origin to their
+  destination. If a transit vehicle changes routes while passengers are
+  onboard (interlining), transit agencies should not recount the passengers.
+  Employees or contractors on transit agency business are not passengers."
+- **100% counts / missing-trip rule** (p. 146): "Sometimes transit agencies
+  performing 100 percent counts will miss passenger counts on some vehicle
+  trips because of personnel problems or equipment failures. If these vehicle
+  trips are 2 percent or less of the total, transit agencies should factor up
+  the data to account for the missing trips. However, if the vehicle trips
+  with missing data exceed 2 percent of total trips, agencies must have a
+  qualified statistician approve the factoring method used to account for the
+  missing percentage." — the calc's `missing_trip_threshold` default 0.02 is
+  this REAL FTA threshold (NOT an engineering placeholder); above it the calc
+  refuses (blocking `apc_missing_trips_above_fta_threshold`) because the
+  statistician approval is a human workflow.
+- **APC validation examples** (p. 151): "First, develop processes to throw
+  out any trips with invalid APC data. … For example, agencies may flag trips
+  or blocks where the difference between boardings and alightings is greater
+  than 10 percent, or trips where the passenger load drops below zero." —
+  implemented as the `apc_count_imbalance` (default `imbalance_threshold`
+  0.10, the manual's example figure) and `apc_negative_load` warnings.
+- **APC certification** (pp. 147–148): "The use of APCs for NTD reporting
+  requires FTA approval." … "FTA will only certify APC systems for NTD
+  reporting if the percent difference between manual and APC data in the
+  sample, for both UPT and PMT, is less than 5 percent." … "FTA will also
+  only certify APC systems if the proportion of trips without valid APC data
+  (the discard rate) is less than 50 percent of the number of trips on
+  APC-equipped vehicles." "The next benchmarking year is Report Year (RY)
+  2028." — recorded for context; certification is an agency workflow, not
+  calc logic.
+- **Sampling floor** (p. 149): "Minimum confidence of 95 percent; and
+  Minimum precision level of ±10 percent." — future sampling-path
+  parameters, not used by upt_v0.
+
+TIDES event vocabulary: `event_type` enum verified 2026-07-10 against
+TIDES-transit/TIDES `spec/passenger_events.schema.json` (main branch — repo
+HEAD `7ddaa7ab820eeca1cc7a681ba9ae79a72ba10af1`; the schema file's last
+change is commit `d887d42ce081f3fb6155664a3c486101d62ec52b`, 2023-12-11). The
+enum contains exactly 16 values; the passenger boarding/alighting values are
+verbatim **"Passenger boarded"** and **"Passenger alighted"** (the bike
+variants "Individual bike boarded"/"Individual bike alighted" are not
+passengers under the p. 143 definition and are never counted).
+`event_count` is "Count for this event, e.g., 3 for a Passenger Boarding
+event with 3 boardings, default is `1`" — the canonical contract nevertheless
+preserves NULL as NULL, and the calc warns (`apc_null_count`) and counts 0
+rather than silently applying the schema default.
 
 ## Divergence analysis — calc 0.2.0 vs. verified definitions (2026-07-10)
 
@@ -99,3 +159,15 @@ Definitions are now VERIFIED; the implementation is **partially aligned**, with 
   Policy Manual before this default is treated as more than a placeholder;
   ultimately per-agency configuration (handoff 0002 open question, owner: NTD
   role, then Backend for the config surface).
+- **upt_v0 mode-awareness (handoff 0005 open question, owner: NTD role)**:
+  the p. 146 factor-up is applied FLEET-WIDE in v0; the manual speaks of
+  totals per mode/TOS. Revisit at the mode-awareness increment (requires mode
+  attribution on trips).
+- **upt_v0 reportability gates**: (1) simulated-only data — every current
+  passenger event carries `source = "tides_simulated"` and each consuming run
+  emits the `simulated_source_data` info finding; (2) APC certification per
+  pp. 147–148 (FTA approval, ±5% benchmarking vs manual counts, discard rate
+  < 50%, next benchmarking RY 2028) is an agency workflow that must exist
+  before any APC-derived UPT is reportable; (3) the p. 149 sampling floor
+  (95% confidence, ±10% precision) applies only if the 100%-count path is
+  abandoned — not implemented.

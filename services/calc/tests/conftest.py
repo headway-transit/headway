@@ -11,15 +11,16 @@ target to simulate a mid-run persist failure.
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
 import pytest
 
-from headway_calc.types import VehiclePosition
+from headway_calc.types import PassengerEvent, VehiclePosition
 
 # services/calc/tests/conftest.py -> repo root is parents[3]
 GOLDEN_DIR = Path(__file__).resolve().parents[3] / "tests" / "golden" / "vrm_vrh_v0"
+UPT_GOLDEN_DIR = Path(__file__).resolve().parents[3] / "tests" / "golden" / "upt_v0"
 
 
 def load_positions(raw: dict) -> list[VehiclePosition]:
@@ -36,6 +37,25 @@ def load_positions(raw: dict) -> list[VehiclePosition]:
             block_id=p.get("block_id"),
         )
         for p in raw["positions"]
+    ]
+
+
+def load_events(raw_case: dict) -> list[PassengerEvent]:
+    """Map one upt_v0 golden case's event rows onto PassengerEvent."""
+    return [
+        PassengerEvent(
+            event_timestamp=datetime.fromisoformat(e["event_timestamp"]),
+            service_date=date.fromisoformat(e["service_date"]),
+            passenger_event_id=e["passenger_event_id"],
+            vehicle_id=e["vehicle_id"],
+            trip_id=e["trip_id"],
+            trip_stop_sequence=e["trip_stop_sequence"],
+            event_type=e["event_type"],
+            event_count=e["event_count"],
+            source=e["source"],
+            source_record_id=e["source_record_id"],
+        )
+        for e in raw_case["events"]
     ]
 
 
@@ -85,6 +105,21 @@ def golden_expected_v0_4() -> dict:
     return json.loads((GOLDEN_DIR / "expected_v0_4.json").read_text())
 
 
+@pytest.fixture(scope="session")
+def upt_golden_fixture() -> dict:
+    """UPT fixture for upt_v0 0.1.0 (handoff 0005): a blocked case (missing
+    share 1/3 > the FTA 2% threshold) and a factored case (share exactly
+    0.02) — see tests/golden/upt_v0/BASIS.md."""
+    return json.loads((UPT_GOLDEN_DIR / "fixture.json").read_text())
+
+
+@pytest.fixture(scope="session")
+def upt_golden_expected() -> dict:
+    """Expectations for upt_v0 CALC_VERSION 0.1.0 over the UPT fixture —
+    see tests/golden/upt_v0/BASIS.md."""
+    return json.loads((UPT_GOLDEN_DIR / "expected.json").read_text())
+
+
 def positions_to_rows(positions: list[VehiclePosition]) -> list[tuple]:
     """Render VehiclePositions as reader result rows (the handoff-0001
     canonical.vehicle_positions columns plus the trips.block_id join, handoff
@@ -105,6 +140,32 @@ def positions_to_rows(positions: list[VehiclePosition]) -> list[tuple]:
     ]
 
 
+def events_to_rows(events: list[PassengerEvent]) -> list[tuple]:
+    """Render PassengerEvents as reader result rows (the handoff-0005
+    canonical.passenger_events columns), in the reader's SQL order
+    (event_timestamp, passenger_event_id, source_record_id) — the fake
+    stands in for the database, so it honors the ORDER BY."""
+    ordered = sorted(
+        events,
+        key=lambda e: (e.event_timestamp, e.passenger_event_id, e.source_record_id),
+    )
+    return [
+        (
+            e.event_timestamp,
+            e.service_date,
+            e.passenger_event_id,
+            e.vehicle_id,
+            e.trip_id,
+            e.trip_stop_sequence,
+            e.event_type,
+            e.event_count,
+            e.source,
+            e.source_record_id,
+        )
+        for e in ordered
+    ]
+
+
 class RecordingCursor:
     def __init__(self, conn: "RecordingConnection"):
         self._conn = conn
@@ -117,7 +178,15 @@ class RecordingCursor:
         self._pending_one = None
         self._pending_all = []
         if sql.lstrip().upper().startswith("SELECT"):
-            self._pending_all = list(conn.position_rows)
+            # Dispatch canned rows per reader query (handoff 0005 added the
+            # passenger-events and operated-trips SELECTs alongside the
+            # positions SELECT).
+            if "canonical.passenger_events" in sql:
+                self._pending_all = list(conn.passenger_event_rows)
+            elif "SELECT DISTINCT trip_id" in sql:
+                self._pending_all = list(conn.operated_trip_rows)
+            else:
+                self._pending_all = list(conn.position_rows)
         elif "INSERT INTO dq.issues" in sql:
             if conn.fail_on == "dq.issues":
                 raise RuntimeError("simulated dq.issues insert failure")
@@ -140,8 +209,16 @@ class RecordingCursor:
 class RecordingConnection:
     """DB-API-shaped fake that records statements and transaction boundaries."""
 
-    def __init__(self, position_rows: list[tuple] | None = None, fail_on: str | None = None):
+    def __init__(
+        self,
+        position_rows: list[tuple] | None = None,
+        fail_on: str | None = None,
+        passenger_event_rows: list[tuple] | None = None,
+        operated_trip_rows: list[tuple] | None = None,
+    ):
         self.position_rows = position_rows or []
+        self.passenger_event_rows = passenger_event_rows or []
+        self.operated_trip_rows = operated_trip_rows or []
         self.fail_on = fail_on
         self.executed: list[tuple[str, tuple | None]] = []
         # Each commit records how many statements were executed at that point,

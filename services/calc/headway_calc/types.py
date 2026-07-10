@@ -7,7 +7,7 @@ over immutable inputs and produce immutable results. Stdlib only.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 
 #: Finding severities — mirror dq.issues.severity exactly.
@@ -57,6 +57,58 @@ class VehiclePosition:
             raise ValueError(
                 f"longitude {self.longitude!r} out of range [-180, 180] "
                 f"(source_record_id={self.source_record_id!r})"
+            )
+
+
+@dataclass(frozen=True)
+class PassengerEvent:
+    """One canonical passenger event (read contract: canonical.passenger_events,
+    migration 0012, handoff 0005 — TIDES vocabulary per ADR-0003).
+
+    ``event_timestamp`` MUST be timezone-aware UTC event time (the APC event
+    timestamp, never ingest time). ``trip_id`` (from TIDES
+    ``trip_id_performed``) is None when the event is unassigned — upt_v0
+    treats trip assignment as the revenue-service proxy, consistent with
+    vrm_v0/vrh_v0 (documented approximation), and simply excludes unassigned
+    events from the counted figure. ``event_type`` carries the verbatim TIDES
+    ``event_type`` enum value (e.g. ``"Passenger boarded"`` /
+    ``"Passenger alighted"`` — see headway_calc.upt for the verified
+    citation). ``event_count`` is preserved as-is: None stays None (the
+    handoff-0005 contract forbids coalescing a NULL count to a guessed
+    number; the calc warns and counts 0). ``source`` is the ingestion
+    envelope source (``"tides"`` for real feeds, ``"tides_simulated"`` for
+    simulator output — the simulated-data rule makes the distinction
+    permanent). ``source_record_id`` is the content-addressed raw record id
+    this event derives from; it feeds the lineage graph (ADR-0007).
+    """
+
+    event_timestamp: datetime
+    service_date: date
+    passenger_event_id: str
+    vehicle_id: str
+    trip_id: str | None
+    trip_stop_sequence: int | None
+    event_type: str
+    event_count: int | None
+    source: str
+    source_record_id: str
+
+    def __post_init__(self) -> None:
+        if (
+            self.event_timestamp.tzinfo is None
+            or self.event_timestamp.utcoffset() is None
+        ):
+            raise ValueError(
+                f"PassengerEvent.event_timestamp must be timezone-aware UTC; "
+                f"got naive datetime {self.event_timestamp!r} "
+                f"(source_record_id={self.source_record_id!r})"
+            )
+        if self.event_count is not None and self.event_count < 0:
+            # TIDES constrains event_count to minimum 0; a negative canonical
+            # count is a bad row and is surfaced loudly, never coerced.
+            raise ValueError(
+                f"PassengerEvent.event_count must be >= 0 or None; got "
+                f"{self.event_count!r} (source_record_id={self.source_record_id!r})"
             )
 
 
@@ -191,6 +243,64 @@ class TripExcisionCoverageDetail(BlockCoverageDetail):
 
 
 @dataclass(frozen=True)
+class UptDetail:
+    """Detail of one upt_v0 run (handoff 0005), persisted verbatim into
+    computed.metric_values.detail (JSONB, migration 0010).
+
+    - ``total_boardings_counted`` — the deterministic base count: sum of
+      event_count over boarding events with a trip assignment (NULL counts
+      contribute 0 and are warned, never guessed).
+    - ``operated_trips`` / ``trips_with_events`` / ``missing_trips`` — the
+      p. 146 missing-trip rule's inputs: operated trips are distinct trip_ids
+      observed in canonical.vehicle_positions for the period; a missing trip
+      is an operated trip with zero passenger events.
+    - ``missing_share`` — missing/operated, quantized 0.0001 ROUND_HALF_EVEN
+      for reporting (the threshold COMPARISON is exact, never the quantized
+      value); Decimal("0") when nothing operated (degenerate period).
+    - ``factor_applied`` — the FTA-sanctioned factor-up
+      operated/(operated − missing) applied when missing_share <= the
+      threshold, quantized 0.000001 ROUND_HALF_EVEN for reporting (the value
+      itself is computed from the exact fraction); None when the run was
+      blocked (share above the threshold: statistician workflow required).
+    - ``source_mix`` — event counts per envelope source (ALWAYS present, the
+      handoff-0005 simulated-data rule: a certifiable figure containing
+      simulated records is a contradiction the DQ trail must make visible).
+    - ``missing_trip_threshold`` (default 0.02 — a REAL FTA threshold, 2026
+      NTD Policy Manual p. 146) and ``imbalance_threshold`` (default 0.10 —
+      the p. 151 APC validation example) — the run's explicit inputs, carried
+      for provenance exactly as the coverage thresholds are.
+
+    ``to_dict`` renders every Decimal as a string so JSON never coerces a
+    reported ratio through binary float; source_mix keys are emitted sorted.
+    """
+
+    total_boardings_counted: int
+    operated_trips: int
+    trips_with_events: int
+    missing_trips: int
+    missing_share: Decimal
+    factor_applied: Decimal | None
+    source_mix: dict[str, int]
+    missing_trip_threshold: Decimal
+    imbalance_threshold: Decimal
+
+    def to_dict(self) -> dict:
+        return {
+            "total_boardings_counted": self.total_boardings_counted,
+            "operated_trips": self.operated_trips,
+            "trips_with_events": self.trips_with_events,
+            "missing_trips": self.missing_trips,
+            "missing_share": str(self.missing_share),
+            "factor_applied": (
+                None if self.factor_applied is None else str(self.factor_applied)
+            ),
+            "source_mix": {k: self.source_mix[k] for k in sorted(self.source_mix)},
+            "missing_trip_threshold": str(self.missing_trip_threshold),
+            "imbalance_threshold": str(self.imbalance_threshold),
+        }
+
+
+@dataclass(frozen=True)
 class CalcResult:
     """The output of one calculation run.
 
@@ -204,7 +314,8 @@ class CalcResult:
     figure, in deterministic order — these feed lineage.edges (one edge per
     id); records of excluded groups appear ONLY in their warning findings.
     ``detail`` carries the 0.2.0 coverage detail (a BlockCoverageDetail for
-    0.3.0 block-aware VRH; None for 0.1.0 results).
+    0.3.0 block-aware VRH; an UptDetail for upt_v0, handoff 0005; None for
+    0.1.0 results).
     """
 
     value: Decimal | None
@@ -215,7 +326,7 @@ class CalcResult:
     blocking_issues: tuple[Finding, ...]
     warnings: tuple[Finding, ...] = ()
     infos: tuple[Finding, ...] = ()
-    detail: CoverageDetail | None = None
+    detail: CoverageDetail | UptDetail | None = None
 
     def __post_init__(self) -> None:
         if self.blocking_issues and self.value is not None:

@@ -9,12 +9,14 @@ from pathlib import Path
 
 MIGRATIONS_DIR = Path(__file__).resolve().parent / "migrations"
 
-# Every table named in the handoff contract.
+# Every table named in the handoff contract (0001; canonical.passenger_events
+# added by handoff 0005 / migration 0012).
 CONTRACT_TABLES = [
     "raw.records",
     "canonical.routes",
     "canonical.trips",
     "canonical.vehicle_positions",
+    "canonical.passenger_events",
     "computed.metric_values",
     "lineage.edges",
     "dq.issues",
@@ -108,6 +110,38 @@ def test_vehicle_positions_is_hypertable_with_unique_index():
         r'\(vehicle_id, "time", source_record_id\)',
         sql,
     ), "unique index (vehicle_id, time, source_record_id) missing"
+
+
+def test_passenger_events_hypertable_unique_key_and_columns():
+    # Handoff 0005 / migration 0012: TIDES passenger events (slice 2 UPT).
+    sql = all_sql()
+    assert "create_hypertable('canonical.passenger_events', 'event_timestamp')" in sql
+    assert re.search(
+        r"CREATE UNIQUE INDEX\s+\w+\s+ON canonical\.passenger_events\s*"
+        r"\(passenger_event_id, event_timestamp, source_record_id\)",
+        sql,
+    ), "unique index (passenger_event_id, event_timestamp, source_record_id) missing"
+    # Column checks scoped to the 0012 file (raw.records also has a 'source'
+    # column, so matching the concatenated SQL would prove nothing).
+    sql_0012 = (MIGRATIONS_DIR / "0012_passenger_events.sql").read_text(
+        encoding="utf-8"
+    )
+    assert re.search(r"source\s+TEXT NOT NULL", sql_0012), (
+        "canonical.passenger_events.source must be TEXT NOT NULL (simulated "
+        "data permanently distinguishable, handoff 0005)"
+    )
+    assert re.search(
+        r"source_record_id\s+TEXT NOT NULL REFERENCES raw\.records",
+        sql_0012,
+    ), "canonical.passenger_events.source_record_id must reference raw.records"
+    # event_count NULL preserved — never coalesced, so no NOT NULL, no default.
+    assert re.search(r"event_count\s+INTEGER\s*,", sql_0012), (
+        "canonical.passenger_events.event_count must be nullable INTEGER "
+        "with no default (NULL preserved, never coalesced)"
+    )
+    assert not re.search(r"event_count\s+INTEGER\s+(NOT NULL|DEFAULT)", sql_0012), (
+        "canonical.passenger_events.event_count must stay nullable with no default"
+    )
 
 
 def test_immutability_triggers_present():

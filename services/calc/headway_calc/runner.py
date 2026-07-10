@@ -1,8 +1,10 @@
 """run_period — closes the canonical→computed loop for one reporting period.
 
 Orchestration only: load canonical.vehicle_positions (headway_calc.reader,
-block_id joined per handoff 0003), run the v0 calculations (compute_vrm at
-0.2.0, compute_vrh at 0.4.0 — the default paths, handoffs 0002/0004), route
+block_id joined per handoff 0003) plus canonical.passenger_events and the
+operated trip_ids (handoff 0005), run the v0 calculations (compute_vrm at
+0.2.0, compute_vrh at 0.4.0, compute_upt at 0.1.0 — the default paths,
+handoffs 0002/0004/0005), route
 EVERY finding to dq.issues with its own severity
 (headway_calc.dq: infos stay info, warnings stay warnings, blocking stays
 blocking), then
@@ -47,8 +49,13 @@ from headway_calc._blocks import LAYOVER_MAX_SECONDS
 from headway_calc._grouping import COVERAGE_THRESHOLD, GAP_THRESHOLD_SECONDS
 from headway_calc.dq import route_findings
 from headway_calc.persist import _METRIC_BY_CALC_NAME, persist_result
-from headway_calc.reader import load_vehicle_positions
+from headway_calc.reader import (
+    load_operated_trip_ids,
+    load_passenger_events,
+    load_vehicle_positions,
+)
 from headway_calc.types import CalcResult
+from headway_calc.upt import IMBALANCE_THRESHOLD, MISSING_TRIP_THRESHOLD, compute_upt
 from headway_calc.vrh import compute_vrh
 from headway_calc.vrm import compute_vrm
 
@@ -86,7 +93,9 @@ class MetricOutcome:
 
     @property
     def coverage(self) -> str | None:
-        return None if self.detail is None else self.detail["coverage"]
+        # upt_v0's UptDetail carries no coverage ratio (its completeness
+        # evidence is missing_share) — None, not a KeyError.
+        return None if self.detail is None else self.detail.get("coverage")
 
     def to_dict(self) -> dict:
         return {
@@ -117,7 +126,11 @@ class RunReport:
     gap_threshold_seconds: float
     coverage_threshold: Decimal
     layover_max_seconds: float
+    missing_trip_threshold: Decimal
+    imbalance_threshold: Decimal
     positions_loaded: int
+    passenger_events_loaded: int
+    operated_trips_loaded: int
     outcomes: tuple[MetricOutcome, ...]
 
     @property
@@ -157,7 +170,11 @@ class RunReport:
             # Decimal rendered as text (JSON-safe, never binary float).
             "coverage_threshold": str(self.coverage_threshold),
             "layover_max_seconds": self.layover_max_seconds,
+            "missing_trip_threshold": str(self.missing_trip_threshold),
+            "imbalance_threshold": str(self.imbalance_threshold),
             "positions_loaded": self.positions_loaded,
+            "passenger_events_loaded": self.passenger_events_loaded,
+            "operated_trips_loaded": self.operated_trips_loaded,
             "persisted_count": self.persisted_count,
             "blocked_count": self.blocked_count,
             "routed_issue_count": self.routed_issue_count,
@@ -178,14 +195,21 @@ def run_period(
     gap_threshold_seconds: float | None = None,
     coverage_threshold: Decimal | float | str | None = None,
     layover_max_seconds: float | None = None,
+    missing_trip_threshold: Decimal | float | str | None = None,
+    imbalance_threshold: Decimal | float | str | None = None,
 ) -> RunReport:
-    """Run vrm_v0 (0.2.0) and vrh_v0 (0.4.0) over one half-open period.
+    """Run vrm_v0 (0.2.0), vrh_v0 (0.4.0) and upt_v0 (0.1.0) over one
+    half-open period.
 
-    Loads positions (block_id joined) via headway_calc.reader, computes both
-    metrics — VRM under the handoff-0002 gap policy, VRH block-aware with
-    trip-level excision per handoff 0004 and ``layover_max_seconds`` passed
-    through (default 1800 — data-informed and exhibit-aligned, per-agency
-    configurable; all three inputs are recorded in the report) — then:
+    Loads positions (block_id joined), passenger events and operated
+    trip_ids via headway_calc.reader, computes the three metrics — VRM under
+    the handoff-0002 gap policy, VRH block-aware with trip-level excision
+    per handoff 0004 and ``layover_max_seconds`` passed through (default
+    1800 — data-informed and exhibit-aligned, per-agency configurable), UPT
+    per handoff 0005 with ``missing_trip_threshold`` (default 0.02 — the
+    REAL FTA p. 146 threshold) and ``imbalance_threshold`` (default 0.10 —
+    the p. 151 validation example) passed through; all five inputs are
+    recorded in the report — then:
     - EVERY finding (block_unavailable infos, excised-trip and
       layover_exceeds_max warnings, blocking coverage refusals) is routed to
       dq.issues with its own severity, committed first;
@@ -216,10 +240,28 @@ def run_period(
         if layover_max_seconds is None
         else float(layover_max_seconds)
     )
+    missing_threshold = (
+        MISSING_TRIP_THRESHOLD
+        if missing_trip_threshold is None
+        else Decimal(str(missing_trip_threshold))
+    )
+    imbal_threshold = (
+        IMBALANCE_THRESHOLD
+        if imbalance_threshold is None
+        else Decimal(str(imbalance_threshold))
+    )
     positions = load_vehicle_positions(conn, period_start, period_end)
+    passenger_events = load_passenger_events(conn, period_start, period_end)
+    operated_trip_ids = load_operated_trip_ids(conn, period_start, period_end)
     results: tuple[CalcResult, ...] = (
         compute_vrm(positions, threshold, cov_threshold),
         compute_vrh(positions, threshold, cov_threshold, layover_max),
+        compute_upt(
+            passenger_events,
+            operated_trip_ids,
+            missing_trip_threshold=missing_threshold,
+            imbalance_threshold=imbal_threshold,
+        ),
     )
 
     # Transaction 1 — fail-loudly-first: route and COMMIT every finding
@@ -313,7 +355,11 @@ def run_period(
         gap_threshold_seconds=threshold,
         coverage_threshold=cov_threshold,
         layover_max_seconds=layover_max,
+        missing_trip_threshold=missing_threshold,
+        imbalance_threshold=imbal_threshold,
         positions_loaded=len(positions),
+        passenger_events_loaded=len(passenger_events),
+        operated_trips_loaded=len(operated_trip_ids),
         outcomes=tuple(outcomes),
     )
 

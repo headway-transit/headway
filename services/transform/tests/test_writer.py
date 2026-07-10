@@ -4,10 +4,13 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+from datetime import date
+
 from headway_transform.envelope import validate_envelope
 from headway_transform.gtfs_rt_positions import CanonicalVehiclePosition
 from headway_transform.gtfs_static import CanonicalRoute, CanonicalTrip
 from headway_transform.model import DQFinding, LineageEdge
+from headway_transform.tides_passenger_events import CanonicalPassengerEvent
 from headway_transform.writer import DbWriter
 
 from conftest import make_envelope_dict
@@ -97,6 +100,67 @@ def test_insert_vehicle_positions_conflict_do_nothing_on_unique_key(
     assert params == (
         TIME, "bus-1", "T1", "R1", 44.9, -93.2, None, None, None, "cd" * 32
     )
+
+
+def test_insert_passenger_events_conflict_do_nothing_on_unique_key(
+    fake_connection,
+) -> None:
+    row = CanonicalPassengerEvent(
+        event_timestamp=TIME,
+        service_date=date(2026, 7, 8),
+        passenger_event_id="PE-1",
+        vehicle_id="bus-1",
+        trip_id="T1",
+        trip_stop_sequence=1,
+        event_type="Passenger boarded",
+        event_count=2,
+        source="tides_simulated",
+        source_record_id="cd" * 32,
+    )
+    DbWriter(fake_connection).insert_passenger_events([row])
+
+    [(sql, params)] = fake_connection.executed
+    assert "INSERT INTO canonical.passenger_events" in sql
+    assert (
+        "ON CONFLICT (passenger_event_id, event_timestamp, source_record_id) "
+        "DO NOTHING" in sql
+    )
+    assert params == (
+        TIME,
+        date(2026, 7, 8),
+        "PE-1",
+        "bus-1",
+        "T1",
+        1,
+        "Passenger boarded",
+        2,
+        "tides_simulated",
+        "cd" * 32,
+    )
+    # No tenant_id column anywhere (ADR-0004).
+    assert "tenant" not in sql.lower()
+
+
+def test_insert_passenger_event_null_count_binds_none_not_zero(
+    fake_connection,
+) -> None:
+    """A NULL event_count is bound as None — preserved, never coalesced."""
+    row = CanonicalPassengerEvent(
+        event_timestamp=TIME,
+        service_date=date(2026, 7, 8),
+        passenger_event_id="PE-2",
+        vehicle_id="bus-1",
+        trip_id=None,
+        trip_stop_sequence=2,
+        event_type="Passenger alighted",
+        event_count=None,
+        source="tides",
+        source_record_id="cd" * 32,
+    )
+    DbWriter(fake_connection).insert_passenger_events([row])
+    [(_sql, params)] = fake_connection.executed
+    assert params[7] is None  # event_count — None, NOT 0
+    assert params[4] is None  # trip_id stays unassigned
 
 
 def test_insert_lineage_edges(fake_connection) -> None:

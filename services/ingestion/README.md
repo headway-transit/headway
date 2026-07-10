@@ -26,12 +26,20 @@ Invariants (Ingestion Engineer guardrails):
 | `internal/producer/` | `Producer` interface; Kafka impl (franz-go) + in-memory fake |
 | `connectors/gtfsrt/` | GTFS-Realtime poller (vehicle_positions / trip_updates / alerts → `raw.gtfs_rt.*`, base64 payload) |
 | `connectors/gtfsstatic/` | GTFS static zip fetcher (→ `raw.gtfs_static.feed`, `object_ref` payload; bytes landed at `raw/gtfs_static/<record_id>.zip` via an `ObjectStore` interface: MinIO impl + fake) |
+| `connectors/tides/` | TIDES passenger_events file-drop scanner (one-shot scan of `TIDES_DROP_DIR` for `passenger_events*.csv` → `raw.tides.passenger_events`, `object_ref` payload; bytes landed at `raw/tides/<record_id>.csv`; processed files moved to `processed/`; header sanity check against the required TIDES columns sets `parse_status` only) |
 | `cmd/headway-ingest/` | The service binary: env config, connector startup, SIGINT/SIGTERM clean shutdown, `log/slog` JSON logging |
 
 GTFS / GTFS-Realtime payload *semantics* are defined by the specs at
 gtfs.org and are the Data Engineer's concern; this service captures bytes and
 transport only. GTFS-RT parse classification uses the pinned MobilityData
-bindings (`gtfs-realtime-bindings/golang/gtfs v1.0.0`).
+bindings (`gtfs-realtime-bindings/golang/gtfs v1.0.0`). TIDES
+passenger_events semantics are defined by the TIDES spec
+(TIDES-transit/TIDES on GitHub, `spec/passenger_events.schema.json`); the
+connector's header check was verified against commit
+`d887d42ce081f3fb6155664a3c486101d62ec52b` (2026-07-10) — re-verify against
+the current spec before extending. Simulated drops (from
+`tools/tides-simulator`) MUST run with `TIDES_SOURCE=tides_simulated` so
+provenance permanently distinguishes them (handoff 0005 binding rule).
 
 ## Configuration (environment)
 
@@ -42,9 +50,11 @@ bindings (`gtfs-realtime-bindings/golang/gtfs v1.0.0`).
 | `GTFS_RT_TRIP_UPDATES_URL` | Poll this trip-updates feed (optional) |
 | `GTFS_RT_ALERTS_URL` | Poll this alerts feed (optional) |
 | `GTFS_STATIC_URL` | Fetch this GTFS static zip once at startup (optional) |
+| `TIDES_DROP_DIR` | Scan this directory once at startup for TIDES `passenger_events*.csv` drops (optional) |
+| `TIDES_SOURCE` | Envelope `source` for TIDES drops, default `tides`; simulator drops MUST use `tides_simulated` |
 | `POLL_INTERVAL` | Go duration for GTFS-RT polling, default `30s` |
 | `AGENCY_ID` | Optional envelope `agency_id` (multi-feed disambiguation only) |
-| `S3_ENDPOINT` | MinIO/S3 endpoint `host:port` (required with `GTFS_STATIC_URL`) |
+| `S3_ENDPOINT` | MinIO/S3 endpoint `host:port` (required with `GTFS_STATIC_URL` or `TIDES_DROP_DIR`) |
 | `S3_ACCESS_KEY` / `S3_SECRET_KEY` | Object-store credentials (inject from the secret store; never logged) |
 | `S3_BUCKET` | Raw bucket, default `headway-raw` |
 | `S3_USE_SSL` | `true` for TLS; default `false` (on-prem MinIO) |
@@ -62,22 +72,26 @@ At least one connector URL must be set.
 
 ## Verification status
 
-Unit tests, build, and vet **pass** (2026-07-08, `go1.25.0 linux/amd64`, toolchain
-auto-selected by the go.mod directive; host had go1.22.2 with `GOTOOLCHAIN=auto`):
+Unit tests, build, and vet **pass** (2026-07-10, toolchain auto-selected by
+the go.mod directive; host go1.22+ with `GOTOOLCHAIN=auto`):
 
 ```
-$ go mod tidy && go build ./... && go vet ./... && go test ./...
+$ go build ./... && go vet ./... && go test ./... -count=1
 ?   .../cmd/headway-ingest    [no test files]
-ok  .../connectors/gtfsrt     0.009s
-ok  .../connectors/gtfsstatic 0.011s
-ok  .../internal/envelope     0.003s
+ok  .../connectors/gtfsrt     0.005s
+ok  .../connectors/gtfsstatic 0.004s
+ok  .../connectors/tides      0.003s
+ok  .../internal/envelope     0.001s
 ?   .../internal/producer     [no test files]
 ```
 
 Covered by fakes/httptest: envelope determinism + SHA-256 known vector +
 required-field completeness; GTFS-RT happy path / malformed-never-dropped /
 consecutive-duplicate skip; GTFS static envelope + content-addressed object
-key + broken-zip-still-landed + land-before-produce ordering.
+key + broken-zip-still-landed + land-before-produce ordering; TIDES drop
+envelope + missing-required-column-still-landed-and-produced-as-malformed +
+source override (`tides_simulated`) + processed-move idempotent re-scan +
+land-before-produce ordering.
 
 **PENDING (not verified — no Docker in the authoring environment):**
 
@@ -97,4 +111,6 @@ logged; the `dq.issues` emission hook comes with the Data Engineer's rule
 engine), no source-schema descriptor registry, GTFS static is a one-shot
 fetch (no re-poll/If-Modified-Since), GTFS-RT dedupe cursor is in-memory
 (restart re-produces the current frame; safe because `record_id` makes
-re-ingest idempotent).
+re-ingest idempotent), TIDES drop scan is one-shot (no directory watcher;
+re-run the service to pick up new drops — the `processed/` move plus
+content-addressed `record_id` keep re-scans idempotent).

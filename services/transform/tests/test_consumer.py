@@ -172,6 +172,67 @@ def test_gtfs_static_with_fetcher_normalizes_routes_and_trips() -> None:
     assert len(conn.sql_for("lineage.edges")) == 2  # one per canonical row
 
 
+def test_tides_passenger_events_routed_with_fetcher_normalizes_rows() -> None:
+    csv_bytes = (
+        "passenger_event_id,service_date,event_timestamp,trip_id_performed,"
+        "trip_stop_sequence,event_type,vehicle_id,event_count\n"
+        "PE-1,2026-07-08,2026-07-08T12:00:00Z,T1,1,Passenger boarded,bus-1,2\n"
+        "PE-2,2026-07-08,2026-07-08T12:01:00Z,T1,2,Passenger alighted,bus-1,1\n"
+    ).encode("utf-8")
+
+    conn = FakeConnection()
+    doc = make_envelope_dict(
+        csv_bytes,
+        source="tides_simulated",
+        connector="headway-tides",
+        content_type="text/csv",
+        payload_encoding="object_ref",
+        payload="objects/passenger_events.csv",
+    )
+    source = FakeMessageSource(
+        [("raw.tides.passenger_events", None, json.dumps(doc).encode())]
+    )
+    fetched: list[str] = []
+
+    def fetcher(key: str) -> bytes:
+        fetched.append(key)
+        return csv_bytes
+
+    run_loop(source, DbWriter(conn), object_fetcher=fetcher)
+
+    assert fetched == ["objects/passenger_events.csv"]
+    assert len(conn.sql_for("raw.records")) == 1
+    events = conn.sql_for("canonical.passenger_events")
+    assert len(events) == 2
+    # Envelope source carried verbatim onto every row (handoff 0005 rule).
+    assert [params[8] for _sql, params in events] == [
+        "tides_simulated",
+        "tides_simulated",
+    ]
+    assert len(conn.sql_for("lineage.edges")) == 2  # one per canonical row
+    assert conn.sql_for("dq.issues") == []
+
+
+def test_tides_passenger_events_object_ref_without_fetcher_is_blocking_issue() -> None:
+    conn = FakeConnection()
+    doc = make_envelope_dict(
+        b"csv-bytes",
+        source="tides",
+        connector="headway-tides",
+        content_type="text/csv",
+        payload_encoding="object_ref",
+        payload="objects/passenger_events.csv",
+    )
+    source = FakeMessageSource(
+        [("raw.tides.passenger_events", None, json.dumps(doc).encode())]
+    )
+    run_loop(source, DbWriter(conn))
+    dq = conn.sql_for("dq.issues")
+    assert dq[0][1][0] == "object_ref_unavailable"
+    assert dq[0][1][1] == "blocking"
+    assert conn.sql_for("canonical.passenger_events") == []
+
+
 def test_writer_failure_rolls_back_and_quarantines_then_continues() -> None:
     conn = FakeConnection(fail_on_sql_containing="canonical.vehicle_positions")
     good = envelope_json(build_vp_payload())

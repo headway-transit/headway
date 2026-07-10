@@ -26,10 +26,11 @@ from datetime import date
 from headway_calc.types import CalcResult
 
 #: Metric name (computed.metric_values.metric) per calc_name, per handoff 0001
-#: (v0 metrics: 'vrm', 'vrh').
+#: (v0 metrics: 'vrm', 'vrh') plus 'upt' (handoff 0005).
 _METRIC_BY_CALC_NAME = {
     "vrm_v0": "vrm",
     "vrh_v0": "vrh",
+    "upt_v0": "upt",
 }
 
 #: detail is bound as text and cast to JSONB in SQL (%s::jsonb) so the write

@@ -9,20 +9,30 @@ divergences — see REGULATORY_TRACKER.md. compute_vrm is CALC_VERSION 0.2.0
 (gap policy: per-group exclusion + coverage, handoff 0002); compute_vrh is
 CALC_VERSION 0.4.0 (trip-level excision, handoff 0004 — block-aware layover
 inclusion per 0.3.0/handoff 0003, exclusion unit refined to the gapped trip
-plus its adjacent layover intervals). compute_vrh_v0_3, compute_vrh_v0_2 and
-compute_vrm_v0_1/compute_vrh_v0_1 are the retained earlier versions, kept
-runnable so historical submissions recompute bit-for-bit.
+plus its adjacent layover intervals); compute_upt is CALC_VERSION 0.1.0
+(Unlinked Passenger Trips over TIDES passenger events, handoff 0005 — the
+p. 146 missing-trip rule with a REAL FTA 2% threshold). compute_vrh_v0_3,
+compute_vrh_v0_2 and compute_vrm_v0_1/compute_vrh_v0_1 are the retained
+earlier versions, kept runnable so historical submissions recompute
+bit-for-bit.
 """
 
 from headway_calc.dq import route_blocking_issues, route_findings
-from headway_calc.reader import load_vehicle_positions
+from headway_calc.reader import (
+    load_operated_trip_ids,
+    load_passenger_events,
+    load_vehicle_positions,
+)
 from headway_calc.types import (
     BlockingIssue,
     CalcResult,
     CoverageDetail,
     Finding,
+    PassengerEvent,
+    UptDetail,
     VehiclePosition,
 )
+from headway_calc.upt import compute_upt
 from headway_calc.vrm import compute_vrm, compute_vrm_v0_1
 from headway_calc.vrh import (
     compute_vrh,
@@ -42,13 +52,18 @@ __all__ = [
     "CalcResult",
     "CoverageDetail",
     "Finding",
+    "PassengerEvent",
+    "UptDetail",
     "VehiclePosition",
+    "compute_upt",
     "compute_vrm",
     "compute_vrm_v0_1",
     "compute_vrh",
     "compute_vrh_v0_1",
     "compute_vrh_v0_2",
     "compute_vrh_v0_3",
+    "load_operated_trip_ids",
+    "load_passenger_events",
     "load_vehicle_positions",
     "route_blocking_issues",
     "route_findings",

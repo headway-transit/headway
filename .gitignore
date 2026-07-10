@@ -46,3 +46,6 @@ out/
 
 # Claude Code local settings (user-local, not project governance)
 .claude/settings.local.json*
+
+# TIDES drop directory: runtime data (simulator output / agency drops), never source
+deploy/compose/tides-drop/

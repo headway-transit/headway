@@ -12,6 +12,9 @@ matching the handoff-0001 schema exactly:
   key (vehicle_id, time, source_record_id) — at-least-once Kafka delivery
   makes exact replays of the same content-addressed record normal, and an
   identical row is not new data;
+- canonical.passenger_events inserts (handoff 0005 / migration 0012), ON
+  CONFLICT DO NOTHING on the unique key (passenger_event_id,
+  event_timestamp, source_record_id) for the same replay reason;
 - lineage.edges and dq.issues inserts (never conflated, never skipped).
 
 Transaction boundaries belong to the caller (the consumer commits per
@@ -29,6 +32,7 @@ from .envelope import Envelope
 from .gtfs_rt_positions import CanonicalVehiclePosition
 from .gtfs_static import CanonicalRoute, CanonicalTrip
 from .model import DQFinding, LineageEdge
+from .tides_passenger_events import CanonicalPassengerEvent
 
 
 class Connection(Protocol):
@@ -73,6 +77,15 @@ INSERT INTO canonical.vehicle_positions
      latitude, longitude, bearing, speed_mps, odometer_m, source_record_id)
 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
 ON CONFLICT (vehicle_id, "time", source_record_id) DO NOTHING
+""".strip()
+
+INSERT_PASSENGER_EVENT_SQL = """
+INSERT INTO canonical.passenger_events
+    (event_timestamp, service_date, passenger_event_id, vehicle_id,
+     trip_id, trip_stop_sequence, event_type, event_count,
+     source, source_record_id)
+VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+ON CONFLICT (passenger_event_id, event_timestamp, source_record_id) DO NOTHING
 """.strip()
 
 INSERT_LINEAGE_EDGE_SQL = """
@@ -161,6 +174,26 @@ class DbWriter:
                     row.bearing,
                     row.speed_mps,
                     row.odometer_m,
+                    row.source_record_id,
+                ),
+            )
+
+    def insert_passenger_events(
+        self, rows: Iterable[CanonicalPassengerEvent]
+    ) -> None:
+        for row in rows:
+            self._execute(
+                INSERT_PASSENGER_EVENT_SQL,
+                (
+                    row.event_timestamp,
+                    row.service_date,
+                    row.passenger_event_id,
+                    row.vehicle_id,
+                    row.trip_id,
+                    row.trip_stop_sequence,
+                    row.event_type,
+                    row.event_count,
+                    row.source,
                     row.source_record_id,
                 ),
             )

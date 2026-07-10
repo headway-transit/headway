@@ -1,5 +1,6 @@
-"""Injectable reader for canonical.vehicle_positions. Matches handoff 0001,
-plus the canonical.trips.block_id join (handoff 0003, migration 0011).
+"""Injectable readers for canonical.vehicle_positions (handoff 0001, plus the
+canonical.trips.block_id join — handoff 0003, migration 0011) and
+canonical.passenger_events (handoff 0005, migration 0012).
 
 The read side of the calc loop: SELECT canonical rows for one reporting
 period and map them onto the frozen VehiclePosition dataclass. Takes any
@@ -32,7 +33,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, timezone
 
-from headway_calc.types import VehiclePosition
+from headway_calc.types import PassengerEvent, VehiclePosition
 
 #: Column names and order per handoff 0001 (canonical.vehicle_positions) plus
 #: canonical.trips.block_id (handoff 0003, migration 0011) via LEFT JOIN.
@@ -46,9 +47,43 @@ _SELECT_POSITIONS_SQL = (
 )
 
 
+#: Column names and order per the handoff-0005 canonical.passenger_events
+#: contract (migration 0012). Deterministic ORDER BY: event_timestamp, then
+#: passenger_event_id, then source_record_id (the same total order
+#: headway_calc.upt sorts by internally).
+_SELECT_PASSENGER_EVENTS_SQL = (
+    "SELECT event_timestamp, service_date, passenger_event_id, vehicle_id, "
+    "trip_id, trip_stop_sequence, event_type, event_count, source, "
+    "source_record_id "
+    "FROM canonical.passenger_events "
+    "WHERE event_timestamp >= %s AND event_timestamp < %s "
+    "ORDER BY event_timestamp, passenger_event_id, source_record_id"
+)
+
+#: Operated trips for the upt_v0 missing-trip rule (handoff 0005): the
+#: distinct trips actually observed operating in canonical.vehicle_positions
+#: over the period. Deterministic ORDER BY trip_id.
+_SELECT_OPERATED_TRIP_IDS_SQL = (
+    "SELECT DISTINCT trip_id FROM canonical.vehicle_positions "
+    "WHERE trip_id IS NOT NULL AND time >= %s AND time < %s "
+    "ORDER BY trip_id"
+)
+
+
 def _utc_midnight(d: date) -> datetime:
     """The instant a DATE begins, as a timezone-aware UTC datetime."""
     return datetime(d.year, d.month, d.day, tzinfo=timezone.utc)
+
+
+def _refuse_bad_period(period_start: date, period_end: date) -> None:
+    """Refuses (ValueError) an empty or inverted period: an accidental
+    zero-length period would silently compute over nothing."""
+    if period_start >= period_end:
+        raise ValueError(
+            f"Refusing empty/inverted period: period_start={period_start.isoformat()} "
+            f"must be strictly before period_end={period_end.isoformat()} "
+            f"(half-open [start, end))."
+        )
 
 
 def load_vehicle_positions(
@@ -69,12 +104,7 @@ def load_vehicle_positions(
     Refuses (ValueError) an empty or inverted period: an accidental
     zero-length period would silently compute over nothing.
     """
-    if period_start >= period_end:
-        raise ValueError(
-            f"Refusing empty/inverted period: period_start={period_start.isoformat()} "
-            f"must be strictly before period_end={period_end.isoformat()} "
-            f"(half-open [start, end))."
-        )
+    _refuse_bad_period(period_start, period_end)
     cur = conn.cursor()
     cur.execute(
         _SELECT_POSITIONS_SQL,
@@ -92,3 +122,67 @@ def load_vehicle_positions(
         )
         for row in cur.fetchall()
     ]
+
+
+def load_passenger_events(
+    conn,
+    period_start: date,
+    period_end: date,
+) -> list[PassengerEvent]:
+    """Load canonical passenger events for the half-open period [start, end).
+
+    Bounds are UTC midnights of the given DATEs applied to ``event_timestamp``
+    (the module's half-open convention — a June run is
+    ``[2026-06-01, 2026-07-01)``). Rows arrive in deterministic order
+    (event_timestamp, passenger_event_id, source_record_id), columns per the
+    handoff-0005 canonical.passenger_events contract (migration 0012), and
+    are mapped 1:1 onto PassengerEvent — NULLs pass through as None
+    (``event_count`` NULL is preserved, NEVER coalesced; the calc warns and
+    counts 0), and the dataclass's own validation fails loudly on a naive
+    timestamp or a negative count. Refuses (ValueError) an empty or inverted
+    period.
+    """
+    _refuse_bad_period(period_start, period_end)
+    cur = conn.cursor()
+    cur.execute(
+        _SELECT_PASSENGER_EVENTS_SQL,
+        (_utc_midnight(period_start), _utc_midnight(period_end)),
+    )
+    return [
+        PassengerEvent(
+            event_timestamp=row[0],
+            service_date=row[1],
+            passenger_event_id=row[2],
+            vehicle_id=row[3],
+            trip_id=row[4],
+            trip_stop_sequence=row[5],
+            event_type=row[6],
+            event_count=row[7],
+            source=row[8],
+            source_record_id=row[9],
+        )
+        for row in cur.fetchall()
+    ]
+
+
+def load_operated_trip_ids(
+    conn,
+    period_start: date,
+    period_end: date,
+) -> list[str]:
+    """Load the distinct trip_ids observed operating in the half-open period.
+
+    ``SELECT DISTINCT trip_id FROM canonical.vehicle_positions`` with a
+    non-NULL trip_id and ``time`` in [start, end) — the operated-trips
+    denominator of the upt_v0 missing-trip rule (2026 NTD Policy Manual
+    p. 146, handoff 0005): an operated trip with zero passenger events is a
+    missing trip. Deterministic order (trip_id). Refuses (ValueError) an
+    empty or inverted period.
+    """
+    _refuse_bad_period(period_start, period_end)
+    cur = conn.cursor()
+    cur.execute(
+        _SELECT_OPERATED_TRIP_IDS_SQL,
+        (_utc_midnight(period_start), _utc_midnight(period_end)),
+    )
+    return [row[0] for row in cur.fetchall()]

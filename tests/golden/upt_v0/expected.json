@@ -1,0 +1,153 @@
+{
+  "blocked_case": {
+    "upt_v0_0_1": {
+      "value": null,
+      "unit": "unlinked_passenger_trips",
+      "calc_name": "upt_v0",
+      "calc_version": "0.1.0",
+      "input_record_ids": [
+        "rec-e-01",
+        "rec-e-02",
+        "rec-e-06"
+      ],
+      "blocking": [
+        {
+          "issue_type": "apc_missing_trips_above_fta_threshold",
+          "severity": "blocking",
+          "source_record_ids": []
+        }
+      ],
+      "warnings": [
+        {
+          "issue_type": "apc_null_count",
+          "severity": "warning",
+          "source_record_ids": [
+            "rec-e-07"
+          ]
+        },
+        {
+          "issue_type": "apc_count_imbalance",
+          "severity": "warning",
+          "trip_id": "trip-2",
+          "source_record_ids": [
+            "rec-e-05",
+            "rec-e-06",
+            "rec-e-07"
+          ]
+        },
+        {
+          "issue_type": "apc_negative_load",
+          "severity": "warning",
+          "trip_id": "trip-2",
+          "source_record_ids": [
+            "rec-e-05"
+          ]
+        }
+      ],
+      "infos": [
+        {
+          "issue_type": "simulated_source_data",
+          "severity": "info",
+          "source_record_ids": [
+            "rec-e-01",
+            "rec-e-02",
+            "rec-e-03",
+            "rec-e-04",
+            "rec-e-05",
+            "rec-e-06",
+            "rec-e-07",
+            "rec-e-08"
+          ]
+        }
+      ],
+      "detail": {
+        "total_boardings_counted": 18,
+        "operated_trips": 3,
+        "trips_with_events": 2,
+        "missing_trips": 1,
+        "missing_share": "0.3333",
+        "factor_applied": null,
+        "source_mix": {
+          "tides_simulated": 8
+        },
+        "missing_trip_threshold": "0.02",
+        "imbalance_threshold": "0.10"
+      }
+    }
+  },
+  "factored_case": {
+    "upt_v0_0_1": {
+      "value": "100",
+      "unit": "unlinked_passenger_trips",
+      "calc_name": "upt_v0",
+      "calc_version": "0.1.0",
+      "input_record_ids": [
+        "rec-b-01-1",
+        "rec-b-02-1",
+        "rec-b-03-1",
+        "rec-b-04-1",
+        "rec-b-05-1",
+        "rec-b-06-1",
+        "rec-b-07-1",
+        "rec-b-08-1",
+        "rec-b-09-1",
+        "rec-b-10-1",
+        "rec-b-11-1",
+        "rec-b-12-1",
+        "rec-b-13-1",
+        "rec-b-14-1",
+        "rec-b-15-1",
+        "rec-b-16-1",
+        "rec-b-17-1",
+        "rec-b-18-1",
+        "rec-b-19-1",
+        "rec-b-20-1",
+        "rec-b-21-1",
+        "rec-b-22-1",
+        "rec-b-23-1",
+        "rec-b-24-1",
+        "rec-b-25-1",
+        "rec-b-26-1",
+        "rec-b-27-1",
+        "rec-b-28-1",
+        "rec-b-29-1",
+        "rec-b-30-1",
+        "rec-b-31-1",
+        "rec-b-32-1",
+        "rec-b-33-1",
+        "rec-b-34-1",
+        "rec-b-35-1",
+        "rec-b-36-1",
+        "rec-b-37-1",
+        "rec-b-38-1",
+        "rec-b-39-1",
+        "rec-b-40-1",
+        "rec-b-41-1",
+        "rec-b-42-1",
+        "rec-b-43-1",
+        "rec-b-44-1",
+        "rec-b-45-1",
+        "rec-b-46-1",
+        "rec-b-47-1",
+        "rec-b-48-1",
+        "rec-b-49-1"
+      ],
+      "blocking": [],
+      "warnings": [],
+      "infos": [],
+      "detail": {
+        "total_boardings_counted": 98,
+        "operated_trips": 50,
+        "trips_with_events": 49,
+        "missing_trips": 1,
+        "missing_share": "0.0200",
+        "factor_applied": "1.020408",
+        "source_mix": {
+          "tides": 98
+        },
+        "missing_trip_threshold": "0.02",
+        "imbalance_threshold": "0.10"
+      }
+    }
+  }
+}

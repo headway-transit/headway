@@ -25,8 +25,8 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="python -m headway_calc.runner",
         description=(
-            "Run vrm_v0/vrh_v0 over one half-open period [period-start, "
-            "period-end) (UTC) against the database named by "
+            "Run vrm_v0/vrh_v0/upt_v0 over one half-open period "
+            "[period-start, period-end) (UTC) against the database named by "
             "HEADWAY_DATABASE_URL, and print the RunReport as JSON."
         ),
     )
@@ -79,6 +79,32 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
             "issue. The value used is recorded in the RunReport."
         ),
     )
+    parser.add_argument(
+        "--missing-trip-threshold",
+        type=Decimal,
+        default=None,
+        help=(
+            "Override the upt_v0 missing-trip share above which the run is "
+            "blocked (default: the library default, 0.02 — the REAL FTA "
+            "threshold, 2026 NTD Policy Manual p. 146: missing trips at 2 "
+            "percent or less of the total are factored up deterministically; "
+            "above it a qualified statistician must approve the factoring, so "
+            "the calc refuses with one apc_missing_trips_above_fta_threshold "
+            "dq issue). The value used is recorded in the RunReport."
+        ),
+    )
+    parser.add_argument(
+        "--imbalance-threshold",
+        type=Decimal,
+        default=None,
+        help=(
+            "Override the upt_v0 per-trip boarding/alighting imbalance share "
+            "flagged as apc_count_imbalance (default: the library default, "
+            "0.10 — the 2026 NTD Policy Manual p. 151 APC validation "
+            "example: difference between boardings and alightings greater "
+            "than 10 percent). The value used is recorded in the RunReport."
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -108,6 +134,8 @@ def main(argv: list[str] | None = None) -> int:
             gap_threshold_seconds=args.gap_threshold_seconds,
             coverage_threshold=args.coverage_threshold,
             layover_max_seconds=args.layover_max_seconds,
+            missing_trip_threshold=args.missing_trip_threshold,
+            imbalance_threshold=args.imbalance_threshold,
         )
 
     print(report.to_json())

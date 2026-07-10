@@ -29,17 +29,42 @@ code cannot drift from the checked-in contract without failing loudly).
   (gtfs.org, cited in-code), so an absent column or empty value is NULL with
   **no** DQ finding; existing rows backfill on the next static-feed replay
   via the upsert path.
+- `headway_transform/tides_passenger_events.py` —
+  `normalize_tides_passenger_events` v0.1.0 (handoff 0005, slice 2 UPT):
+  TIDES `passenger_events` CSV → `CanonicalPassengerEvent` rows (migration
+  0012, column-for-column; `trip_id` from TIDES `trip_id_performed`) + one
+  lineage edge per row
+  (`output_id = '<passenger_event_id>|<event_timestamp RFC3339>|<record_id>'`).
+  Required fields, the 16-value `event_type` enum and the missing-value
+  tokens (`NA`, `NaN`, empty string) verified against TIDES-transit/TIDES
+  `spec/passenger_events.schema.json` (main branch, 2026-07-10, cited
+  in-code). `event_count` NULL is **preserved as NULL** — never coalesced
+  (not to 0, not to the TIDES documented default of 1). `event_timestamp`
+  must carry a UTC offset (TIDES declares Frictionless `datetime`; the
+  default format is ISO 8601 in UTC per specs.frictionlessdata.io); a naive
+  timestamp is a DQ finding, never a guessed zone. Every malformed row →
+  `malformed_passenger_event` finding citing record_id + row number (row
+  skipped from canonical, never silently); empty file → single
+  info-severity finding. The envelope `source` (`tides` |
+  `tides_simulated`) is carried verbatim onto every row — simulated data
+  stays permanently distinguishable in provenance (handoff 0005 binding
+  rule).
 - `headway_transform/writer.py` — injectable DB-API writer; SQL matches the
   handoff-0001 schema exactly, plus `canonical.trips.block_id` (migration
-  0011, handoff 0003) in the trip upsert (`raw.records`, `canonical.*`,
-  `lineage.edges`, `dq.issues`; vehicle positions `ON CONFLICT (vehicle_id,
-  "time", source_record_id) DO NOTHING`). No `tenant_id` anywhere (ADR-0004).
+  0011, handoff 0003) in the trip upsert and `canonical.passenger_events`
+  inserts (migration 0012, handoff 0005; `ON CONFLICT (passenger_event_id,
+  event_timestamp, source_record_id) DO NOTHING`) (`raw.records`,
+  `canonical.*`, `lineage.edges`, `dq.issues`; vehicle positions
+  `ON CONFLICT (vehicle_id, "time", source_record_id) DO NOTHING`). No
+  `tenant_id` anywhere (ADR-0004).
 - `headway_transform/consumer.py` — loop skeleton behind a tiny
   `MessageSource` interface (`poll() -> (topic, key, value) | None`) so the
   Kafka client is swappable and unit-testable with a fake. Per-message
   failures are logged AND written as `dq.issues` rows (rollback + quarantine
   commit); the loop continues — a poison message never kills it and is never
-  dropped without a trace.
+  dropped without a trace. Routes `raw.gtfs_rt.vehicle_positions`,
+  `raw.gtfs_static.feed` and `raw.tides.passenger_events` (the latter two
+  fetch `object_ref` payloads through the injected object fetcher).
 - `headway_transform/kafka_source.py` — the real source over
   **kafka-python-ng** (lazy import; `kafka` extra), manual offset commit
   after the DB commit → at-least-once, idempotent via content-addressed
@@ -53,7 +78,7 @@ cd services/transform && python3 -m pytest tests/ -q
 
 ## Verification status
 
-- `python3 -m pytest tests/ -q` → **38 passed in 0.19s** (2026-07-09,
+- `python3 -m pytest tests/ -q` → **49 passed in 0.22s** (2026-07-10,
   Python 3.12.3, venv `/home/daniel/venv`). Covers: envelope contract
   validation (valid/invalid/extra-property/bad-version); real FeedMessage
   round trip (built with gtfs-realtime-bindings in-test) with one lineage
@@ -65,7 +90,22 @@ cd services/transform && python3 -m pytest tests/ -q
   no DQ finding when the column is absent — the optional-field case stays
   green (handoff 0003); fake-connection writer SQL/params including the
   five-column trip upsert with `block_id = EXCLUDED.block_id`; consumer
-  poison-message quarantine and loop survival.
+  poison-message quarantine and loop survival. TIDES passenger events
+  (handoff 0005, in-test CSV bytes): happy path with one edge per row and
+  source carried; `tides_simulated` carried verbatim; malformed rows (missing
+  `vehicle_id`, unparseable timestamp, unparseable count) → one
+  `malformed_passenger_event` finding each with row number while good rows
+  still land; unknown `event_type` (wrong case) → finding, not a guess;
+  NULL/absent `event_count` preserved as `None`, never 0; naive timestamp →
+  finding, row skipped; empty file (zero bytes and header-only) → single
+  info finding; writer passenger-events SQL/params with `None` binds;
+  consumer routing of `raw.tides.passenger_events` through the object
+  fetcher and blocking `object_ref_unavailable` without one.
+- `cd db && python3 -m pytest test_migrations_static.py -q` → **10 passed in
+  0.11s** (2026-07-10), including the new migration-0012 checks (hypertable
+  on `event_timestamp`, unique `(passenger_event_id, event_timestamp,
+  source_record_id)`, `source TEXT NOT NULL`, FK to `raw.records`, nullable
+  no-default `event_count`).
 - **PENDING — live verification.** Docker/Kafka/Postgres are unavailable in
   this environment. Not yet verified: consumption from a real Kafka broker
   (`kafka_source.py` is untested against a live cluster), inserts against a
@@ -80,6 +120,12 @@ cd services/transform && python3 -m pytest tests/ -q
   backfills `block_id` onto existing `canonical.trips` rows — MBTA carries
   it for bus/subway, confirm at replay) run against the live database by the
   orchestrator, followed by the calc v0.2-vs-v0.3 VRH comparison.
+- **PENDING — migration 0012 live apply (orchestrator's job, handoff 0005).**
+  `0012_passenger_events.sql` has passed the static checks only; the
+  orchestrator applies it to the live database. End-to-end TIDES flow
+  (headway-tides connector → MinIO object_ref → topic
+  `raw.tides.passenger_events` → this normalizer → live TimescaleDB) awaits
+  the ingestion deliverables of handoff 0005.
 
 ## Dependency licenses (all permissive / OSI-approved)
 

@@ -23,7 +23,7 @@ import json
 import logging
 from typing import Callable, Optional, Protocol
 
-from . import gtfs_rt_positions, gtfs_static
+from . import gtfs_rt_positions, gtfs_static, tides_passenger_events
 from .envelope import Envelope, EnvelopeValidationError, parse_envelope
 from .model import SEVERITY_BLOCKING, SEVERITY_WARNING, DQFinding
 from .writer import DbWriter
@@ -32,9 +32,11 @@ logger = logging.getLogger(__name__)
 
 TOPIC_GTFS_RT_VEHICLE_POSITIONS = "raw.gtfs_rt.vehicle_positions"
 TOPIC_GTFS_STATIC_FEED = "raw.gtfs_static.feed"
+TOPIC_TIDES_PASSENGER_EVENTS = "raw.tides.passenger_events"
 
 # Fetches object-store bytes for payload_encoding='object_ref' envelopes
-# (GTFS static zips). Injected; the consumer has no object-store client.
+# (GTFS static zips, TIDES passenger_events CSVs). Injected; the consumer
+# has no object-store client.
 ObjectFetcher = Callable[[str], bytes]
 
 
@@ -152,6 +154,42 @@ def _handle_gtfs_static(
     writer.insert_dq_issues(findings)
 
 
+def _handle_tides_passenger_events(
+    writer: DbWriter,
+    envelope: Envelope,
+    object_fetcher: Optional[ObjectFetcher],
+) -> None:
+    if envelope.payload_encoding == "object_ref":
+        if object_fetcher is None:
+            writer.insert_dq_issues(
+                [
+                    DQFinding(
+                        issue_type="object_ref_unavailable",
+                        severity=SEVERITY_BLOCKING,
+                        title="TIDES passenger_events payload could not be fetched",
+                        description=(
+                            f"Record {envelope.record_id} references object "
+                            f"{envelope.payload!r} but no object fetcher is "
+                            "configured; file not normalized (raw record "
+                            "retained, nothing dropped)."
+                        ),
+                        source_record_ids=[envelope.record_id],
+                    )
+                ]
+            )
+            return
+        csv_bytes = object_fetcher(envelope.payload)
+    else:
+        csv_bytes = envelope.decode_payload()
+
+    rows, edges, findings = tides_passenger_events.normalize(
+        csv_bytes, envelope.record_id, envelope.source
+    )
+    writer.insert_passenger_events(rows)
+    writer.insert_lineage_edges(edges)
+    writer.insert_dq_issues(findings)
+
+
 def process_message(
     writer: DbWriter,
     topic: str,
@@ -178,6 +216,8 @@ def process_message(
         _handle_vehicle_positions(writer, envelope)
     elif topic == TOPIC_GTFS_STATIC_FEED:
         _handle_gtfs_static(writer, envelope, object_fetcher)
+    elif topic == TOPIC_TIDES_PASSENGER_EVENTS:
+        _handle_tides_passenger_events(writer, envelope, object_fetcher)
     else:
         logger.warning("no normalizer for topic %s", topic)
         writer.insert_dq_issues(
