@@ -1,0 +1,152 @@
+{
+  "description": "Synthetic golden BLOCK fixture for vrh_v0 0.4.0 (handoff 0004): one vehicle, one GTFS block of THREE trips with 600 s layovers, where the MIDDLE trip contains a 400 s within-trip telemetry gap. v0.4 keeps trips F+H's running time and drops trip G plus BOTH adjacent layover intervals. See BASIS.md, calc 0.4.0 section. NOT an FTA-certified figure; regression anchor only.",
+  "gap_threshold_seconds": 300,
+  "layover_max_seconds": 1800,
+  "coverage_threshold_passing": "0.5",
+  "positions": [
+    {
+      "time": "2026-01-15T12:00:00+00:00",
+      "vehicle_id": "veh-401",
+      "trip_id": "trip-F",
+      "block_id": "blk-4",
+      "latitude": 42.0,
+      "longitude": -75.0,
+      "source_record_id": "rec-f-00"
+    },
+    {
+      "time": "2026-01-15T12:01:00+00:00",
+      "vehicle_id": "veh-401",
+      "trip_id": "trip-F",
+      "block_id": "blk-4",
+      "latitude": 42.01,
+      "longitude": -75.0,
+      "source_record_id": "rec-f-01"
+    },
+    {
+      "time": "2026-01-15T12:02:00+00:00",
+      "vehicle_id": "veh-401",
+      "trip_id": "trip-F",
+      "block_id": "blk-4",
+      "latitude": 42.02,
+      "longitude": -75.0,
+      "source_record_id": "rec-f-02"
+    },
+    {
+      "time": "2026-01-15T12:03:00+00:00",
+      "vehicle_id": "veh-401",
+      "trip_id": "trip-F",
+      "block_id": "blk-4",
+      "latitude": 42.03,
+      "longitude": -75.0,
+      "source_record_id": "rec-f-03"
+    },
+    {
+      "time": "2026-01-15T12:04:00+00:00",
+      "vehicle_id": "veh-401",
+      "trip_id": "trip-F",
+      "block_id": "blk-4",
+      "latitude": 42.04,
+      "longitude": -75.0,
+      "source_record_id": "rec-f-04"
+    },
+    {
+      "time": "2026-01-15T12:05:00+00:00",
+      "vehicle_id": "veh-401",
+      "trip_id": "trip-F",
+      "block_id": "blk-4",
+      "latitude": 42.05,
+      "longitude": -75.0,
+      "source_record_id": "rec-f-05"
+    },
+    {
+      "time": "2026-01-15T12:15:00+00:00",
+      "vehicle_id": "veh-401",
+      "trip_id": "trip-G",
+      "block_id": "blk-4",
+      "latitude": 42.05,
+      "longitude": -75.0,
+      "source_record_id": "rec-g-00"
+    },
+    {
+      "time": "2026-01-15T12:16:00+00:00",
+      "vehicle_id": "veh-401",
+      "trip_id": "trip-G",
+      "block_id": "blk-4",
+      "latitude": 42.06,
+      "longitude": -75.0,
+      "source_record_id": "rec-g-01"
+    },
+    {
+      "time": "2026-01-15T12:22:40+00:00",
+      "vehicle_id": "veh-401",
+      "trip_id": "trip-G",
+      "block_id": "blk-4",
+      "latitude": 42.07,
+      "longitude": -75.0,
+      "source_record_id": "rec-g-02"
+    },
+    {
+      "time": "2026-01-15T12:23:40+00:00",
+      "vehicle_id": "veh-401",
+      "trip_id": "trip-G",
+      "block_id": "blk-4",
+      "latitude": 42.08,
+      "longitude": -75.0,
+      "source_record_id": "rec-g-03"
+    },
+    {
+      "time": "2026-01-15T12:33:40+00:00",
+      "vehicle_id": "veh-401",
+      "trip_id": "trip-H",
+      "block_id": "blk-4",
+      "latitude": 42.08,
+      "longitude": -75.0,
+      "source_record_id": "rec-h-00"
+    },
+    {
+      "time": "2026-01-15T12:34:40+00:00",
+      "vehicle_id": "veh-401",
+      "trip_id": "trip-H",
+      "block_id": "blk-4",
+      "latitude": 42.09,
+      "longitude": -75.0,
+      "source_record_id": "rec-h-01"
+    },
+    {
+      "time": "2026-01-15T12:35:40+00:00",
+      "vehicle_id": "veh-401",
+      "trip_id": "trip-H",
+      "block_id": "blk-4",
+      "latitude": 42.1,
+      "longitude": -75.0,
+      "source_record_id": "rec-h-02"
+    },
+    {
+      "time": "2026-01-15T12:36:40+00:00",
+      "vehicle_id": "veh-401",
+      "trip_id": "trip-H",
+      "block_id": "blk-4",
+      "latitude": 42.11,
+      "longitude": -75.0,
+      "source_record_id": "rec-h-03"
+    },
+    {
+      "time": "2026-01-15T12:37:40+00:00",
+      "vehicle_id": "veh-401",
+      "trip_id": "trip-H",
+      "block_id": "blk-4",
+      "latitude": 42.12,
+      "longitude": -75.0,
+      "source_record_id": "rec-h-04"
+    },
+    {
+      "time": "2026-01-15T12:38:40+00:00",
+      "vehicle_id": "veh-401",
+      "trip_id": "trip-H",
+      "block_id": "blk-4",
+      "latitude": 42.13,
+      "longitude": -75.0,
+      "source_record_id": "rec-h-05"
+    }
+  ]
+}

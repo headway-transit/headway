@@ -1,0 +1,84 @@
+{
+  "basis": "Synthetic hand-worked example (see BASIS.md, calc 0.4.0 section). NOT an FTA-certified figure; regression anchor only. Pins vrh_v0 CALC_VERSION 0.4.0 (trip-level excision, handoff 0004) over fixture_block_v04.json, with the retained 0.3.0/0.2.0 comparison values on the SAME positions, and the clean two-trip fixture_block.json under 0.4.0.",
+  "block_v04_fixture": {
+    "comment": "One vehicle (veh-401), one block (blk-4), three trips: F (clean), G (400 s within-trip gap), H (clean), 600 s layovers F-G and G-H. v0.4 keeps trips F+H's running time (300 s + 300 s), excises trip G and drops BOTH adjacent layover intervals (a layover interval counts only when both bounding trips are clean). Trip-denominated coverage 2/3 blocks at the default 0.95 threshold, so the passing case runs at an explicit 0.5.",
+    "vrh_v0_4": {
+      "coverage_threshold": "0.5",
+      "value": "0.17",
+      "unit": "hours",
+      "detail": {
+        "coverage": "0.6667",
+        "total_groups": 1,
+        "excluded_groups": 0,
+        "clean_position_share": "0.7500",
+        "gap_threshold_seconds": 300.0,
+        "coverage_threshold": "0.5",
+        "layover_max_seconds": 1800.0,
+        "total_trips": 3,
+        "trips_excised": 1,
+        "blocks_touched": 1,
+        "layover_intervals_dropped": 2
+      },
+      "input_record_ids": [
+        "rec-f-00",
+        "rec-f-01",
+        "rec-f-02",
+        "rec-f-03",
+        "rec-f-04",
+        "rec-f-05",
+        "rec-h-00",
+        "rec-h-01",
+        "rec-h-02",
+        "rec-h-03",
+        "rec-h-04",
+        "rec-h-05"
+      ],
+      "warnings": [
+        {
+          "issue_type": "telemetry_gap_excluded",
+          "severity": "warning",
+          "trip_id": "trip-G",
+          "source_record_ids": ["rec-g-00", "rec-g-01", "rec-g-02", "rec-g-03"]
+        }
+      ]
+    },
+    "vrh_v0_4_default_threshold_blocked": {
+      "comment": "At the default coverage_threshold 0.95: 2 clean trips < 0.95 x 3 -> blocked, value None, one blocking coverage_below_threshold finding citing the excised trip's records.",
+      "coverage_threshold": "0.95",
+      "value": null,
+      "blocking_issue_type": "coverage_below_threshold",
+      "blocking_source_record_ids": ["rec-g-00", "rec-g-01", "rec-g-02", "rec-g-03"]
+    },
+    "vrh_v0_3_comparison": {
+      "comment": "Retained compute_vrh_v0_3 over the identical positions at coverage_threshold 0 (block-denominated coverage would be 0/1): block-level exclusion drops the ENTIRE block -> 0.00 h. v0.4 (0.17 h) >= v0.3 (0.00 h): block exclusion is strictly harsher.",
+      "coverage_threshold": "0",
+      "value": "0.00",
+      "total_groups": 1,
+      "excluded_groups": 1
+    },
+    "vrh_v0_2_comparison": {
+      "comment": "Retained compute_vrh_v0_2 over the identical positions at coverage_threshold 0.5: per-trip exclusion also drops only trip-G (0.17 h) but never counted any layover; on this fixture no clean-adjacent layover survives excision, so v0.4 == v0.2 == 0.17 h (v0.4 >= v0.2 in general).",
+      "coverage_threshold": "0.5",
+      "value": "0.17",
+      "total_groups": 3
+    }
+  },
+  "clean_block_fixture_v0_4": {
+    "comment": "fixture_block.json (two CLEAN trips, 600 s layover) under v0.4: nothing is excised, the clean-adjacent layover interval stays included -> the 0.3.0 value 0.33 h is reproduced exactly, detail now trip-denominated.",
+    "value": "0.33",
+    "unit": "hours",
+    "detail": {
+      "coverage": "1.0000",
+      "total_groups": 1,
+      "excluded_groups": 0,
+      "clean_position_share": "1.0000",
+      "gap_threshold_seconds": 300.0,
+      "coverage_threshold": "0.95",
+      "layover_max_seconds": 1800.0,
+      "total_trips": 2,
+      "trips_excised": 0,
+      "blocks_touched": 0,
+      "layover_intervals_dropped": 0
+    }
+  }
+}

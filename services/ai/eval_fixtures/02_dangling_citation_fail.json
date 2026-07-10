@@ -1,0 +1,26 @@
+{
+  "name": "dangling_citation_fails",
+  "description": "The number is legitimate but the cited computed.metric_values id does not exist in the universe (dangling citation). Expected: FAIL on citation resolution.",
+  "universe": {
+    "computed.metric_values": ["5f3c2a9e-1d4b-4c8e-9f0a-7b6d5e4c3b2a"]
+  },
+  "allowed_numbers": ["12794.92", "2026"],
+  "record_count_whitelist": [],
+  "draft": {
+    "provider_name": "stub",
+    "provider_version": "0.1.0",
+    "claims": [
+      {
+        "text": "VRM for May 2026 was 12,794.92 miles.",
+        "cited_record_kind": "computed.metric_values",
+        "cited_record_id": "00000000-0000-0000-0000-000000000000",
+        "numeric_values": ["12794.92"]
+      }
+    ]
+  },
+  "expected": {
+    "passed": false,
+    "citation_resolution_rate": "0.0000",
+    "fabricated_number_count": 0
+  }
+}

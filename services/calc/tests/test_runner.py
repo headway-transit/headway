@@ -1,6 +1,6 @@
 """Unit tests for headway_calc.runner (and the CLI boundary) with the
-recording fake connection — vrm_v0 0.2.0 (handoff 0002) + vrh_v0 0.3.0
-(block-aware, handoff 0003).
+recording fake connection — vrm_v0 0.2.0 (handoff 0002) + vrh_v0 0.4.0
+(block-aware with trip-level excision, handoff 0004).
 
 Covers: clean period → both metrics persisted (full coverage; the golden
 fixture carries no block_id, so vrh routes its block_unavailable INFO rows
@@ -33,8 +33,10 @@ PERIOD_END = date(2026, 2, 1)
 
 #: Coverage detail of the full golden fixture (BASIS.md, calc 0.2.0 section):
 #: 3 in-trip groups, trip-C excluded, 20 of 24 in-trip positions clean. The
-#: fixture has no block_id, so vrh_v0 0.3.0's per-trip fallback yields the
-#: SAME group counts, plus the layover_max_seconds provenance field.
+#: fixture has no block_id, so vrh_v0 0.4.0's per-trip fallback yields the
+#: SAME counts (trip-denominated coverage == group coverage when every group
+#: is one trip), plus the layover_max_seconds provenance field and the
+#: handoff-0004 trip-excision statistics.
 GAPPED_DETAIL = {
     "coverage": "0.6667",
     "total_groups": 3,
@@ -53,8 +55,22 @@ CLEAN_DETAIL = {
     "coverage_threshold": "0.95",
 }
 
-VRH_GAPPED_DETAIL = dict(GAPPED_DETAIL, layover_max_seconds=1800.0)
-VRH_CLEAN_DETAIL = dict(CLEAN_DETAIL, layover_max_seconds=1800.0)
+VRH_GAPPED_DETAIL = dict(
+    GAPPED_DETAIL,
+    layover_max_seconds=1800.0,
+    total_trips=3,
+    trips_excised=1,
+    blocks_touched=0,  # trip-C is a NULL-block fallback, not a block
+    layover_intervals_dropped=0,
+)
+VRH_CLEAN_DETAIL = dict(
+    CLEAN_DETAIL,
+    layover_max_seconds=1800.0,
+    total_trips=2,
+    trips_excised=0,
+    blocks_touched=0,
+    layover_intervals_dropped=0,
+)
 
 #: block_unavailable info rows the no-block_id golden fixture produces for
 #: vrh_v0 0.3.0: one per vehicle-day, in (vehicle_id, day) order.
@@ -110,7 +126,7 @@ def test_clean_period_persists_both_metrics_and_routes_only_infos(clean_rows):
     assert (vrm.calc_name, vrm.metric, vrm.unit) == ("vrm_v0", "vrm", "miles")
     assert (vrh.calc_name, vrh.metric, vrh.unit) == ("vrh_v0", "vrh", "hours")
     assert vrm.calc_version == "0.2.0"
-    assert vrh.calc_version == "0.3.0"
+    assert vrh.calc_version == "0.4.0"
     # Golden expected values (tests/golden/vrm_vrh_v0/expected.json; the
     # no-block fallback reproduces the 0.2.0 VRH value exactly).
     assert vrm.value == "12.44"
@@ -188,7 +204,7 @@ def test_gapped_period_below_default_coverage_blocks_and_routes_findings(gapped_
     ):
         issue_type, severity, status, title, description, record_ids = params
         assert status == "open"
-        expected_version = "0.2.0" if calc_name == "vrm_v0" else "0.3.0"
+        expected_version = "0.2.0" if calc_name == "vrm_v0" else "0.4.0"
         assert calc_name in description and expected_version in description
         assert "[2026-01-01, 2026-02-01)" in description
         if severity == "info":
@@ -380,7 +396,7 @@ def test_run_report_json_is_parseable_and_complete(clean_rows):
     assert parsed["metrics"][0]["calc_version"] == "0.2.0"
     assert parsed["metrics"][0]["coverage"] == "1.0000"
     assert parsed["metrics"][0]["detail"] == CLEAN_DETAIL
-    assert parsed["metrics"][1]["calc_version"] == "0.3.0"
+    assert parsed["metrics"][1]["calc_version"] == "0.4.0"
     assert parsed["metrics"][1]["detail"] == VRH_CLEAN_DETAIL
     assert parsed["metrics"][1]["info_count"] == 2
 

@@ -177,3 +177,76 @@ group (0.2.0 semantics): the clean subset (trip-A + trip-B) still totals
 `rec-a-*`; veh-202/2026-01-15 citing `rec-b-*`) — the documented undercount;
 the figure stands.
 
+## Calc 0.4.0 — trip-level excision (`fixture_block_v04.json`, `expected_v0_4.json`)
+
+`vrh_v0` **CALC_VERSION 0.4.0** (handoff 0004): the exclusion unit is refined
+from the block group to *the gapped trip plus its adjacent layover
+intervals* — a layover interval counts only when BOTH bounding trips are
+clean; the block's remaining clean trips (and their other layover intervals)
+stay in the figure. Coverage returns to trip denomination
+(`clean_trips / total_trips`). New fixture `fixture_block_v04.json`; every
+prior fixture/expectation file above is byte-identical and untouched.
+
+### Block v0.4 fixture layout
+
+One vehicle `veh-401`, one block `blk-4`, THREE trips on the −75.0 meridian
+in +0.01° lat steps:
+
+| Trip | Positions | Times (UTC) | Notes |
+|---|---|---|---|
+| `trip-F` | 6 (`rec-f-00`..`rec-f-05`) | 12:00:00 → 12:05:00, 60 s spacing | clean |
+| `trip-G` | 4 (`rec-g-00`..`rec-g-03`) | 12:15:00, 12:16:00, 12:22:40, 12:23:40 | **400 s within-trip gap** (`rec-g-01` → `rec-g-02` > 300 s threshold) |
+| `trip-H` | 6 (`rec-h-00`..`rec-h-05`) | 12:33:40 → 12:38:40, 60 s spacing | clean |
+
+Inter-trip intervals (layover by block membership): F→G = `rec-f-05`
+(12:05:00) → `rec-g-00` (12:15:00) = **600 s**; G→H = `rec-g-03` (12:23:40)
+→ `rec-h-00` (12:33:40) = **600 s**. Both are ≤ the 1800 s cap — but both
+are ADJACENT to the gapped trip-G, so v0.4 drops them.
+
+### Hand computation — VRH v0.4
+
+- trip-F running time: 5 deltas × 60 s = **300 s** (kept — clean)
+- layover F→G: 600 s — **DROPPED** (bounding trip-G is excised)
+- trip-G running time: **EXCISED** (400 s within-trip gap)
+- layover G→H: 600 s — **DROPPED** (bounding trip-G is excised)
+- trip-H running time: 5 deltas × 60 s = **300 s** (kept — clean)
+- total: 300 + 300 = 600 s = 600/3600 h = 0.1666… → quantized (0.01 h,
+  ROUND_HALF_EVEN) = **`0.17` hours**
+
+The excised trip is never bridged: the 28 min 40 s between trip-F's end and
+trip-H's start contributes nothing.
+
+Coverage (trip-denominated): `clean_trips / total_trips = 2/3 = 0.6666…` →
+**`0.6667`**; `clean_position_share = 12/16 = 0.75` → **`0.7500`**. Block
+statistics: `total_groups = 1`, `excluded_groups = 0` (the block still
+contributes), `blocks_touched = 1`, `trips_excised = 1`,
+`layover_intervals_dropped = 2`. One `telemetry_gap_excluded` **warning**
+citing ONLY trip-G's records (`rec-g-00`..`rec-g-03`); `input_record_ids` =
+the included positions only (`rec-f-*`, `rec-h-*`).
+
+At the DEFAULT `coverage_threshold = 0.95`: `2 < 0.95 × 3 = 2.85` → blocked
+(`value = None`, one blocking `coverage_below_threshold` finding citing
+`rec-g-*`). The passing case therefore runs at an explicit **0.5**
+(`2 ≥ 0.5 × 3 = 1.5`), exactly like the 0.2.0 golden's case B.
+
+### Hand comparison — retained v0.3 and v0.2 over the SAME positions
+
+- **v0.3 (block-level exclusion, `compute_vrh_v0_3`)**: the one block group
+  contains a within-trip gap → the ENTIRE block is excluded. At
+  `coverage_threshold = 0` (block coverage would be 0/1): **`0.00` hours**.
+  v0.4 recovers trips F+H's 600 s of clean running time: 0.17 ≥ 0.00 —
+  block exclusion is strictly harsher.
+- **v0.2 (per-trip exclusion, `compute_vrh_v0_2`)**, threshold 0.5: trips
+  F and H count (600 s), trip-G is excluded → **`0.17` hours**,
+  `total_groups = 3`. On THIS fixture v0.4 equals v0.2 — the middle trip's
+  excision drops every layover interval, so there is no layover left to
+  recover (v0.4 ≥ v0.2 holds in general; the clean two-trip case next shows
+  the strict recovery).
+
+### Clean two-trip block (`fixture_block.json`) under v0.4
+
+Nothing is excised, and the 600 s clean-adjacent layover interval stays
+included: v0.4 reproduces the 0.3.0 value **`0.33` hours** exactly (0.16 h
+above the per-trip v0.2 value — the retained D1 recovery), with
+trip-denominated detail: `total_trips = 2`, `trips_excised = 0`,
+`blocks_touched = 0`, `layover_intervals_dropped = 0`, coverage `1.0000`.

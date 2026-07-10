@@ -153,6 +153,44 @@ class BlockCoverageDetail(CoverageDetail):
 
 
 @dataclass(frozen=True)
+class TripExcisionCoverageDetail(BlockCoverageDetail):
+    """Coverage detail of one calc-0.4.0 trip-excision VRH run (handoff 0004).
+
+    Coverage returns to TRIP denomination: ``coverage`` is
+    clean_trips/total_trips (directly comparable to 0.2.0's group coverage —
+    a 0.2.0 group IS a trip). The inherited block-group fields keep their
+    structural meaning: ``total_groups`` counts VRH block groups (blocks or
+    per-trip fallbacks), ``excluded_groups`` counts groups whose EVERY trip
+    was excised (contributing nothing), ``clean_position_share`` is the share
+    of in-trip positions belonging to clean trips. New block statistics:
+
+    - ``total_trips`` / ``trips_excised`` — the coverage numerator's
+      complement: trips containing a within-trip gap > gap_threshold_seconds;
+    - ``blocks_touched`` — non-NULL-block groups with at least one excised
+      trip (per-trip fallback excisions show in trips_excised only);
+    - ``layover_intervals_dropped`` — inter-trip intervals dropped because at
+      least one bounding trip was excised (a layover interval counts only
+      when BOTH bounding trips are clean).
+
+    All three thresholds (gap_threshold_seconds, coverage_threshold,
+    layover_max_seconds) are inherited provenance fields.
+    """
+
+    total_trips: int
+    trips_excised: int
+    blocks_touched: int
+    layover_intervals_dropped: int
+
+    def to_dict(self) -> dict:
+        detail = super().to_dict()
+        detail["total_trips"] = self.total_trips
+        detail["trips_excised"] = self.trips_excised
+        detail["blocks_touched"] = self.blocks_touched
+        detail["layover_intervals_dropped"] = self.layover_intervals_dropped
+        return detail
+
+
+@dataclass(frozen=True)
 class CalcResult:
     """The output of one calculation run.
 

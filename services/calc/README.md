@@ -3,7 +3,8 @@
 Headway's deterministic calculation library — **the only place any reported
 number originates** (walking skeleton per ADR-0009, schema contract per
 handoff `docs/handoffs/0001`, gap policy per handoff `docs/handoffs/0002`,
-block-aware VRH per handoff `docs/handoffs/0003`).
+block-aware VRH per handoff `docs/handoffs/0003`, trip-level excision per
+handoff `docs/handoffs/0004`).
 Pure, versioned functions: stdlib-only core, no network, no clock reads, no
 randomness, no hidden state; time comes exclusively from inputs, and results
 are `Decimal`, never float.
@@ -18,7 +19,9 @@ are `Decimal`, never float.
   `severity`: `'blocking'`/`'warning'`/`'info'`; the 0.1.0 name
   `BlockingIssue` stays importable, defaulting to blocking),
   `CoverageDetail`, `BlockCoverageDetail` (0.3.0: adds
-  `layover_max_seconds` provenance).
+  `layover_max_seconds` provenance), `TripExcisionCoverageDetail` (0.4.0:
+  trip-denominated coverage + `total_trips`/`trips_excised`/
+  `blocks_touched`/`layover_intervals_dropped`).
 - `headway_calc/distance.py` — haversine miles (float per leg, one final
   Decimal quantization to 0.01 mi, ROUND_HALF_EVEN — rule documented in the
   module, pre-verification).
@@ -26,11 +29,13 @@ are `Decimal`, never float.
   deliberately NOT block-aware: layover miles are N/A per Exhibit 35) and
   `compute_vrm_v0_1` (0.1.0, retained unchanged for bit-for-bit historical
   recomputes).
-- `headway_calc/vrh.py` — `vrh_v0`: `compute_vrh` (0.3.0, the default path —
-  block-aware layover inclusion, handoff 0003), `compute_vrh_v0_2` (0.2.0,
+- `headway_calc/vrh.py` — `vrh_v0`: `compute_vrh` (0.4.0, the default path —
+  trip-level excision, handoff 0004), `compute_vrh_v0_3` (0.3.0, block-level
+  exclusion, retained unchanged), `compute_vrh_v0_2` (0.2.0,
   retained unchanged) and `compute_vrh_v0_1` (0.1.0, retained unchanged).
-- `headway_calc/_blocks.py` — internal 0.3.0 machinery: block grouping,
-  layover accounting, the block gap policy, and the `block_unavailable`
+- `headway_calc/_blocks.py` — internal 0.3.0/0.4.0 machinery: block
+  grouping, layover accounting, the block gap policy (0.3.0), the
+  trip-excision policy (0.4.0), and the `block_unavailable`
   per-vehicle-day info findings. The 0.1.0/0.2.0 machinery in
   `_grouping.py` is untouched.
 - `headway_calc/persist.py` — injectable DB-API writer:
@@ -56,7 +61,7 @@ are `Decimal`, never float.
 - `headway_calc/runner.py` — `run_period(conn, start, end,
   gap_threshold_seconds=None, coverage_threshold=None,
   layover_max_seconds=None)`: closes the canonical→computed loop (reader →
-  compute_vrm 0.2.0 / compute_vrh 0.3.0 → dq routing → persist) and returns
+  compute_vrm 0.2.0 / compute_vrh 0.4.0 → dq routing → persist) and returns
   a frozen `RunReport` carrying all three inputs and per-metric coverage
   detail. See "Runner" below.
 - `headway_calc/_cli.py` — the ONE process boundary (argv, env, psycopg);
@@ -64,20 +69,62 @@ are `Decimal`, never float.
 - `REGULATORY_TRACKER.md` — calc/version → citation → verification status.
   VRM/VRH/deadhead/layover definitions are VERIFIED against the 2026 NTD
   Policy Manual (quoted in the tracker); divergence D1 (layover inclusion)
-  is CLOSED by vrh_v0 0.3.0; **no figure is reportable** pending the
-  remaining divergences D2–D6 and the flagged engineering placeholders
-  (`coverage_threshold` 0.95, `layover_max_seconds` 1800).
+  is CLOSED by vrh_v0 0.3.0 and retained by 0.4.0; **no figure is
+  reportable** pending the remaining divergences D2–D6 and the flagged
+  `coverage_threshold` 0.95 engineering placeholder (`layover_max_seconds`
+  1800 is now data-informed and exhibit-aligned per handoff 0004, per-agency
+  configurable).
 - Golden dataset: `tests/golden/vrm_vrh_v0/` (repo root) — synthetic
   hand-worked example (see its `BASIS.md`); regression anchor only, not an
   FTA-certified figure. `expected.json` pins 0.1.0; `expected_v0_2.json`
   pins the 0.2.0 gap policy over the same fixture; `fixture_block.json` +
-  `expected_v0_3.json` pin the 0.3.0 block case (600 s layover included).
+  `expected_v0_3.json` pin the 0.3.0 block case (600 s layover included);
+  `fixture_block_v04.json` + `expected_v0_4.json` pin the 0.4.0 trip-level
+  excision case (three-trip block, middle trip gapped).
 
-## Block-aware VRH — 0.3.0 (default for VRH): layover inclusion
+## Trip-level excision — 0.4.0 (default for VRH)
 
-Per handoff 0003, `compute_vrh` (CALC_VERSION `0.3.0`) closes divergence D1 —
-the FTA **includes** layover/recovery time in VRH (2026 NTD Policy Manual,
-Exhibit 35, p. 133; see `REGULATORY_TRACKER.md`):
+Per handoff 0004, `compute_vrh` (CALC_VERSION `0.4.0`) refines the exclusion
+unit from the block group to *the gapped trip plus its adjacent layover
+intervals* — definitional correctness (layover inclusion, D1) no longer
+requires discarding a gapped block's sound data:
+
+- **Grouping and layover accounting unchanged from 0.3.0** — block-aware
+  grouping, NULL-block per-trip fallback with `block_unavailable` info
+  findings, inter-trip intervals counted as layover up to
+  `layover_max_seconds`, over-cap intervals not counted + one
+  `layover_exceeds_max` warning.
+- **Exclusion unit refined.** A within-trip gap (> `gap_threshold_seconds`)
+  excises ONLY that trip's running time and the inter-trip layover intervals
+  immediately adjacent to it (both sides, where present) — a layover
+  interval counts only when BOTH bounding trips are clean, and an excised
+  trip is never bridged. The block's remaining clean trips and their other
+  layover intervals stay in the figure. One `telemetry_gap_excluded`
+  **warning** per excised trip, citing that trip's records.
+- **Coverage returns to trip denomination**: `coverage = clean_trips /
+  total_trips` (directly comparable to 0.2.0's group coverage). The detail
+  JSONB carries the trip coverage, the block statistics (`blocks_touched`,
+  `trips_excised`, `layover_intervals_dropped`) and all three thresholds.
+- **Lineage**: `input_record_ids` cover INCLUDED positions only; excised
+  trips' records are cited by their findings.
+- **`layover_max_seconds` 1800 is now data-informed and exhibit-aligned**
+  (no longer a bare placeholder): the measured MBTA inter-trip interval
+  distribution (2026-07-10, 7,400 in-block intervals: p50 = 30 s, p90 =
+  109 s, p99 = 7,124 s, 2.7% > 1,800 s) shows a long tail of out-of-service
+  parking, which Exhibit 35 explicitly excludes from revenue hours ("Bus
+  arrives at the end of the route, parks, and goes out of service… →
+  Vehicle Revenue Hours: No"). Still per-agency configurable, not an
+  FTA-published number.
+- **Monotonicity (property-tested)**: v0.4 ≥ v0.2 and v0.4 ≥ v0.3 on
+  identical input — block-level exclusion is strictly harsher.
+- `compute_vrh_v0_3` retains 0.3.0 unchanged (block-level exclusion) for
+  bit-for-bit historical recomputes.
+
+## Block-aware VRH — 0.3.0 (retained): layover inclusion
+
+Per handoff 0003, `compute_vrh_v0_3` (CALC_VERSION `0.3.0`) closes divergence
+D1 — the FTA **includes** layover/recovery time in VRH (2026 NTD Policy
+Manual, Exhibit 35, p. 133; see `REGULATORY_TRACKER.md`):
 
 - **Block grouping.** Positions of the same vehicle whose trips share a GTFS
   `block_id` (joined from `canonical.trips`, migration 0011) form ONE VRH
@@ -155,12 +202,14 @@ Loads `canonical.vehicle_positions` (with `block_id` joined) for the
 **half-open** period `[period-start, period-end)` (UTC — June is
 `[2026-06-01, 2026-07-01)`, so consecutive months tile with no
 double-counted and no dropped instant), runs `vrm_v0` at CALC_VERSION 0.2.0
-and `vrh_v0` at CALC_VERSION 0.3.0 (block-aware; `--layover-max-seconds`
-passes through), and prints the `RunReport` as JSON (all three inputs
-recorded). Per metric:
+and `vrh_v0` at CALC_VERSION 0.4.0 (block-aware with trip-level excision;
+`--layover-max-seconds` passes through; the per-metric `detail` in the
+report carries the trip coverage plus `trips_excised`/`blocks_touched`/
+`layover_intervals_dropped`), and prints the `RunReport` as JSON (all three
+inputs recorded). Per metric:
 
 - **every finding is routed to `dq.issues` with its own severity** —
-  block-fallback infos stay info, excluded-group and over-cap-layover
+  block-fallback infos stay info, excised-trip and over-cap-layover
   warnings stay warnings, coverage refusals stay blocking;
 - **blocking findings present** (coverage below threshold) → **no
   `computed.metric_values` row is written** for that metric (the guardrail:
@@ -206,68 +255,73 @@ handoff 0001).
 
 ## Verification status
 
-### What ran (2026-07-09, Python 3.12.3, hypothesis 6.156.4)
+### What ran (2026-07-10, Python 3.12.3, hypothesis 6.156.4)
 
 ```
 $ cd services/calc && python3 -m pytest tests/ -q
-........................................................................ [ 76%]
-......................                                                   [100%]
-94 passed in 4.17s
+........................................................................ [ 62%]
+...........................................                              [100%]
+115 passed in 5.49s
 ```
 
-0.3.0 golden tests explicitly (block case per handoff 0003, hand-worked in
-`tests/golden/vrm_vrh_v0/BASIS.md`):
+0.4.0 golden tests explicitly (trip-excision case per handoff 0004,
+hand-worked in `tests/golden/vrm_vrh_v0/BASIS.md`, calc 0.4.0 section):
 
 ```
-$ python3 -m pytest tests/test_golden_v03.py -v
-tests/test_golden_v03.py::test_golden_v03_block_fixture_includes_layover PASSED [ 25%]
-tests/test_golden_v03.py::test_golden_v03_retained_v02_excludes_the_layover PASSED [ 50%]
-tests/test_golden_v03.py::test_golden_v03_vrm_unchanged_at_v02 PASSED    [ 75%]
-tests/test_golden_v03.py::test_golden_v03_no_block_fixture_falls_back_per_trip PASSED [100%]
-4 passed in 0.11s
+$ python3 -m pytest tests/test_golden_v04.py -v
+tests/test_golden_v04.py::test_golden_v04_middle_trip_excision_keeps_clean_remainder PASSED [ 20%]
+tests/test_golden_v04.py::test_golden_v04_default_threshold_blocks_at_trip_coverage PASSED [ 40%]
+tests/test_golden_v04.py::test_golden_v04_retained_v03_excludes_the_whole_block PASSED [ 60%]
+tests/test_golden_v04.py::test_golden_v04_retained_v02_matches_on_this_fixture PASSED [ 80%]
+tests/test_golden_v04.py::test_golden_v04_clean_block_reproduces_v03_value_exactly PASSED [100%]
+5 passed in 0.11s
 ```
 
-Coverage: everything from 0.1.0/0.2.0 (goldens byte-identical; the 0.2.0
-golden/property test bodies unchanged, now pinned to the retained
-`compute_vrh_v0_2` exactly as the 0.1.0 suites pin `compute_vrh_v0_1`); NEW
-for 0.3.0 — block golden (two trips, one block, 600 s layover: v0.3 `0.33` h
-INCLUDES it, retained v0.2 `0.17` h excludes it, VRM stays 0.2.0 at
-`6.91` mi; no-block fixture falls back per-trip reproducing `0.45` h plus
-per-vehicle-day `block_unavailable` infos); 0.3.0 unit tests (layover cap
-inclusive at the line, over-cap interval not counted + warned with bounding
-records, within-trip gap excluding the WHOLE block group, vehicle-day info
-grouping, null-trip positions inside a block ignored, non-positive intervals
-contributing nothing, contradictory block_ids failing loudly, same block_id
-on two vehicles never merging); 0.3.0 Hypothesis properties (MONOTONICITY:
-v0.3 VRH ≥ v0.2 VRH on identical gap-free input; cap 0 collapses to the v0.2
-value exactly; figure monotone in the cap with exact interval accounting and
-one warning per over-cap interval; determinism/order-independence as full
-structural equality; blocking ⇔ the exact coverage threshold line over block
-groups with blocking-implies-None retained); reader block_id LEFT JOIN
-SQL/mapping; runner end-to-end with per-severity dq routing (info rows
-included), the vrh 0.3.0 detail JSONB carrying `layover_max_seconds`, and
-`--layover-max-seconds` pass-through; and the stdlib-purity guardrail now
-also covering `_blocks.py`. Migrations 0010+0011 are statically asserted by
-`db/test_migrations_static.py` (9 passed); the transform suite (block_id
-parse/upsert, absent-column case) is 38 passed.
+Coverage: everything from 0.1.0/0.2.0/0.3.0 (all prior golden
+fixtures/expectations byte-identical; the 0.3.0 golden/unit/property test
+bodies unchanged, now pinned to the retained `compute_vrh_v0_3` exactly as
+the 0.1.0/0.2.0 suites pin `compute_vrh_v0_1`/`compute_vrh_v0_2`); NEW for
+0.4.0 — trip-excision golden (three-trip block, 600 s layovers, middle trip
+gapped 400 s: v0.4 keeps trips F+H at `0.17` h and drops trip G plus BOTH
+adjacent layovers; retained v0.3 drops the whole block to `0.00` h; retained
+v0.2 also `0.17` h — no clean-adjacent layover survives on this fixture;
+default 0.95 threshold blocks at trip coverage 2/3; the CLEAN two-trip block
+fixture reproduces the 0.3.0 value `0.33` h exactly under v0.4); 0.4.0 unit
+tests (middle- and edge-trip excision with the far layover surviving, one
+warning per excised trip citing only that trip's records, adjacent gapped
+trips, a fully-excised block counting as excluded_groups, NULL-block
+fallback excision keeping `block_unavailable` infos and blocks_touched=0,
+lineage narrowing to included positions, the surviving-interval layover cap
+still warning, trip-denominated blocking); 0.4.0 Hypothesis properties over
+schedules WITH per-trip gap injection (MONOTONICITY on ARBITRARY input:
+v0.4 VRH ≥ v0.2 VRH with identical lineage AND v0.4 VRH ≥ v0.3 VRH; cap 0
+collapses to the v0.2 value exactly; figure monotone in the cap with exact
+clean-adjacent interval accounting and one warning per over-cap
+clean-adjacent interval; one telemetry_gap_excluded warning per excised trip
+citing exactly that trip's records; determinism/order-independence as full
+structural equality; blocking ⇔ the exact coverage threshold line over
+TRIPS with blocking-implies-None retained); runner end-to-end now asserting
+the vrh 0.4.0 detail JSONB (trip coverage + trips_excised/blocks_touched/
+layover_intervals_dropped + layover_max_seconds). Migrations 0010+0011 are
+statically asserted by `db/test_migrations_static.py` (9 passed).
 
 ### What is PENDING
 
 - **Live re-run on the MBTA dataset (orchestrator's job)** — this increment
   was implemented and unit/golden-tested against fake connections only, per
-  the working agreement. The orchestrator applies
-  `db/migrations/0011_trips_block_id.sql`, replays the GTFS static feed (the
-  upsert path backfills `block_id`), and re-runs
-  `python -m headway_calc.runner` live, comparing v0.2 vs v0.3 VRH — the
-  delta approximates the recovered layover share and should be
-  sanity-checked against the manual's "10 to 20 percent of running time"
-  description (handoff 0003, Outputs).
+  the working agreement. The orchestrator re-runs
+  `python -m headway_calc.runner` live and compares v0.2/v0.3/v0.4 VRH over
+  the same period (handoff 0004, Outputs): expected trip-level coverage
+  ≈ 0.91 and VRH ≈ the v0.2 value plus layover recovered over
+  clean-adjacent intervals.
 - **Reportability** — definitions are VERIFIED (tracker) and D1 is CLOSED,
-  but no figure is reportable until divergences D2–D6 are addressed and the
-  engineering placeholders are verified: `coverage_threshold` 0.95 (FTA
-  completeness expectations) and `layover_max_seconds` 1800 (observed MBTA
-  inter-trip layover distributions; ultimately per-agency config — handoff
-  0003 open question).
+  but no figure is reportable until divergences D2–D6 are addressed and
+  `coverage_threshold` 0.95 is verified against FTA completeness
+  expectations (`layover_max_seconds` 1800 is now data-informed and
+  exhibit-aligned per the measured 2026-07-10 inter-trip distribution —
+  per-agency config remains future work). The handoff-0004 open question
+  (partial retention of an excised trip's layover intervals) is deferred;
+  the conservative both-sides drop stands.
 - **dq.issues ownership** — routing lands findings in `dq.issues` with their
   own severity via `headway_calc.dq` / `run_period`; owner assignment and the
   resolution workflow remain the DQ workflow's scope (Backend), not this

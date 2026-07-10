@@ -64,7 +64,7 @@ jobs:
           }
           {
             echo "go=$(hit '^services/ingestion/|^scripts/license|^\.github/workflows/')"
-            echo "python=$(hit '^services/(calc|transform|api)/|^db/|^scripts/license|^\.github/workflows/')"
+            echo "python=$(hit '^services/(calc|transform|api|ai)/|^db/|^scripts/license|^\.github/workflows/')"
             echo "web=$(hit '^web/|^scripts/license|^\.github/workflows/')"
             echo "integration=$(hit '^services/api/|^db/|^tests/integration/|^\.github/workflows/')"
           } >> "$GITHUB_OUTPUT"
@@ -98,7 +98,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        service: [calc, transform, api]
+        service: [calc, transform, api, ai]
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
@@ -108,11 +108,15 @@ jobs:
           cache-dependency-path: services/${{ matrix.service }}/pyproject.toml
       - name: install service with test extra
         # each pyproject defines a [test] optional-dependency set
-        # (calc: pytest+hypothesis; transform: pytest; api: pytest+httpx)
+        # (calc: pytest+hypothesis; transform: pytest; api: pytest+httpx; ai: pytest)
         run: python -m pip install -e "services/${{ matrix.service }}[test]"
       - name: pytest
         working-directory: services/${{ matrix.service }}
         run: python -m pytest -q
+      - name: grounding regression gate (AI_SYSTEMS_ENGINEER — a grounding regression fails the build)
+        if: matrix.service == 'ai'
+        working-directory: services/ai
+        run: python -m headway_ai.regression
 
   db-static:
     name: python / db migrations (static)
@@ -241,6 +245,7 @@ jobs:
             -e "services/calc[test,persist]" \
             -e "services/transform[test,kafka,db]" \
             -e "services/api[test]" \
+            -e "services/ai[test,ollama]" \
             -r db/requirements.txt
       - uses: actions/setup-node@v6
         if: hashFiles('web/package.json') != ''

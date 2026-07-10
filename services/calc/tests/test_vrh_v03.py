@@ -16,7 +16,11 @@ from decimal import Decimal
 import pytest
 
 from headway_calc.types import VehiclePosition
-from headway_calc.vrh import compute_vrh, compute_vrh_v0_2
+
+# Pinned to the RETAINED 0.3.0 function (handoff 0004: 0.4.0 is the default
+# compute_vrh; shipped versions recompute bit-for-bit) — bodies unchanged.
+from headway_calc.vrh import compute_vrh_v0_2
+from headway_calc.vrh import compute_vrh_v0_3 as compute_vrh
 
 T0 = datetime(2026, 1, 15, 12, 0, 0, tzinfo=timezone.utc)
 

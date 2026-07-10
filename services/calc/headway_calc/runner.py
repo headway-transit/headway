@@ -2,7 +2,7 @@
 
 Orchestration only: load canonical.vehicle_positions (headway_calc.reader,
 block_id joined per handoff 0003), run the v0 calculations (compute_vrm at
-0.2.0, compute_vrh at 0.3.0 — the default paths, handoffs 0002/0003), route
+0.2.0, compute_vrh at 0.4.0 — the default paths, handoffs 0002/0004), route
 EVERY finding to dq.issues with its own severity
 (headway_calc.dq: infos stay info, warnings stay warnings, blocking stays
 blocking), then
@@ -179,21 +179,23 @@ def run_period(
     coverage_threshold: Decimal | float | str | None = None,
     layover_max_seconds: float | None = None,
 ) -> RunReport:
-    """Run vrm_v0 (0.2.0) and vrh_v0 (0.3.0) over one half-open period.
+    """Run vrm_v0 (0.2.0) and vrh_v0 (0.4.0) over one half-open period.
 
     Loads positions (block_id joined) via headway_calc.reader, computes both
-    metrics — VRM under the handoff-0002 gap policy, VRH block-aware per
-    handoff 0003 with ``layover_max_seconds`` passed through (default 1800 —
-    an ENGINEERING PLACEHOLDER; all three inputs are recorded in the report)
-    — then:
-    - EVERY finding (block_unavailable infos, excluded-group and
+    metrics — VRM under the handoff-0002 gap policy, VRH block-aware with
+    trip-level excision per handoff 0004 and ``layover_max_seconds`` passed
+    through (default 1800 — data-informed and exhibit-aligned, per-agency
+    configurable; all three inputs are recorded in the report) — then:
+    - EVERY finding (block_unavailable infos, excised-trip and
       layover_exceeds_max warnings, blocking coverage refusals) is routed to
       dq.issues with its own severity, committed first;
     - a result with blocking findings has NO computed.metric_values row
       written (never emit a certifiable value over an unresolved gap);
     - a non-blocked result is persisted via headway_calc.persist (metric
-      value + coverage detail JSONB + lineage edges over included groups
-      only), its warnings/infos standing alongside as the routed dq rows.
+      value + coverage detail JSONB — for VRH the trip-denominated coverage
+      plus blocks_touched/trips_excised/layover_intervals_dropped — +
+      lineage edges over included positions only), its warnings/infos
+      standing alongside as the routed dq rows.
 
     Commits in two transactions, issues first (see module docstring). Any
     failure propagates after rolling back only the in-flight value phase;

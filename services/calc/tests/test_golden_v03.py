@@ -20,7 +20,10 @@ from decimal import Decimal
 
 from conftest import load_positions
 
-from headway_calc.vrh import compute_vrh, compute_vrh_v0_2
+# Pinned to the RETAINED 0.3.0 function (handoff 0004: 0.4.0 is the default
+# compute_vrh; shipped versions recompute bit-for-bit) — bodies unchanged.
+from headway_calc.vrh import compute_vrh_v0_2
+from headway_calc.vrh import compute_vrh_v0_3 as compute_vrh
 from headway_calc.vrm import compute_vrm
 
 

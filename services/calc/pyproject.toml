@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "headway-calc"
-version = "0.3.0"
+version = "0.4.0"
 description = "Headway deterministic calculation library (NTD metrics). Pure, versioned, stdlib-only core; every reported number originates here with full lineage."
 readme = "README.md"
 requires-python = ">=3.12"

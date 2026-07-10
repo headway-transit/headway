@@ -1,0 +1,26 @@
+{
+  "name": "fabricated_number_fails",
+  "description": "Adversarial fabrication case: the citation resolves, but the claim states VRM was 13,000.00 miles while the allowed numbers contain only 12794.92 (and the period year). 13,000.00 is an unexplained number. Expected: FAIL on fabrication.",
+  "universe": {
+    "computed.metric_values": ["5f3c2a9e-1d4b-4c8e-9f0a-7b6d5e4c3b2a"]
+  },
+  "allowed_numbers": ["12794.92", "2026"],
+  "record_count_whitelist": [],
+  "draft": {
+    "provider_name": "stub",
+    "provider_version": "0.1.0",
+    "claims": [
+      {
+        "text": "VRM for May 2026 was 13,000.00 miles.",
+        "cited_record_kind": "computed.metric_values",
+        "cited_record_id": "5f3c2a9e-1d4b-4c8e-9f0a-7b6d5e4c3b2a",
+        "numeric_values": ["13000.00"]
+      }
+    ]
+  },
+  "expected": {
+    "passed": false,
+    "citation_resolution_rate": "1.0000",
+    "fabricated_number_count": 1
+  }
+}

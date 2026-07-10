@@ -70,6 +70,21 @@ def golden_expected_v0_3() -> dict:
     return json.loads((GOLDEN_DIR / "expected_v0_3.json").read_text())
 
 
+@pytest.fixture(scope="session")
+def golden_block_v04_fixture() -> dict:
+    """Block fixture for vrh_v0 0.4.0 (handoff 0004): one block of three
+    trips, the MIDDLE trip gapped — see BASIS.md, calc 0.4.0 section."""
+    return json.loads((GOLDEN_DIR / "fixture_block_v04.json").read_text())
+
+
+@pytest.fixture(scope="session")
+def golden_expected_v0_4() -> dict:
+    """Expectations for CALC_VERSION 0.4.0 (trip-level excision) over
+    fixture_block_v04.json (plus fixture_block.json under 0.4.0) — see
+    BASIS.md, calc 0.4.0 section."""
+    return json.loads((GOLDEN_DIR / "expected_v0_4.json").read_text())
+
+
 def positions_to_rows(positions: list[VehiclePosition]) -> list[tuple]:
     """Render VehiclePositions as reader result rows (the handoff-0001
     canonical.vehicle_positions columns plus the trips.block_id join, handoff

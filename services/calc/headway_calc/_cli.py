@@ -70,9 +70,11 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         default=None,
         help=(
             "Override the maximum inter-trip interval counted as layover "
-            "within a block for vrh_v0 0.3.0 (default: the library default, "
-            "1800s — an ENGINEERING PLACEHOLDER pending observed layover "
-            "distributions; see REGULATORY_TRACKER.md). An over-cap interval "
+            "within a block for vrh_v0 0.4.0 (default: the library default, "
+            "1800s — data-informed and exhibit-aligned per the measured "
+            "inter-trip interval distribution and Exhibit 35's "
+            "out-of-service exclusion; per-agency configurable; see "
+            "REGULATORY_TRACKER.md). An over-cap interval "
             "is not counted and raises a layover_exceeds_max warning dq "
             "issue. The value used is recorded in the RunReport."
         ),
