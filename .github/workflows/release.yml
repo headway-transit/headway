@@ -80,7 +80,7 @@ jobs:
           output-format: table
 
       - name: upload source SBOMs for the release job
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.1
         with:
           name: sbom-source
           path: headway-source-${{ github.ref_name }}.*.json
@@ -172,7 +172,7 @@ jobs:
             "${DIGEST_REF}"
 
       - name: upload image SBOMs for the release job
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.1
         with:
           name: sbom-image-${{ matrix.service }}
           path: ${{ matrix.image }}-image-${{ github.ref_name }}.*.json
@@ -189,7 +189,7 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: download all SBOMs
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.1
         with:
           pattern: sbom-*
           path: dist/sbom
