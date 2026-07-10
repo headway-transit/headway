@@ -232,6 +232,47 @@ td.figure {
   background: var(--color-warning-bg);
   color: var(--color-warning-text);
 }
+/* SIMULATED DATA: text + icon + color + border — never color alone. */
+.tag.simulated {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  background: var(--color-danger-bg);
+  color: var(--color-danger-text);
+  border: 2px solid var(--color-danger-text);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+.tag.simulated svg {
+  flex: none;
+}
+
+/* ---- calculation detail panel (expanded table row) ---- */
+
+.detail-panel {
+  margin: var(--space-1) 0;
+  padding-left: 1.2rem;
+  background: var(--color-surface);
+}
+ul.detail-panel li {
+  margin: var(--space-1) 0;
+}
+
+/* ---- monthly report month picker ---- */
+
+.month-picker {
+  display: flex;
+  gap: var(--space-3);
+  margin: var(--space-3) 0;
+}
+.month-picker select {
+  font: inherit;
+  color: var(--color-text);
+  padding: var(--space-2);
+  border: 1px solid var(--color-input-border);
+  border-radius: 4px;
+  background: var(--color-bg);
+}
 
 /* ---- severity (text + icon + color — never color alone) ---- */
 

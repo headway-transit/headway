@@ -42,6 +42,9 @@ export function Layout() {
               <Link to="/metrics">{copy.nav.metrics}</Link>
             </li>
             <li>
+              <Link to="/reports/monthly">{copy.nav.reports}</Link>
+            </li>
+            <li>
               <Link to="/dq">{copy.nav.dq}</Link>
             </li>
           </ul>

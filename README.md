@@ -22,8 +22,22 @@ Kubernetes. If a feature only works in the cloud, it is rejected.
 
 ## Quickstart
 
-See [`deploy/compose/`](deploy/compose/) — copy `.env.example` to `.env`,
-set three passwords, and run `docker compose up -d`.
+On a fresh Linux box, run the guided installer:
+
+```sh
+./install/install.sh
+```
+
+It checks the machine (Docker, ports, memory, disk), refuses to overwrite
+an existing installation, generates `deploy/compose/.env` with strong
+secrets, brings the stack up, applies the database migrations, and creates
+your first administrator account — explaining every step and every failure
+in plain language. `./install/install.sh --check` does a no-changes dry
+run. See [`install/README.md`](install/README.md) for the full guide.
+
+Prefer to do it by hand? See [`deploy/compose/`](deploy/compose/) — copy
+`.env.example` to `.env`, set three passwords, and run
+`docker compose up -d`.
 
 ## Repository layout (ADR-0010)
 

@@ -25,6 +25,7 @@ export const copy = {
 
   nav: {
     metrics: "Metrics",
+    reports: "Monthly ridership",
     dq: "Data quality",
   },
 
@@ -46,6 +47,17 @@ export const copy = {
   metricLabels: {
     vrm: "Vehicle Revenue Miles (VRM)",
     vrh: "Vehicle Revenue Hours (VRH)",
+    upt: "Unlinked Passenger Trips (UPT)",
+  } as Record<string, string>,
+
+  /**
+   * Display labels for unit codes the API serves. Unknown codes fall back to
+   * the raw code — shown honestly, never guessed at.
+   */
+  unitLabels: {
+    miles: "miles",
+    hours: "hours",
+    unlinked_passenger_trips: "unlinked passenger trips",
   } as Record<string, string>,
 
   metrics: {
@@ -65,8 +77,15 @@ export const copy = {
       value: "Value",
       calc: "Calculation",
       status: "Certification status",
+      details: "Details",
       provenance: "Provenance",
     },
+    detailToggle: (metric: string, period: string) =>
+      `Calculation details for ${metric}, ${period}`,
+    detailListLabel: (metric: string, period: string) =>
+      `Calculation details for ${metric}, ${period}`,
+    detailEmpty:
+      "The calculation recorded no extra detail for this figure.",
     selectRow: (metric: string, period: string) =>
       `Select ${metric}, ${period}, for certification`,
     alreadyCertified: "Already certified",
@@ -143,6 +162,97 @@ export const copy = {
     submitResolution: "Mark as resolved",
     cancelResolution: "Cancel",
     resolveSuccess: (title: string) => `“${title}” is now resolved.`,
+  },
+
+  /**
+   * Plain-language translations of the calculation detail the API serves
+   * (computed.metric_values.detail — coverage details and UPT detail, see
+   * services/calc/headway_calc/types.py). The UI translates WORDING only:
+   * every number and ratio below is the API's string, never recomputed.
+   * Detail keys this catalog does not know are shown raw-but-tidy
+   * (forward-compatible — a new key is displayed, never hidden).
+   */
+  detail: {
+    coverage: (percent: string, excluded: string) =>
+      `Covers ${percent}% of vehicle-trips; ${excluded} excluded and documented.`,
+    factorApplied: (factor: string, missingTrips: string, thresholdPercent: string) =>
+      `Adjusted up ×${factor} for ${missingTrips} missing trips, as federal rules allow when ${thresholdPercent}% or fewer are missing.`,
+    noFactorApplied: "No adjustment factor was applied.",
+    sourceMix: (parts: string) => `Where the data came from: ${parts}.`,
+    sourceMixPart: (source: string, count: string) =>
+      `${source} (${count} events)`,
+    uptCounts: (withEvents: string, operated: string) =>
+      `Passenger counts were recorded on ${withEvents} of ${operated} operated trips.`,
+    known: {
+      total_groups: (n: string) => `Vehicle-trip groups in this period: ${n}.`,
+      clean_position_share: (p: string) =>
+        `${p}% of location reports belong to fully covered trips.`,
+      gap_threshold_seconds: (n: string) =>
+        `A trip was set aside when its location reports had a gap longer than ${n} seconds.`,
+      coverage_threshold: (p: string) =>
+        `This figure is only produced when coverage is at least ${p}%.`,
+      layover_max_seconds: (n: string) =>
+        `Waiting time between trips was counted up to ${n} seconds per wait.`,
+      total_trips: (n: string) => `Trips in this period: ${n}.`,
+      trips_excised: (n: string) =>
+        `Trips set aside because of gaps in their location data: ${n}.`,
+      blocks_touched: (n: string) =>
+        `Vehicle work blocks affected by a set-aside trip: ${n}.`,
+      layover_intervals_dropped: (n: string) =>
+        `Between-trip waits not counted because a neighboring trip was set aside: ${n}.`,
+      total_boardings_counted: (n: string) =>
+        `Passenger boardings counted from the data: ${n}.`,
+      operated_trips: (n: string) => `Trips operated in this period: ${n}.`,
+      trips_with_events: (n: string) =>
+        `Trips with passenger-count data: ${n}.`,
+      missing_trips: (n: string) =>
+        `Trips with no passenger-count data: ${n}.`,
+      missing_share: (p: string) =>
+        `${p}% of operated trips had no passenger counts.`,
+      missing_trip_threshold: (p: string) =>
+        `Federal rules allow adjusting for missing trips when ${p}% or fewer are missing.`,
+      imbalance_threshold: (p: string) =>
+        `Boarding and alighting counts are flagged for review when they differ by more than ${p}%.`,
+    } as Record<string, (value: string) => string>,
+  },
+
+  simulated: {
+    badge: "Simulated data",
+    tooltip:
+      "This number was computed from simulated test data. It must never be submitted.",
+    reportBanner:
+      "This report includes at least one figure computed from simulated test data. It must never be submitted.",
+  },
+
+  report: {
+    heading: "Monthly ridership report",
+    intro:
+      "The vehicle miles, vehicle hours, and passenger trips Headway computed for one calendar month, shown exactly as computed — this page never recalculates or edits a number.",
+    disclaimer:
+      "Preview only. The official NTD Monthly Ridership submission format has not yet been verified against FTA's reporting system documentation.",
+    monthLabel: "Month",
+    yearLabel: "Year",
+    monthNames: [
+      "January", "February", "March", "April", "May", "June",
+      "July", "August", "September", "October", "November", "December",
+    ],
+    tableCaption: (monthName: string, year: string) =>
+      `Figures for ${monthName} ${year}, exactly as the calculation service computed them.`,
+    columns: {
+      metric: "Metric",
+      value: "Value",
+      unit: "Unit",
+      calc: "Calculation",
+      status: "Certification status",
+      coverage: "How complete is the data",
+      provenance: "Provenance",
+    },
+    noFigure: (metric: string) =>
+      `No ${metric} figure has been computed for this month.`,
+    coverageNotReported: "Not reported",
+    exportCsv: "Download CSV (preview only)",
+    exportFileName: (year: string, month: string) =>
+      `headway-monthly-ridership-${year}-${month}-preview.csv`,
   },
 
   errors: {

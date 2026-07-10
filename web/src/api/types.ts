@@ -50,6 +50,16 @@ export interface MetricValue {
   /** ISO date-time */
   computed_at: string;
   certification_status: string;
+  /**
+   * Per-value calculation detail (computed.metric_values.detail JSONB,
+   * migration 0010; served since the wave-8 additive contract extension —
+   * see handoff 0001's wave-8 response). `{}` for detail-less rows. Shapes
+   * come from services/calc/headway_calc/types.py to_dict(): coverage
+   * details for vrm/vrh, UptDetail for upt. Ratios/factors inside are JSON
+   * STRINGS for the same reason `value` is — this UI never parses them into
+   * numbers. Optional so the UI tolerates an API that predates the field.
+   */
+  detail?: Record<string, unknown>;
 }
 
 // ---- /metrics/values/{id}/lineage ----

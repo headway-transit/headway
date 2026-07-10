@@ -14,6 +14,7 @@ import { DqView } from "./views/DqView";
 import { LineageView } from "./views/LineageView";
 import { LoginView } from "./views/LoginView";
 import { MetricsView } from "./views/MetricsView";
+import { MonthlyReportView } from "./views/MonthlyReportView";
 
 function RequireAuth({ children }: { children: ReactNode }) {
   const session = useSession();
@@ -52,6 +53,7 @@ export function AppRoutes() {
         <Route path="/" element={<Navigate to="/metrics" replace />} />
         <Route path="/metrics" element={<MetricsView />} />
         <Route path="/metrics/:id/lineage" element={<LineageView />} />
+        <Route path="/reports/monthly" element={<MonthlyReportView />} />
         <Route path="/dq" element={<DqView />} />
       </Route>
     </Routes>

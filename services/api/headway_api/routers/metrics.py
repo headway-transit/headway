@@ -8,8 +8,9 @@ is serialized as a STRING so NUMERIC precision survives JSON (never float).
 from __future__ import annotations
 
 import datetime as dt
+import json
 from decimal import Decimal
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
@@ -35,6 +36,14 @@ class MetricValue(BaseModel):
     calc_version: str
     computed_at: dt.datetime
     certification_status: str
+    # Per-value calculation detail (computed.metric_values.detail, JSONB,
+    # migration 0010), served VERBATIM as the calc library persisted it:
+    # coverage details for vrm/vrh (CoverageDetail and descendants), UPT
+    # detail (UptDetail) — see services/calc/headway_calc/types.py to_dict.
+    # Ratios/factors inside are STRINGS for the same reason ``value`` is.
+    # ``{}`` for detail-less rows (the column default). Additive field —
+    # documented in handoff 0001's wave-8 response section.
+    detail: dict[str, Any] = {}
 
 
 class LineageNode(BaseModel):
@@ -56,9 +65,21 @@ LineageNode.model_rebuild()
 
 _SELECT_VALUES = (
     "SELECT metric_value_id, metric, unit, period_start, period_end, scope, "
-    "value, calc_name, calc_version, computed_at, certification_status "
+    "value, calc_name, calc_version, computed_at, certification_status, "
+    "detail "
     "FROM computed.metric_values"
 )
+
+
+def _detail_as_dict(raw: object) -> dict[str, Any]:
+    """JSONB comes back as a dict from psycopg; tolerate drivers that hand
+    back the JSON text instead. NULL (pre-0010 rows) serves as {} — the
+    column default — never invented content."""
+    if raw is None:
+        return {}
+    if isinstance(raw, dict):
+        return raw
+    return json.loads(raw)
 
 
 @router.get("/metrics/values", response_model=list[MetricValue])
@@ -98,6 +119,7 @@ def list_metric_values(
             calc_version=r[8],
             computed_at=r[9],
             certification_status=r[10],
+            detail=_detail_as_dict(r[11]),
         )
         for r in rows
     ]

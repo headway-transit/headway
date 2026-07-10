@@ -16,6 +16,42 @@ def test_values_are_strings_never_floats(client, fake_db):
     assert isinstance(row["value"], str)
 
 
+def test_detail_jsonb_round_trips_verbatim(client, fake_db):
+    """The detail column (migration 0010) is served exactly as persisted:
+    ratio/factor strings stay strings, counts stay ints, source_mix intact."""
+    detail = {
+        "total_boardings_counted": 41567,
+        "operated_trips": 9123,
+        "trips_with_events": 9032,
+        "missing_trips": 91,
+        "missing_share": "0.0100",
+        "factor_applied": "1.010075",
+        "source_mix": {"tides": 41345, "tides_simulated": 222},
+        "missing_trip_threshold": "0.02",
+        "imbalance_threshold": "0.10",
+    }
+    fake_db.add_metric_value(
+        metric="upt", unit="unlinked_passenger_trips",
+        calc_name="upt_v0", calc_version="0.5.0",
+        value=Decimal("41985.90"), detail=detail,
+    )
+    r = client.get("/metrics/values", headers=auth_header(fake_db, "vera"))
+    assert r.status_code == 200
+    (row,) = r.json()
+    assert row["detail"] == detail
+    assert isinstance(row["detail"]["factor_applied"], str)
+    assert isinstance(row["detail"]["missing_share"], str)
+    assert row["detail"]["source_mix"]["tides_simulated"] == 222
+
+
+def test_detail_less_row_serves_empty_object(client, fake_db):
+    fake_db.add_metric_value()  # detail defaults to {} (column default)
+    r = client.get("/metrics/values", headers=auth_header(fake_db, "vera"))
+    assert r.status_code == 200
+    (row,) = r.json()
+    assert row["detail"] == {}
+
+
 def test_filter_by_metric_and_period(client, fake_db):
     fake_db.add_metric_value(metric="vrm", period_start=dt.date(2026, 5, 1),
                              period_end=dt.date(2026, 5, 31))

@@ -650,6 +650,12 @@
           "certification_status": {
             "type": "string",
             "title": "Certification Status"
+          },
+          "detail": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Detail",
+            "default": {}
           }
         },
         "type": "object",

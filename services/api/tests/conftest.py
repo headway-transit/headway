@@ -133,6 +133,7 @@ class FakeConn:
                         r["period_start"], r["period_end"], r["scope"],
                         r["value"], r["calc_name"], r["calc_version"],
                         r["computed_at"], r["certification_status"],
+                        r["detail"],
                     )
                     for r in rows
                 ]
@@ -275,6 +276,7 @@ class FakeConn:
             "calc_version": "0.1.0",
             "computed_at": dt.datetime(2026, 7, 1, 12, 0, tzinfo=UTC),
             "certification_status": "uncertified",
+            "detail": {},  # JSONB column default (migration 0010)
         }
         mv.update(overrides)
         self.metric_values[mv["metric_value_id"]] = mv

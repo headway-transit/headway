@@ -1,11 +1,14 @@
-import { useCallback, useEffect, useId, useState } from "react";
+import { Fragment, useCallback, useEffect, useId, useState } from "react";
 import type { FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { ApiError, certify, listMetricValues } from "../api/client";
 import type { MetricValue } from "../api/types";
 import { canCertify, useSession } from "../auth/session";
+import { MetricDetailPanel } from "../components/MetricDetail";
 import { Modal } from "../components/Modal";
+import { SimulatedBadge } from "../components/SimulatedBadge";
 import { copy } from "../copy";
+import { isSimulated } from "../detail";
 
 /**
  * A calc version below 1.0.0 is marked PRE-VERIFICATION in
@@ -22,6 +25,10 @@ function metricLabel(code: string): string {
   return copy.metricLabels[code] ?? code;
 }
 
+function unitLabel(code: string): string {
+  return copy.unitLabels[code] ?? code;
+}
+
 function periodLabel(value: MetricValue): string {
   return `${value.period_start} to ${value.period_end}`;
 }
@@ -34,6 +41,7 @@ export function MetricsView() {
   const [selectionError, setSelectionError] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [openDetails, setOpenDetails] = useState<Set<string>>(new Set());
 
   const load = useCallback(async () => {
     setLoadError(null);
@@ -51,6 +59,15 @@ export function MetricsView() {
 
   const toggleSelected = (id: string) => {
     setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleDetails = (id: string) => {
+    setOpenDetails((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
@@ -133,61 +150,107 @@ export function MetricsView() {
                   <th scope="col">{copy.metrics.columns.value}</th>
                   <th scope="col">{copy.metrics.columns.calc}</th>
                   <th scope="col">{copy.metrics.columns.status}</th>
+                  <th scope="col">{copy.metrics.columns.details}</th>
                   <th scope="col">{copy.metrics.columns.provenance}</th>
                 </tr>
               </thead>
               <tbody>
-                {values.map((v) => (
-                  <tr key={v.metric_value_id}>
-                    {showCertifyControls && (
-                      <td>
-                        {v.certification_status === "certified" ? (
-                          <span>{copy.metrics.alreadyCertified}</span>
-                        ) : (
-                          <input
-                            type="checkbox"
-                            checked={selected.has(v.metric_value_id)}
-                            onChange={() => toggleSelected(v.metric_value_id)}
-                            aria-label={copy.metrics.selectRow(
-                              metricLabel(v.metric),
-                              periodLabel(v),
+                {values.map((v) => {
+                  const detail = v.detail ?? {};
+                  const hasDetail = Object.keys(detail).length > 0;
+                  const detailsOpen = openDetails.has(v.metric_value_id);
+                  const columnCount = 8 + (showCertifyControls ? 1 : 0);
+                  return (
+                    <Fragment key={v.metric_value_id}>
+                      <tr>
+                        {showCertifyControls && (
+                          <td>
+                            {v.certification_status === "certified" ? (
+                              <span>{copy.metrics.alreadyCertified}</span>
+                            ) : (
+                              <input
+                                type="checkbox"
+                                checked={selected.has(v.metric_value_id)}
+                                onChange={() =>
+                                  toggleSelected(v.metric_value_id)
+                                }
+                                aria-label={copy.metrics.selectRow(
+                                  metricLabel(v.metric),
+                                  periodLabel(v),
+                                )}
+                              />
                             )}
-                          />
+                          </td>
                         )}
-                      </td>
-                    )}
-                    <th scope="row">{metricLabel(v.metric)}</th>
-                    <td>{v.unit}</td>
-                    <td>{periodLabel(v)}</td>
-                    {/* The figure, verbatim as the API served it. Never
-                        parsed, rounded, or reformatted client-side. */}
-                    <td className="figure">{v.value}</td>
-                    <td>
-                      {v.calc_name} {v.calc_version}
-                      {isPreVerification(v) && (
-                        <>
-                          {" "}
-                          <span className="tag pre-verification">
-                            {copy.metrics.preVerificationTag}
+                        <th scope="row">
+                          {metricLabel(v.metric)}
+                          {isSimulated(v.detail) && (
+                            <>
+                              {" "}
+                              <SimulatedBadge />
+                            </>
+                          )}
+                        </th>
+                        <td>{unitLabel(v.unit)}</td>
+                        <td>{periodLabel(v)}</td>
+                        {/* The figure, verbatim as the API served it. Never
+                            parsed, rounded, or reformatted client-side. */}
+                        <td className="figure">{v.value}</td>
+                        <td>
+                          {v.calc_name} {v.calc_version}
+                          {isPreVerification(v) && (
+                            <>
+                              {" "}
+                              <span className="tag pre-verification">
+                                {copy.metrics.preVerificationTag}
+                              </span>
+                            </>
+                          )}
+                        </td>
+                        <td>
+                          <span className={`tag ${v.certification_status}`}>
+                            {v.certification_status}
                           </span>
-                        </>
+                        </td>
+                        <td>
+                          {hasDetail && (
+                            <button
+                              type="button"
+                              aria-expanded={detailsOpen}
+                              onClick={() => toggleDetails(v.metric_value_id)}
+                            >
+                              {copy.metrics.columns.details}
+                              <span className="visually-hidden">
+                                {` — ${metricLabel(v.metric)}, ${periodLabel(v)}`}
+                              </span>
+                            </button>
+                          )}
+                        </td>
+                        <td>
+                          <Link to={`/metrics/${v.metric_value_id}/lineage`}>
+                            {copy.metrics.explainLink}
+                            <span className="visually-hidden">
+                              {` — ${metricLabel(v.metric)}, ${periodLabel(v)}`}
+                            </span>
+                          </Link>
+                        </td>
+                      </tr>
+                      {hasDetail && detailsOpen && (
+                        <tr>
+                          <td colSpan={columnCount}>
+                            <MetricDetailPanel
+                              detail={detail}
+                              label={copy.metrics.detailListLabel(
+                                metricLabel(v.metric),
+                                periodLabel(v),
+                              )}
+                            />
+                          </td>
+                        </tr>
                       )}
-                    </td>
-                    <td>
-                      <span className={`tag ${v.certification_status}`}>
-                        {v.certification_status}
-                      </span>
-                    </td>
-                    <td>
-                      <Link to={`/metrics/${v.metric_value_id}/lineage`}>
-                        {copy.metrics.explainLink}
-                        <span className="visually-hidden">
-                          {` — ${metricLabel(v.metric)}, ${periodLabel(v)}`}
-                        </span>
-                      </Link>
-                    </td>
-                  </tr>
-                ))}
+                    </Fragment>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -280,7 +343,7 @@ function CertifyModal({ values, onClose, onCertified }: CertifyModalProps) {
               copy.metricLabels[v.metric] ?? v.metric,
               `${v.period_start} to ${v.period_end}`,
               v.value,
-              v.unit,
+              unitLabel(v.unit),
               `${v.calc_name} ${v.calc_version}`,
             )}{" "}
             <Link to={`/metrics/${v.metric_value_id}/lineage`}>
