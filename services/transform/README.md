@@ -21,12 +21,17 @@ code cannot drift from the checked-in contract without failing loudly).
   for undecodable payloads / malformed entities. Event-time policy: entity
   timestamp, else header timestamp (noted as an info DQ finding), else the
   entity is a DQ finding — a time is never guessed.
-- `headway_transform/gtfs_static.py` — `normalize_gtfs_static` v0.1.0:
+- `headway_transform/gtfs_static.py` — `normalize_gtfs_static` v0.2.0:
   GTFS zip `routes.txt`/`trips.txt` → `CanonicalRoute`/`CanonicalTrip` +
   edges. `route_type` → mode map cited to gtfs.org; unmapped values → mode
-  `'unknown'` + DQ finding, never a guess.
+  `'unknown'` + DQ finding, never a guess. v0.2.0 (handoff 0003) parses
+  `trips.txt` `block_id` — OPTIONAL per the GTFS Schedule Reference
+  (gtfs.org, cited in-code), so an absent column or empty value is NULL with
+  **no** DQ finding; existing rows backfill on the next static-feed replay
+  via the upsert path.
 - `headway_transform/writer.py` — injectable DB-API writer; SQL matches the
-  handoff-0001 schema exactly (`raw.records`, `canonical.*`,
+  handoff-0001 schema exactly, plus `canonical.trips.block_id` (migration
+  0011, handoff 0003) in the trip upsert (`raw.records`, `canonical.*`,
   `lineage.edges`, `dq.issues`; vehicle positions `ON CONFLICT (vehicle_id,
   "time", source_record_id) DO NOTHING`). No `tenant_id` anywhere (ADR-0004).
 - `headway_transform/consumer.py` — loop skeleton behind a tiny
@@ -48,16 +53,19 @@ cd services/transform && python3 -m pytest tests/ -q
 
 ## Verification status
 
-- `python3 -m pytest tests/ -q` → **36 passed in 0.16s** (2026-07-08,
-  Python 3.12, venv `/home/daniel/venv`). Covers: envelope contract
+- `python3 -m pytest tests/ -q` → **38 passed in 0.19s** (2026-07-09,
+  Python 3.12.3, venv `/home/daniel/venv`). Covers: envelope contract
   validation (valid/invalid/extra-property/bad-version); real FeedMessage
   round trip (built with gtfs-realtime-bindings in-test) with one lineage
   edge per row; header-timestamp fallback noted; no-timestamp →
   DQ finding not a guessed row; undecodable protobuf → `undecodable_payload`
   finding, zero rows, no swallowed exception; in-test GTFS zip →
   routes/trips + edges; unknown `route_type` → `'unknown'` + finding;
-  fake-connection writer SQL/params; consumer poison-message quarantine and
-  loop survival.
+  `block_id` parsed when the column is present (empty → NULL) and NULL with
+  no DQ finding when the column is absent — the optional-field case stays
+  green (handoff 0003); fake-connection writer SQL/params including the
+  five-column trip upsert with `block_id = EXCLUDED.block_id`; consumer
+  poison-message quarantine and loop survival.
 - **PENDING — live verification.** Docker/Kafka/Postgres are unavailable in
   this environment. Not yet verified: consumption from a real Kafka broker
   (`kafka_source.py` is untested against a live cluster), inserts against a
@@ -67,6 +75,11 @@ cd services/transform && python3 -m pytest tests/ -q
   The first environment with Docker must run the compose stack, replay a
   golden fixture, and attach the evidence before this is declared Done
   (Shared Constraint 8).
+- **PENDING — live block_id backfill (orchestrator's job, handoff 0003).**
+  Migration `0011_trips_block_id.sql` and a static-feed replay (the upsert
+  backfills `block_id` onto existing `canonical.trips` rows — MBTA carries
+  it for bus/subway, confirm at replay) run against the live database by the
+  orchestrator, followed by the calc v0.2-vs-v0.3 VRH comparison.
 
 ## Dependency licenses (all permissive / OSI-approved)
 

@@ -10,6 +10,12 @@ coverage 2/3 is below the line, ONE blocking coverage_below_threshold finding,
 value None, and (B) an explicit coverage_threshold 0.5 → the gapped trip-C
 group is excluded with one warning finding and the figure equals the
 clean-group values (VRM 12.44 mi / VRH 0.45 h) with exact coverage detail.
+
+VRH is pinned to the RETAINED 0.2.0 function (compute_vrh_v0_2 — per-trip
+grouping, superseded as the default by the block-aware 0.3.0 per handoff
+0003), aliased to the name below so the test bodies are byte-identical to the
+0.2.0 originals; historical submissions recompute bit-for-bit. The 0.3.0
+block goldens live in test_golden_v03.py.
 """
 
 from __future__ import annotations
@@ -18,7 +24,7 @@ from decimal import Decimal
 
 from conftest import load_positions
 
-from headway_calc.vrh import compute_vrh
+from headway_calc.vrh import compute_vrh_v0_2 as compute_vrh
 from headway_calc.vrm import compute_vrm
 
 

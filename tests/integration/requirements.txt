@@ -1,0 +1,11 @@
+# tests/integration — real-PostgreSQL integration suite dependencies.
+#
+# The suite also needs the API service itself; install both from the repo
+# root (services/api[test] already brings fastapi, httpx, psycopg, bcrypt,
+# PyJWT — this file only pins the test-runner side explicitly):
+#
+#   python -m pip install -e "services/api[test]" -r tests/integration/requirements.txt
+#
+pytest>=8
+psycopg[binary]>=3.1
+httpx>=0.27

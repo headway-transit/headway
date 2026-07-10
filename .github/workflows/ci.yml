@@ -35,6 +35,7 @@ jobs:
       go: ${{ steps.filter.outputs.go }}
       python: ${{ steps.filter.outputs.python }}
       web: ${{ steps.filter.outputs.web }}
+      integration: ${{ steps.filter.outputs.integration }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -65,6 +66,7 @@ jobs:
             echo "go=$(hit '^services/ingestion/|^scripts/license|^\.github/workflows/')"
             echo "python=$(hit '^services/(calc|transform|api)/|^db/|^scripts/license|^\.github/workflows/')"
             echo "web=$(hit '^web/|^scripts/license|^\.github/workflows/')"
+            echo "integration=$(hit '^services/api/|^db/|^tests/integration/|^\.github/workflows/')"
           } >> "$GITHUB_OUTPUT"
 
   go-ingestion:
@@ -128,6 +130,48 @@ jobs:
         run: python -m pip install pytest
       - name: pytest (static migration checks)
         run: python -m pytest -q db/test_migrations_static.py
+
+  integration-postgres:
+    # Standing protection for the 2026-07-10 autocommit bug class: the API
+    # returned 201 while psycopg3's implicit-transaction trap kept every
+    # write in a never-committed savepoint (services/api/headway_api/db.py,
+    # tests/integration/README.md). Runs the API against a REAL
+    # TimescaleDB/PostgreSQL 16 service container; the suite creates and
+    # drops its own scratch database, so this is reproducible locally
+    # against any throwaway Postgres (see tests/integration/README.md).
+    # The service is a plain Docker image (not a third-party action), so the
+    # first-party-actions-only guardrail holds.
+    name: python / api integration (real postgres)
+    needs: changes
+    if: needs.changes.outputs.integration == 'true'
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: timescale/timescaledb:latest-pg16
+        env:
+          # CI-only throwaway credential for the ephemeral service container;
+          # not a secret (the database lives only for this job).
+          POSTGRES_PASSWORD: headway-ci-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      HEADWAY_IT_ADMIN_URL: postgres://postgres:headway-ci-only@localhost:5432/postgres
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: services/api/pyproject.toml
+      - name: install API service + integration suite deps
+        run: python -m pip install -e "services/api[test]" -r tests/integration/requirements.txt
+      - name: pytest (integration, real postgres)
+        run: python -m pytest tests/integration -q
 
   web:
     name: web / build + test
@@ -210,6 +254,47 @@ jobs:
         run: npm ci
       - name: run the gate
         run: python3 scripts/license_gate.py --ecosystem all
+
+  sbom-scan:
+    # Supply-chain gate (SECURITY_ENGINEER policy; DevOps enforces): generate
+    # a source-tree Syft SBOM on every push/PR and Grype-scan it, failing on
+    # severity >= CRITICAL. Releases gate harder (>= HIGH, see release.yml):
+    # blocking every PR on high CVEs deep in the dependency tree — often with
+    # no fix released yet — would train people to bypass the gate, while a
+    # release artifact is what agencies actually deploy and is held to the
+    # stricter bar. Threshold changes are Security-role decisions.
+    #
+    # Runs unconditionally (like license-gate): dependency manifests live in
+    # every ecosystem dir, so path-filtering this job would just re-encode
+    # "run everything". anchore/* actions are pinned-major, open-source
+    # (Apache-2.0), self-hostable — the documented exception to the
+    # first-party-only rule, because they ARE the supply-chain tools.
+    name: sbom + vuln scan (source)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: syft SBOM (source, CycloneDX-JSON)
+        uses: anchore/sbom-action@v0
+        with:
+          path: .
+          format: cyclonedx-json
+          output-file: headway-source.cdx.json
+          upload-artifact: false
+          upload-release-assets: false
+      - name: upload SBOM artifact (short retention — CI evidence, not a release)
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-source-${{ github.sha }}
+          path: headway-source.cdx.json
+          retention-days: 7
+          if-no-files-found: error
+      - name: "grype scan (gate: severity >= critical for pushes/PRs)"
+        uses: anchore/scan-action@v6
+        with:
+          sbom: headway-source.cdx.json
+          fail-build: true
+          severity-cutoff: critical
+          output-format: table
 
   yaml-validate:
     name: yaml validate (compose, prometheus, workflows)

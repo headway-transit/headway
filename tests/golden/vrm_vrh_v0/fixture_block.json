@@ -1,0 +1,115 @@
+{
+  "description": "Synthetic golden BLOCK fixture for vrh_v0 0.3.0 (handoff 0003): two trips of one vehicle sharing one GTFS block, separated by a 600 s layover. See BASIS.md, calc 0.3.0 section. NOT an FTA-certified figure; regression anchor only.",
+  "gap_threshold_seconds": 300,
+  "layover_max_seconds": 1800,
+  "positions": [
+    {
+      "time": "2026-01-15T12:00:00+00:00",
+      "vehicle_id": "veh-301",
+      "trip_id": "trip-D",
+      "block_id": "blk-1",
+      "latitude": 41.0,
+      "longitude": -75.0,
+      "source_record_id": "rec-d-00"
+    },
+    {
+      "time": "2026-01-15T12:01:00+00:00",
+      "vehicle_id": "veh-301",
+      "trip_id": "trip-D",
+      "block_id": "blk-1",
+      "latitude": 41.01,
+      "longitude": -75.0,
+      "source_record_id": "rec-d-01"
+    },
+    {
+      "time": "2026-01-15T12:02:00+00:00",
+      "vehicle_id": "veh-301",
+      "trip_id": "trip-D",
+      "block_id": "blk-1",
+      "latitude": 41.02,
+      "longitude": -75.0,
+      "source_record_id": "rec-d-02"
+    },
+    {
+      "time": "2026-01-15T12:03:00+00:00",
+      "vehicle_id": "veh-301",
+      "trip_id": "trip-D",
+      "block_id": "blk-1",
+      "latitude": 41.03,
+      "longitude": -75.0,
+      "source_record_id": "rec-d-03"
+    },
+    {
+      "time": "2026-01-15T12:04:00+00:00",
+      "vehicle_id": "veh-301",
+      "trip_id": "trip-D",
+      "block_id": "blk-1",
+      "latitude": 41.04,
+      "longitude": -75.0,
+      "source_record_id": "rec-d-04"
+    },
+    {
+      "time": "2026-01-15T12:05:00+00:00",
+      "vehicle_id": "veh-301",
+      "trip_id": "trip-D",
+      "block_id": "blk-1",
+      "latitude": 41.05,
+      "longitude": -75.0,
+      "source_record_id": "rec-d-05"
+    },
+    {
+      "time": "2026-01-15T12:15:00+00:00",
+      "vehicle_id": "veh-301",
+      "trip_id": "trip-E",
+      "block_id": "blk-1",
+      "latitude": 41.05,
+      "longitude": -75.0,
+      "source_record_id": "rec-e-00"
+    },
+    {
+      "time": "2026-01-15T12:16:00+00:00",
+      "vehicle_id": "veh-301",
+      "trip_id": "trip-E",
+      "block_id": "blk-1",
+      "latitude": 41.06,
+      "longitude": -75.0,
+      "source_record_id": "rec-e-01"
+    },
+    {
+      "time": "2026-01-15T12:17:00+00:00",
+      "vehicle_id": "veh-301",
+      "trip_id": "trip-E",
+      "block_id": "blk-1",
+      "latitude": 41.07,
+      "longitude": -75.0,
+      "source_record_id": "rec-e-02"
+    },
+    {
+      "time": "2026-01-15T12:18:00+00:00",
+      "vehicle_id": "veh-301",
+      "trip_id": "trip-E",
+      "block_id": "blk-1",
+      "latitude": 41.08,
+      "longitude": -75.0,
+      "source_record_id": "rec-e-03"
+    },
+    {
+      "time": "2026-01-15T12:19:00+00:00",
+      "vehicle_id": "veh-301",
+      "trip_id": "trip-E",
+      "block_id": "blk-1",
+      "latitude": 41.09,
+      "longitude": -75.0,
+      "source_record_id": "rec-e-04"
+    },
+    {
+      "time": "2026-01-15T12:20:00+00:00",
+      "vehicle_id": "veh-301",
+      "trip_id": "trip-E",
+      "block_id": "blk-1",
+      "latitude": 41.1,
+      "longitude": -75.0,
+      "source_record_id": "rec-e-05"
+    }
+  ]
+}

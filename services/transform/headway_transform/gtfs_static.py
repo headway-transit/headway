@@ -21,7 +21,9 @@ from .model import (
 )
 
 TRANSFORM_NAME = "normalize_gtfs_static"
-TRANSFORM_VERSION = "0.1.0"
+# 0.2.0: parses trips.txt block_id (handoff 0003, block-aware VRH). New
+# version so lineage edges distinguish rows normalized with block_id support.
+TRANSFORM_VERSION = "0.2.0"
 
 INPUT_KIND = "raw.records"
 ROUTES_OUTPUT_KIND = "canonical.routes"
@@ -61,12 +63,13 @@ class CanonicalRoute:
 
 @dataclass(frozen=True)
 class CanonicalTrip:
-    """One canonical.trips row (handoff 0001)."""
+    """One canonical.trips row (handoff 0001; block_id per handoff 0003)."""
 
     trip_id: str  # TEXT PRIMARY KEY
     route_id: str  # TEXT NOT NULL REFERENCES canonical.routes
     service_id: str  # TEXT NOT NULL
     direction_id: int | None  # SMALLINT
+    block_id: str | None = None  # TEXT (migration 0011; optional per GTFS)
 
 
 def _read_csv(zf: zipfile.ZipFile, name: str) -> list[dict[str, str]]:
@@ -260,11 +263,21 @@ def normalize(
                             )
                         )
 
+                # block_id is OPTIONAL per the GTFS Schedule Reference,
+                # trips.txt (gtfs.org/documentation/schedule/reference/
+                # #tripstxt, verified 2026-07-09): "Identifies the block to
+                # which the trip belongs. A block consists of a single trip
+                # or many sequential trips made using the same vehicle,
+                # defined by shared service days and block_id." An absent
+                # column or empty value is valid GTFS → NULL, NO DQ finding.
+                block_id = (row.get("block_id") or "").strip() or None
+
                 trip = CanonicalTrip(
                     trip_id=trip_id,
                     route_id=route_id,
                     service_id=service_id,
                     direction_id=direction_id,
+                    block_id=block_id,
                 )
                 trips.append(trip)
                 edges.append(_edge(TRIPS_OUTPUT_KIND, trip.trip_id))

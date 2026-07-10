@@ -44,6 +44,12 @@ _CONSEQUENCE_BY_SEVERITY = {
         "figure; any value persisted for this run was computed WITHOUT them, "
         "with the exclusion reported in the metric value's coverage detail."
     ),
+    "info": (
+        "Info severity: documentation only — the figure stands and nothing "
+        "was excluded on account of this finding; it records a documented "
+        "limitation of the inputs (e.g. the calc 0.3.0 per-trip VRH fallback "
+        "where block_id is unavailable)."
+    ),
 }
 
 

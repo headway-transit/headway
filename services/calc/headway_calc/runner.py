@@ -1,9 +1,11 @@
 """run_period — closes the canonical→computed loop for one reporting period.
 
-Orchestration only: load canonical.vehicle_positions (headway_calc.reader),
-run the v0 calculations (compute_vrm, compute_vrh — the 0.2.0 default path,
-handoff 0002), route EVERY finding to dq.issues with its own severity
-(headway_calc.dq: warnings stay warnings, blocking stays blocking), then
+Orchestration only: load canonical.vehicle_positions (headway_calc.reader,
+block_id joined per handoff 0003), run the v0 calculations (compute_vrm at
+0.2.0, compute_vrh at 0.3.0 — the default paths, handoffs 0002/0003), route
+EVERY finding to dq.issues with its own severity
+(headway_calc.dq: infos stay info, warnings stay warnings, blocking stays
+blocking), then
 persist each result that carries NO blocking findings (headway_calc.persist —
 value + coverage detail + lineage edges; warnings persist alongside as the
 already-routed dq rows). The guardrail is structural: a result with blocking
@@ -41,6 +43,7 @@ from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 
+from headway_calc._blocks import LAYOVER_MAX_SECONDS
 from headway_calc._grouping import COVERAGE_THRESHOLD, GAP_THRESHOLD_SECONDS
 from headway_calc.dq import route_findings
 from headway_calc.persist import _METRIC_BY_CALC_NAME, persist_result
@@ -56,10 +59,10 @@ class MetricOutcome:
 
     Exactly one of the two shapes holds:
     - persisted: metric_value_id set, value set, routed_blocking_ids empty
-      (routed_warning_ids may name excluded-group warnings that persisted
+      (routed_warning_ids/routed_info_ids may name findings that persisted
       alongside the value as dq rows);
     - blocked:   metric_value_id None, value None, routed_blocking_ids
-      non-empty (warnings, if any, are routed too).
+      non-empty (warnings and infos, if any, are routed too).
 
     ``detail`` is the calculation's coverage detail (CoverageDetail.to_dict(),
     JSON-safe: ratios as strings, counts as ints) — the same object persisted
@@ -74,6 +77,7 @@ class MetricOutcome:
     metric_value_id: str | None
     routed_blocking_ids: tuple[str, ...]
     routed_warning_ids: tuple[str, ...]
+    routed_info_ids: tuple[str, ...]
     detail: dict | None
 
     @property
@@ -97,8 +101,10 @@ class MetricOutcome:
             "detail": self.detail,
             "routed_blocking_ids": list(self.routed_blocking_ids),
             "routed_warning_ids": list(self.routed_warning_ids),
+            "routed_info_ids": list(self.routed_info_ids),
             "blocking_issue_count": len(self.routed_blocking_ids),
             "warning_count": len(self.routed_warning_ids),
+            "info_count": len(self.routed_info_ids),
         }
 
 
@@ -110,6 +116,7 @@ class RunReport:
     period_end: date
     gap_threshold_seconds: float
     coverage_threshold: Decimal
+    layover_max_seconds: float
     positions_loaded: int
     outcomes: tuple[MetricOutcome, ...]
 
@@ -130,8 +137,16 @@ class RunReport:
         return sum(len(o.routed_warning_ids) for o in self.outcomes)
 
     @property
+    def routed_info_count(self) -> int:
+        return sum(len(o.routed_info_ids) for o in self.outcomes)
+
+    @property
     def routed_issue_count(self) -> int:
-        return self.routed_blocking_count + self.routed_warning_count
+        return (
+            self.routed_blocking_count
+            + self.routed_warning_count
+            + self.routed_info_count
+        )
 
     def to_dict(self) -> dict:
         return {
@@ -141,12 +156,14 @@ class RunReport:
             "gap_threshold_seconds": self.gap_threshold_seconds,
             # Decimal rendered as text (JSON-safe, never binary float).
             "coverage_threshold": str(self.coverage_threshold),
+            "layover_max_seconds": self.layover_max_seconds,
             "positions_loaded": self.positions_loaded,
             "persisted_count": self.persisted_count,
             "blocked_count": self.blocked_count,
             "routed_issue_count": self.routed_issue_count,
             "routed_blocking_count": self.routed_blocking_count,
             "routed_warning_count": self.routed_warning_count,
+            "routed_info_count": self.routed_info_count,
             "metrics": [o.to_dict() for o in self.outcomes],
         }
 
@@ -160,19 +177,23 @@ def run_period(
     period_end: date,
     gap_threshold_seconds: float | None = None,
     coverage_threshold: Decimal | float | str | None = None,
+    layover_max_seconds: float | None = None,
 ) -> RunReport:
-    """Run vrm_v0 and vrh_v0 (0.2.0) over one half-open period [start, end).
+    """Run vrm_v0 (0.2.0) and vrh_v0 (0.3.0) over one half-open period.
 
-    Loads positions via headway_calc.reader, computes both metrics under the
-    handoff-0002 gap policy (per-group exclusion + coverage; both thresholds
-    pass through and are recorded in the report), then:
-    - EVERY finding (excluded-group warnings and blocking coverage refusals)
-      is routed to dq.issues with its own severity, committed first;
+    Loads positions (block_id joined) via headway_calc.reader, computes both
+    metrics — VRM under the handoff-0002 gap policy, VRH block-aware per
+    handoff 0003 with ``layover_max_seconds`` passed through (default 1800 —
+    an ENGINEERING PLACEHOLDER; all three inputs are recorded in the report)
+    — then:
+    - EVERY finding (block_unavailable infos, excluded-group and
+      layover_exceeds_max warnings, blocking coverage refusals) is routed to
+      dq.issues with its own severity, committed first;
     - a result with blocking findings has NO computed.metric_values row
       written (never emit a certifiable value over an unresolved gap);
     - a non-blocked result is persisted via headway_calc.persist (metric
       value + coverage detail JSONB + lineage edges over included groups
-      only), its warnings standing alongside as the routed dq rows.
+      only), its warnings/infos standing alongside as the routed dq rows.
 
     Commits in two transactions, issues first (see module docstring). Any
     failure propagates after rolling back only the in-flight value phase;
@@ -188,21 +209,29 @@ def run_period(
         if coverage_threshold is None
         else Decimal(str(coverage_threshold))
     )
+    layover_max = (
+        LAYOVER_MAX_SECONDS
+        if layover_max_seconds is None
+        else float(layover_max_seconds)
+    )
     positions = load_vehicle_positions(conn, period_start, period_end)
     results: tuple[CalcResult, ...] = (
         compute_vrm(positions, threshold, cov_threshold),
-        compute_vrh(positions, threshold, cov_threshold),
+        compute_vrh(positions, threshold, cov_threshold, layover_max),
     )
 
     # Transaction 1 — fail-loudly-first: route and COMMIT every finding
-    # (warnings first, then blocking, each with its own severity) before any
-    # value is written, so DQ evidence is durable no matter what happens in
-    # the value phase.
+    # (infos, then warnings, then blocking, each with its own severity)
+    # before any value is written, so DQ evidence is durable no matter what
+    # happens in the value phase.
+    info_ids_by_calc: dict[str, tuple[str, ...]] = {}
     warning_ids_by_calc: dict[str, tuple[str, ...]] = {}
     blocking_ids_by_calc: dict[str, tuple[str, ...]] = {}
     routed_any = False
     for result in results:
-        findings = list(result.warnings) + list(result.blocking_issues)
+        findings = (
+            list(result.infos) + list(result.warnings) + list(result.blocking_issues)
+        )
         if findings:
             issue_ids = route_findings(
                 conn,
@@ -213,9 +242,15 @@ def run_period(
                 period_end,
             )
             routed_any = True
+            n_infos = len(result.infos)
             n_warnings = len(result.warnings)
-            warning_ids_by_calc[result.calc_name] = tuple(issue_ids[:n_warnings])
-            blocking_ids_by_calc[result.calc_name] = tuple(issue_ids[n_warnings:])
+            info_ids_by_calc[result.calc_name] = tuple(issue_ids[:n_infos])
+            warning_ids_by_calc[result.calc_name] = tuple(
+                issue_ids[n_infos : n_infos + n_warnings]
+            )
+            blocking_ids_by_calc[result.calc_name] = tuple(
+                issue_ids[n_infos + n_warnings :]
+            )
     if routed_any:
         conn.commit()
 
@@ -227,6 +262,7 @@ def run_period(
     try:
         for result in results:
             detail = None if result.detail is None else result.detail.to_dict()
+            info_ids = info_ids_by_calc.get(result.calc_name, ())
             warning_ids = warning_ids_by_calc.get(result.calc_name, ())
             blocking_ids = blocking_ids_by_calc.get(result.calc_name, ())
             if result.blocking_issues:
@@ -240,6 +276,7 @@ def run_period(
                         metric_value_id=None,
                         routed_blocking_ids=blocking_ids,
                         routed_warning_ids=warning_ids,
+                        routed_info_ids=info_ids,
                         detail=detail,
                     )
                 )
@@ -258,6 +295,7 @@ def run_period(
                         metric_value_id=metric_value_id,
                         routed_blocking_ids=(),
                         routed_warning_ids=warning_ids,
+                        routed_info_ids=info_ids,
                         detail=detail,
                     )
                 )
@@ -272,6 +310,7 @@ def run_period(
         period_end=period_end,
         gap_threshold_seconds=threshold,
         coverage_threshold=cov_threshold,
+        layover_max_seconds=layover_max,
         positions_loaded=len(positions),
         outcomes=tuple(outcomes),
     )

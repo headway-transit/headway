@@ -1,8 +1,9 @@
 """Unit tests for headway_calc.reader with the recording fake connection.
 
-Asserts the SQL shape (columns exactly per handoff 0001, half-open bounds,
-deterministic ORDER BY), the UTC-datetime parameter binding, and the row →
-VehiclePosition mapping. No live database.
+Asserts the SQL shape (columns per handoff 0001 plus the trips.block_id LEFT
+JOIN per handoff 0003, half-open bounds, deterministic ORDER BY), the
+UTC-datetime parameter binding, and the row → VehiclePosition mapping. No
+live database.
 """
 
 from __future__ import annotations
@@ -27,6 +28,7 @@ def _sample_rows():
             40.0,
             -75.0,
             "rec-a-00",
+            "blk-1",
         ),
         (
             datetime(2026, 1, 15, 12, 1, tzinfo=timezone.utc),
@@ -35,6 +37,7 @@ def _sample_rows():
             40.01,
             -75.0,
             "rec-x-00",
+            None,  # LEFT JOIN: no trip, no block — NULL, never a dropped row
         ),
     ]
 
@@ -51,21 +54,26 @@ def test_reader_maps_rows_to_dataclasses():
     assert first.latitude == 40.0
     assert first.longitude == -75.0
     assert first.source_record_id == "rec-a-00"
+    assert first.block_id == "blk-1"  # joined from canonical.trips
     assert positions[1].trip_id is None  # None passes through untouched
+    assert positions[1].block_id is None
 
 
-def test_reader_sql_columns_and_order_match_handoff():
+def test_reader_sql_columns_join_and_order_match_handoffs():
     conn = RecordingConnection(position_rows=[])
     load_vehicle_positions(conn, PERIOD_START, PERIOD_END)
 
     assert len(conn.executed) == 1
     sql, _ = conn.executed[0]
     assert (
-        "SELECT time, vehicle_id, trip_id, latitude, longitude, source_record_id"
-        in sql
+        "SELECT p.time, p.vehicle_id, p.trip_id, p.latitude, p.longitude, "
+        "p.source_record_id, t.block_id" in sql
     )
-    assert "FROM canonical.vehicle_positions" in sql
-    assert "ORDER BY vehicle_id, time, source_record_id" in sql
+    assert "FROM canonical.vehicle_positions AS p" in sql
+    # Handoff 0003: block_id joined from canonical.trips — LEFT JOIN so an
+    # unassigned/unknown trip yields NULL, never a dropped position row.
+    assert "LEFT JOIN canonical.trips AS t ON t.trip_id = p.trip_id" in sql
+    assert "ORDER BY p.vehicle_id, p.time, p.source_record_id" in sql
 
 
 def test_reader_uses_half_open_utc_bounds():
@@ -74,7 +82,7 @@ def test_reader_uses_half_open_utc_bounds():
 
     sql, params = conn.executed[0]
     # Half-open: inclusive lower bound, EXCLUSIVE upper bound.
-    assert "WHERE time >= %s AND time < %s" in sql
+    assert "WHERE p.time >= %s AND p.time < %s" in sql
     assert "<=" not in sql.split("WHERE", 1)[1]
     # DATE bounds bound as timezone-aware UTC midnights, never naive/dates —
     # the comparison must not depend on the DB session time zone.

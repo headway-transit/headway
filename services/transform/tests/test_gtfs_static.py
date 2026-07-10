@@ -50,6 +50,9 @@ def test_routes_and_trips_normalized_with_edges() -> None:
         ("T2", "R1", "WKDY", 1),
         ("T3", "R2", "SAT", None),
     ]
+    # block_id is OPTIONAL per GTFS: an absent column is valid — NULL on every
+    # row and NO DQ finding (asserted above: findings == []).
+    assert [t.block_id for t in trips] == [None, None, None]
 
     # Exactly one lineage edge per canonical row, anchored to the feed record.
     assert len(edges) == len(routes) + len(trips)
@@ -59,9 +62,31 @@ def test_routes_and_trips_normalized_with_edges() -> None:
     assert sorted(e.output_id for e in trip_edges) == ["T1", "T2", "T3"]
     for edge in edges:
         assert edge.transform_name == TRANSFORM_NAME == "normalize_gtfs_static"
-        assert edge.transform_version == TRANSFORM_VERSION == "0.1.0"
+        assert edge.transform_version == TRANSFORM_VERSION == "0.2.0"
         assert edge.input_kind == "raw.records"
         assert edge.input_id == RECORD_ID
+
+
+def test_trips_block_id_parsed_when_column_present() -> None:
+    """block_id column (handoff 0003): non-empty values parsed, empty → NULL,
+    never a DQ finding — the field is optional per the GTFS spec."""
+    trips_txt = (
+        "trip_id,route_id,service_id,direction_id,block_id\n"
+        "T1,R1,WKDY,0,B-77\n"
+        "T2,R1,WKDY,1,B-77\n"
+        "T3,R2,SAT,, \n"  # whitespace-only block_id → NULL, no finding
+    )
+    _routes, trips, edges, findings = normalize(
+        build_zip({"routes.txt": ROUTES_TXT, "trips.txt": trips_txt}), RECORD_ID
+    )
+
+    assert findings == []
+    assert [(t.trip_id, t.block_id) for t in trips] == [
+        ("T1", "B-77"),
+        ("T2", "B-77"),
+        ("T3", None),
+    ]
+    assert len([e for e in edges if e.output_kind == "canonical.trips"]) == 3
 
 
 def test_unknown_route_type_gets_mode_unknown_plus_finding() -> None:

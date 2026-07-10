@@ -64,6 +64,19 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
             "value used is recorded in the RunReport."
         ),
     )
+    parser.add_argument(
+        "--layover-max-seconds",
+        type=float,
+        default=None,
+        help=(
+            "Override the maximum inter-trip interval counted as layover "
+            "within a block for vrh_v0 0.3.0 (default: the library default, "
+            "1800s — an ENGINEERING PLACEHOLDER pending observed layover "
+            "distributions; see REGULATORY_TRACKER.md). An over-cap interval "
+            "is not counted and raises a layover_exceeds_max warning dq "
+            "issue. The value used is recorded in the RunReport."
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -92,6 +105,7 @@ def main(argv: list[str] | None = None) -> int:
             period_end=args.period_end,
             gap_threshold_seconds=args.gap_threshold_seconds,
             coverage_threshold=args.coverage_threshold,
+            layover_max_seconds=args.layover_max_seconds,
         )
 
     print(report.to_json())

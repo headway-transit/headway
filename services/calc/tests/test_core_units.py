@@ -10,6 +10,7 @@ import pytest
 
 from headway_calc.distance import EARTH_RADIUS_MILES, haversine_miles, miles_to_decimal
 from headway_calc.types import (
+    BlockCoverageDetail,
     BlockingIssue,
     CalcResult,
     CoverageDetail,
@@ -144,6 +145,87 @@ def test_calc_result_rejects_blocking_severity_in_warnings():
             blocking_issues=(),
             warnings=(BlockingIssue("telemetry_gap", "t", "d", ("rec-1",)),),
         )
+
+
+# --- 0.3.0 additions: info severity, infos field, block detail (handoff 0003)
+
+
+def _info():
+    return Finding(
+        "block_unavailable", "t", "d", ("rec-a-00",), severity="info"
+    )
+
+
+def test_finding_accepts_info_severity():
+    assert _info().severity == "info"
+
+
+def test_vehicle_position_block_id_defaults_to_none():
+    t = datetime(2026, 1, 15, 12, 0, 0, tzinfo=timezone.utc)
+    assert VehiclePosition(t, "veh-1", "trip-A", 40.0, -75.0, "rec-1").block_id is None
+    carried = VehiclePosition(t, "veh-1", "trip-A", 40.0, -75.0, "rec-1", "blk-1")
+    assert carried.block_id == "blk-1"
+
+
+def test_calc_result_allows_value_alongside_infos():
+    """Info findings never force value=None — they document, not exclude."""
+    result = CalcResult(
+        value=Decimal("0.45"),
+        unit="hours",
+        calc_name="vrh_v0",
+        calc_version="0.3.0",
+        input_record_ids=("rec-a-00",),
+        blocking_issues=(),
+        infos=(_info(),),
+    )
+    assert result.value == Decimal("0.45")
+
+
+def test_calc_result_rejects_non_info_severity_in_infos():
+    with pytest.raises(ValueError, match="infos"):
+        CalcResult(
+            value=Decimal("0.45"),
+            unit="hours",
+            calc_name="vrh_v0",
+            calc_version="0.3.0",
+            input_record_ids=(),
+            blocking_issues=(),
+            infos=(_warning(),),
+        )
+
+
+def test_calc_result_rejects_info_severity_in_warnings():
+    with pytest.raises(ValueError, match="warnings"):
+        CalcResult(
+            value=Decimal("0.45"),
+            unit="hours",
+            calc_name="vrh_v0",
+            calc_version="0.3.0",
+            input_record_ids=(),
+            blocking_issues=(),
+            warnings=(_info(),),
+        )
+
+
+def test_block_coverage_detail_to_dict_adds_layover_max_seconds():
+    detail = BlockCoverageDetail(
+        coverage=Decimal("1.0000"),
+        total_groups=1,
+        excluded_groups=0,
+        clean_position_share=Decimal("1.0000"),
+        gap_threshold_seconds=300.0,
+        coverage_threshold=Decimal("0.95"),
+        layover_max_seconds=1800.0,
+    )
+    assert detail.to_dict() == {
+        "coverage": "1.0000",
+        "total_groups": 1,
+        "excluded_groups": 0,
+        "clean_position_share": "1.0000",
+        "gap_threshold_seconds": 300.0,
+        "coverage_threshold": "0.95",
+        "layover_max_seconds": 1800.0,
+    }
 
 
 def test_coverage_detail_to_dict_renders_ratios_as_strings():

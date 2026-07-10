@@ -13,8 +13,9 @@ from decimal import Decimal
 #: Finding severities — mirror dq.issues.severity exactly.
 SEVERITY_BLOCKING = "blocking"
 SEVERITY_WARNING = "warning"
+SEVERITY_INFO = "info"
 
-_ALLOWED_SEVERITIES = (SEVERITY_BLOCKING, SEVERITY_WARNING)
+_ALLOWED_SEVERITIES = (SEVERITY_BLOCKING, SEVERITY_WARNING, SEVERITY_INFO)
 
 
 @dataclass(frozen=True)
@@ -26,7 +27,11 @@ class VehiclePosition:
     unassigned — v0 calculations treat trip assignment as the revenue-service
     proxy and simply exclude unassigned positions (documented approximation).
     ``source_record_id`` is the content-addressed raw record id this position
-    derives from; it feeds the lineage graph (ADR-0007).
+    derives from; it feeds the lineage graph (ADR-0007). ``block_id`` is the
+    trip's GTFS block (joined from canonical.trips by the reader — handoff
+    0003, calc vrh_v0 0.3.0); None when the position is unassigned or the feed
+    omits the optional field, in which case VRH falls back to per-trip
+    grouping.
     """
 
     time: datetime
@@ -35,6 +40,7 @@ class VehiclePosition:
     latitude: float
     longitude: float
     source_record_id: str
+    block_id: str | None = None
 
     def __post_init__(self) -> None:
         if self.time.tzinfo is None or self.time.utcoffset() is None:
@@ -65,7 +71,12 @@ class Finding:
       number). E.g. 0.1.0's 'telemetry_gap', 0.2.0's 'coverage_below_threshold'.
     - ``'warning'`` — documented and owned, but the figure stands. E.g. 0.2.0's
       'telemetry_gap_excluded': a gapped (vehicle_id, trip_id) group excluded
-      from the summed figure, reported via coverage.
+      from the summed figure, reported via coverage; 0.3.0's
+      'layover_exceeds_max': an over-cap inter-trip interval not counted.
+    - ``'info'`` — documented context only; the figure stands and nothing was
+      excluded on account of the finding. E.g. 0.3.0's 'block_unavailable':
+      NULL-block trips fell back to per-trip VRH grouping (documented
+      undercount — layover time between those trips is not counted).
 
     ``source_record_ids`` identifies the raw records bounding/causing the
     finding. For an excluded group this is ALL of that group's records —
@@ -123,17 +134,39 @@ class CoverageDetail:
 
 
 @dataclass(frozen=True)
+class BlockCoverageDetail(CoverageDetail):
+    """Coverage detail of one calc-0.3.0 block-aware VRH run (handoff 0003).
+
+    Same coverage machinery as CoverageDetail — groups are now VRH block
+    groups (a vehicle's trips sharing a block_id, or per-trip fallbacks where
+    block_id is NULL) — plus the run's ``layover_max_seconds`` (explicit
+    input, default 1800 — an ENGINEERING PLACEHOLDER, not an FTA number) for
+    provenance, exactly as gap_threshold_seconds is carried.
+    """
+
+    layover_max_seconds: float
+
+    def to_dict(self) -> dict:
+        detail = super().to_dict()
+        detail["layover_max_seconds"] = self.layover_max_seconds
+        return detail
+
+
+@dataclass(frozen=True)
 class CalcResult:
     """The output of one calculation run.
 
     ``value`` is a Decimal (never float) — or None when ``blocking_issues`` is
     non-empty: a calculation never emits a certifiable value over an unresolved
     gap. The invariant binds BLOCKING findings only: ``warnings`` (severity
-    'warning', e.g. 0.2.0's excluded-group findings) coexist with a value.
+    'warning', e.g. 0.2.0's excluded-group findings) and ``infos`` (severity
+    'info', e.g. 0.3.0's 'block_unavailable' fallback documentation) coexist
+    with a value.
     ``input_record_ids`` lists the source_record_ids actually consumed by the
     figure, in deterministic order — these feed lineage.edges (one edge per
     id); records of excluded groups appear ONLY in their warning findings.
-    ``detail`` carries the 0.2.0 coverage detail (None for 0.1.0 results).
+    ``detail`` carries the 0.2.0 coverage detail (a BlockCoverageDetail for
+    0.3.0 block-aware VRH; None for 0.1.0 results).
     """
 
     value: Decimal | None
@@ -143,6 +176,7 @@ class CalcResult:
     input_record_ids: tuple[str, ...]
     blocking_issues: tuple[Finding, ...]
     warnings: tuple[Finding, ...] = ()
+    infos: tuple[Finding, ...] = ()
     detail: CoverageDetail | None = None
 
     def __post_init__(self) -> None:
@@ -167,5 +201,12 @@ class CalcResult:
                 raise ValueError(
                     f"CalcResult.warnings must all carry severity "
                     f"'{SEVERITY_WARNING}'; got {finding.severity!r} "
+                    f"(issue_type={finding.issue_type!r})"
+                )
+        for finding in self.infos:
+            if finding.severity != SEVERITY_INFO:
+                raise ValueError(
+                    f"CalcResult.infos must all carry severity "
+                    f"'{SEVERITY_INFO}'; got {finding.severity!r} "
                     f"(issue_type={finding.issue_type!r})"
                 )

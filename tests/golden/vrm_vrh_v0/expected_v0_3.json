@@ -1,0 +1,93 @@
+{
+  "basis": "Synthetic hand-worked example (see BASIS.md, calc 0.3.0 section). NOT an FTA-certified figure; regression anchor only. Pins vrh_v0 CALC_VERSION 0.3.0 (block-aware layover inclusion, handoff 0003) over fixture_block.json, with the 0.2.0 comparison values on the SAME positions.",
+  "block_fixture": {
+    "comment": "One vehicle (veh-301), one block (blk-1), two clean trips (trip-D, trip-E) with a 600 s inter-trip layover. v0.3 groups the block as ONE VRH group and INCLUDES the 600 s (<= layover_max_seconds 1800); the retained v0.2 per-trip grouping EXCLUDES it. VRM stays 0.2.0: layover miles are N/A per Exhibit 35.",
+    "vrh_v0_3": {
+      "value": "0.33",
+      "unit": "hours",
+      "detail": {
+        "coverage": "1.0000",
+        "total_groups": 1,
+        "excluded_groups": 0,
+        "clean_position_share": "1.0000",
+        "gap_threshold_seconds": 300.0,
+        "coverage_threshold": "0.95",
+        "layover_max_seconds": 1800.0
+      },
+      "input_record_ids": [
+        "rec-d-00",
+        "rec-d-01",
+        "rec-d-02",
+        "rec-d-03",
+        "rec-d-04",
+        "rec-d-05",
+        "rec-e-00",
+        "rec-e-01",
+        "rec-e-02",
+        "rec-e-03",
+        "rec-e-04",
+        "rec-e-05"
+      ]
+    },
+    "vrh_v0_2_comparison": {
+      "comment": "compute_vrh_v0_2 over the identical positions: per-trip grouping drops the 600 s layover — 0.33 h - 0.17 h ~= the 600 s (0.1666... h) recovered by v0.3.",
+      "value": "0.17",
+      "unit": "hours",
+      "total_groups": 2
+    },
+    "vrm_v0_2": {
+      "comment": "VRM is unchanged at 0.2.0 (layover miles N/A per Exhibit 35): 10 meridian legs of 0.01 degrees.",
+      "value": "6.91",
+      "unit": "miles"
+    }
+  },
+  "original_fixture_fallback": {
+    "comment": "The ORIGINAL fixture.json clean subset (trip-A + trip-B, no block_id anywhere) under v0.3: per-trip fallback reproduces the 0.2.0 value exactly, plus one block_unavailable INFO finding per vehicle-day.",
+    "vrh_value": "0.45",
+    "infos": [
+      {
+        "issue_type": "block_unavailable",
+        "severity": "info",
+        "vehicle_id": "veh-101",
+        "source_record_ids": [
+          "rec-a-00",
+          "rec-a-01",
+          "rec-a-02",
+          "rec-a-03",
+          "rec-a-04",
+          "rec-a-05",
+          "rec-a-06",
+          "rec-a-07",
+          "rec-a-08",
+          "rec-a-09"
+        ]
+      },
+      {
+        "issue_type": "block_unavailable",
+        "severity": "info",
+        "vehicle_id": "veh-202",
+        "source_record_ids": [
+          "rec-b-00",
+          "rec-b-01",
+          "rec-b-02",
+          "rec-b-03",
+          "rec-b-04",
+          "rec-b-05",
+          "rec-b-06",
+          "rec-b-07",
+          "rec-b-08",
+          "rec-b-09"
+        ]
+      }
+    ],
+    "detail": {
+      "coverage": "1.0000",
+      "total_groups": 2,
+      "excluded_groups": 0,
+      "clean_position_share": "1.0000",
+      "gap_threshold_seconds": 300.0,
+      "coverage_threshold": "0.95",
+      "layover_max_seconds": 1800.0
+    }
+  }
+}

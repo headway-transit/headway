@@ -6,6 +6,11 @@ groups alone), excluding a group never increases the figure, coverage stays
 in [0, 1], results are deterministic, and blocking findings imply value=None
 (the certifiability line, exact at the threshold). Hypothesis is test-only —
 the library itself contains no randomness.
+
+VRH is pinned to the RETAINED 0.2.0 function (compute_vrh_v0_2 — superseded
+as the default by the block-aware 0.3.0 per handoff 0003), aliased to the
+name below so the test bodies are byte-identical to the 0.2.0 originals. The
+0.3.0 invariants live in test_properties_v03.py.
 """
 
 from __future__ import annotations
@@ -18,7 +23,7 @@ from hypothesis import strategies as st
 
 from headway_calc._grouping import GAP_THRESHOLD_SECONDS
 from headway_calc.types import VehiclePosition
-from headway_calc.vrh import compute_vrh
+from headway_calc.vrh import compute_vrh_v0_2 as compute_vrh
 from headway_calc.vrm import compute_vrm
 
 T0 = datetime(2026, 1, 15, 12, 0, 0, tzinfo=timezone.utc)

@@ -1,0 +1,209 @@
+# Headway release pipeline — SBOM + vulnerability gate + keyless signing.
+#
+# Trigger: version tags (v*.*.*). No artifact is published without:
+#   1. SBOMs (Syft via anchore/sbom-action) in BOTH CycloneDX-JSON and
+#      SPDX-JSON, for the repo source tree AND every built image;
+#   2. a passing Grype vulnerability scan (anchore/scan-action) — the scan
+#      runs BEFORE the image is pushed, so a failing gate means nothing
+#      reaches the registry;
+#   3. a Cosign keyless signature (GitHub OIDC) + a CycloneDX SBOM
+#      attestation attached to the image in ghcr.io.
+# SBOMs are also uploaded as assets on the GitHub release.
+#
+# Scan threshold (SECURITY_ENGINEER role policy — DevOps enforces, does not
+# set): releases fail on severity >= HIGH. CI pushes/PRs gate at CRITICAL
+# (see ci.yml `sbom-scan`) so day-to-day merges are not blocked by the
+# background stream of not-yet-fixable high CVEs deep in the tree, but a
+# release artifact — the thing an agency actually deploys — is held to the
+# stricter bar. Changing either threshold is a Security-role decision,
+# recorded in security/control-mapping/, not a pipeline tweak.
+#
+# Action policy: ci.yml is first-party-actions-only. This workflow adds
+# exactly three pinned, open-source (Apache-2.0), non-proprietary actions
+# that ARE the supply-chain tools themselves — anchore/sbom-action (Syft),
+# anchore/scan-action (Grype), sigstore/cosign-installer — all runnable
+# self-hosted. Release creation/asset upload uses the gh CLI (no
+# third-party release action). Majors are pinned per repo convention.
+#
+# scripts/sbom_local.sh reproduces the SBOM+scan half of this pipeline
+# locally via the official syft/grype container images.
+
+name: release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: read
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAMESPACE: ghcr.io/headway-transit
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false # never cancel a half-published release
+
+jobs:
+  # ---------------------------------------------------------------- source
+  source-sbom:
+    name: sbom + scan / source tree
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: syft SBOM (source, CycloneDX-JSON)
+        uses: anchore/sbom-action@v0
+        with:
+          path: .
+          format: cyclonedx-json
+          output-file: headway-source-${{ github.ref_name }}.cdx.json
+          upload-artifact: false
+          upload-release-assets: false
+
+      - name: syft SBOM (source, SPDX-JSON)
+        uses: anchore/sbom-action@v0
+        with:
+          path: .
+          format: spdx-json
+          output-file: headway-source-${{ github.ref_name }}.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+
+      - name: "grype scan (gate: severity >= high — Security-role policy)"
+        uses: anchore/scan-action@v6
+        with:
+          sbom: headway-source-${{ github.ref_name }}.cdx.json
+          fail-build: true
+          severity-cutoff: high
+          output-format: table
+
+      - name: upload source SBOMs for the release job
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-source
+          path: headway-source-${{ github.ref_name }}.*.json
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------- images
+  # Matrix-ready: add future services as new include entries; each gets the
+  # same build -> SBOM -> scan-gate -> push -> sign -> attest sequence.
+  image:
+    name: image / ${{ matrix.service }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write # push to ghcr.io
+      id-token: write # cosign keyless signing via GitHub OIDC
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - service: ingestion
+            context: services/ingestion
+            image: headway-ingestion
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: docker build
+        run: |
+          set -euo pipefail
+          docker build \
+            -t "${IMAGE_NAMESPACE}/${{ matrix.image }}:${{ github.ref_name }}" \
+            "${{ matrix.context }}"
+
+      - name: syft SBOM (image, CycloneDX-JSON)
+        uses: anchore/sbom-action@v0
+        with:
+          image: ${{ env.IMAGE_NAMESPACE }}/${{ matrix.image }}:${{ github.ref_name }}
+          format: cyclonedx-json
+          output-file: ${{ matrix.image }}-image-${{ github.ref_name }}.cdx.json
+          upload-artifact: false
+          upload-release-assets: false
+
+      - name: syft SBOM (image, SPDX-JSON)
+        uses: anchore/sbom-action@v0
+        with:
+          image: ${{ env.IMAGE_NAMESPACE }}/${{ matrix.image }}:${{ github.ref_name }}
+          format: spdx-json
+          output-file: ${{ matrix.image }}-image-${{ github.ref_name }}.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+
+      - name: "grype scan (gate: severity >= high — Security-role policy)"
+        # Runs BEFORE push: a red gate means the image never reaches ghcr.
+        uses: anchore/scan-action@v6
+        with:
+          sbom: ${{ matrix.image }}-image-${{ github.ref_name }}.cdx.json
+          fail-build: true
+          severity-cutoff: high
+          output-format: table
+
+      - name: push to ghcr
+        run: |
+          set -euo pipefail
+          echo "${{ secrets.GITHUB_TOKEN }}" \
+            | docker login "${REGISTRY}" -u "${{ github.actor }}" --password-stdin
+          docker push "${IMAGE_NAMESPACE}/${{ matrix.image }}:${{ github.ref_name }}"
+
+      - uses: sigstore/cosign-installer@v3
+
+      - name: cosign sign + attach SBOM attestation (keyless, GitHub OIDC)
+        # Keyless: the signing identity is this workflow's OIDC token —
+        # no long-lived key to manage or leak. Verification command and the
+        # expected identity/issuer are documented in docs/supply-chain.md.
+        # Sign the immutable digest, never the movable tag.
+        run: |
+          set -euo pipefail
+          DIGEST_REF="$(docker inspect --format='{{index .RepoDigests 0}}' \
+            "${IMAGE_NAMESPACE}/${{ matrix.image }}:${{ github.ref_name }}")"
+          echo "signing ${DIGEST_REF}"
+          cosign sign --yes "${DIGEST_REF}"
+          cosign attest --yes \
+            --type cyclonedx \
+            --predicate "${{ matrix.image }}-image-${{ github.ref_name }}.cdx.json" \
+            "${DIGEST_REF}"
+          echo "verifying signature (fail loudly if signing did not stick)"
+          cosign verify \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            --certificate-identity-regexp \
+              "^https://github.com/${{ github.repository }}/\.github/workflows/release\.yml@${{ github.ref }}$" \
+            "${DIGEST_REF}"
+
+      - name: upload image SBOMs for the release job
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-image-${{ matrix.service }}
+          path: ${{ matrix.image }}-image-${{ github.ref_name }}.*.json
+          if-no-files-found: error
+
+  # --------------------------------------------------------------- release
+  release:
+    name: github release + SBOM assets
+    needs: [source-sbom, image]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the release and upload assets
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: download all SBOMs
+        uses: actions/download-artifact@v4
+        with:
+          pattern: sbom-*
+          path: dist/sbom
+          merge-multiple: true
+
+      - name: create release and attach SBOMs (gh CLI, no third-party action)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          ls -l dist/sbom
+          TAG="${{ github.ref_name }}"
+          gh release create "$TAG" \
+            --verify-tag \
+            --title "Headway $TAG" \
+            --notes "Headway $TAG. Images: ${IMAGE_NAMESPACE}/headway-ingestion:$TAG (Cosign keyless-signed, CycloneDX SBOM attested — see docs/supply-chain.md for the verify command). SBOMs (CycloneDX + SPDX, source and image) attached below." \
+            dist/sbom/*.json

@@ -55,7 +55,7 @@ def test_insert_raw_record_object_ref_sets_payload_ref(fake_connection) -> None:
 def test_upsert_routes_and_trips_sql(fake_connection) -> None:
     writer = DbWriter(fake_connection)
     writer.upsert_routes([CanonicalRoute("R1", "5", "Fifth St", "bus")])
-    writer.upsert_trips([CanonicalTrip("T1", "R1", "WKDY", 0)])
+    writer.upsert_trips([CanonicalTrip("T1", "R1", "WKDY", 0, "B-77")])
 
     route_sql, route_params = fake_connection.sql_for("canonical.routes")[0]
     assert "ON CONFLICT (route_id) DO UPDATE" in route_sql
@@ -63,7 +63,15 @@ def test_upsert_routes_and_trips_sql(fake_connection) -> None:
 
     trip_sql, trip_params = fake_connection.sql_for("canonical.trips")[0]
     assert "ON CONFLICT (trip_id) DO UPDATE" in trip_sql
-    assert trip_params == ("T1", "R1", "WKDY", 0)
+    assert "block_id     = EXCLUDED.block_id" in trip_sql
+    assert trip_params == ("T1", "R1", "WKDY", 0, "B-77")
+
+
+def test_upsert_trip_without_block_id_binds_null(fake_connection) -> None:
+    """Feeds omitting the optional block_id upsert NULL (backfill-safe)."""
+    DbWriter(fake_connection).upsert_trips([CanonicalTrip("T2", "R1", "WKDY", 1)])
+    _sql, params = fake_connection.sql_for("canonical.trips")[0]
+    assert params == ("T2", "R1", "WKDY", 1, None)
 
 
 def test_insert_vehicle_positions_conflict_do_nothing_on_unique_key(

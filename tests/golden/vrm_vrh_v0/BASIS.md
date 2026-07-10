@@ -115,3 +115,65 @@ included groups — exactly the clean-subset values hand-worked above:
 The 0.1.0 expectations above are untouched: they pin the retained
 `compute_vrm_v0_1`/`compute_vrh_v0_1` functions (all-or-nothing gap refusal)
 so historical submissions recompute bit-for-bit.
+
+## Calc 0.3.0 — block-aware VRH: layover inclusion (`fixture_block.json`, `expected_v0_3.json`)
+
+`vrh_v0` **CALC_VERSION 0.3.0** (handoff 0003, closing divergence D1: the FTA
+INCLUDES layover/recovery time in VRH — 2026 NTD Policy Manual, Exhibit 35,
+p. 133): a vehicle's trips sharing a GTFS `block_id` form ONE VRH group, and
+the inter-trip interval is included up to `layover_max_seconds` (default
+1800 — an **ENGINEERING PLACEHOLDER**, not an FTA number). New fixture
+`fixture_block.json`; the 0.1.0/0.2.0 fixtures and expectations above are
+byte-identical and untouched.
+
+### Block fixture layout
+
+One vehicle `veh-301`, one block `blk-1`, two clean trips, all positions on
+the −75.0 meridian in +0.01° lat steps (same geometry as trip-A):
+
+| Trip | Positions | Times (UTC) | Latitudes |
+|---|---|---|---|
+| `trip-D` | 6 (`rec-d-00`..`rec-d-05`) | 12:00:00 → 12:05:00, 60 s spacing | 41.00 → 41.05 |
+| `trip-E` | 6 (`rec-e-00`..`rec-e-05`) | 12:15:00 → 12:20:00, 60 s spacing | 41.05 → 41.10 |
+
+Inter-trip interval: `rec-d-05` (12:05:00) → `rec-e-00` (12:15:00) =
+**600 s** — layover by definition (same vehicle, same block), and
+`600 ≤ layover_max_seconds = 1800`, so v0.3 counts it.
+
+### Hand computation — VRH v0.3 (block group)
+
+- trip-D running time: 5 deltas × 60 s = 300 s
+- layover (in-block inter-trip interval): **600 s, INCLUDED**
+- trip-E running time: 5 deltas × 60 s = 300 s
+- total: 300 + 600 + 300 = 1200 s = 1200/3600 h = 0.3333… → quantized
+  (0.01 h, ROUND_HALF_EVEN) = **`0.33` hours**
+
+Coverage: one block group, clean → `total_groups = 1`, `coverage = 1.0000`,
+`clean_position_share = 1.0000`; detail additionally carries
+`layover_max_seconds: 1800.0` (provenance for the explicit input).
+
+### Hand comparison — retained VRH v0.2 over the SAME positions
+
+Per-(vehicle, trip) grouping drops the inter-trip time:
+
+- trip-D: 300 s; trip-E: 300 s; layover: **dropped**
+- total: 600 s = 600/3600 = 0.1666… → quantized **`0.17` hours**
+
+The v0.3 − v0.2 delta, 0.33 − 0.17 = 0.16 h ≈ the 600 s (0.1666… h) of
+layover recovered — the documented D1 undercount on this fixture.
+
+### Hand computation — VRM (unchanged at 0.2.0)
+
+Layover *miles* are N/A per Exhibit 35, so VRM keeps per-trip grouping: 10
+meridian legs of 0.01° = `10 × 0.69093419 = 6.9093419 mi` → quantized
+**`6.91` miles** (leg length as derived in the 0.1.0 section above).
+
+### Fallback on the ORIGINAL fixture (no block_id)
+
+`fixture.json` carries no `block_id`, so under v0.3 every trip is its own
+group (0.2.0 semantics): the clean subset (trip-A + trip-B) still totals
+**`0.45` hours** with full coverage, plus one **info** finding
+`block_unavailable` per affected vehicle-day (veh-101/2026-01-15 citing
+`rec-a-*`; veh-202/2026-01-15 citing `rec-b-*`) — the documented undercount;
+the figure stands.
+

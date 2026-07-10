@@ -31,6 +31,9 @@ def load_positions(raw: dict) -> list[VehiclePosition]:
             latitude=p["latitude"],
             longitude=p["longitude"],
             source_record_id=p["source_record_id"],
+            # block_id (handoff 0003) is absent from the pre-0.3.0 fixtures:
+            # None, exactly like a feed omitting the optional GTFS field.
+            block_id=p.get("block_id"),
         )
         for p in raw["positions"]
     ]
@@ -53,13 +56,36 @@ def golden_expected_v0_2() -> dict:
     return json.loads((GOLDEN_DIR / "expected_v0_2.json").read_text())
 
 
+@pytest.fixture(scope="session")
+def golden_block_fixture() -> dict:
+    """Block fixture for vrh_v0 0.3.0 (handoff 0003): two trips in one block
+    with a 600 s layover — see BASIS.md, calc 0.3.0 section."""
+    return json.loads((GOLDEN_DIR / "fixture_block.json").read_text())
+
+
+@pytest.fixture(scope="session")
+def golden_expected_v0_3() -> dict:
+    """Expectations for CALC_VERSION 0.3.0 (block-aware layover inclusion)
+    over fixture_block.json — see BASIS.md, calc 0.3.0 section."""
+    return json.loads((GOLDEN_DIR / "expected_v0_3.json").read_text())
+
+
 def positions_to_rows(positions: list[VehiclePosition]) -> list[tuple]:
-    """Render VehiclePositions as canonical.vehicle_positions result rows,
-    in the reader's SQL order (vehicle_id, time, source_record_id) — the fake
-    stands in for the database, so it honors the ORDER BY."""
+    """Render VehiclePositions as reader result rows (the handoff-0001
+    canonical.vehicle_positions columns plus the trips.block_id join, handoff
+    0003), in the reader's SQL order (vehicle_id, time, source_record_id) —
+    the fake stands in for the database, so it honors the ORDER BY."""
     ordered = sorted(positions, key=lambda p: (p.vehicle_id, p.time, p.source_record_id))
     return [
-        (p.time, p.vehicle_id, p.trip_id, p.latitude, p.longitude, p.source_record_id)
+        (
+            p.time,
+            p.vehicle_id,
+            p.trip_id,
+            p.latitude,
+            p.longitude,
+            p.source_record_id,
+            p.block_id,
+        )
         for p in ordered
     ]
 

@@ -58,12 +58,13 @@ SET short_name = EXCLUDED.short_name,
 """.strip()
 
 UPSERT_TRIP_SQL = """
-INSERT INTO canonical.trips (trip_id, route_id, service_id, direction_id)
-VALUES (%s, %s, %s, %s)
+INSERT INTO canonical.trips (trip_id, route_id, service_id, direction_id, block_id)
+VALUES (%s, %s, %s, %s, %s)
 ON CONFLICT (trip_id) DO UPDATE
 SET route_id     = EXCLUDED.route_id,
     service_id   = EXCLUDED.service_id,
-    direction_id = EXCLUDED.direction_id
+    direction_id = EXCLUDED.direction_id,
+    block_id     = EXCLUDED.block_id
 """.strip()
 
 INSERT_VEHICLE_POSITION_SQL = """
@@ -135,7 +136,13 @@ class DbWriter:
         for trip in trips:
             self._execute(
                 UPSERT_TRIP_SQL,
-                (trip.trip_id, trip.route_id, trip.service_id, trip.direction_id),
+                (
+                    trip.trip_id,
+                    trip.route_id,
+                    trip.service_id,
+                    trip.direction_id,
+                    trip.block_id,
+                ),
             )
 
     def insert_vehicle_positions(

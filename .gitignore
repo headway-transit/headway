@@ -31,6 +31,7 @@ node_modules/
 
 # --- Build / dist artifacts ---
 dist/
+# dist/ covers dist/sbom/ — local SBOM + scan output from scripts/sbom_local.sh
 build/
 out/
 *.log

@@ -1,14 +1,17 @@
 """Unit tests for headway_calc.runner (and the CLI boundary) with the
-recording fake connection — calc 0.2.0 gap policy (handoff 0002).
+recording fake connection — vrm_v0 0.2.0 (handoff 0002) + vrh_v0 0.3.0
+(block-aware, handoff 0003).
 
-Covers: clean period → both metrics persisted (full coverage, no dq rows);
-gapped period at the default coverage_threshold → warning + blocking dq rows
-with each finding's OWN severity and NO metric_values insert; gapped period
-with an explicitly lowered coverage_threshold → clean-group values persisted
-with the exclusion warnings routed alongside (the golden case B); coverage
-detail in the persisted row and the RunReport; determinism; threshold
-pass-through; and the two-transaction fail-loudly-first ordering (a persist
-failure never rolls back already-committed dq issues). No live database.
+Covers: clean period → both metrics persisted (full coverage; the golden
+fixture carries no block_id, so vrh routes its block_unavailable INFO rows
+and the figure stands); gapped period at the default coverage_threshold →
+info + warning + blocking dq rows with each finding's OWN severity and NO
+metric_values insert; gapped period with an explicitly lowered
+coverage_threshold → clean-group values persisted with the findings routed
+alongside (the golden case B); coverage detail in the persisted row and the
+RunReport; determinism; threshold/layover pass-through; and the
+two-transaction fail-loudly-first ordering (a persist failure never rolls
+back already-committed dq issues). No live database.
 """
 
 from __future__ import annotations
@@ -29,7 +32,9 @@ PERIOD_START = date(2026, 1, 1)
 PERIOD_END = date(2026, 2, 1)
 
 #: Coverage detail of the full golden fixture (BASIS.md, calc 0.2.0 section):
-#: 3 in-trip groups, trip-C excluded, 20 of 24 in-trip positions clean.
+#: 3 in-trip groups, trip-C excluded, 20 of 24 in-trip positions clean. The
+#: fixture has no block_id, so vrh_v0 0.3.0's per-trip fallback yields the
+#: SAME group counts, plus the layover_max_seconds provenance field.
 GAPPED_DETAIL = {
     "coverage": "0.6667",
     "total_groups": 3,
@@ -47,6 +52,21 @@ CLEAN_DETAIL = {
     "gap_threshold_seconds": 300.0,
     "coverage_threshold": "0.95",
 }
+
+VRH_GAPPED_DETAIL = dict(GAPPED_DETAIL, layover_max_seconds=1800.0)
+VRH_CLEAN_DETAIL = dict(CLEAN_DETAIL, layover_max_seconds=1800.0)
+
+#: block_unavailable info rows the no-block_id golden fixture produces for
+#: vrh_v0 0.3.0: one per vehicle-day, in (vehicle_id, day) order.
+CLEAN_INFO_RECORD_IDS = [
+    [f"rec-a-{i:02d}" for i in range(10)],  # veh-101 / 2026-01-15
+    [f"rec-b-{i:02d}" for i in range(10)],  # veh-202 / 2026-01-15
+]
+GAPPED_INFO_RECORD_IDS = [
+    [f"rec-a-{i:02d}" for i in range(10)],  # veh-101 / 2026-01-15
+    # veh-202 / 2026-01-15: trip-B and the gapped trip-C are both fallbacks.
+    [f"rec-b-{i:02d}" for i in range(10)] + [f"rec-c-{i:02d}" for i in range(4)],
+]
 
 
 @pytest.fixture()
@@ -68,7 +88,7 @@ def gapped_rows(golden_fixture):
 # --- clean period ----------------------------------------------------------
 
 
-def test_clean_period_persists_both_metrics_and_routes_nothing(clean_rows):
+def test_clean_period_persists_both_metrics_and_routes_only_infos(clean_rows):
     conn = RecordingConnection(position_rows=clean_rows)
     report = run_period(conn, PERIOD_START, PERIOD_END)
 
@@ -77,36 +97,53 @@ def test_clean_period_persists_both_metrics_and_routes_nothing(clean_rows):
     assert report.positions_loaded == 22
     assert report.persisted_count == 2
     assert report.blocked_count == 0
-    assert report.routed_issue_count == 0
     assert report.coverage_threshold == Decimal("0.95")
+    assert report.layover_max_seconds == 1800.0
+    # The fixture has no block_id: vrh 0.3.0 documents the per-trip fallback
+    # with one INFO per vehicle-day — nothing blocking, nothing excluded.
+    assert report.routed_issue_count == 2
+    assert report.routed_info_count == 2
+    assert report.routed_warning_count == 0
+    assert report.routed_blocking_count == 0
 
     vrm, vrh = report.outcomes
     assert (vrm.calc_name, vrm.metric, vrm.unit) == ("vrm_v0", "vrm", "miles")
     assert (vrh.calc_name, vrh.metric, vrh.unit) == ("vrh_v0", "vrh", "hours")
     assert vrm.calc_version == "0.2.0"
-    assert vrh.calc_version == "0.2.0"
-    # Golden expected values (tests/golden/vrm_vrh_v0/expected.json).
+    assert vrh.calc_version == "0.3.0"
+    # Golden expected values (tests/golden/vrm_vrh_v0/expected.json; the
+    # no-block fallback reproduces the 0.2.0 VRH value exactly).
     assert vrm.value == "12.44"
     assert vrh.value == "0.45"
     assert vrm.metric_value_id == "mv-0001"
     assert vrh.metric_value_id == "mv-0002"
     assert vrm.routed_blocking_ids == () and vrm.routed_warning_ids == ()
+    assert vrm.routed_info_ids == ()
     assert vrh.routed_blocking_ids == () and vrh.routed_warning_ids == ()
+    assert vrh.routed_info_ids == ("issue-0001", "issue-0002")
     assert vrm.detail == CLEAN_DETAIL
+    assert vrh.detail == VRH_CLEAN_DETAIL
     assert vrm.coverage == "1.0000"
 
-    # No dq row was written; both metric values (+ lineage) were, carrying the
-    # coverage detail JSONB.
-    assert conn.statements_matching("INSERT INTO dq.issues") == []
+    # dq rows: exactly the two vrh info rows, with info severity.
+    dq_inserts = conn.statements_matching("INSERT INTO dq.issues")
+    assert len(dq_inserts) == 2
+    for (_, params), record_ids in zip(dq_inserts, CLEAN_INFO_RECORD_IDS):
+        assert params[0] == "block_unavailable"
+        assert params[1] == "info"
+        assert params[5] == record_ids
+
+    # Both metric values (+ lineage) were written, carrying the coverage
+    # detail JSONB (vrh's with the layover_max_seconds provenance).
     mv_inserts = conn.statements_matching("INSERT INTO computed.metric_values")
     assert len(mv_inserts) == 2
-    for _, params in mv_inserts:
-        assert json.loads(params[8]) == CLEAN_DETAIL
+    assert json.loads(mv_inserts[0][1][8]) == CLEAN_DETAIL
+    assert json.loads(mv_inserts[1][1][8]) == VRH_CLEAN_DETAIL
     # One lineage edge per consumed record per metric (20 records each).
     assert len(conn.statements_matching("INSERT INTO lineage.edges")) == 40
-    # One transaction: the value phase (no issue phase needed).
-    assert len(conn.commits) == 1
-    assert conn.commits[0] == len(conn.executed)  # everything committed
+    # Two transactions: the info rows first, then the value phase.
+    assert len(conn.commits) == 2
+    assert conn.commits[-1] == len(conn.executed)  # everything committed
     assert conn.rollback_count == 0
 
 
@@ -120,19 +157,24 @@ def test_gapped_period_below_default_coverage_blocks_and_routes_findings(gapped_
     assert report.positions_loaded == 26
     assert report.persisted_count == 0
     assert report.blocked_count == 2
-    assert report.routed_issue_count == 4  # per metric: 1 warning + 1 blocking
+    # vrm: 1 warning + 1 blocking; vrh: 2 infos + 1 warning + 1 blocking.
+    assert report.routed_issue_count == 6
+    assert report.routed_info_count == 2
     assert report.routed_warning_count == 2
     assert report.routed_blocking_count == 2
 
     vrm, vrh = report.outcomes
     assert vrm.metric_value_id is None and vrm.value is None
     assert vrh.metric_value_id is None and vrh.value is None
-    # Warnings are routed first, then the blocking coverage refusal.
+    # Per metric: infos routed first, then warnings, then blocking.
+    assert vrm.routed_info_ids == ()
     assert vrm.routed_warning_ids == ("issue-0001",)
     assert vrm.routed_blocking_ids == ("issue-0002",)
-    assert vrh.routed_warning_ids == ("issue-0003",)
-    assert vrh.routed_blocking_ids == ("issue-0004",)
+    assert vrh.routed_info_ids == ("issue-0003", "issue-0004")
+    assert vrh.routed_warning_ids == ("issue-0005",)
+    assert vrh.routed_blocking_ids == ("issue-0006",)
     assert vrm.detail == GAPPED_DETAIL
+    assert vrh.detail == VRH_GAPPED_DETAIL
     assert vrm.coverage == "0.6667"
 
     # The guardrail: NO metric value, NO lineage edge below the coverage line.
@@ -140,15 +182,18 @@ def test_gapped_period_below_default_coverage_blocks_and_routes_findings(gapped_
     assert conn.statements_matching("INSERT INTO lineage.edges") == []
 
     dq_inserts = conn.statements_matching("INSERT INTO dq.issues")
-    assert len(dq_inserts) == 4
+    assert len(dq_inserts) == 6
     for (sql, params), calc_name in zip(
-        dq_inserts, ("vrm_v0", "vrm_v0", "vrh_v0", "vrh_v0")
+        dq_inserts, ("vrm_v0", "vrm_v0", "vrh_v0", "vrh_v0", "vrh_v0", "vrh_v0")
     ):
         issue_type, severity, status, title, description, record_ids = params
         assert status == "open"
-        assert calc_name in description and "0.2.0" in description
+        expected_version = "0.2.0" if calc_name == "vrm_v0" else "0.3.0"
+        assert calc_name in description and expected_version in description
         assert "[2026-01-01, 2026-02-01)" in description
-        if severity == "warning":
+        if severity == "info":
+            assert issue_type == "block_unavailable"
+        elif severity == "warning":
             assert issue_type == "telemetry_gap_excluded"
             assert "veh-202" in title and "trip-C" in title
             # The ENTIRE excluded group's records, per handoff 0002 rule 5.
@@ -158,6 +203,9 @@ def test_gapped_period_below_default_coverage_blocks_and_routes_findings(gapped_
             assert issue_type == "coverage_below_threshold"
             assert "0.6667" in title and "0.95" in title
             assert record_ids == ["rec-c-00", "rec-c-01", "rec-c-02", "rec-c-03"]
+    # vrh's per-vehicle-day info rows cite the fallback trips' records.
+    info_params = [p for _, p in dq_inserts if p[1] == "info"]
+    assert [p[5] for p in info_params] == GAPPED_INFO_RECORD_IDS
 
     # One transaction: the issue phase (nothing to persist afterwards).
     assert len(conn.commits) == 1
@@ -179,29 +227,37 @@ def test_gapped_period_with_lowered_threshold_persists_clean_group_values(gapped
     assert report.coverage_threshold == Decimal("0.5")
     assert report.persisted_count == 2
     assert report.blocked_count == 0
+    assert report.routed_info_count == 2
     assert report.routed_warning_count == 2
     assert report.routed_blocking_count == 0
 
-    expected_detail = dict(GAPPED_DETAIL, coverage_threshold="0.5")
+    expected_vrm_detail = dict(GAPPED_DETAIL, coverage_threshold="0.5")
+    expected_vrh_detail = dict(VRH_GAPPED_DETAIL, coverage_threshold="0.5")
     vrm, vrh = report.outcomes
     assert vrm.value == "12.44" and vrm.metric_value_id == "mv-0001"
     assert vrh.value == "0.45" and vrh.metric_value_id == "mv-0002"
     assert vrm.routed_warning_ids == ("issue-0001",)
-    assert vrh.routed_warning_ids == ("issue-0002",)
-    assert vrm.detail == expected_detail
+    assert vrh.routed_info_ids == ("issue-0002", "issue-0003")
+    assert vrh.routed_warning_ids == ("issue-0004",)
+    assert vrm.detail == expected_vrm_detail
+    assert vrh.detail == expected_vrh_detail
 
-    # dq rows: exactly the two warnings, with warning severity.
+    # dq rows: two exclusion warnings + vrh's two fallback infos, each with
+    # its own severity.
     dq_inserts = conn.statements_matching("INSERT INTO dq.issues")
-    assert len(dq_inserts) == 2
-    for _, params in dq_inserts:
-        assert params[0] == "telemetry_gap_excluded"
-        assert params[1] == "warning"
+    assert len(dq_inserts) == 4
+    assert [(p[0], p[1]) for _, p in dq_inserts] == [
+        ("telemetry_gap_excluded", "warning"),  # vrm
+        ("block_unavailable", "info"),  # vrh, veh-101
+        ("block_unavailable", "info"),  # vrh, veh-202
+        ("telemetry_gap_excluded", "warning"),  # vrh
+    ]
 
     # Persisted rows carry the exact coverage detail JSONB.
     mv_inserts = conn.statements_matching("INSERT INTO computed.metric_values")
     assert len(mv_inserts) == 2
-    for _, params in mv_inserts:
-        assert json.loads(params[8]) == expected_detail
+    assert json.loads(mv_inserts[0][1][8]) == expected_vrm_detail
+    assert json.loads(mv_inserts[1][1][8]) == expected_vrh_detail
 
     # Lineage narrows to included groups only: 20 clean records per metric,
     # never a rec-c-* (excluded) or rec-x-* (unassigned) record.
@@ -225,6 +281,7 @@ def _stable_projection(report) -> dict:
         m["metric_value_id"] = None
         m["routed_blocking_ids"] = len(m["routed_blocking_ids"])
         m["routed_warning_ids"] = len(m["routed_warning_ids"])
+        m["routed_info_ids"] = len(m["routed_info_ids"])
     return d
 
 
@@ -274,13 +331,15 @@ def test_persist_failure_does_not_roll_back_committed_dq_issues(
     with pytest.raises(RuntimeError, match="simulated metric_values insert failure"):
         run_period(conn, PERIOD_START, PERIOD_END)
 
-    # The dq issue was inserted AND committed before the failing insert:
-    # statements are [SELECT, dq insert, failing mv insert]; the sole commit
-    # boundary covers exactly the first two.
-    assert [sql for sql, _ in conn.executed[:2]][0].startswith("SELECT")
-    assert "INSERT INTO dq.issues" in conn.executed[1][0]
-    assert "INSERT INTO computed.metric_values" in conn.executed[2][0]
-    assert conn.commits == [2]  # committed through the dq insert, no further
+    # The dq issues were inserted AND committed before the failing insert:
+    # statements are [SELECT, vrm blocking dq insert, vrh's 2 info dq
+    # inserts, failing mv insert]; the sole commit boundary covers exactly
+    # the first four.
+    assert conn.executed[0][0].startswith("SELECT")
+    for sql, _ in conn.executed[1:4]:
+        assert "INSERT INTO dq.issues" in sql
+    assert "INSERT INTO computed.metric_values" in conn.executed[4][0]
+    assert conn.commits == [4]  # committed through the dq inserts, no further
     # The value phase alone was rolled back; the commit record stands.
     assert conn.rollback_count == 1
 
@@ -308,17 +367,22 @@ def test_run_report_json_is_parseable_and_complete(clean_rows):
     assert parsed["period_convention"] == "half-open [period_start, period_end), UTC"
     assert parsed["gap_threshold_seconds"] == 300.0
     assert parsed["coverage_threshold"] == "0.95"
+    assert parsed["layover_max_seconds"] == 1800.0
     assert parsed["positions_loaded"] == 22
     assert parsed["persisted_count"] == 2
     assert parsed["blocked_count"] == 0
     assert parsed["routed_blocking_count"] == 0
     assert parsed["routed_warning_count"] == 0
+    assert parsed["routed_info_count"] == 2
     assert [m["metric"] for m in parsed["metrics"]] == ["vrm", "vrh"]
     assert parsed["metrics"][0]["value"] == "12.44"
     assert parsed["metrics"][0]["persisted"] is True
     assert parsed["metrics"][0]["calc_version"] == "0.2.0"
     assert parsed["metrics"][0]["coverage"] == "1.0000"
     assert parsed["metrics"][0]["detail"] == CLEAN_DETAIL
+    assert parsed["metrics"][1]["calc_version"] == "0.3.0"
+    assert parsed["metrics"][1]["detail"] == VRH_CLEAN_DETAIL
+    assert parsed["metrics"][1]["info_count"] == 2
 
 
 def test_gap_threshold_override_is_recorded(clean_rows):
@@ -340,6 +404,20 @@ def test_coverage_threshold_override_is_recorded(clean_rows):
     )
     assert report.coverage_threshold == Decimal("0.5")
     assert report.outcomes[0].detail["coverage_threshold"] == "0.5"
+
+
+def test_layover_max_seconds_override_passes_through_to_vrh(clean_rows):
+    report = run_period(
+        RecordingConnection(position_rows=clean_rows),
+        PERIOD_START,
+        PERIOD_END,
+        layover_max_seconds=900,
+    )
+    assert report.layover_max_seconds == 900.0
+    vrm, vrh = report.outcomes
+    assert vrh.detail["layover_max_seconds"] == 900.0
+    # VRM is unchanged at 0.2.0: no layover field in its detail.
+    assert "layover_max_seconds" not in vrm.detail
 
 
 def test_cli_refuses_without_database_url(monkeypatch):

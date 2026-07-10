@@ -85,6 +85,21 @@ def test_metric_values_detail_jsonb_not_null_default_empty():
     ), "computed.metric_values.detail must be added as JSONB NOT NULL DEFAULT '{}'::jsonb"
 
 
+def test_trips_block_id_added_nullable_text():
+    # Handoff 0003 / migration 0011: GTFS block_id for block-aware VRH (calc
+    # v0.3). Nullable TEXT — block_id is optional per the GTFS spec, so no
+    # NOT NULL and no default.
+    sql = all_sql()
+    match = re.search(
+        r"ALTER TABLE\s+canonical\.trips\s+ADD COLUMN\s+block_id\s+TEXT\s*;",
+        sql,
+    )
+    assert match, "canonical.trips.block_id must be added as nullable TEXT"
+    assert not re.search(r"block_id\s+TEXT\s+NOT NULL", sql), (
+        "canonical.trips.block_id must stay nullable (optional per GTFS)"
+    )
+
+
 def test_vehicle_positions_is_hypertable_with_unique_index():
     sql = all_sql()
     assert "create_hypertable('canonical.vehicle_positions', 'time')" in sql
