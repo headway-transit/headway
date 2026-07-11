@@ -1,0 +1,85 @@
+{
+  "description": "Golden fixture for voms_v0 0.1.0 (handoff 0009): three UTC service days with distinct in-trip vehicle counts 2/3/2 -> maximum 3. Includes an unassigned position (never counted, revenue-service proxy) and a duplicate vehicle-day position (distinct counting). See BASIS.md. Synthetic, NOT FTA-certified; regression anchor only.",
+  "positions": [
+    {
+      "time": "2026-07-01T08:00:00+00:00",
+      "vehicle_id": "veh-1",
+      "trip_id": "trip-v1",
+      "latitude": 40.0,
+      "longitude": -75.0,
+      "source_record_id": "rec-v1-00",
+      "mode": "bus"
+    },
+    {
+      "time": "2026-07-01T08:01:00+00:00",
+      "vehicle_id": "veh-1",
+      "trip_id": "trip-v1",
+      "latitude": 40.01,
+      "longitude": -75.0,
+      "source_record_id": "rec-v1-01",
+      "mode": "bus"
+    },
+    {
+      "time": "2026-07-01T08:00:00+00:00",
+      "vehicle_id": "veh-2",
+      "trip_id": "trip-v2",
+      "latitude": 40.0,
+      "longitude": -75.0,
+      "source_record_id": "rec-v2-00",
+      "mode": "bus"
+    },
+    {
+      "time": "2026-07-01T08:02:00+00:00",
+      "vehicle_id": "veh-9",
+      "trip_id": null,
+      "latitude": 40.0,
+      "longitude": -75.0,
+      "source_record_id": "rec-vx-00"
+    },
+    {
+      "time": "2026-07-02T09:00:00+00:00",
+      "vehicle_id": "veh-1",
+      "trip_id": "trip-v3",
+      "latitude": 40.0,
+      "longitude": -75.0,
+      "source_record_id": "rec-v3-00",
+      "mode": "bus"
+    },
+    {
+      "time": "2026-07-02T09:00:00+00:00",
+      "vehicle_id": "veh-2",
+      "trip_id": "trip-v4",
+      "latitude": 40.0,
+      "longitude": -75.0,
+      "source_record_id": "rec-v4-00",
+      "mode": "bus"
+    },
+    {
+      "time": "2026-07-02T09:00:00+00:00",
+      "vehicle_id": "veh-3",
+      "trip_id": "trip-v5",
+      "latitude": 40.0,
+      "longitude": -75.0,
+      "source_record_id": "rec-v5-00",
+      "mode": "bus"
+    },
+    {
+      "time": "2026-07-03T10:00:00+00:00",
+      "vehicle_id": "veh-2",
+      "trip_id": "trip-v6",
+      "latitude": 40.0,
+      "longitude": -75.0,
+      "source_record_id": "rec-v6-00",
+      "mode": "bus"
+    },
+    {
+      "time": "2026-07-03T10:00:00+00:00",
+      "vehicle_id": "veh-3",
+      "trip_id": "trip-v7",
+      "latitude": 40.0,
+      "longitude": -75.0,
+      "source_record_id": "rec-v7-00",
+      "mode": "bus"
+    }
+  ]
+}

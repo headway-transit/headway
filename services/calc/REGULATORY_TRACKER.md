@@ -18,6 +18,8 @@ are never deleted or rewritten.
 | vrh_v0 | 0.4.0 | Trip-level excision per handoff 0004: grouping and layover accounting UNCHANGED from 0.3.0 (block-aware; NULL-block per-trip fallback + info 'block_unavailable' per vehicle-day; inter-trip interval is layover BY DEFINITION, included up to layover_max_seconds, default 1800 s — see status; over-cap interval NOT counted + warning 'layover_exceeds_max'), but the EXCLUSION UNIT is refined from the block group to the gapped trip plus its adjacent layover intervals: a within-trip gap (> gap_threshold_seconds, default 300 s) excises ONLY that trip's running time and the inter-trip layover intervals immediately adjacent to it (both sides, where present — a layover interval counts only when BOTH bounding trips are clean; an excised trip is never bridged); the block's remaining clean trips and their other layover intervals stay in the figure; one warning 'telemetry_gap_excluded' PER EXCISED TRIP citing that trip's records. Coverage returns to TRIP denomination: clean_trips/total_trips (directly comparable to 0.2.0's group coverage; blocking 'coverage_below_threshold' below coverage_threshold, default 0.95 — ENGINEERING PLACEHOLDER); detail JSONB carries the trip coverage, the block statistics (blocks_touched, trips_excised, layover_intervals_dropped) and all three thresholds; lineage covers INCLUDED positions only (excised trips' records cited by their findings); VRM stays 0.2.0; 0.3.0/0.2.0/0.1.0 retained runnable (compute_vrh_v0_3, compute_vrh_v0_2, compute_vrh_v0_1) | Exhibit 35 BOTH directions — 2026 NTD Policy Manual (Full Reporting), p. 133: layover at end of route → Vehicle Revenue Hours **Yes** (inclusion, as 0.3.0), AND "Bus arrives at the end of the route, parks, and goes out of service… → Vehicle Revenue Hours: **No**" (out-of-service exclusion — the justification for capping long inter-trip intervals); pp. 128–133 ("Revenue hours … include … Layover/recovery time"; "Layover time typically ranges from 10 to 20 percent of the running time" — descriptive, not a cap); measured MBTA inter-trip interval distribution (2026-07-10, 7,400 in-block intervals): p50 = 30 s, p90 = 109 s, p99 = 7,124 s, 2.7% > 1,800 s, 49 negative overlaps — the long tail is out-of-service parking | DEFINITIONS VERIFIED — D1 remains CLOSED (layover inclusion retained); NOT REPORTABLE — remaining divergences **D2–D6 unchanged** (rail passenger-car measure D2 foremost). layover_max_seconds 1800 s is now **data-informed and exhibit-aligned** (the measured distribution shows 97.3% of in-block intervals under the cap and a long tail of out-of-service parking that Exhibit 35 excludes), **per-agency configurable** — no longer a bare placeholder, still not an FTA-published number. coverage_threshold 0.95 remains an ENGINEERING PLACEHOLDER (pending FTA completeness verification). Open question (handoff 0004): partial retention of an excised trip's layover intervals when the gap is provably outside the layover-adjacent running segments — deferred; the conservative both-sides drop stands. Live v0.2/v0.3/v0.4 re-run on the MBTA dataset PENDING — orchestrator (expected: trip-level coverage ≈ 0.91; v0.4 ≥ v0.2 and v0.4 ≥ v0.3 on identical input — property-tested). | 2026 NTD Policy Manual (Full Reporting), pp. 128–136 + 2025 NTD Full Reporting Policy Manual (identical text) / verified 2026-07-10; MBTA inter-trip interval distribution measured 2026-07-10 (handoff 0004) |
 | upt_v0 | 0.1.0 | Unlinked Passenger Trips per handoff 0005: deterministic sum of `event_count` over TIDES boarding events (`event_type = "Passenger boarded"`, verified enum — see citation; bike boardings are NOT passengers per the p. 143 definition) with a trip assignment (`trip_id` from `trip_id_performed` — the same revenue-service proxy as vrm/vrh, documented approximation); NULL `event_count` contributes 0 + one warning `apc_null_count` citing the record (never coalesced to the TIDES default 1); p. 151 validations AS QUOTED: per-trip \|boardings−alightings\| > imbalance_threshold × boardings (explicit input, default 0.10 — the manual's example figure) → warning `apc_count_imbalance`; running load (ordered by trip_stop_sequence then event_timestamp, NULL sequence last — documented convention) dropping below zero → warning `apc_negative_load`; **missing-trip rule (p. 146)**: operated trips (SELECT DISTINCT trip_id FROM canonical.vehicle_positions over the period) with zero passenger events are missing; missing/operated ≤ missing_trip_threshold (explicit input, default 0.02 — **a REAL FTA threshold, not a placeholder**; exact comparison, never the quantized share) → deterministic factor-up UPT = counted × operated/(operated−missing) from the exact fraction, quantized to whole boardings (Decimal 1, ROUND_HALF_EVEN — engineering rounding convention, the manual prescribes none), factor + inputs in detail JSONB; share > threshold → ONE blocking `apc_missing_trips_above_fta_threshold`, value None (statistician approval is a human workflow); simulated-source rule (handoff 0005): any `source != "tides"` → ONE info `simulated_source_data`, source_mix always in detail; lineage over counted boarding events only | UPT definition — 2026 NTD Policy Manual (Full Reporting) p. 143 ("Unlinked Passenger Trips (UPT) are the number of boardings…"); missing-trip 2% rule — p. 146; APC validation examples — p. 151 (all quoted under "Verified definitions — UPT" below); TIDES `event_type` enum — TIDES-transit/TIDES `spec/passenger_events.schema.json`, main branch (repo HEAD `7ddaa7ab820eeca1cc7a681ba9ae79a72ba10af1`, schema file last changed `d887d42ce081f3fb6155664a3c486101d62ec52b` 2023-12-11), verified 2026-07-10 | DEFINITIONS VERIFIED (p. 143/146/151 quoted below; TIDES enum verified against the live spec repo) — **NOT REPORTABLE**: (1) all current passenger events are SIMULATED (`source = "tides_simulated"`; every consuming run carries the `simulated_source_data` info finding — a certifiable figure containing simulated records is a contradiction); (2) APC use for NTD reporting requires FTA approval/benchmarking per pp. 147–148 (±5% vs manual counts, discard rate < 50%, next benchmarking RY 2028) — an agency workflow outside calc logic; (3) factor-up is FLEET-WIDE in v0, not per mode/TOS (handoff 0005 open question — mode-awareness increment, owner NTD role); (4) the p. 149 sampling floor (95% confidence, ±10% precision) is a future sampling path, unused here | 2026 NTD Policy Manual (Full Reporting), pp. 143–151 (PDF pp. 161–169) / verified 2026-07-10; TIDES passenger_events schema (github.com/TIDES-transit/TIDES) / verified 2026-07-10 |
 
+| voms_v0 | 0.1.0 | Monthly Vehicles Operated in Maximum Service per handoff 0009 (PRE-VERIFICATION approximation): per mode (and fleet-wide), the **maximum over service days of the count of distinct vehicles observed in revenue service** (positions with a trip assignment — the same revenue-service proxy as vrm/vrh) that day; **day = the UTC calendar date of the position's event time** (documented v0 convention, NOT an agency service day); integer value, unit 'vehicles'; detail JSONB {days_observed, days_in_period, peak_day (EARLIEST day attaining the maximum — deterministic tie-break), per_day_counts {min, max, mean-as-string (0.0001 ROUND_HALF_EVEN)}}; lineage over the peak day's in-trip records only. **BLOCKING-FREE by design — the coverage machinery does NOT apply**: vrm/vrh SUM over telemetry (a gap corrupts the summed figure), but VOMS is a MAX of daily distinct-vehicle counts — a within-day gap cannot inflate the count and missing telemetry can only lower a day's count or drop a day, i.e. understate a maximum, never overstate it; the potential undercount is surfaced as ONE warning 'voms_partial_observation' whenever days_observed < days_in_period (empty input = observed maximum 0 + the warning, never a guess). Runs on the runner's --per-mode (MR-20) path: fleet scope 'agency' + per-mode scope 'mode:<mode>' rows | Monthly VOMS — 2025 NTD Monthly and Weekly Reference Policy Manual, Form MR-20, p. 33 (quoted verbatim): "VOMS is the number of revenue vehicles/passenger cars operated to meet the maximum service requirement during the month of service reported. VOMS excludes atypical days or one-time special events." | PRE-VERIFICATION, NOT REPORTABLE — documented divergences: **(a)** "maximum service requirement" is schedule-peak SIMULTANEITY; the day-level distinct-vehicle max counts every vehicle used at any point of the peak day and is therefore an UPPER-BOUND proxy — verify against the Policy Manual VOMS section before any figure is treated as reportable; **(b)** the p. 33 atypical-day / one-time-special-event exclusion is NOT implemented (needs an agency calendar policy — open question, owner NTD role); **(c)** rail VOMS counts passenger cars; GTFS-RT carries one vehicle per trainset (existing divergence D2 — rail modes non-reportable pending consist data). | 2025 NTD Monthly and Weekly Reference Policy Manual (`docs/reference/2025 NTD Mthly-Wkly-Ref-Manual_20250828.pdf`), p. 33 / verified 2026-07-11 |
+
 ## Verified definitions — FTA NTD Policy Manual (verified 2026-07-10)
 
 Source: **2026 NTD Policy Manual, Full Reporting** (`docs/reference/National Transit Database 2026 Policy Manual_ Full Reporting.pdf`), chapter "Service Data Requirements" → "Service Supplied", manual pp. 128–136 (PDF pp. 146–154), including Exhibits 35–37 (worked miles/hours truth tables for bus, demand-response, and rail). Cross-checked against the **2025 NTD Full Reporting Policy Manual** (`docs/reference/2025 NTD Full Reporting Policy Manual.pdf`, manual pp. ~126–134, PDF pp. 144–152): all key definitional sentences are textually identical across the two reporting years.
@@ -171,3 +173,82 @@ Definitions are now VERIFIED; the implementation is **partially aligned**, with 
   before any APC-derived UPT is reportable; (3) the p. 149 sampling floor
   (95% confidence, ±10% precision) applies only if the 100%-count path is
   abandoned — not implemented.
+
+## Verified — Monthly Ridership form MR-20 (verified 2026-07-11)
+
+Source: **2025 NTD Monthly and Weekly Reference Policy Manual** (`docs/reference/2025 NTD Mthly-Wkly-Ref-Manual_20250828.pdf`), "Monthly Ridership Reporting (Form MR-20)", manual pp. 32–33.
+
+- **The four MR-20 data points, quoted (p. 32):** "The MR-20 form requires agencies to report the following data points: • Unlinked Passenger Trips (UPT) • Actual Vehicle (Passenger Car) Revenue Hours • Actual Vehicle (Passenger Car) Revenue Miles • Vehicles Operated in Annual Maximum Service (VOMS)".
+- **Per-mode reporting (p. 32):** "Full Reporters must report Monthly Ridership data for each mode of public transportation service that the agency operates … required to report on all modes reported on an agency's P-20 form."
+- **Monthly sampling relief (p. 32):** monthly UPT via the agency's annual sampling procedure "may not meet FTA's confidence and precision levels for annual data (±10 percent precision for a 95 percent confidence level) but does meet FTA's requirements for reporting monthly data on the … MR-20."
+- **Monthly VOMS (p. 33):** "VOMS is the number of revenue vehicles/passenger cars operated to meet the maximum service requirement during the month … excludes atypical days or one-time special events"; explicitly may differ from annual S-10 VOMS (month vs fiscal-year window).
+- **Bonus — WE-20 weekly form (p. 34):** sampled agencies report a reference week (second full week of the month) of weekday 5-day UPT + VRM, due seven business days after the reference week ends.
+
+**Implications for Headway (gap list to a real MR generator):**
+1. **Per-mode is mandatory** — our calcs are fleet-wide (documented limitation since handoff 0005); mode dimension (from canonical.routes.mode) must flow into grouping + metric_values scope before an MR-20 package is honest. This supersedes "field format" as the primary gap.
+2. **VOMS is a missing calc** — monthly max vehicles in service (computable from canonical.vehicle_positions: peak distinct vehicles in revenue service, atypical-day exclusion needs a policy rule) → new calc + tracker row.
+3. Our UPT/VRM/VRH map 1:1 to the other three fields (with all existing divergence caveats D1–D6 still governing reportability).
+
+## Mode scoping (2026-07-11) — handoff 0009
+
+MR-20 requires the four data points **per mode** (p. 32, quoted above), so
+the calc library gained a mode dimension. This section documents it; the
+existing calc rows above are deliberately NOT edited.
+
+- **No version bump — input selection, not a semantics change.** The
+  per-mode paths (`headway_calc.mode`: `compute_vrm_by_mode`,
+  `compute_vrh_by_mode`, `compute_upt_by_mode`, `compute_voms_by_mode`)
+  partition the run's input rows by mode and apply the UNCHANGED, shipped
+  calc versions to each subset — byte-for-byte the same math as the
+  fleet-wide run, exactly as running a calc over a different period is not a
+  new version. vrm_v0 stays 0.2.0, vrh_v0 stays 0.4.0, upt_v0 stays 0.1.0,
+  voms_v0 is 0.1.0. Under the versioning rule ("changing calculation logic
+  mints a new version"), no calculation logic changed; what changed is WHICH
+  rows are selected as input, and that selection is recorded per row in
+  `computed.metric_values.scope`.
+- **Scope encoding — no migration.** Mode-scoped rows carry
+  `scope = 'mode:<mode>'` in the existing handoff-0001 `scope` column (TEXT,
+  default 'agency'); fleet-wide rows keep `scope = 'agency'` unchanged (full
+  backward compatibility — existing goldens untouched).
+- **Mode source.** `canonical.routes.mode` LEFT JOINed onto every position
+  and passenger event via `canonical.trips` (reader, handoff 0009). The mode
+  vocabulary is the transform's GTFS route_type→mode map
+  (`headway_transform.gtfs_static.ROUTE_TYPE_TO_MODE`, cited to gtfs.org in
+  that module).
+- **The 'unknown' bucket — never dropped, never guessed.** A NULL mode
+  (unassigned row, unknown trip, or unknown route) buckets as
+  `mode:unknown`, is computed like any other bucket, and is surfaced as ONE
+  info finding per per-mode run (`unknown_mode_share`, routed under the
+  identity `mode_dimension 0.1.0` — a run-level input-selection note, not a
+  calculation; citations truncate at 100 records, full counts always
+  stated).
+- **Findings per scope.** Mode-scoped runs route their findings to
+  dq.issues exactly like fleet runs, the description naming the scope; the
+  structural guardrail (blocking findings ⇒ no metric_values row) holds PER
+  SCOPED RESULT — a gapped mode blocks only its own scope. A finding over
+  the same records may therefore appear once for 'agency' and once per
+  affected mode scope — deliberate: each row documents a different figure.
+- **upt_v0 factor-up note.** On the per-mode path the p. 146 factor-up
+  applies PER MODE (mode-average boardings; each mode's operated-trips
+  denominator derives from the same loaded positions) — closer to the
+  manual's per-mode/TOS totals than the documented fleet-wide factor of the
+  'agency' row (upt_v0 row above, limitation (3); property-pinned: fleet
+  and per-mode sums legitimately differ when trips are missing, and a mode
+  whose own missing share exceeds 2% blocks even when the fleet share does
+  not). The 'agency' row's behavior is unchanged.
+- **Additivity.** vrm/vrh/upt are additive across the mode partition
+  (golden-pinned exact sums; property-tested with the quantization bound
+  made explicit — each figure quantizes once, so independently quantized
+  per-mode figures may drift from the fleet figure by at most half a
+  quantum each). **voms is NOT additive**: modes may peak on different days,
+  so only max(per-mode) ≤ fleet ≤ Σ(per-mode) holds (property-pinned).
+- **Runner surface.** `run_period(..., per_mode=True)` /
+  `python -m headway_calc.runner --per-mode` (default OFF — pre-0009
+  behavior byte-identical); the per-mode path also runs voms_v0 (fleet +
+  per mode). The MR-20 generator (`python -m headway_calc.mr20 --month
+  YYYY-MM [--run]`) consumes the persisted rows — latest per
+  metric+scope+period — and emits the NOT-REPORTABLE preview package
+  (banner + programmatically enumerated caveats: flag-derived +
+  missing-cells + the fixed D1–D6 list; missing cell = explicit null +
+  reason; rail modes per the route_type map flagged
+  non_reportable_pending_d2).

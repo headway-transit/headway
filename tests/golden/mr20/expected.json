@@ -1,0 +1,246 @@
+{
+  "form": "MR-20",
+  "generator": {
+    "name": "headway_calc.mr20",
+    "version": "0.1.0"
+  },
+  "month": "2026-06",
+  "period_start": "2026-06-01",
+  "period_end": "2026-07-01",
+  "period_convention": "half-open [period_start, period_end), UTC",
+  "citation": "2025 NTD Monthly and Weekly Reference Policy Manual, Monthly Ridership Reporting (Form MR-20), pp. 32-33 \u2014 verified 2026-07-11 (REGULATORY_TRACKER.md, 'Verified \u2014 Monthly Ridership form MR-20')",
+  "reportable": false,
+  "banner": "NOT REPORTABLE \u2014 preview package only. Every figure below is governed by the caveats enumerated in 'caveats'; nothing in this package may be submitted to the NTD. Generated from computed.metric_values with full provenance (metric_value_id, calc_version, certification_status, flags, coverage) per cell.",
+  "caveats": [
+    {
+      "id": "flag:pre_verification",
+      "status": "open",
+      "text": "One or more figures come from 0.x (pre-verification) calc versions: definitions are verified against the NTD manuals but the implementations carry documented divergences (REGULATORY_TRACKER.md) \u2014 no 0.x figure is reportable."
+    },
+    {
+      "id": "flag:simulated_source_data",
+      "status": "open",
+      "text": "One or more figures consumed SIMULATED source records (e.g. source='tides_simulated'): a certifiable figure containing simulated records is a contradiction (handoff-0005 simulated-data rule)."
+    },
+    {
+      "id": "flag:uncertified",
+      "status": "open",
+      "text": "One or more figures carry certification_status 'uncertified': no human attestation exists for them (cert.certifications)."
+    },
+    {
+      "id": "flag:voms_day_level_proxy",
+      "status": "open",
+      "text": "VOMS is the voms_v0 day-level proxy: the maximum over service days (UTC) of distinct vehicles observed in revenue service \u2014 an UPPER-BOUND proxy for the p. 33 'maximum service requirement' (schedule-peak simultaneity); the atypical-day exclusion is NOT implemented (agency calendar policy pending); rail passenger-car counting pending D2 (tracker, calc voms_v0 divergences a/b/c)."
+    },
+    {
+      "id": "flag:voms_partial_observation",
+      "status": "open",
+      "text": "One or more VOMS figures observed fewer days than the period contains (voms_partial_observation warning): the reported maximum may understate the month's true VOMS."
+    },
+    {
+      "id": "missing_cells",
+      "status": "open",
+      "text": "One or more cells are missing (value null with a reason): the metric was not computed for that scope, or its run was blocked by dq findings \u2014 a missing figure is reported as missing, never invented."
+    },
+    {
+      "id": "D1",
+      "status": "closed",
+      "text": "Layover/recovery time in VRH \u2014 CLOSED by vrh_v0 0.3.0/0.4.0 block-aware layover inclusion (tracker); retained here because the closure is calc-version-specific."
+    },
+    {
+      "id": "D2",
+      "status": "open",
+      "text": "Rail passenger-car measure: rail VRM/VRH/VOMS count passenger cars (a 4-car train x 1 mi = 4 car-miles); GTFS-RT carries one vehicle per trainset. Rail modes are flagged non-reportable pending consist data."
+    },
+    {
+      "id": "D3",
+      "status": "open",
+      "text": "Revenue-service proxy: trip_id assignment stands in for 'in revenue service'; agency practice varies \u2014 per-agency confirmation required."
+    },
+    {
+      "id": "D4",
+      "status": "open",
+      "text": "Measurement fidelity: position-derived haversine distance chord-cuts curves; validate against odometer/shape distance before reportability."
+    },
+    {
+      "id": "D5",
+      "status": "open",
+      "text": "Demand-response definition (first pick-up to last drop-off) is not implemented; DR is out of scope for the fixed-route calcs."
+    },
+    {
+      "id": "D6",
+      "status": "open",
+      "text": "Excluded activities (charter/school/training/maintenance) are excluded only insofar as they carry no trip_id (covered by the D3 proxy caveat)."
+    }
+  ],
+  "data_points": [
+    "upt",
+    "vrh",
+    "vrm",
+    "voms"
+  ],
+  "modes": {
+    "bus": {
+      "upt": {
+        "value": "30011",
+        "unit": "unlinked_passenger_trips",
+        "metric_value_id": "mv-upt-bus",
+        "calc_name": "upt_v0",
+        "calc_version": "0.1.0",
+        "certification_status": "uncertified",
+        "flags": [
+          "pre_verification",
+          "simulated_source_data",
+          "uncertified"
+        ],
+        "coverage": null
+      },
+      "vrh": {
+        "value": "4102.50",
+        "unit": "hours",
+        "metric_value_id": "mv-vrh-bus",
+        "calc_name": "vrh_v0",
+        "calc_version": "0.4.0",
+        "certification_status": "uncertified",
+        "flags": [
+          "pre_verification",
+          "uncertified"
+        ],
+        "coverage": "0.9655"
+      },
+      "vrm": {
+        "value": "45120.33",
+        "unit": "miles",
+        "metric_value_id": "mv-vrm-bus",
+        "calc_name": "vrm_v0",
+        "calc_version": "0.2.0",
+        "certification_status": "uncertified",
+        "flags": [
+          "pre_verification",
+          "uncertified"
+        ],
+        "coverage": "0.9750"
+      },
+      "voms": {
+        "value": "339",
+        "unit": "vehicles",
+        "metric_value_id": "mv-voms-bus",
+        "calc_name": "voms_v0",
+        "calc_version": "0.1.0",
+        "certification_status": "uncertified",
+        "flags": [
+          "pre_verification",
+          "uncertified",
+          "voms_day_level_proxy",
+          "voms_partial_observation"
+        ],
+        "coverage": null
+      },
+      "non_reportable_pending_d2": false
+    },
+    "subway": {
+      "upt": {
+        "value": "14621",
+        "unit": "unlinked_passenger_trips",
+        "metric_value_id": "mv-upt-subway",
+        "calc_name": "upt_v0",
+        "calc_version": "0.1.0",
+        "certification_status": "uncertified",
+        "flags": [
+          "pre_verification",
+          "simulated_source_data",
+          "uncertified"
+        ],
+        "coverage": null
+      },
+      "vrh": {
+        "value": "1219.25",
+        "unit": "hours",
+        "metric_value_id": "mv-vrh-subway",
+        "calc_name": "vrh_v0",
+        "calc_version": "0.4.0",
+        "certification_status": "uncertified",
+        "flags": [
+          "pre_verification",
+          "uncertified"
+        ],
+        "coverage": "0.9440"
+      },
+      "vrm": {
+        "value": "16114.55",
+        "unit": "miles",
+        "metric_value_id": "mv-vrm-subway",
+        "calc_name": "vrm_v0",
+        "calc_version": "0.2.0",
+        "certification_status": "uncertified",
+        "flags": [
+          "pre_verification",
+          "uncertified"
+        ],
+        "coverage": "0.9510"
+      },
+      "voms": {
+        "value": null,
+        "reason": "No computed.metric_values row for metric 'voms' scope 'mode:subway' in period [2026-06-01, 2026-07-01): the metric was not computed for this scope, or its run was blocked (see dq.issues). A missing figure is reported as missing, never invented."
+      },
+      "non_reportable_pending_d2": true
+    }
+  },
+  "fleet": {
+    "upt": {
+      "value": "44632",
+      "unit": "unlinked_passenger_trips",
+      "metric_value_id": "mv-upt-agency",
+      "calc_name": "upt_v0",
+      "calc_version": "0.1.0",
+      "certification_status": "uncertified",
+      "flags": [
+        "pre_verification",
+        "simulated_source_data",
+        "uncertified"
+      ],
+      "coverage": null
+    },
+    "vrh": {
+      "value": "5321.75",
+      "unit": "hours",
+      "metric_value_id": "mv-vrh-agency",
+      "calc_name": "vrh_v0",
+      "calc_version": "0.4.0",
+      "certification_status": "uncertified",
+      "flags": [
+        "pre_verification",
+        "uncertified"
+      ],
+      "coverage": "0.9612"
+    },
+    "vrm": {
+      "value": "61234.88",
+      "unit": "miles",
+      "metric_value_id": "mv-vrm-agency",
+      "calc_name": "vrm_v0",
+      "calc_version": "0.2.0",
+      "certification_status": "uncertified",
+      "flags": [
+        "pre_verification",
+        "uncertified"
+      ],
+      "coverage": "0.9702"
+    },
+    "voms": {
+      "value": "412",
+      "unit": "vehicles",
+      "metric_value_id": "mv-voms-agency",
+      "calc_name": "voms_v0",
+      "calc_version": "0.1.0",
+      "certification_status": "uncertified",
+      "flags": [
+        "pre_verification",
+        "uncertified",
+        "voms_day_level_proxy",
+        "voms_partial_observation"
+      ],
+      "coverage": null
+    }
+  }
+}

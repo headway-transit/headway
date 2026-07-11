@@ -31,7 +31,10 @@ class VehiclePosition:
     trip's GTFS block (joined from canonical.trips by the reader — handoff
     0003, calc vrh_v0 0.3.0); None when the position is unassigned or the feed
     omits the optional field, in which case VRH falls back to per-trip
-    grouping.
+    grouping. ``mode`` is the trip's route mode (canonical.routes.mode, joined
+    trips→routes by the reader — handoff 0009); None when the position is
+    unassigned or the trip/route is unknown, in which case mode-scoped
+    computations bucket it as 'unknown' (never dropped, never guessed).
     """
 
     time: datetime
@@ -41,6 +44,7 @@ class VehiclePosition:
     longitude: float
     source_record_id: str
     block_id: str | None = None
+    mode: str | None = None
 
     def __post_init__(self) -> None:
         if self.time.tzinfo is None or self.time.utcoffset() is None:
@@ -79,7 +83,11 @@ class PassengerEvent:
     envelope source (``"tides"`` for real feeds, ``"tides_simulated"`` for
     simulator output — the simulated-data rule makes the distinction
     permanent). ``source_record_id`` is the content-addressed raw record id
-    this event derives from; it feeds the lineage graph (ADR-0007).
+    this event derives from; it feeds the lineage graph (ADR-0007). ``mode``
+    is the trip's route mode (canonical.routes.mode, joined trips→routes by
+    the reader — handoff 0009); None when the event is unassigned or the
+    trip/route is unknown, in which case mode-scoped computations bucket it
+    as 'unknown' (never dropped, never guessed).
     """
 
     event_timestamp: datetime
@@ -92,6 +100,7 @@ class PassengerEvent:
     event_count: int | None
     source: str
     source_record_id: str
+    mode: str | None = None
 
     def __post_init__(self) -> None:
         if (
@@ -301,6 +310,41 @@ class UptDetail:
 
 
 @dataclass(frozen=True)
+class VomsDetail:
+    """Detail of one voms_v0 run (handoff 0009), persisted verbatim into
+    computed.metric_values.detail (JSONB, migration 0010).
+
+    - ``days_observed`` — service days (UTC calendar dates of position time —
+      the documented v0 day convention) with at least one in-trip position.
+    - ``days_in_period`` — calendar days in the half-open [period_start,
+      period_end) run period; when ``days_observed`` is lower the calc emits
+      the 'voms_partial_observation' warning (the max can only be understated
+      by missing days, never overstated).
+    - ``peak_day`` — the EARLIEST day (ISO date string) attaining the maximum
+      distinct-vehicle count (deterministic tie-break); None when no day was
+      observed. Lineage covers this day's in-trip position records.
+    - ``per_day_counts`` — summary of the per-day distinct-vehicle counts:
+      ``{"min": int, "max": int, "mean": str}`` (mean is a Decimal quantized
+      0.0001 ROUND_HALF_EVEN, rendered as a string so JSON never coerces it
+      through binary float; min/max are exact integer counts). All three are
+      None when no day was observed.
+    """
+
+    days_observed: int
+    days_in_period: int
+    peak_day: str | None
+    per_day_counts: dict
+
+    def to_dict(self) -> dict:
+        return {
+            "days_observed": self.days_observed,
+            "days_in_period": self.days_in_period,
+            "peak_day": self.peak_day,
+            "per_day_counts": dict(self.per_day_counts),
+        }
+
+
+@dataclass(frozen=True)
 class CalcResult:
     """The output of one calculation run.
 
@@ -314,8 +358,8 @@ class CalcResult:
     figure, in deterministic order — these feed lineage.edges (one edge per
     id); records of excluded groups appear ONLY in their warning findings.
     ``detail`` carries the 0.2.0 coverage detail (a BlockCoverageDetail for
-    0.3.0 block-aware VRH; an UptDetail for upt_v0, handoff 0005; None for
-    0.1.0 results).
+    0.3.0 block-aware VRH; an UptDetail for upt_v0, handoff 0005; a
+    VomsDetail for voms_v0, handoff 0009; None for 0.1.0 results).
     """
 
     value: Decimal | None
@@ -326,7 +370,7 @@ class CalcResult:
     blocking_issues: tuple[Finding, ...]
     warnings: tuple[Finding, ...] = ()
     infos: tuple[Finding, ...] = ()
-    detail: CoverageDetail | UptDetail | None = None
+    detail: CoverageDetail | UptDetail | VomsDetail | None = None
 
     def __post_init__(self) -> None:
         if self.blocking_issues and self.value is not None:

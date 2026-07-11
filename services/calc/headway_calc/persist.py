@@ -26,11 +26,13 @@ from datetime import date
 from headway_calc.types import CalcResult
 
 #: Metric name (computed.metric_values.metric) per calc_name, per handoff 0001
-#: (v0 metrics: 'vrm', 'vrh') plus 'upt' (handoff 0005).
+#: (v0 metrics: 'vrm', 'vrh') plus 'upt' (handoff 0005) and 'voms'
+#: (handoff 0009).
 _METRIC_BY_CALC_NAME = {
     "vrm_v0": "vrm",
     "vrh_v0": "vrh",
     "upt_v0": "upt",
+    "voms_v0": "voms",
 }
 
 #: detail is bound as text and cast to JSONB in SQL (%s::jsonb) so the write
@@ -57,6 +59,10 @@ def persist_result(
     scope: str = "agency",
 ) -> str:
     """Persist a CalcResult: one computed.metric_values row + lineage edges.
+
+    ``scope`` is the computed.metric_values.scope value — 'agency' (the
+    default, fleet-wide) or a mode scope 'mode:<mode>' (handoff 0009; the
+    handoff-0001 scope column, no migration).
 
     Refuses (raises ValueError) if the result carries blocking issues or has
     no value — blocking issues belong in dq.issues, never in

@@ -43,6 +43,22 @@ are `Decimal`, never float.
   Passenger Trips over TIDES passenger events, handoff 0005; the p. 146
   missing-trip rule with the REAL FTA 2% threshold; see "Unlinked Passenger
   Trips" below).
+- `headway_calc/voms.py` — `voms_v0`: `compute_voms` (0.1.0 — monthly
+  Vehicles Operated in Maximum Service, handoff 0009: max over UTC service
+  days of distinct in-trip vehicles; BLOCKING-FREE by design, partial
+  observation is a warning; see "Mode dimension, VOMS and the MR-20
+  package" below).
+- `headway_calc/mode.py` — the handoff-0009 mode dimension:
+  `compute_{vrm,vrh,upt,voms}_by_mode` run the UNCHANGED calc versions over
+  per-mode input subsets (input selection, not a semantics change — no
+  version bump; `REGULATORY_TRACKER.md`, "Mode scoping"); NULL mode buckets
+  as `'unknown'` (never dropped, never guessed) and is surfaced by ONE
+  `unknown_mode_share` info finding per per-mode run.
+- `headway_calc/mr20.py` — `build_mr20_package` + the
+  `python -m headway_calc.mr20 --month YYYY-MM [--run]` CLI: the
+  NOT-REPORTABLE MR-20 preview package (four data points per mode + fleet,
+  full per-cell provenance, explicit-null missing cells, programmatic
+  caveats, rail modes pending D2).
 - `headway_calc/_blocks.py` — internal 0.3.0/0.4.0 machinery: block
   grouping, layover accounting, the block gap policy (0.3.0), the
   trip-excision policy (0.4.0), and the `block_unavailable`
@@ -115,7 +131,11 @@ are `Decimal`, never float.
   excision case (three-trip block, middle trip gapped). For UPT:
   `tests/golden/upt_v0/` pins the blocked case (missing share 1/3 > 2%) and
   the factored case (share exactly 0.02 → 98 × 50/49 = 100), hand-worked in
-  its `BASIS.md`.
+  its `BASIS.md`. Handoff 0009 adds `tests/golden/voms_v0/` (three days,
+  distinct-vehicle counts 2/3/2 → 3), `tests/golden/mode_scope/` (two modes
+  + the unknown bucket; per-mode values summing exactly to the fleet values
+  for vrm/vrh/upt) and `tests/golden/mr20/` (canned metric rows → the exact
+  package JSON), each with its own hand-worked `BASIS.md`.
 
 ## Unlinked Passenger Trips — upt_v0 0.1.0
 
@@ -164,6 +184,62 @@ computes UPT from TIDES passenger events (2026 NTD Policy Manual p. 143:
   boarding events; NULL-count and unassigned events never appear there.
 - **Fleet-wide limitation**: the factor-up is fleet-wide in v0, not per
   mode/TOS (handoff 0005 open question; see `REGULATORY_TRACKER.md`).
+
+## Mode dimension, VOMS and the MR-20 package — handoff 0009
+
+MR-20 (2025 NTD Monthly and Weekly Reference Policy Manual pp. 32–33,
+verified — see `REGULATORY_TRACKER.md`, "Verified — Monthly Ridership form
+MR-20") requires UPT, VRH, VRM and VOMS **per mode**. The pieces:
+
+- **Mode on every row.** The reader LEFT JOINs `canonical.routes.mode` (via
+  `canonical.trips`) onto every position and passenger event. NULL mode
+  (unassigned row / unknown trip / unknown route) buckets as `'unknown'` —
+  counted, computed, surfaced (ONE `unknown_mode_share` info per per-mode
+  run, citations truncated at 100 records), never dropped, never guessed.
+- **Per-mode compute paths, NO version bump.** `headway_calc.mode` runs the
+  unchanged `compute_vrm` (0.2.0) / `compute_vrh` (0.4.0) / `compute_upt`
+  (0.1.0) / `compute_voms` (0.1.0) over each mode's subset — subsetting
+  inputs by mode is input selection, not a semantics change (tracker, "Mode
+  scoping"). Rows persist with `scope = 'mode:<mode>'` alongside the
+  unchanged `scope = 'agency'` row (the handoff-0001 `scope` column — no
+  migration). The blocking guardrail holds per scoped result; the upt
+  factor-up applies per mode on this path (closer to the manual than the
+  fleet-wide factor, which the `'agency'` row retains unchanged).
+- **voms_v0 0.1.0** (`compute_voms(positions, period_start, period_end)`):
+  per UTC service day (the UTC calendar date of position time — documented
+  convention), the count of distinct in-trip vehicles; the figure is the
+  **maximum over days** (integer, unit `'vehicles'`; detail: days observed/
+  in period, peak day — earliest on ties — and a min/max/mean per-day
+  summary; lineage over the peak day's records). PRE-VERIFICATION proxy
+  with divergences (a) day-level max ≠ schedule-peak simultaneity (upper
+  bound), (b) no atypical-day exclusion, (c) rail passenger cars (D2) —
+  tracker row voms_v0. **Blocking-free by design**: coverage machinery
+  guards SUMS against gaps, but an observation gap can only UNDERSTATE a
+  maximum — so partial observation is ONE `voms_partial_observation`
+  warning (days_observed < days_in_period), never a refusal.
+- **Additivity**: vrm/vrh/upt are additive across the mode partition
+  (golden-pinned exact sums; property tests carry the explicit
+  quantization bound). **voms is NOT additive** — modes may peak on
+  different days; only `max(per-mode) ≤ fleet ≤ Σ(per-mode)` holds
+  (property-pinned, max ≠ sum construction included).
+- **MR-20 generator**:
+
+  ```
+  export HEADWAY_DATABASE_URL=postgresql://…/agency_db
+  python -m headway_calc.mr20 --month 2026-07           # assemble only
+  python -m headway_calc.mr20 --month 2026-07 --run     # run_period(per_mode=True) first
+  ```
+
+  Assembles the latest `computed.metric_values` row per metric+scope for
+  the month's half-open period into the four MR-20 data points per mode +
+  fleet. Every cell carries `{value, unit, metric_value_id, calc_name,
+  calc_version, certification_status, flags, coverage}`; a missing cell is
+  an **explicit null + reason** (never invented); rail modes (per the
+  transform's route_type map: tram/subway/rail/cable_tram/funicular/
+  monorail) carry `non_reportable_pending_d2: true`; the header is the
+  NOT-REPORTABLE banner plus programmatically enumerated caveats
+  (flag-derived + missing-cells + the fixed D1–D6 list). The package is the
+  artifact the web report view can later consume verbatim.
 
 ## Trip-level excision — 0.4.0 (default for VRH)
 
@@ -279,8 +355,14 @@ export HEADWAY_DATABASE_URL=postgresql://…/agency_db
 python -m headway_calc.runner --period-start 2026-06-01 --period-end 2026-07-01
 # optional: --gap-threshold-seconds 300 --coverage-threshold 0.95 \
 #           --layover-max-seconds 1800 --missing-trip-threshold 0.02 \
-#           --imbalance-threshold 0.10 --ignore-settings
+#           --imbalance-threshold 0.10 --ignore-settings --per-mode
 ```
+
+`--per-mode` (default OFF — pre-0009 behavior byte-identical): additionally
+runs voms_v0 and one mode-scoped result per metric per mode (scope
+`'mode:<mode>'`), routing mode-scoped findings with their scope named and
+the ONE run-level `unknown_mode_share` info. The MR-20 path
+(`python -m headway_calc.mr20 --run`) turns it on.
 
 ### Threshold precedence — explicit flag > app.settings row > code default
 
@@ -379,11 +461,16 @@ handoff 0001).
 
 ```
 $ cd services/calc && python3 -m pytest tests/ -q
-........................................................................ [ 38%]
-........................................................................ [ 77%]
-.........................................                                [100%]
-185 passed in 10.31s
+........................................................................ [ 29%]
+........................................................................ [ 58%]
+........................................................................ [ 88%]
+.............................                                            [100%]
+245 passed in 11.25s
 ```
+
+(185 pre-0009 tests unchanged and green — the per-mode path defaults OFF —
+plus 60 new: voms unit/golden/property, mode unit/golden/property, per-mode
+runner end-to-end, mr20 unit + exact-package golden.)
 
 upt_v0 golden tests explicitly (handoff 0005, hand-worked in
 `tests/golden/upt_v0/BASIS.md`):
@@ -468,6 +555,32 @@ precedence matrix over all four knobs; `read_settings=False` /
 flags; imbalance_threshold never `"settings"`; seeded settings reproduce
 the default run exactly — determinism intact across the settings path).
 
+NEW for handoff 0009 (mode dimension, voms_v0, MR-20 generator) — voms
+golden `tests/golden/voms_v0/` (three UTC days, distinct-vehicle counts
+2/3/2 → 3, exact vs partial period, peak-day lineage) and unit tests
+(distinct-not-position counting, unassigned exclusion, UTC day convention,
+earliest-day tie-break, empty-input zero, blocking-free, detail shape,
+period refusal); voms Hypothesis properties (determinism/order-independence,
+value ≡ max of daily distinct counts, adding a vehicle-day never decreases,
+blocking-free with the partial-observation warning iff days are missing,
+max(per-mode) ≤ fleet ≤ Σ(per-mode) with the max ≠ sum construction
+pinned); mode golden `tests/golden/mode_scope/` (bus/subway/unknown; per-mode
+values summing EXACTLY to the fleet values for vrm/vrh/upt) and unit tests
+(bucketing, partitioning, per-mode operated-trips denominator ≡ fleet union,
+zero-event mode blocks honestly, unknown-mode finding counts + 100-record
+citation truncation); mode Hypothesis properties (vrh exact additivity on
+the 36 s quantum grid, vrm additivity within the documented quantization
+bound, upt exact additivity on fully-covered fleets with the fleet-vs-
+per-mode factor divergence pinned 498 vs 500, per-mode lineage partitioning
+the fleet lineage); per-mode runner end-to-end (default OFF byte-identical,
+16 scoped outcomes with scope bound on every INSERT, scoped dq descriptions,
+ONE unknown_mode_share info, per-scope blocking independence, determinism,
+--per-mode CLI); mr20 tests (month-period rule, latest-per-metric+scope SQL
+shape, EXACT package JSON golden `tests/golden/mr20/`, missing-cell
+null+reason, rail-pending-D2 per the transform map, flag-derived caveats,
+empty-table package, CLI boundary). Reader tests now assert the routes.mode
+LEFT JOINs on both queries and NULL-mode passthrough.
+
 ### What is PENDING
 
 - **Live re-run on the MBTA dataset (orchestrator's job)** — this increment
@@ -476,7 +589,9 @@ the default run exactly — determinism intact across the settings path).
   `python -m headway_calc.runner` live and compares v0.2/v0.3/v0.4 VRH over
   the same period (handoff 0004, Outputs): expected trip-level coverage
   ≈ 0.91 and VRH ≈ the v0.2 value plus layover recovered over
-  clean-adjacent intervals.
+  clean-adjacent intervals. Handoff 0009 adds the live per-mode + voms +
+  package run (`python -m headway_calc.runner --per-mode`, then
+  `python -m headway_calc.mr20 --month …`) — also the orchestrator's step.
 - **Reportability** — definitions are VERIFIED (tracker) and D1 is CLOSED,
   but no figure is reportable until divergences D2–D6 are addressed and
   `coverage_threshold` 0.95 is verified against FTA completeness

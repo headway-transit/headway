@@ -60,6 +60,7 @@ def route_findings(
     calc_version: str,
     period_start: date,
     period_end: date,
+    scope: str | None = None,
 ) -> list[str]:
     """Insert one dq.issues row per Finding; return the new issue ids.
 
@@ -70,17 +71,25 @@ def route_findings(
     raised it over WHICH period plus the severity-specific consequence — so a
     data steward reading the issue knows exactly what happened to the figure.
 
+    ``scope`` (handoff 0009): when given (a mode-scoped run, e.g.
+    'mode:bus'), the description additionally names the metric-value scope
+    the finding belongs to, so a mode-scoped finding is distinguishable from
+    the fleet-wide ('agency') run's finding over the same records. Default
+    None keeps the routed description byte-identical to pre-0009 runs.
+
     Returns the inserted issue_ids (as text) in input order. Raises on any
     insert failure — never swallows. Does not commit.
     """
     cur = conn.cursor()
     issue_ids: list[str] = []
     for finding in findings:
+        scope_note = "" if scope is None else f" Metric-value scope: {scope!r}."
         description = (
             f"{finding.description}\n\n"
             f"Raised by calculation {calc_name} version {calc_version} for "
             f"period [{period_start.isoformat()}, {period_end.isoformat()}) "
-            f"(half-open, UTC). {_CONSEQUENCE_BY_SEVERITY[finding.severity]}"
+            f"(half-open, UTC).{scope_note} "
+            f"{_CONSEQUENCE_BY_SEVERITY[finding.severity]}"
         )
         cur.execute(
             _INSERT_ISSUE_SQL,

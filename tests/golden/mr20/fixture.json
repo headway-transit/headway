@@ -1,0 +1,238 @@
+{
+  "description": "Canned computed.metric_values rows (latest per metric+scope for period [2026-06-01, 2026-07-01)) feeding the MR-20 package golden: fleet ('agency') and mode:bus complete; mode:subway (a rail mode, pending D2) deliberately missing its voms row to pin the explicit-null-with-reason cell. See BASIS.md. Synthetic, NOT FTA-certified; regression anchor only.",
+  "month": "2026-06",
+  "rows": [
+    {
+      "metric": "upt",
+      "scope": "agency",
+      "metric_value_id": "mv-upt-agency",
+      "value": "44632",
+      "unit": "unlinked_passenger_trips",
+      "calc_name": "upt_v0",
+      "calc_version": "0.1.0",
+      "certification_status": "uncertified",
+      "detail": {
+        "total_boardings_counted": 44190,
+        "operated_trips": 5000,
+        "trips_with_events": 4950,
+        "missing_trips": 50,
+        "missing_share": "0.0100",
+        "factor_applied": "1.010101",
+        "source_mix": {
+          "tides_simulated": 51234
+        },
+        "missing_trip_threshold": "0.02",
+        "imbalance_threshold": "0.10"
+      }
+    },
+    {
+      "metric": "vrh",
+      "scope": "agency",
+      "metric_value_id": "mv-vrh-agency",
+      "value": "5321.75",
+      "unit": "hours",
+      "calc_name": "vrh_v0",
+      "calc_version": "0.4.0",
+      "certification_status": "uncertified",
+      "detail": {
+        "coverage": "0.9612",
+        "total_groups": 900,
+        "excluded_groups": 20,
+        "clean_position_share": "0.9701",
+        "gap_threshold_seconds": 300.0,
+        "coverage_threshold": "0.95",
+        "layover_max_seconds": 1800.0,
+        "total_trips": 5000,
+        "trips_excised": 194,
+        "blocks_touched": 150,
+        "layover_intervals_dropped": 310
+      }
+    },
+    {
+      "metric": "vrm",
+      "scope": "agency",
+      "metric_value_id": "mv-vrm-agency",
+      "value": "61234.88",
+      "unit": "miles",
+      "calc_name": "vrm_v0",
+      "calc_version": "0.2.0",
+      "certification_status": "uncertified",
+      "detail": {
+        "coverage": "0.9702",
+        "total_groups": 5000,
+        "excluded_groups": 149,
+        "clean_position_share": "0.9755",
+        "gap_threshold_seconds": 300.0,
+        "coverage_threshold": "0.95"
+      }
+    },
+    {
+      "metric": "voms",
+      "scope": "agency",
+      "metric_value_id": "mv-voms-agency",
+      "value": "412",
+      "unit": "vehicles",
+      "calc_name": "voms_v0",
+      "calc_version": "0.1.0",
+      "certification_status": "uncertified",
+      "detail": {
+        "days_observed": 28,
+        "days_in_period": 30,
+        "peak_day": "2026-06-10",
+        "per_day_counts": {
+          "min": 355,
+          "max": 412,
+          "mean": "381.5000"
+        }
+      }
+    },
+    {
+      "metric": "upt",
+      "scope": "mode:bus",
+      "metric_value_id": "mv-upt-bus",
+      "value": "30011",
+      "unit": "unlinked_passenger_trips",
+      "calc_name": "upt_v0",
+      "calc_version": "0.1.0",
+      "certification_status": "uncertified",
+      "detail": {
+        "total_boardings_counted": 29713,
+        "operated_trips": 4000,
+        "trips_with_events": 3960,
+        "missing_trips": 40,
+        "missing_share": "0.0100",
+        "factor_applied": "1.010101",
+        "source_mix": {
+          "tides_simulated": 34321
+        },
+        "missing_trip_threshold": "0.02",
+        "imbalance_threshold": "0.10"
+      }
+    },
+    {
+      "metric": "vrh",
+      "scope": "mode:bus",
+      "metric_value_id": "mv-vrh-bus",
+      "value": "4102.50",
+      "unit": "hours",
+      "calc_name": "vrh_v0",
+      "calc_version": "0.4.0",
+      "certification_status": "uncertified",
+      "detail": {
+        "coverage": "0.9655",
+        "total_groups": 700,
+        "excluded_groups": 12,
+        "clean_position_share": "0.9720",
+        "gap_threshold_seconds": 300.0,
+        "coverage_threshold": "0.95",
+        "layover_max_seconds": 1800.0,
+        "total_trips": 4000,
+        "trips_excised": 138,
+        "blocks_touched": 101,
+        "layover_intervals_dropped": 220
+      }
+    },
+    {
+      "metric": "vrm",
+      "scope": "mode:bus",
+      "metric_value_id": "mv-vrm-bus",
+      "value": "45120.33",
+      "unit": "miles",
+      "calc_name": "vrm_v0",
+      "calc_version": "0.2.0",
+      "certification_status": "uncertified",
+      "detail": {
+        "coverage": "0.9750",
+        "total_groups": 4000,
+        "excluded_groups": 100,
+        "clean_position_share": "0.9790",
+        "gap_threshold_seconds": 300.0,
+        "coverage_threshold": "0.95"
+      }
+    },
+    {
+      "metric": "voms",
+      "scope": "mode:bus",
+      "metric_value_id": "mv-voms-bus",
+      "value": "339",
+      "unit": "vehicles",
+      "calc_name": "voms_v0",
+      "calc_version": "0.1.0",
+      "certification_status": "uncertified",
+      "detail": {
+        "days_observed": 28,
+        "days_in_period": 30,
+        "peak_day": "2026-06-10",
+        "per_day_counts": {
+          "min": 290,
+          "max": 339,
+          "mean": "312.2500"
+        }
+      }
+    },
+    {
+      "metric": "upt",
+      "scope": "mode:subway",
+      "metric_value_id": "mv-upt-subway",
+      "value": "14621",
+      "unit": "unlinked_passenger_trips",
+      "calc_name": "upt_v0",
+      "calc_version": "0.1.0",
+      "certification_status": "uncertified",
+      "detail": {
+        "total_boardings_counted": 14477,
+        "operated_trips": 1000,
+        "trips_with_events": 990,
+        "missing_trips": 10,
+        "missing_share": "0.0100",
+        "factor_applied": "1.010101",
+        "source_mix": {
+          "tides_simulated": 16913
+        },
+        "missing_trip_threshold": "0.02",
+        "imbalance_threshold": "0.10"
+      }
+    },
+    {
+      "metric": "vrh",
+      "scope": "mode:subway",
+      "metric_value_id": "mv-vrh-subway",
+      "value": "1219.25",
+      "unit": "hours",
+      "calc_name": "vrh_v0",
+      "calc_version": "0.4.0",
+      "certification_status": "uncertified",
+      "detail": {
+        "coverage": "0.9440",
+        "total_groups": 200,
+        "excluded_groups": 8,
+        "clean_position_share": "0.9612",
+        "gap_threshold_seconds": 300.0,
+        "coverage_threshold": "0.90",
+        "layover_max_seconds": 1800.0,
+        "total_trips": 1000,
+        "trips_excised": 56,
+        "blocks_touched": 49,
+        "layover_intervals_dropped": 90
+      }
+    },
+    {
+      "metric": "vrm",
+      "scope": "mode:subway",
+      "metric_value_id": "mv-vrm-subway",
+      "value": "16114.55",
+      "unit": "miles",
+      "calc_name": "vrm_v0",
+      "calc_version": "0.2.0",
+      "certification_status": "uncertified",
+      "detail": {
+        "coverage": "0.9510",
+        "total_groups": 1000,
+        "excluded_groups": 49,
+        "clean_position_share": "0.9615",
+        "gap_threshold_seconds": 300.0,
+        "coverage_threshold": "0.95"
+      }
+    }
+  ]
+}

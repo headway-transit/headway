@@ -1,6 +1,7 @@
 """Injectable readers for canonical.vehicle_positions (handoff 0001, plus the
-canonical.trips.block_id join — handoff 0003, migration 0011) and
-canonical.passenger_events (handoff 0005, migration 0012).
+canonical.trips.block_id join — handoff 0003, migration 0011, and the
+canonical.routes.mode join — handoff 0009) and canonical.passenger_events
+(handoff 0005, migration 0012; mode joined per handoff 0009).
 
 The read side of the calc loop: SELECT canonical rows for one reporting
 period and map them onto the frozen VehiclePosition dataclass. Takes any
@@ -14,6 +15,13 @@ is a LEFT JOIN — an unassigned position (trip_id NULL), an unknown trip, or a
 feed omitting the optional block_id field all yield block_id NULL (the calc
 then falls back to per-trip grouping and documents the undercount), never a
 dropped row.
+
+mode join (handoff 0009): each position AND each passenger event carries the
+trip's route mode (canonical.routes.mode, LEFT JOIN canonical.trips →
+canonical.routes). An unassigned row (trip_id NULL), an unknown trip, or an
+unknown route yields mode NULL — mode-scoped computations bucket NULL mode as
+'unknown' and surface the unknown-mode share as an info finding; a row is
+NEVER dropped and a mode is NEVER guessed.
 
 Boundary convention (documented, load-bearing): the period is HALF-OPEN in
 UTC — ``time >= period_start 00:00:00 UTC AND time < period_end 00:00:00
@@ -36,28 +44,33 @@ from datetime import date, datetime, timezone
 from headway_calc.types import PassengerEvent, VehiclePosition
 
 #: Column names and order per handoff 0001 (canonical.vehicle_positions) plus
-#: canonical.trips.block_id (handoff 0003, migration 0011) via LEFT JOIN.
+#: canonical.trips.block_id (handoff 0003, migration 0011) and
+#: canonical.routes.mode (handoff 0009) via LEFT JOINs.
 _SELECT_POSITIONS_SQL = (
     "SELECT p.time, p.vehicle_id, p.trip_id, p.latitude, p.longitude, "
-    "p.source_record_id, t.block_id "
+    "p.source_record_id, t.block_id, r.mode "
     "FROM canonical.vehicle_positions AS p "
     "LEFT JOIN canonical.trips AS t ON t.trip_id = p.trip_id "
+    "LEFT JOIN canonical.routes AS r ON r.route_id = t.route_id "
     "WHERE p.time >= %s AND p.time < %s "
     "ORDER BY p.vehicle_id, p.time, p.source_record_id"
 )
 
 
 #: Column names and order per the handoff-0005 canonical.passenger_events
-#: contract (migration 0012). Deterministic ORDER BY: event_timestamp, then
+#: contract (migration 0012) plus canonical.routes.mode (handoff 0009) via
+#: LEFT JOINs. Deterministic ORDER BY: event_timestamp, then
 #: passenger_event_id, then source_record_id (the same total order
 #: headway_calc.upt sorts by internally).
 _SELECT_PASSENGER_EVENTS_SQL = (
-    "SELECT event_timestamp, service_date, passenger_event_id, vehicle_id, "
-    "trip_id, trip_stop_sequence, event_type, event_count, source, "
-    "source_record_id "
-    "FROM canonical.passenger_events "
-    "WHERE event_timestamp >= %s AND event_timestamp < %s "
-    "ORDER BY event_timestamp, passenger_event_id, source_record_id"
+    "SELECT e.event_timestamp, e.service_date, e.passenger_event_id, "
+    "e.vehicle_id, e.trip_id, e.trip_stop_sequence, e.event_type, "
+    "e.event_count, e.source, e.source_record_id, r.mode "
+    "FROM canonical.passenger_events AS e "
+    "LEFT JOIN canonical.trips AS t ON t.trip_id = e.trip_id "
+    "LEFT JOIN canonical.routes AS r ON r.route_id = t.route_id "
+    "WHERE e.event_timestamp >= %s AND e.event_timestamp < %s "
+    "ORDER BY e.event_timestamp, e.passenger_event_id, e.source_record_id"
 )
 
 #: Operated trips for the upt_v0 missing-trip rule (handoff 0005): the
@@ -95,9 +108,9 @@ def load_vehicle_positions(
 
     Bounds are UTC midnights of the given DATEs (see module docstring for the
     half-open convention). Rows arrive ordered by (vehicle_id, time,
-    source_record_id), each carrying the trip's block_id (NULL when
-    unassigned/unknown/absent — LEFT JOIN, see module docstring), and are
-    mapped 1:1 onto VehiclePosition; the dataclass's own validation then
+    source_record_id), each carrying the trip's block_id and route mode (NULL
+    when unassigned/unknown/absent — LEFT JOINs, see module docstring), and
+    are mapped 1:1 onto VehiclePosition; the dataclass's own validation then
     fails loudly on any naive timestamp or out-of-range coordinate — a bad
     canonical row is surfaced, never coerced.
 
@@ -119,6 +132,7 @@ def load_vehicle_positions(
             longitude=row[4],
             source_record_id=row[5],
             block_id=row[6],
+            mode=row[7],
         )
         for row in cur.fetchall()
     ]
@@ -135,8 +149,10 @@ def load_passenger_events(
     (the module's half-open convention — a June run is
     ``[2026-06-01, 2026-07-01)``). Rows arrive in deterministic order
     (event_timestamp, passenger_event_id, source_record_id), columns per the
-    handoff-0005 canonical.passenger_events contract (migration 0012), and
-    are mapped 1:1 onto PassengerEvent — NULLs pass through as None
+    handoff-0005 canonical.passenger_events contract (migration 0012) plus
+    the trip's route mode (NULL when unassigned/unknown — LEFT JOINs,
+    handoff 0009), and are mapped 1:1 onto PassengerEvent — NULLs pass
+    through as None
     (``event_count`` NULL is preserved, NEVER coalesced; the calc warns and
     counts 0), and the dataclass's own validation fails loudly on a naive
     timestamp or a negative count. Refuses (ValueError) an empty or inverted
@@ -160,6 +176,7 @@ def load_passenger_events(
             event_count=row[7],
             source=row[8],
             source_record_id=row[9],
+            mode=row[10],
         )
         for row in cur.fetchall()
     ]

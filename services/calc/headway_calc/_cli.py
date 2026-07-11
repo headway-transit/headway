@@ -106,6 +106,18 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--per-mode",
+        action="store_true",
+        help=(
+            "Additionally compute voms_v0 and one mode-scoped result per "
+            "metric per mode (computed.metric_values scope 'mode:<mode>', "
+            "handoff 0009), alongside the unchanged fleet-wide 'agency' "
+            "rows. Default OFF (the pre-0009 behavior); the MR-20 package "
+            "path (python -m headway_calc.mr20 --run) turns it on — the "
+            "MR-20 form requires the four data points per mode."
+        ),
+    )
+    parser.add_argument(
         "--ignore-settings",
         action="store_true",
         help=(
@@ -154,7 +166,79 @@ def main(argv: list[str] | None = None) -> int:
             missing_trip_threshold=args.missing_trip_threshold,
             imbalance_threshold=args.imbalance_threshold,
             read_settings=not args.ignore_settings,
+            per_mode=args.per_mode,
         )
 
     print(report.to_json())
+    return 0
+
+
+def _parse_mr20_args(argv: list[str] | None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        prog="python -m headway_calc.mr20",
+        description=(
+            "Assemble the NOT-REPORTABLE MR-20 preview package for one "
+            "calendar month from computed.metric_values (latest row per "
+            "metric+scope for the month's half-open period) and print it as "
+            "JSON. The package mirrors the four MR-20 data points (UPT, "
+            "VRH, VRM, VOMS) per mode plus fleet totals, every cell "
+            "carrying provenance; missing cells are explicit nulls with a "
+            "reason, never invented."
+        ),
+    )
+    parser.add_argument(
+        "--month",
+        required=True,
+        help="Calendar month YYYY-MM, e.g. 2026-07 (period [2026-07-01, 2026-08-01)).",
+    )
+    parser.add_argument(
+        "--run",
+        action="store_true",
+        help=(
+            "First execute run_period over the month WITH per-mode scoping "
+            "(the runner's --per-mode path: fleet + mode-scoped rows + "
+            "voms_v0), then assemble the package from the freshly persisted "
+            "rows. Thresholds resolve as in a plain run (app.settings row > "
+            "code default). Without this flag the package is assembled from "
+            "whatever computed.metric_values already holds."
+        ),
+    )
+    return parser.parse_args(argv)
+
+
+def mr20_main(argv: list[str] | None = None) -> int:
+    """Process boundary for ``python -m headway_calc.mr20``."""
+    import json
+
+    from headway_calc.mr20 import build_mr20_package, month_period
+
+    args = _parse_mr20_args(argv)
+
+    database_url = os.environ.get("HEADWAY_DATABASE_URL")
+    if not database_url:
+        raise SystemExit(
+            "HEADWAY_DATABASE_URL is not set. Refusing to guess a connection "
+            "string — set it to the agency database URL and re-run."
+        )
+
+    try:
+        import psycopg
+    except ImportError as exc:  # pragma: no cover — driver-less environments
+        raise SystemExit(
+            "The psycopg driver is required for a live run but is not "
+            "installed. Install it with: pip install 'headway-calc[persist]'"
+        ) from exc
+
+    with psycopg.connect(database_url) as conn:
+        if args.run:
+            period_start, period_end = month_period(args.month)
+            run_period(
+                conn,
+                period_start=period_start,
+                period_end=period_end,
+                per_mode=True,
+            )
+        package = build_mr20_package(conn, args.month)
+
+    print(json.dumps(package, indent=2))
     return 0

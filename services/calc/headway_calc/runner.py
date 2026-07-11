@@ -51,6 +51,16 @@ from decimal import Decimal
 from headway_calc._blocks import LAYOVER_MAX_SECONDS
 from headway_calc._grouping import COVERAGE_THRESHOLD, GAP_THRESHOLD_SECONDS
 from headway_calc.dq import route_findings
+from headway_calc.mode import (
+    MODE_DIMENSION_NAME,
+    MODE_DIMENSION_VERSION,
+    compute_upt_by_mode,
+    compute_voms_by_mode,
+    compute_vrh_by_mode,
+    compute_vrm_by_mode,
+    scope_for_mode,
+    unknown_mode_finding,
+)
 from headway_calc.persist import _METRIC_BY_CALC_NAME, persist_result
 from headway_calc.reader import (
     load_operated_trip_ids,
@@ -60,8 +70,13 @@ from headway_calc.reader import (
 from headway_calc.settings import load_policy_settings
 from headway_calc.types import CalcResult
 from headway_calc.upt import IMBALANCE_THRESHOLD, MISSING_TRIP_THRESHOLD, compute_upt
+from headway_calc.voms import compute_voms
 from headway_calc.vrh import compute_vrh
 from headway_calc.vrm import compute_vrm
+
+#: The fleet-wide scope value (the computed.metric_values.scope column
+#: default, handoff 0001).
+SCOPE_AGENCY = "agency"
 
 
 @dataclass(frozen=True)
@@ -78,6 +93,10 @@ class MetricOutcome:
     ``detail`` is the calculation's coverage detail (CoverageDetail.to_dict(),
     JSON-safe: ratios as strings, counts as ints) — the same object persisted
     to computed.metric_values.detail when the metric persists.
+
+    ``scope`` (handoff 0009) is the computed.metric_values.scope the outcome
+    was persisted under: 'agency' (fleet-wide, the default) or 'mode:<mode>'
+    on a --per-mode run.
     """
 
     calc_name: str
@@ -90,6 +109,7 @@ class MetricOutcome:
     routed_warning_ids: tuple[str, ...]
     routed_info_ids: tuple[str, ...]
     detail: dict | None
+    scope: str = SCOPE_AGENCY
 
     @property
     def persisted(self) -> bool:
@@ -107,6 +127,7 @@ class MetricOutcome:
             "calc_version": self.calc_version,
             "metric": self.metric,
             "unit": self.unit,
+            "scope": self.scope,
             "value": self.value,
             "metric_value_id": self.metric_value_id,
             "persisted": self.persisted,
@@ -133,6 +154,12 @@ class RunReport:
     app.settings does not exist yet or was skipped via read_settings=False).
     ``imbalance_threshold`` is not an app.settings knob, so its source is
     only ever ``"explicit"`` or ``"default"``.
+
+    ``per_mode`` (handoff 0009): whether the run also computed mode-scoped
+    figures (scope 'mode:<mode>' outcomes alongside the 'agency' ones, plus
+    voms_v0). ``run_info_ids`` carries run-level routed info ids that belong
+    to no single metric — currently at most the ONE 'unknown_mode_share'
+    finding a per-mode run routes.
     """
 
     period_start: date
@@ -147,6 +174,8 @@ class RunReport:
     passenger_events_loaded: int
     operated_trips_loaded: int
     outcomes: tuple[MetricOutcome, ...]
+    per_mode: bool = False
+    run_info_ids: tuple[str, ...] = ()
 
     @property
     def persisted_count(self) -> int:
@@ -166,7 +195,9 @@ class RunReport:
 
     @property
     def routed_info_count(self) -> int:
-        return sum(len(o.routed_info_ids) for o in self.outcomes)
+        return sum(len(o.routed_info_ids) for o in self.outcomes) + len(
+            self.run_info_ids
+        )
 
     @property
     def routed_issue_count(self) -> int:
@@ -192,6 +223,8 @@ class RunReport:
             "positions_loaded": self.positions_loaded,
             "passenger_events_loaded": self.passenger_events_loaded,
             "operated_trips_loaded": self.operated_trips_loaded,
+            "per_mode": self.per_mode,
+            "run_info_ids": list(self.run_info_ids),
             "persisted_count": self.persisted_count,
             "blocked_count": self.blocked_count,
             "routed_issue_count": self.routed_issue_count,
@@ -215,9 +248,12 @@ def run_period(
     missing_trip_threshold: Decimal | float | str | None = None,
     imbalance_threshold: Decimal | float | str | None = None,
     read_settings: bool = True,
+    per_mode: bool = False,
 ) -> RunReport:
     """Run vrm_v0 (0.2.0), vrh_v0 (0.4.0) and upt_v0 (0.1.0) over one
-    half-open period.
+    half-open period; with ``per_mode=True`` (the MR-20 path, handoff 0009)
+    additionally voms_v0 (0.1.0) and one mode-scoped result per mode per
+    metric.
 
     Threshold precedence (per threshold, highest wins) — recorded per
     threshold in ``RunReport.threshold_sources``:
@@ -260,6 +296,26 @@ def run_period(
       plus blocks_touched/trips_excised/layover_intervals_dropped — +
       lineage edges over included positions only), its warnings/infos
       standing alongside as the routed dq rows.
+
+    Per-mode path (``per_mode=True``, default OFF — handoff 0009; the MR-20
+    package needs the four data points PER MODE, tracker "Verified — Monthly
+    Ridership form MR-20"):
+
+    - voms_v0 0.1.0 joins the run: one fleet-wide ('agency') result plus one
+      per mode (compute_voms / compute_voms_by_mode — blocking-free, see the
+      voms module docstring);
+    - each metric additionally runs over each mode's input subset (the
+      UNCHANGED calc versions — input selection, not a semantics change; see
+      headway_calc.mode and the tracker's "Mode scoping" section), persisting
+      one computed.metric_values row per mode with scope 'mode:<mode>'
+      alongside the unchanged scope 'agency' row; NULL modes bucket as
+      'mode:unknown', never dropped;
+    - mode-scoped findings route to dq.issues exactly like fleet findings,
+      their descriptions naming the scope; a mode-scoped result with blocking
+      findings persists no row for that scope (the structural guardrail is
+      per scoped result);
+    - ONE run-level info finding 'unknown_mode_share' is routed when any
+      loaded position/event carries no mode (RunReport.run_info_ids).
 
     Commits in two transactions, issues first (see module docstring). Any
     failure propagates after rolling back only the in-flight value phase;
@@ -332,15 +388,42 @@ def run_period(
         ),
     )
 
+    # Scoped result list: the fleet-wide ('agency') results first — unchanged
+    # order and semantics — then, on the per-mode path (handoff 0009), the
+    # fleet voms_v0 result and one mode-scoped result per metric per mode.
+    scoped_results: list[tuple[str, CalcResult]] = [
+        (SCOPE_AGENCY, result) for result in results
+    ]
+    run_finding = None
+    if per_mode:
+        scoped_results.append(
+            (SCOPE_AGENCY, compute_voms(positions, period_start, period_end))
+        )
+        per_mode_results = (
+            compute_vrm_by_mode(positions, threshold, cov_threshold),
+            compute_vrh_by_mode(positions, threshold, cov_threshold, layover_max),
+            compute_upt_by_mode(
+                passenger_events,
+                positions,
+                missing_trip_threshold=missing_threshold,
+                imbalance_threshold=imbal_threshold,
+            ),
+            compute_voms_by_mode(positions, period_start, period_end),
+        )
+        for by_mode in per_mode_results:
+            for bucket, result in by_mode.items():
+                scoped_results.append((scope_for_mode(bucket), result))
+        run_finding = unknown_mode_finding(positions, passenger_events)
+
     # Transaction 1 — fail-loudly-first: route and COMMIT every finding
-    # (infos, then warnings, then blocking, each with its own severity)
-    # before any value is written, so DQ evidence is durable no matter what
-    # happens in the value phase.
-    info_ids_by_calc: dict[str, tuple[str, ...]] = {}
-    warning_ids_by_calc: dict[str, tuple[str, ...]] = {}
-    blocking_ids_by_calc: dict[str, tuple[str, ...]] = {}
+    # (infos, then warnings, then blocking, each with its own severity;
+    # mode-scoped findings name their scope) before any value is written, so
+    # DQ evidence is durable no matter what happens in the value phase.
+    info_ids_by_key: dict[tuple[str, str], tuple[str, ...]] = {}
+    warning_ids_by_key: dict[tuple[str, str], tuple[str, ...]] = {}
+    blocking_ids_by_key: dict[tuple[str, str], tuple[str, ...]] = {}
     routed_any = False
-    for result in results:
+    for scope, result in scoped_results:
         findings = (
             list(result.infos) + list(result.warnings) + list(result.blocking_issues)
         )
@@ -352,17 +435,30 @@ def run_period(
                 result.calc_version,
                 period_start,
                 period_end,
+                scope=None if scope == SCOPE_AGENCY else scope,
             )
             routed_any = True
+            key = (result.calc_name, scope)
             n_infos = len(result.infos)
             n_warnings = len(result.warnings)
-            info_ids_by_calc[result.calc_name] = tuple(issue_ids[:n_infos])
-            warning_ids_by_calc[result.calc_name] = tuple(
+            info_ids_by_key[key] = tuple(issue_ids[:n_infos])
+            warning_ids_by_key[key] = tuple(
                 issue_ids[n_infos : n_infos + n_warnings]
             )
-            blocking_ids_by_calc[result.calc_name] = tuple(
-                issue_ids[n_infos + n_warnings :]
+            blocking_ids_by_key[key] = tuple(issue_ids[n_infos + n_warnings :])
+    run_info_ids: tuple[str, ...] = ()
+    if run_finding is not None:
+        run_info_ids = tuple(
+            route_findings(
+                conn,
+                [run_finding],
+                MODE_DIMENSION_NAME,
+                MODE_DIMENSION_VERSION,
+                period_start,
+                period_end,
             )
+        )
+        routed_any = True
     if routed_any:
         conn.commit()
 
@@ -372,11 +468,12 @@ def run_period(
     outcomes: list[MetricOutcome] = []
     persisted_any = False
     try:
-        for result in results:
+        for scope, result in scoped_results:
             detail = None if result.detail is None else result.detail.to_dict()
-            info_ids = info_ids_by_calc.get(result.calc_name, ())
-            warning_ids = warning_ids_by_calc.get(result.calc_name, ())
-            blocking_ids = blocking_ids_by_calc.get(result.calc_name, ())
+            key = (result.calc_name, scope)
+            info_ids = info_ids_by_key.get(key, ())
+            warning_ids = warning_ids_by_key.get(key, ())
+            blocking_ids = blocking_ids_by_key.get(key, ())
             if result.blocking_issues:
                 outcomes.append(
                     MetricOutcome(
@@ -390,11 +487,12 @@ def run_period(
                         routed_warning_ids=warning_ids,
                         routed_info_ids=info_ids,
                         detail=detail,
+                        scope=scope,
                     )
                 )
             else:
                 metric_value_id = persist_result(
-                    conn, result, period_start, period_end
+                    conn, result, period_start, period_end, scope=scope
                 )
                 persisted_any = True
                 outcomes.append(
@@ -409,6 +507,7 @@ def run_period(
                         routed_warning_ids=warning_ids,
                         routed_info_ids=info_ids,
                         detail=detail,
+                        scope=scope,
                     )
                 )
         if persisted_any:
@@ -430,6 +529,8 @@ def run_period(
         passenger_events_loaded=len(passenger_events),
         operated_trips_loaded=len(operated_trip_ids),
         outcomes=tuple(outcomes),
+        per_mode=per_mode,
+        run_info_ids=run_info_ids,
     )
 
 

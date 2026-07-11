@@ -1,0 +1,241 @@
+{
+  "description": "Golden fixture for the handoff-0009 mode dimension: a bus trip (trip-A, the vrm_vrh_v0 trip-A geometry), a subway trip (trip-B, the trip-B geometry), two unassigned positions and one unassigned passenger event (the 'unknown' bucket). Per-mode values sum to the fleet values for the additive metrics; see BASIS.md. Synthetic, NOT FTA-certified; regression anchor only.",
+  "events": [
+    {
+      "passenger_event_id": "pe-bus-1",
+      "event_timestamp": "2026-01-15T12:00:30+00:00",
+      "service_date": "2026-01-15",
+      "vehicle_id": "veh-101",
+      "trip_id": "trip-A",
+      "trip_stop_sequence": 1,
+      "event_type": "Passenger boarded",
+      "event_count": 5,
+      "source": "tides",
+      "source_record_id": "rec-e-bus-1",
+      "mode": "bus"
+    },
+    {
+      "passenger_event_id": "pe-sub-1",
+      "event_timestamp": "2026-01-15T12:01:00+00:00",
+      "service_date": "2026-01-15",
+      "vehicle_id": "veh-202",
+      "trip_id": "trip-B",
+      "trip_stop_sequence": 1,
+      "event_type": "Passenger boarded",
+      "event_count": 7,
+      "source": "tides",
+      "source_record_id": "rec-e-sub-1",
+      "mode": "subway"
+    },
+    {
+      "passenger_event_id": "pe-x-1",
+      "event_timestamp": "2026-01-15T12:02:00+00:00",
+      "service_date": "2026-01-15",
+      "vehicle_id": "veh-303",
+      "trip_id": null,
+      "trip_stop_sequence": 1,
+      "event_type": "Passenger boarded",
+      "event_count": 4,
+      "source": "tides",
+      "source_record_id": "rec-e-x-1"
+    }
+  ],
+  "positions": [
+    {
+      "time": "2026-01-15T12:00:00+00:00",
+      "vehicle_id": "veh-101",
+      "trip_id": "trip-A",
+      "latitude": 40.0,
+      "longitude": -75.0,
+      "source_record_id": "rec-a-00",
+      "mode": "bus"
+    },
+    {
+      "time": "2026-01-15T12:01:00+00:00",
+      "vehicle_id": "veh-101",
+      "trip_id": "trip-A",
+      "latitude": 40.01,
+      "longitude": -75.0,
+      "source_record_id": "rec-a-01",
+      "mode": "bus"
+    },
+    {
+      "time": "2026-01-15T12:02:00+00:00",
+      "vehicle_id": "veh-101",
+      "trip_id": "trip-A",
+      "latitude": 40.02,
+      "longitude": -75.0,
+      "source_record_id": "rec-a-02",
+      "mode": "bus"
+    },
+    {
+      "time": "2026-01-15T12:03:00+00:00",
+      "vehicle_id": "veh-101",
+      "trip_id": "trip-A",
+      "latitude": 40.03,
+      "longitude": -75.0,
+      "source_record_id": "rec-a-03",
+      "mode": "bus"
+    },
+    {
+      "time": "2026-01-15T12:04:00+00:00",
+      "vehicle_id": "veh-101",
+      "trip_id": "trip-A",
+      "latitude": 40.04,
+      "longitude": -75.0,
+      "source_record_id": "rec-a-04",
+      "mode": "bus"
+    },
+    {
+      "time": "2026-01-15T12:05:00+00:00",
+      "vehicle_id": "veh-101",
+      "trip_id": "trip-A",
+      "latitude": 40.05,
+      "longitude": -75.0,
+      "source_record_id": "rec-a-05",
+      "mode": "bus"
+    },
+    {
+      "time": "2026-01-15T12:06:00+00:00",
+      "vehicle_id": "veh-101",
+      "trip_id": "trip-A",
+      "latitude": 40.06,
+      "longitude": -75.0,
+      "source_record_id": "rec-a-06",
+      "mode": "bus"
+    },
+    {
+      "time": "2026-01-15T12:07:00+00:00",
+      "vehicle_id": "veh-101",
+      "trip_id": "trip-A",
+      "latitude": 40.07,
+      "longitude": -75.0,
+      "source_record_id": "rec-a-07",
+      "mode": "bus"
+    },
+    {
+      "time": "2026-01-15T12:08:00+00:00",
+      "vehicle_id": "veh-101",
+      "trip_id": "trip-A",
+      "latitude": 40.08,
+      "longitude": -75.0,
+      "source_record_id": "rec-a-08",
+      "mode": "bus"
+    },
+    {
+      "time": "2026-01-15T12:09:00+00:00",
+      "vehicle_id": "veh-101",
+      "trip_id": "trip-A",
+      "latitude": 40.09,
+      "longitude": -75.0,
+      "source_record_id": "rec-a-09",
+      "mode": "bus"
+    },
+    {
+      "time": "2026-01-15T12:00:00+00:00",
+      "vehicle_id": "veh-202",
+      "trip_id": "trip-B",
+      "latitude": 0.0,
+      "longitude": -75.0,
+      "source_record_id": "rec-b-00",
+      "mode": "subway"
+    },
+    {
+      "time": "2026-01-15T12:02:00+00:00",
+      "vehicle_id": "veh-202",
+      "trip_id": "trip-B",
+      "latitude": 0.0,
+      "longitude": -74.99,
+      "source_record_id": "rec-b-01",
+      "mode": "subway"
+    },
+    {
+      "time": "2026-01-15T12:04:00+00:00",
+      "vehicle_id": "veh-202",
+      "trip_id": "trip-B",
+      "latitude": 0.0,
+      "longitude": -74.98,
+      "source_record_id": "rec-b-02",
+      "mode": "subway"
+    },
+    {
+      "time": "2026-01-15T12:06:00+00:00",
+      "vehicle_id": "veh-202",
+      "trip_id": "trip-B",
+      "latitude": 0.0,
+      "longitude": -74.97,
+      "source_record_id": "rec-b-03",
+      "mode": "subway"
+    },
+    {
+      "time": "2026-01-15T12:08:00+00:00",
+      "vehicle_id": "veh-202",
+      "trip_id": "trip-B",
+      "latitude": 0.0,
+      "longitude": -74.96,
+      "source_record_id": "rec-b-04",
+      "mode": "subway"
+    },
+    {
+      "time": "2026-01-15T12:10:00+00:00",
+      "vehicle_id": "veh-202",
+      "trip_id": "trip-B",
+      "latitude": 0.0,
+      "longitude": -74.95,
+      "source_record_id": "rec-b-05",
+      "mode": "subway"
+    },
+    {
+      "time": "2026-01-15T12:12:00+00:00",
+      "vehicle_id": "veh-202",
+      "trip_id": "trip-B",
+      "latitude": 0.0,
+      "longitude": -74.94,
+      "source_record_id": "rec-b-06",
+      "mode": "subway"
+    },
+    {
+      "time": "2026-01-15T12:14:00+00:00",
+      "vehicle_id": "veh-202",
+      "trip_id": "trip-B",
+      "latitude": 0.0,
+      "longitude": -74.93,
+      "source_record_id": "rec-b-07",
+      "mode": "subway"
+    },
+    {
+      "time": "2026-01-15T12:16:00+00:00",
+      "vehicle_id": "veh-202",
+      "trip_id": "trip-B",
+      "latitude": 0.0,
+      "longitude": -74.92,
+      "source_record_id": "rec-b-08",
+      "mode": "subway"
+    },
+    {
+      "time": "2026-01-15T12:18:00+00:00",
+      "vehicle_id": "veh-202",
+      "trip_id": "trip-B",
+      "latitude": 0.0,
+      "longitude": -74.91,
+      "source_record_id": "rec-b-09",
+      "mode": "subway"
+    },
+    {
+      "time": "2026-01-15T13:00:00+00:00",
+      "vehicle_id": "veh-303",
+      "trip_id": null,
+      "latitude": 10.0,
+      "longitude": 10.0,
+      "source_record_id": "rec-x-00"
+    },
+    {
+      "time": "2026-01-15T13:01:00+00:00",
+      "vehicle_id": "veh-303",
+      "trip_id": null,
+      "latitude": 10.0,
+      "longitude": 10.0,
+      "source_record_id": "rec-x-01"
+    }
+  ]
+}

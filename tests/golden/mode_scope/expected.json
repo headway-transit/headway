@@ -1,0 +1,39 @@
+{
+  "description": "Per-mode expectations over fixture.json (handoff 0009), hand-worked in BASIS.md: mode-scoped values sum EXACTLY to the fleet values for the additive metrics vrm/vrh/upt; voms is NOT additive across modes (max, not sum). Synthetic, NOT FTA-certified; regression anchor only.",
+  "period_start": "2026-01-01",
+  "period_end": "2026-02-01",
+  "fleet": {
+    "vrm": "12.44",
+    "vrh": "0.45",
+    "upt": "12",
+    "voms": "2"
+  },
+  "per_mode": {
+    "vrm": {
+      "bus": "6.22",
+      "subway": "6.22",
+      "unknown": "0.00"
+    },
+    "vrh": {
+      "bus": "0.15",
+      "subway": "0.30",
+      "unknown": "0.00"
+    },
+    "upt": {
+      "bus": "5",
+      "subway": "7",
+      "unknown": "0"
+    },
+    "voms": {
+      "bus": "1",
+      "subway": "1",
+      "unknown": "0"
+    }
+  },
+  "unknown_mode": {
+    "positions_unknown": 2,
+    "positions_total": 22,
+    "events_unknown": 1,
+    "events_total": 3
+  }
+}

@@ -40,6 +40,7 @@ def _sample_rows():
             -75.0,
             "rec-a-00",
             "blk-1",
+            "bus",  # canonical.routes.mode joined via trips (handoff 0009)
         ),
         (
             datetime(2026, 1, 15, 12, 1, tzinfo=timezone.utc),
@@ -49,6 +50,7 @@ def _sample_rows():
             -75.0,
             "rec-x-00",
             None,  # LEFT JOIN: no trip, no block — NULL, never a dropped row
+            None,  # LEFT JOIN: no trip, no route, no mode — NULL, never guessed
         ),
     ]
 
@@ -66,8 +68,10 @@ def test_reader_maps_rows_to_dataclasses():
     assert first.longitude == -75.0
     assert first.source_record_id == "rec-a-00"
     assert first.block_id == "blk-1"  # joined from canonical.trips
+    assert first.mode == "bus"  # joined from canonical.routes (handoff 0009)
     assert positions[1].trip_id is None  # None passes through untouched
     assert positions[1].block_id is None
+    assert positions[1].mode is None  # NULL mode stays None, never guessed
 
 
 def test_reader_sql_columns_join_and_order_match_handoffs():
@@ -78,12 +82,15 @@ def test_reader_sql_columns_join_and_order_match_handoffs():
     sql, _ = conn.executed[0]
     assert (
         "SELECT p.time, p.vehicle_id, p.trip_id, p.latitude, p.longitude, "
-        "p.source_record_id, t.block_id" in sql
+        "p.source_record_id, t.block_id, r.mode" in sql
     )
     assert "FROM canonical.vehicle_positions AS p" in sql
     # Handoff 0003: block_id joined from canonical.trips — LEFT JOIN so an
     # unassigned/unknown trip yields NULL, never a dropped position row.
     assert "LEFT JOIN canonical.trips AS t ON t.trip_id = p.trip_id" in sql
+    # Handoff 0009: mode joined from canonical.routes via trips — LEFT JOIN
+    # so an unknown trip/route yields NULL mode, never a dropped row.
+    assert "LEFT JOIN canonical.routes AS r ON r.route_id = t.route_id" in sql
     assert "ORDER BY p.vehicle_id, p.time, p.source_record_id" in sql
 
 
@@ -126,17 +133,24 @@ def test_passenger_events_sql_columns_bounds_and_order_match_handoff_0005():
     assert len(conn.executed) == 1
     sql, params = conn.executed[0]
     # Columns per the handoff-0005 canonical.passenger_events contract
-    # (migration 0012), in contract order.
+    # (migration 0012), in contract order, plus routes.mode (handoff 0009).
     assert (
-        "SELECT event_timestamp, service_date, passenger_event_id, vehicle_id, "
-        "trip_id, trip_stop_sequence, event_type, event_count, source, "
-        "source_record_id" in sql
+        "SELECT e.event_timestamp, e.service_date, e.passenger_event_id, "
+        "e.vehicle_id, e.trip_id, e.trip_stop_sequence, e.event_type, "
+        "e.event_count, e.source, e.source_record_id, r.mode" in sql
     )
-    assert "FROM canonical.passenger_events" in sql
+    assert "FROM canonical.passenger_events AS e" in sql
+    # Handoff 0009: mode joined trips → routes — LEFT JOINs so an
+    # unassigned/unknown trip yields NULL mode, never a dropped event row.
+    assert "LEFT JOIN canonical.trips AS t ON t.trip_id = e.trip_id" in sql
+    assert "LEFT JOIN canonical.routes AS r ON r.route_id = t.route_id" in sql
     # Half-open on event_timestamp, UTC-midnight datetime binding.
-    assert "WHERE event_timestamp >= %s AND event_timestamp < %s" in sql
+    assert "WHERE e.event_timestamp >= %s AND e.event_timestamp < %s" in sql
     assert "<=" not in sql.split("WHERE", 1)[1]
-    assert "ORDER BY event_timestamp, passenger_event_id, source_record_id" in sql
+    assert (
+        "ORDER BY e.event_timestamp, e.passenger_event_id, e.source_record_id"
+        in sql
+    )
     assert params == (
         datetime(2026, 6, 1, tzinfo=timezone.utc),
         datetime(2026, 7, 1, tzinfo=timezone.utc),

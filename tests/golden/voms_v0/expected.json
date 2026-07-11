@@ -1,0 +1,48 @@
+{
+  "description": "Expectations for voms_v0 CALC_VERSION 0.1.0 over fixture.json, hand-worked in BASIS.md. Synthetic, NOT FTA-certified; regression anchor only.",
+  "voms_v0_0_1": {
+    "calc_name": "voms_v0",
+    "calc_version": "0.1.0",
+    "unit": "vehicles",
+    "exact_period": {
+      "period_start": "2026-07-01",
+      "period_end": "2026-07-04",
+      "value": "3",
+      "detail": {
+        "days_observed": 3,
+        "days_in_period": 3,
+        "peak_day": "2026-07-02",
+        "per_day_counts": {
+          "min": 2,
+          "max": 3,
+          "mean": "2.3333"
+        }
+      },
+      "warnings": [],
+      "input_record_ids": ["rec-v3-00", "rec-v4-00", "rec-v5-00"]
+    },
+    "partial_period": {
+      "period_start": "2026-07-01",
+      "period_end": "2026-07-08",
+      "value": "3",
+      "detail": {
+        "days_observed": 3,
+        "days_in_period": 7,
+        "peak_day": "2026-07-02",
+        "per_day_counts": {
+          "min": 2,
+          "max": 3,
+          "mean": "2.3333"
+        }
+      },
+      "warnings": [
+        {
+          "issue_type": "voms_partial_observation",
+          "severity": "warning",
+          "source_record_ids": []
+        }
+      ],
+      "input_record_ids": ["rec-v3-00", "rec-v4-00", "rec-v5-00"]
+    }
+  }
+}

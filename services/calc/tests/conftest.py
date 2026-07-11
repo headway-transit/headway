@@ -22,6 +22,9 @@ from headway_calc.types import PassengerEvent, VehiclePosition
 # services/calc/tests/conftest.py -> repo root is parents[3]
 GOLDEN_DIR = Path(__file__).resolve().parents[3] / "tests" / "golden" / "vrm_vrh_v0"
 UPT_GOLDEN_DIR = Path(__file__).resolve().parents[3] / "tests" / "golden" / "upt_v0"
+VOMS_GOLDEN_DIR = Path(__file__).resolve().parents[3] / "tests" / "golden" / "voms_v0"
+MODE_GOLDEN_DIR = Path(__file__).resolve().parents[3] / "tests" / "golden" / "mode_scope"
+MR20_GOLDEN_DIR = Path(__file__).resolve().parents[3] / "tests" / "golden" / "mr20"
 
 
 def load_positions(raw: dict) -> list[VehiclePosition]:
@@ -36,6 +39,9 @@ def load_positions(raw: dict) -> list[VehiclePosition]:
             # block_id (handoff 0003) is absent from the pre-0.3.0 fixtures:
             # None, exactly like a feed omitting the optional GTFS field.
             block_id=p.get("block_id"),
+            # mode (handoff 0009) is absent from pre-0009 fixtures: None,
+            # exactly like an unknown trip/route (LEFT JOIN NULL).
+            mode=p.get("mode"),
         )
         for p in raw["positions"]
     ]
@@ -55,6 +61,7 @@ def load_events(raw_case: dict) -> list[PassengerEvent]:
             event_count=e["event_count"],
             source=e["source"],
             source_record_id=e["source_record_id"],
+            mode=e.get("mode"),
         )
         for e in raw_case["events"]
     ]
@@ -121,11 +128,55 @@ def upt_golden_expected() -> dict:
     return json.loads((UPT_GOLDEN_DIR / "expected.json").read_text())
 
 
+@pytest.fixture(scope="session")
+def voms_golden_fixture() -> dict:
+    """VOMS fixture for voms_v0 0.1.0 (handoff 0009): 3 service days with
+    distinct-vehicle counts 2/3/2 → maximum 3 — see
+    tests/golden/voms_v0/BASIS.md."""
+    return json.loads((VOMS_GOLDEN_DIR / "fixture.json").read_text())
+
+
+@pytest.fixture(scope="session")
+def voms_golden_expected() -> dict:
+    """Expectations for voms_v0 CALC_VERSION 0.1.0 over the VOMS fixture —
+    see tests/golden/voms_v0/BASIS.md."""
+    return json.loads((VOMS_GOLDEN_DIR / "expected.json").read_text())
+
+
+@pytest.fixture(scope="session")
+def mode_golden_fixture() -> dict:
+    """Mode-scoping fixture (handoff 0009): two modes' positions/events plus
+    unassigned (unknown-mode) rows — see tests/golden/mode_scope/BASIS.md."""
+    return json.loads((MODE_GOLDEN_DIR / "fixture.json").read_text())
+
+
+@pytest.fixture(scope="session")
+def mode_golden_expected() -> dict:
+    """Per-mode expectations (scoped values summing to the fleet values for
+    the additive metrics) — see tests/golden/mode_scope/BASIS.md."""
+    return json.loads((MODE_GOLDEN_DIR / "expected.json").read_text())
+
+
+@pytest.fixture(scope="session")
+def mr20_golden_fixture() -> dict:
+    """Canned computed.metric_values rows for the MR-20 package golden —
+    see tests/golden/mr20/BASIS.md."""
+    return json.loads((MR20_GOLDEN_DIR / "fixture.json").read_text())
+
+
+@pytest.fixture(scope="session")
+def mr20_golden_expected() -> dict:
+    """The exact MR-20 package JSON expected over the canned rows — see
+    tests/golden/mr20/BASIS.md."""
+    return json.loads((MR20_GOLDEN_DIR / "expected.json").read_text())
+
+
 def positions_to_rows(positions: list[VehiclePosition]) -> list[tuple]:
     """Render VehiclePositions as reader result rows (the handoff-0001
     canonical.vehicle_positions columns plus the trips.block_id join, handoff
-    0003), in the reader's SQL order (vehicle_id, time, source_record_id) —
-    the fake stands in for the database, so it honors the ORDER BY."""
+    0003, and the routes.mode join, handoff 0009), in the reader's SQL order
+    (vehicle_id, time, source_record_id) — the fake stands in for the
+    database, so it honors the ORDER BY."""
     ordered = sorted(positions, key=lambda p: (p.vehicle_id, p.time, p.source_record_id))
     return [
         (
@@ -136,6 +187,7 @@ def positions_to_rows(positions: list[VehiclePosition]) -> list[tuple]:
             p.longitude,
             p.source_record_id,
             p.block_id,
+            p.mode,
         )
         for p in ordered
     ]
@@ -143,9 +195,10 @@ def positions_to_rows(positions: list[VehiclePosition]) -> list[tuple]:
 
 def events_to_rows(events: list[PassengerEvent]) -> list[tuple]:
     """Render PassengerEvents as reader result rows (the handoff-0005
-    canonical.passenger_events columns), in the reader's SQL order
-    (event_timestamp, passenger_event_id, source_record_id) — the fake
-    stands in for the database, so it honors the ORDER BY."""
+    canonical.passenger_events columns plus the routes.mode join, handoff
+    0009), in the reader's SQL order (event_timestamp, passenger_event_id,
+    source_record_id) — the fake stands in for the database, so it honors
+    the ORDER BY."""
     ordered = sorted(
         events,
         key=lambda e: (e.event_timestamp, e.passenger_event_id, e.source_record_id),
@@ -162,6 +215,7 @@ def events_to_rows(events: list[PassengerEvent]) -> list[tuple]:
             e.event_count,
             e.source,
             e.source_record_id,
+            e.mode,
         )
         for e in ordered
     ]
@@ -211,6 +265,10 @@ class RecordingCursor:
                 self._pending_all = list(conn.passenger_event_rows)
             elif "SELECT DISTINCT trip_id" in sql:
                 self._pending_all = list(conn.operated_trip_rows)
+            elif "FROM computed.metric_values" in sql:
+                # mr20's latest-per-(metric, scope) SELECT (handoff 0009);
+                # the fake serves pre-deduplicated canned rows.
+                self._pending_all = list(conn.metric_value_rows)
             else:
                 self._pending_all = list(conn.position_rows)
         elif "INSERT INTO dq.issues" in sql:
@@ -243,10 +301,12 @@ class RecordingConnection:
         operated_trip_rows: list[tuple] | None = None,
         settings_rows: list[tuple] | None = None,
         settings_table_missing: bool = False,
+        metric_value_rows: list[tuple] | None = None,
     ):
         self.position_rows = position_rows or []
         self.passenger_event_rows = passenger_event_rows or []
         self.operated_trip_rows = operated_trip_rows or []
+        self.metric_value_rows = metric_value_rows or []
         # app.settings (migration 0014): by default the fake serves the
         # seeded rows; settings_table_missing=True models a pre-0014
         # database (the SELECT raises the 42P01 duck-typed error).
