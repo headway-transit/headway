@@ -13,6 +13,13 @@ the same rule as reported figures), 'integer' must be a whole number, 'text'
 any non-empty string. A value that does not parse is a plain-language 422.
 Every change is audited with the old AND new value in the audit detail.
 
+Branding keys (migration 0015, handoff 0008) carry extra rules on top of
+their 'text' type: the two brand_color_* keys must be '#rrggbb' hex AND pass
+the server-side WCAG AA contrast guardrail against both app surfaces
+(branding.py — a failing color is a plain-language 422 naming the failing
+surface and the measured ratio), and brand_logo_meta is system-maintained
+(set by POST /branding/logo, never PUT directly).
+
 DOCUMENTED LIMITATION (handoff 0002 Response): the calc runner does NOT yet
 read this table — its explicit CLI flags still govern every run. Wiring
 runner-reads-settings is the follow-up increment; this surface exists now so
@@ -30,6 +37,7 @@ from pydantic import BaseModel, Field
 from ..audit import write_event
 from ..auth import Identity
 from ..authz import require_authenticated, require_certifying_official
+from ..branding import BRAND_COLOR_KEYS, LOGO_META_KEY, brand_color_problem
 from ..db import get_db
 
 router = APIRouter(tags=["settings"])
@@ -109,6 +117,25 @@ def validate_value(value: str, value_type: str, setting_key: str) -> None:
     # 'text' accepts any non-empty string (the request model enforces
     # non-empty). value_type is CHECK-constrained in the database, so no
     # other branch can exist.
+
+    # Branding keys (migration 0015) carry EXTRA rules beyond their 'text'
+    # type — the accessibility guardrail (handoff 0008: you can brand it;
+    # you cannot brand it inaccessible). Every other key is unchanged.
+    if setting_key == LOGO_META_KEY:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "'brand_logo_meta' is maintained by Headway when an agency "
+                "logo is uploaded and cannot be edited directly. To change "
+                "the logo, upload a new one via POST /branding/logo."
+            ),
+        )
+    if setting_key in BRAND_COLOR_KEYS:
+        problem = brand_color_problem(value)
+        if problem is not None:
+            # Hex-format or WCAG AA contrast refusal — the message names the
+            # failing surface and the measured ratio (branding.py).
+            raise HTTPException(status_code=422, detail=problem)
 
 
 @router.get("/settings", response_model=list[Setting])

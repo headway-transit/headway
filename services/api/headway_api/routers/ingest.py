@@ -117,6 +117,24 @@ class MinioObjectStore:
             self._bucket, key, io.BytesIO(data), len(data), content_type=content_type
         )
 
+    def get(self, key: str) -> Optional[bytes]:
+        """Fetch one object's bytes, or None when it does not exist. Added
+        for the branding logo (routers/branding.py LogoStore); ingest itself
+        never reads back."""
+        from minio.error import S3Error
+
+        try:
+            response = self._client.get_object(self._bucket, key)
+        except S3Error as exc:
+            if exc.code in ("NoSuchKey", "NoSuchObject"):
+                return None
+            raise
+        try:
+            return response.read()
+        finally:
+            response.close()
+            response.release_conn()
+
 
 class KafkaEnvelopeProducer:
     """kafka-python-ng adapter (from the ``ingest`` extra). Flushes per send:

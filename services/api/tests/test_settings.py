@@ -8,10 +8,16 @@ import json
 from conftest import auth_header
 
 SEEDED = {
-    "coverage_threshold": ("0.95", "decimal"),
-    "gap_threshold_seconds": ("300", "integer"),
-    "layover_max_seconds": ("1800", "integer"),
-    "missing_trip_threshold": ("0.02", "decimal"),
+    # (value, value_type, seeding migration)
+    "coverage_threshold": ("0.95", "decimal", "migration:0014"),
+    "gap_threshold_seconds": ("300", "integer", "migration:0014"),
+    "layover_max_seconds": ("1800", "integer", "migration:0014"),
+    "missing_trip_threshold": ("0.02", "decimal", "migration:0014"),
+    # Branding keys (migration 0015, handoff 0008 pillar C).
+    "agency_display_name": ("Transit Agency", "text", "migration:0015"),
+    "brand_color_primary": ("#1a5fb4", "text", "migration:0015"),
+    "brand_color_accent": ("#0b57d0", "text", "migration:0015"),
+    "brand_logo_meta": ("unset", "text", "migration:0015"),
 }
 
 
@@ -20,12 +26,12 @@ def test_any_signed_in_role_reads_the_seeded_settings(client, fake_db):
     assert r.status_code == 200
     rows = {s["setting_key"]: s for s in r.json()}
     assert set(rows) == set(SEEDED)
-    for key, (value, value_type) in SEEDED.items():
+    for key, (value, value_type, seeded_by) in SEEDED.items():
         assert rows[key]["setting_value"] == value
         assert isinstance(rows[key]["setting_value"], str)  # never a JSON number
         assert rows[key]["value_type"] == value_type
         assert rows[key]["description"]  # plain-language basis, never empty
-        assert rows[key]["updated_by"] == "migration:0014"
+        assert rows[key]["updated_by"] == seeded_by
     # The placeholder is flagged as such; the FTA basis is cited.
     assert "PLACEHOLDER" in rows["coverage_threshold"]["description"]
     assert "p. 146" in rows["missing_trip_threshold"]["description"]

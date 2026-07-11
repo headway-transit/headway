@@ -71,6 +71,8 @@ entirely. Any 401 clears the session and returns you to `/login`.
 | Route | What it does |
 |---|---|
 | `/login` | Local-account sign-in (ADR-0011). Failures announced via `role="alert"`, verbatim. |
+| `/dashboard` | Operational dashboard (handoff 0008, pillar B; any signed-in role). Hero stat tiles show the latest **certified** VRM/VRH/UPT verbatim (SimulatedBadge where flagged, provenance link on every tile). Four hand-rolled SVG charts follow the dataviz discipline: UPT line with crosshair + tooltip; VRM & VRH as **small multiples** (one axis each — never dual-axis, asserted structurally in tests); coverage-over-time from the detail JSONB with the coverage threshold as a dashed reference line; unresolved DQ issues as thin stacked bars in reserved status colors with icon + label. Every chart has a keyboard reader (arrow keys walk the points), direct end labels, and a table-view toggle (the WCAG-clean equivalent carrying provenance links). Series colors come only from the validated `--series-*` tokens — never brand colors. |
+| `/settings/branding` | Agency branding (handoff 0008, pillar C; certifying official). Display name, two brand colors with live preview, and logo upload (SVG/PNG ≤ 512 KiB, multipart to `POST /branding/logo`). The **server** refuses colors that fail WCAG AA against the app surfaces (plain-language 422, surfaced verbatim). Saved branding restyles CHROME only: the shell fetches `GET /branding` on load, shows the display name + logo in the header, and overrides `--brand-primary`/`--brand-accent`; the dark theme pins its own accent (the server guardrail covers light surfaces only), and charts never read brand tokens. |
 | `/metrics` | Computed values table: metric, unit, period, value (verbatim string), calculation name+version, certification status. Calc versions below 1.0.0 carry a "Pre-verification" tag and a plain-language banner (they are marked PRE-VERIFICATION in `services/calc/REGULATORY_TRACKER.md` — not certifiable figures yet). EVERY figure's "Details" opens its **Receipt** (`src/components/Receipt.tsx`): story line, coverage meter + exclusions, the verbatim FTA rule + citation, flags, and the walk to raw records. Read-only: the certify flow moved to `/certify`; certifying officials see a plain note linking there. |
 | `/metrics/:id/lineage` | "How this number was made": the provenance tree from `GET /metrics/values/{id}/lineage`. Default is the **lineage graph** (`src/components/LineageGraph.tsx`) — a hand-rolled accessible SVG flow (figure → processing steps → raw records; raw tier collapsed to a count node, expanding 20 at a time; arrow keys move within/between tiers, Enter toggles). A "Text view" toggle is always visible and renders the FULL nested-list tree (every node, complete record ids) — the graph is progressive enhancement, never the only path. |
 | `/reports/monthly` | Monthly ridership preview: VRM/VRH/UPT for a picked month, verbatim, with certification status, coverage summary, per-row Receipt, provenance links, simulated-data banner, and CSV export of the exact served strings. |
@@ -115,6 +117,24 @@ jsdom cannot evaluate color contrast, so the axe runs in the test suite
 disable only the `color-contrast` rule and this script is the contrast
 verification. Severity is additionally encoded by distinct icon **shapes**
 (octagon/triangle/circle) plus text — never color alone.
+
+### Theming (handoff 0008, pillar A)
+
+Two deliberately selected token sets: light (`:root`) and dark
+(`:root[data-theme="dark"]`) in `src/styles.css`. The effective theme is the
+explicit user choice persisted in `localStorage` (`headway-theme`), else
+`prefers-color-scheme`; `index.html` stamps `data-theme` inline before first
+paint and `src/theme.ts` re-resolves it (and follows OS changes while no
+explicit choice exists). Every dark pair is in `check-contrast.mjs` and must
+pass alongside the light set.
+
+Chart series colors (`--series-1/2`, dark-stepped per mode) are validated
+with the dataviz palette validator against each mode's chart surface
+(`#ffffff` light / `#161b22` dark); chart status colors are reserved for
+severity and always ride with icon + label. Brand overrides (`--brand-*`,
+from `GET /branding`) are chrome only — the server refuses any brand color
+under 4.5:1 on either light surface, dark mode pins its own accent, and
+charts never read brand tokens.
 
 ### Keyboard map
 

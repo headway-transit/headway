@@ -44,6 +44,24 @@ const BLOCKED_REASON =
   "be certified, because certifying over a known data gap would attest to " +
   "numbers we know may be wrong.";
 
+/** Accessible name of the always-visible reason line AT the certify button. */
+const REASON_NAME = "Why the certify button is off";
+
+/**
+ * The reason line rendered directly beside the certify button (2026-07-11
+ * click-through, finding 1). It must exist whenever the button is off, be
+ * wired to the button via aria-describedby, and state every active cause.
+ */
+function atButtonReason(): HTMLElement {
+  const button = screen.getByRole("button", {
+    name: "Certify selected figures",
+  });
+  expect(button).toHaveAttribute("aria-disabled", "true");
+  const reason = screen.getByRole("status", { name: REASON_NAME });
+  expect(button).toHaveAttribute("aria-describedby", reason.id);
+  return reason;
+}
+
 const SIMULATED_WARNING =
   "You are about to attest to figures computed from simulated test data. " +
   "Simulated figures must never be submitted to the FTA. Certifying them " +
@@ -98,7 +116,9 @@ describe("/certify (certification cockpit)", () => {
       screen.queryByRole("button", { name: "Certify selected figures" }),
     ).not.toBeInTheDocument();
     expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
-    expect(calls).toHaveLength(0);
+    // No certify-related fetch happened; the only call is the app shell's
+    // unauthenticated GET /branding (handoff 0008 pillar C).
+    expect(calls.filter((c) => c.path !== "/branding")).toHaveLength(0);
 
     await expectNoAxeViolations();
   });
@@ -152,7 +172,7 @@ describe("/certify (certification cockpit)", () => {
     expect(screen.getByText("Already certified")).toBeInTheDocument();
 
     // A warning-severity issue is not a blocker: the panel says so, with
-    // the path to the DQ queue, and the action is enabled.
+    // the path to the DQ queue.
     expect(
       screen.getByText(/No blocking data-quality issues are open/),
     ).toBeInTheDocument();
@@ -162,50 +182,78 @@ describe("/certify (certification cockpit)", () => {
     const button = screen.getByRole("button", {
       name: "Certify selected figures",
     });
-    expect(button).toBeEnabled();
 
-    // Verified, real-data figures raise no acknowledgement warning.
+    // Nothing is selected yet, so the button is off — and it says WHY,
+    // right beside itself (finding 1: a disabled action must explain
+    // itself where the user is looking).
+    expect(atButtonReason()).toHaveTextContent(
+      "Select at least one figure to certify. Use the checkbox above each receipt.",
+    );
+
+    // Verified, real-data figures raise no acknowledgement warning; with a
+    // selection and no blockers the button turns on and the reason goes.
     await user.click(vrmBox);
     expect(
       screen.queryByText("Read this before you sign"),
     ).not.toBeInTheDocument();
+    expect(button).not.toHaveAttribute("aria-disabled");
+    expect(
+      screen.queryByRole("status", { name: REASON_NAME }),
+    ).not.toBeInTheDocument();
 
-    // Empty selections are refused with a plain instruction.
+    // Empty selections: the reason returns, and a click on the still-
+    // perceivable (aria-disabled, never display:none) button is refused —
+    // no dialog, no silent swallow.
     await user.click(vrmBox); // deselect
-    await user.click(button);
-    expect(await screen.findByRole("alert")).toHaveTextContent(
+    expect(atButtonReason()).toHaveTextContent(
       "Select at least one figure to certify. Use the checkbox above each receipt.",
     );
+    await user.click(button);
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 
     await expectNoAxeViolations();
   });
 
-  it("disables the certify action while blocking issues are open, showing the API's 409 reason and the path to /dq", async () => {
+  it("disables the certify action while blocking issues are open, showing the API's 409 reason and the path to /dq — at the panel AND at the button", async () => {
     signInAs("certifying_official");
     mockCockpit([verifiedVrm], [blockingIssue, warningIssue]);
     const user = userEvent.setup();
     renderApp("/certify");
 
-    // The reason mirrors the API's own refusal, count included.
+    // The blockers panel mirrors the API's own refusal, count included.
     const blockers = await screen.findByText(BLOCKED_REASON);
     expect(blockers).toBeInTheDocument();
     expect(
       screen.getByRole("link", { name: "Review the data-quality issues" }),
     ).toHaveAttribute("href", "/dq");
 
-    // The action stays disabled even with a figure selected.
+    // Finding 1: the refusal is ALSO stated right beside the button — the
+    // panel above can be far off-screen on a long page.
+    const reason = atButtonReason();
+    expect(reason).toHaveTextContent(
+      "Certification is blocked: 1 blocking data-quality issue(s) must be resolved first.",
+    );
+    expect(
+      within(reason).getByRole("link", { name: "View the blocking issues" }),
+    ).toHaveAttribute("href", "/dq");
+
+    // The action stays off even with a figure selected, and a click on the
+    // still-focusable (aria-disabled) button is refused, never swallowed
+    // silently: no dialog, reason still on screen.
     const button = screen.getByRole("button", {
       name: "Certify selected figures",
     });
-    expect(button).toBeDisabled();
     await user.click(
       screen.getByRole("checkbox", {
         name: "Certify Vehicle Revenue Miles (VRM), 2026-03-01 to 2026-03-31",
       }),
     );
-    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute("aria-disabled", "true");
+    await user.click(button);
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("status", { name: REASON_NAME }),
+    ).toHaveTextContent(/Certification is blocked/);
 
     await expectNoAxeViolations();
   });
@@ -222,8 +270,8 @@ describe("/certify (certification cockpit)", () => {
     const button = screen.getByRole("button", {
       name: "Certify selected figures",
     });
-    // No selection yet: no warning, button enabled (empty selections are
-    // refused at click time instead).
+    // No selection yet: no warning (the button is off with the
+    // nothing-selected reason beside it instead).
     expect(
       screen.queryByText("Read this before you sign"),
     ).not.toBeInTheDocument();
@@ -236,19 +284,20 @@ describe("/certify (certification cockpit)", () => {
       .closest("div") as HTMLElement;
     expect(warning).toHaveTextContent(SIMULATED_WARNING);
     expect(warning).toHaveTextContent(PRE_VERIFICATION_WARNING);
-    expect(button).toBeDisabled();
-    expect(
-      screen.getByText(
-        "The certify button stays off until you confirm the warning above.",
-      ),
-    ).toBeInTheDocument();
+    // Finding 1: the unacknowledged gate states itself AT the button too.
+    expect(atButtonReason()).toHaveTextContent(
+      "The certify button stays off until you confirm the warning above.",
+    );
 
     // The acknowledgement is its own explicit checkbox.
     const acknowledge = within(warning).getByRole("checkbox", {
       name: "I have read these warnings and I understand what certifying these figures would mean.",
     });
     await user.click(acknowledge);
-    expect(button).toBeEnabled();
+    expect(button).not.toHaveAttribute("aria-disabled");
+    expect(
+      screen.queryByRole("status", { name: REASON_NAME }),
+    ).not.toBeInTheDocument();
 
     // Consent never carries over: changing the selection clears it.
     await user.click(figureBox); // deselect
@@ -258,7 +307,9 @@ describe("/certify (certification cockpit)", () => {
         screen.getByText("Read this before you sign").closest("div") as HTMLElement,
       ).getByRole("checkbox", { name: /I have read these warnings/ }),
     ).not.toBeChecked();
-    expect(button).toBeDisabled();
+    expect(atButtonReason()).toHaveTextContent(
+      "The certify button stays off until you confirm the warning above.",
+    );
 
     await expectNoAxeViolations();
   });
@@ -329,11 +380,16 @@ describe("/certify (certification cockpit)", () => {
     await user.click(within(dialog).getByRole("button", { name: "Certify" }));
 
     // Success restates the API's identifiers verbatim: certification id
-    // AND the audit event reference.
-    const status = await screen.findByRole("status");
+    // AND the audit event reference, in an announced status region. (The
+    // at-button reason line is also role=status once the selection resets,
+    // so the success message is found by its text.)
+    const status = await screen.findByText(
+      /Certification recorded for 2 figures/,
+    );
     expect(status).toHaveTextContent(
       "Certification recorded for 2 figures. Certification ID cert-42. Audit event 7. The API has audit-logged who certified and when.",
     );
+    expect(status.closest("[role='status']")).not.toBeNull();
     const post = calls.find((c) => c.method === "POST");
     expect(post?.body).toEqual({
       metric_value_ids: ["mv-vrm-1", "mv-vrh-1"],
@@ -404,9 +460,10 @@ describe("/certify (certification cockpit)", () => {
     await user.keyboard(" ");
     expect(figureBox).toBeChecked();
 
-    // (d) the acknowledge checkbox is next in the tab order (after the
-    // receipt's provenance link and the blockers panel's /dq link); the
-    // disabled certify button is skipped until it is checked.
+    // (d) the acknowledge checkbox is reachable in the tab order (after the
+    // receipt's provenance link and the blockers panel's /dq link). The
+    // certify button stays IN the tab order even while off (aria-disabled,
+    // never the native attribute) so its reason is perceivable.
     const acknowledge = screen.getByRole("checkbox", {
       name: /I have read these warnings/,
     });

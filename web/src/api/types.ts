@@ -78,6 +78,21 @@ export interface LineageNode {
   inputs?: LineageNode[];
 }
 
+// ---- /public/metrics/certified ----
+
+/**
+ * A certified figure in publishable form (services/api routers/public.py,
+ * handoff 0006 design point 8): the same shape as MetricValue — value is a
+ * string verbatim, detail served verbatim with any simulated flags — with no
+ * PII and no certifier identity. certification_status is always "certified".
+ * certified_at is NOT served today; it is optional here so the UI shows a
+ * certification date the moment the API starts serving one, never guesses it.
+ */
+export interface PublicMetricValue extends MetricValue {
+  /** ISO date-time; not yet served by the API — rendered only when present. */
+  certified_at?: string;
+}
+
 // ---- /certifications ----
 
 export interface CertificationRequest {
@@ -126,6 +141,47 @@ export interface ResolveResponse {
   /** ISO date-time */
   resolved_at: string;
   resolution: string;
+  audit_event_id: number;
+}
+
+// ---- /branding + /settings (handoff 0008, pillar C) ----
+
+/**
+ * GET /branding (services/api routers/branding.py BrandingResponse):
+ * UNAUTHENTICATED by design — the app shell brands itself before sign-in.
+ * The two colors have already passed the server-side WCAG AA contrast
+ * guardrail at write time (headway_api/branding.py).
+ */
+export interface Branding {
+  display_name: string;
+  /** '#rrggbb'; server-verified >= 4.5:1 against both light app surfaces. */
+  primary: string;
+  /** '#rrggbb'; server-verified >= 4.5:1 against both light app surfaces. */
+  accent: string;
+  has_logo: boolean;
+}
+
+/** One row of app.settings (services/api routers/settings.py Setting). */
+export interface Setting {
+  setting_key: string;
+  /** Always a string, exactly as stored — never a JSON number. */
+  setting_value: string;
+  value_type: string;
+  description: string;
+  updated_by: string;
+  /** ISO date-time */
+  updated_at: string;
+}
+
+/** PUT /settings/{key} response (UpdateSettingResponse). */
+export interface UpdateSettingResponse extends Setting {
+  audit_event_id: number;
+}
+
+/** POST /branding/logo response (LogoUploadResponse). */
+export interface LogoUploadResponse {
+  content_type: string;
+  bytes: number;
   audit_event_id: number;
 }
 

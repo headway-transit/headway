@@ -3,6 +3,7 @@ import type { FormEvent } from "react";
 import { ApiError, listDqIssues, resolveDqIssue } from "../api/client";
 import type { DqIssue } from "../api/types";
 import { canResolveDqIssues, useSession } from "../auth/session";
+import { SeverityIcon } from "../components/SeverityIcon";
 import { copy } from "../copy";
 
 /**
@@ -11,12 +12,26 @@ import { copy } from "../copy";
  * and status; blocking issues are visually prominent; nothing is hidden or
  * auto-dismissed. Resolving requires the data-steward role or above — that
  * check here is UX only, the API enforces it.
+ *
+ * The queue-at-a-glance header (2026-07-11 click-through, finding 2): stat
+ * chips (text + count + severity color, never color alone) plus severity and
+ * status filter toggles (aria-pressed) so a steward can see blocking-only in
+ * one click. Counts are workflow tallies of ISSUES — not regulatory figures —
+ * computed client-side from the list GET /dq/issues serves. That endpoint
+ * returns the ENTIRE queue today (no pagination), so the counts cover
+ * everything; if the API ever paginates, these counts must move server-side.
+ * Filtering hides nothing from the counts, and the showing-line states how
+ * many issues the filters are holding back — an issue is never made to look
+ * resolved (or gone) by a filter.
  */
 export function DqView() {
   const session = useSession();
   const [issues, setIssues] = useState<DqIssue[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [announcement, setAnnouncement] = useState<string | null>(null);
+  /** null = no filter (all). */
+  const [severityFilter, setSeverityFilter] = useState<string | null>(null);
+  const [statusFilter, setStatusFilter] = useState<string | null>(null);
 
   useEffect(() => {
     listDqIssues()
@@ -37,6 +52,21 @@ export function DqView() {
 
   const mayResolve = canResolveDqIssues(session);
 
+  // Queue tallies (issue counts, not regulatory figures; full list — see
+  // the component comment). "Open" here means not resolved.
+  const all = issues ?? [];
+  const countBy = (severity: string) =>
+    all.filter((i) => i.severity === severity && i.status !== "resolved")
+      .length;
+  const resolvedCount = all.filter((i) => i.status === "resolved").length;
+
+  const filtered = all.filter(
+    (i) =>
+      (severityFilter === null || i.severity === severityFilter) &&
+      (statusFilter === null || i.status === statusFilter),
+  );
+  const filtersActive = severityFilter !== null || statusFilter !== null;
+
   return (
     <>
       <h1>{copy.dq.heading}</h1>
@@ -54,18 +84,125 @@ export function DqView() {
       {!issues && !error && <p>{copy.loading}</p>}
       {issues && issues.length === 0 && <p>{copy.dq.empty}</p>}
       {issues && issues.length > 0 && (
-        <ul className="issue-list">
-          {issues.map((issue) => (
-            <IssueCard
-              key={issue.issue_id}
-              issue={issue}
-              mayResolve={mayResolve}
-              onResolved={handleResolved}
+        <>
+          <section aria-label={copy.dq.summaryHeading} className="dq-summary">
+            <h2>{copy.dq.summaryHeading}</h2>
+            <ul className="dq-chips">
+              <li className="chip severity blocking">
+                <SeverityIcon severity="blocking" />
+                {copy.dq.summaryBlockingOpen(formatCount(countBy("blocking")))}
+              </li>
+              <li className="chip severity warning">
+                <SeverityIcon severity="warning" />
+                {copy.dq.summaryWarningsOpen(formatCount(countBy("warning")))}
+              </li>
+              <li className="chip severity info">
+                <SeverityIcon severity="info" />
+                {copy.dq.summaryInfoOpen(formatCount(countBy("info")))}
+              </li>
+              <li className="chip resolved">
+                {copy.dq.summaryResolved(formatCount(resolvedCount))}
+              </li>
+            </ul>
+            <FilterBar
+              label={copy.dq.severityFilterLabel}
+              allLabel={copy.dq.filterAllSeverities}
+              options={copy.dq.severityLabels}
+              value={severityFilter}
+              onChange={setSeverityFilter}
             />
-          ))}
-        </ul>
+            <FilterBar
+              label={copy.dq.statusFilterLabel}
+              allLabel={copy.dq.filterAllStatuses}
+              options={copy.dq.statusLabels}
+              value={statusFilter}
+              onChange={setStatusFilter}
+            />
+            {filtersActive && (
+              <p className="dq-showing">
+                {copy.dq.showingCount(
+                  formatCount(filtered.length),
+                  formatCount(all.length),
+                )}
+              </p>
+            )}
+          </section>
+          {filtered.length === 0 ? (
+            <div className="banner">
+              <p>{copy.dq.noMatch(formatCount(all.length))}</p>
+              <button
+                type="button"
+                onClick={() => {
+                  setSeverityFilter(null);
+                  setStatusFilter(null);
+                }}
+              >
+                {copy.dq.clearFilters}
+              </button>
+            </div>
+          ) : (
+            <ul className="issue-list">
+              {filtered.map((issue) => (
+                <IssueCard
+                  key={issue.issue_id}
+                  issue={issue}
+                  mayResolve={mayResolve}
+                  onResolved={handleResolved}
+                />
+              ))}
+            </ul>
+          )}
+        </>
       )}
     </>
+  );
+}
+
+/**
+ * Queue tallies for display: thousands-separated ("8,824"). These are counts
+ * of workflow issues this component made itself — never a regulatory figure,
+ * which would be displayed verbatim from the API instead.
+ */
+function formatCount(count: number): string {
+  return count.toLocaleString("en-US");
+}
+
+interface FilterBarProps {
+  label: string;
+  allLabel: string;
+  /** value -> visible label, in display order. */
+  options: Record<string, string>;
+  value: string | null;
+  onChange: (value: string | null) => void;
+}
+
+/**
+ * One row of filter toggles (severity or status). Plain buttons with
+ * aria-pressed: the pressed one is the only filled one AND keeps its text
+ * label, so the selection is never conveyed by color alone.
+ */
+function FilterBar({ label, allLabel, options, value, onChange }: FilterBarProps) {
+  return (
+    <div className="filter-bar" role="group" aria-label={label}>
+      <span className="filter-bar-label">{label}:</span>
+      <button
+        type="button"
+        aria-pressed={value === null}
+        onClick={() => onChange(null)}
+      >
+        {allLabel}
+      </button>
+      {Object.entries(options).map(([key, optionLabel]) => (
+        <button
+          key={key}
+          type="button"
+          aria-pressed={value === key}
+          onClick={() => onChange(value === key ? null : key)}
+        >
+          {optionLabel}
+        </button>
+      ))}
+    </div>
   );
 }
 
@@ -78,40 +215,6 @@ function SeverityBadge({ severity }: { severity: string }) {
       <SeverityIcon severity={severity} />
       {label}
     </span>
-  );
-}
-
-function SeverityIcon({ severity }: { severity: string }) {
-  // Decorative (aria-hidden): the adjacent text carries the meaning. Distinct
-  // SHAPES per severity so the encoding survives without color.
-  const common = {
-    "aria-hidden": true,
-    width: 14,
-    height: 14,
-    viewBox: "0 0 16 16",
-    fill: "currentColor",
-  } as const;
-  if (severity === "blocking") {
-    // octagon (stop)
-    return (
-      <svg {...common}>
-        <polygon points="5,1 11,1 15,5 15,11 11,15 5,15 1,11 1,5" />
-      </svg>
-    );
-  }
-  if (severity === "warning") {
-    // triangle
-    return (
-      <svg {...common}>
-        <polygon points="8,1 15,15 1,15" />
-      </svg>
-    );
-  }
-  // circle (info / unknown)
-  return (
-    <svg {...common}>
-      <circle cx="8" cy="8" r="7" />
-    </svg>
   );
 }
 

@@ -24,10 +24,21 @@ export const copy = {
   } as Record<string, string>,
 
   nav: {
+    dashboard: "Dashboard",
     metrics: "Metrics",
     reports: "Monthly ridership",
     dq: "Data quality",
     certify: "Certify",
+    branding: "Branding",
+    /** Visible signed-in AND signed-out: the public page needs no account. */
+    publicData: "Public data",
+    signIn: "Sign in",
+  },
+
+  theme: {
+    /** The label names the action (what pressing it switches TO). */
+    switchToDark: "Switch to dark theme",
+    switchToLight: "Switch to light theme",
   },
 
   login: {
@@ -125,7 +136,19 @@ export const copy = {
       `Certification is blocked: ${count} blocking data-quality issue(s) are still unresolved. Every blocking issue must be resolved before any figure can be certified, because certifying over a known data gap would attest to numbers we know may be wrong.`,
     blockersUnknown:
       "Headway could not load the data-quality issues, so it cannot confirm certification is allowed. Certifying is disabled until the issue list loads.",
+    blockersLoading:
+      "Headway is still checking for blocking data-quality issues. Certifying stays off until that check finishes.",
     reviewDqLink: "Review the data-quality issues",
+    /**
+     * The always-visible reason line AT the certify button (2026-07-11
+     * click-through, finding 1): a certify button that will not work must
+     * say why exactly where the user is looking, for EVERY disabled cause.
+     * The blocked wording states the same rule as the API's 409 refusal.
+     */
+    reasonBlockers: (count: string) =>
+      `Certification is blocked: ${count} blocking data-quality issue(s) must be resolved first.`,
+    reasonBlockersLink: "View the blocking issues",
+    reasonLabel: "Why the certify button is off",
     warningsHeading: "Read this before you sign",
     simulatedWarning:
       "You are about to attest to figures computed from simulated test data. Simulated figures must never be submitted to the FTA. Certifying them would put your name on numbers that do not come from real service.",
@@ -216,6 +239,32 @@ export const copy = {
       warning: "Warning",
       info: "Info",
     } as Record<string, string>,
+    statusLabels: {
+      open: "Open",
+      owned: "Owned",
+      resolved: "Resolved",
+    } as Record<string, string>,
+    /**
+     * The queue-at-a-glance chips (2026-07-11 click-through, finding 2).
+     * Counts are of ISSUES IN THE QUEUE — workflow tallies, not regulatory
+     * figures — counted client-side from the full list GET /dq/issues
+     * serves (the endpoint returns every issue; no pagination today).
+     */
+    summaryHeading: "Queue at a glance",
+    summaryBlockingOpen: (count: string) => `${count} blocking open`,
+    summaryWarningsOpen: (count: string) =>
+      `${count} warning${count === "1" ? "" : "s"} open`,
+    summaryInfoOpen: (count: string) => `${count} info open`,
+    summaryResolved: (count: string) => `${count} resolved`,
+    severityFilterLabel: "Show issues by severity",
+    statusFilterLabel: "Show issues by status",
+    filterAllSeverities: "All severities",
+    filterAllStatuses: "All statuses",
+    showingCount: (shown: string, total: string) =>
+      `Showing ${shown} of ${total} issues. The counts above always cover the whole queue.`,
+    noMatch: (total: string) =>
+      `No issues match these filters. The queue still holds ${total} issue(s) — filtering hides nothing from the counts above, and no issue is resolved by being filtered out.`,
+    clearFilters: "Show all issues",
     blockingNote: "Must be resolved before any figure can be certified.",
     statusLabel: "Status",
     ownerLabel: "Owner",
@@ -358,7 +407,168 @@ export const copy = {
       `headway-monthly-ridership-${year}-${month}-preview.csv`,
   },
 
+  /**
+   * The public open-data page (/public — 2026-07-11 click-through, finding
+   * 3): a human-readable rendering of GET /public/metrics/certified, the one
+   * deliberately unauthenticated endpoint (handoff 0006, design point 8).
+   * Every figure is the API's string verbatim; simulated flags are shown,
+   * never stripped — transparency shows the flags, it never hides them.
+   */
+  publicData: {
+    heading: "Public data: certified figures",
+    intro:
+      "These are the figures this agency's certifying official has attested to. Each number is shown exactly as it was certified — this page never recalculates or edits a figure, and anyone can read it without signing in.",
+    /** The permanent disclaimer: rendered on every visit, empty state included. */
+    disclaimer:
+      "This page is the agency's public courtesy copy of its certified figures. It is not the official federal record: the agency's official submissions are filed with the Federal Transit Administration. Any figure computed from simulated test data is labeled below — the label is never removed.",
+    empty:
+      "No figures have been certified yet. Figures appear here as soon as the agency's certifying official attests to them.",
+    machineReadable: "Machine-readable version of this data (JSON)",
+    periodLabel: "Period",
+    certifiedOnLabel: "Certified on",
+    statusCertified: "Certified",
+    calcLine: (name: string, version: string) =>
+      `Calculated by ${name} (version ${version}).`,
+    cardLabel: (metric: string, period: string) =>
+      `Certified figure: ${metric}, ${period}`,
+  },
+
   errors: {
     regionLabel: "Error",
+  },
+
+  /**
+   * The /dashboard view (handoff 0008, pillar B). Every figure shown in a
+   * tile, tooltip, label, or table is the API's string VERBATIM — chart
+   * geometry scales, displayed figures are never recomputed. Axis tick
+   * values are chart scaffolding (scale annotations this UI draws), never
+   * reported figures.
+   */
+  dashboard: {
+    heading: "Dashboard",
+    intro:
+      "The agency's computed figures at a glance. Every number here is shown exactly as the calculation service computed it — the charts scale the picture, never the figures.",
+    empty:
+      "No computed values yet. Charts appear here after the pipeline runs.",
+    tilesHeading: "Latest certified figures",
+    tilesIntro:
+      "The most recent figure of each kind that a certifying official has attested to.",
+    noCertified: "No certified figure yet",
+    noCertifiedDetail: (metric: string) =>
+      `No ${metric} figure has been certified. Figures appear here once the certifying official attests to one.`,
+    tileCertifiedTag: "Certified",
+    tilePeriod: (start: string, end: string) => `${start} to ${end}`,
+    explainLink: "How this number was made",
+    /** Chart / table view toggle — the table is the WCAG-clean equivalent. */
+    viewToggleLabel: (chart: string) => `How to show ${chart}`,
+    chartView: "Chart",
+    tableView: "Table",
+    chartReaderHint:
+      "Use the left and right arrow keys to read each point; the table view lists every value.",
+    upt: {
+      heading: "Unlinked passenger trips over time",
+      description:
+        "One point per reporting period, exactly as computed by the UPT calculation.",
+      empty: "No UPT figures have been computed yet.",
+      tableCaption:
+        "Unlinked passenger trips per reporting period, exactly as computed.",
+    },
+    service: {
+      heading: "Vehicle revenue miles and hours over time",
+      description:
+        "Two panels on separate scales — miles and hours are different units, so they are never drawn on one plot.",
+      vrmPanel: "Vehicle Revenue Miles (VRM)",
+      vrhPanel: "Vehicle Revenue Hours (VRH)",
+      empty: "No VRM or VRH figures have been computed yet.",
+      tableCaption:
+        "Vehicle revenue miles and hours per reporting period, exactly as computed.",
+      notComputed: "Not computed",
+    },
+    coverage: {
+      heading: "Data coverage over time",
+      description:
+        "How complete the location data behind each VRM and VRH figure was, from each figure's calculation detail.",
+      thresholdLabel: (percent: string) => `Coverage threshold (${percent}%)`,
+      empty:
+        "No coverage information has been reported yet. Coverage appears with figures from calculation version 0.2.0 onward.",
+      tableCaption:
+        "Data coverage per reporting period, from each figure's calculation detail.",
+      notReported: "Not reported",
+      seriesVrm: "VRM coverage",
+      seriesVrh: "VRH coverage",
+    },
+    dq: {
+      heading: "Unresolved data-quality issues by severity",
+      description:
+        "Counts of issues in the queue (workflow tallies, not regulatory figures). Blocking issues stop certification.",
+      empty: "No unresolved data-quality issues. The queue is clear.",
+      tableCaption:
+        "Unresolved data-quality issues by workflow status and severity.",
+      statusLabels: {
+        open: "Open",
+        owned: "Owned",
+      } as Record<string, string>,
+      segmentLabel: (severity: string, count: string, status: string) =>
+        `${severity}: ${count} ${status} issue${count === "1" ? "" : "s"}`,
+      totalColumn: "Total",
+      goToQueue: "Go to the data-quality queue",
+    },
+    columns: {
+      period: "Period",
+      value: "Value",
+      unit: "Unit",
+      provenance: "Provenance",
+      status: "Status",
+    },
+    pointLabel: (period: string, entries: string) => `${period}: ${entries}`,
+  },
+
+  /**
+   * The branding settings page (/settings/branding — handoff 0008, pillar
+   * C). The server is the accessibility gate: a brand color that fails WCAG
+   * AA against the app surfaces is refused with a plain-language 422, and
+   * this page surfaces that refusal VERBATIM.
+   */
+  branding: {
+    heading: "Agency branding",
+    intro:
+      "Set the agency's display name, brand colors, and logo. Headway checks every color against its surfaces: a color that would not be readable is refused, with the measured contrast in the message. You can brand it; you cannot brand it unreadable.",
+    notAllowed:
+      "Only a certifying official can change the agency's branding. The current branding is applied across the app for everyone.",
+    loadError:
+      "Headway could not load the current branding. The form below starts from the defaults.",
+    displayNameHeading: "Display name",
+    displayNameLabel: "Agency display name",
+    displayNameHint:
+      "Shown in the app header in place of “Headway” for everyone who uses this instance.",
+    saveDisplayName: "Save display name",
+    displayNameSaved: (name: string) =>
+      `Display name saved. The header now shows “${name}”.`,
+    primaryLabel: "Primary brand color",
+    accentLabel: "Accent brand color",
+    colorHexLabel: (colorName: string) => `${colorName} (hex value)`,
+    colorHint:
+      "A six-digit hex color, for example #1a5fb4. Headway refuses colors that lack readable contrast against its surfaces.",
+    saveColor: (colorName: string) => `Save ${colorName.toLowerCase()}`,
+    colorSaved: (colorName: string, value: string) =>
+      `${colorName} saved: ${value}.`,
+    previewHeading: "Live preview",
+    previewIntro:
+      "How the header chrome would look with the values above. Saving is what makes it real — and the server, not this preview, decides whether a color is readable enough.",
+    previewChartNote:
+      "Charts keep their own validated palette: brand colors change the chrome, never the data encodings.",
+    previewSampleLink: "Sample link",
+    previewSampleButton: "Sample action",
+    logoHeading: "Agency logo",
+    logoHint:
+      "SVG or PNG, at most 512 KiB. The logo appears in the app header next to the display name.",
+    logoLabel: "Logo file",
+    uploadLogo: "Upload logo",
+    logoNone: "No logo has been uploaded yet.",
+    logoPresent: "A logo is uploaded and shown in the header.",
+    logoUploaded: (bytes: string) =>
+      `Logo uploaded (${bytes} bytes). It now appears in the header.`,
+    logoAlt: (displayName: string) => `${displayName} logo`,
+    chooseFileFirst: "Choose an SVG or PNG file first, then upload it.",
   },
 } as const;

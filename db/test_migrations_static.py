@@ -223,6 +223,37 @@ def test_app_settings_seeded_with_calc_policy_knobs():
     )
 
 
+def test_branding_settings_seeded_with_contrast_guardrail():
+    # Handoff 0008 pillar C / migration 0015: agency branding keys. Seeded
+    # (never client-creatable), all 'text', descriptions in plain language and
+    # carrying the guardrail promise — colors that fail accessibility contrast
+    # are refused, at the published WCAG AA line, on both app surfaces.
+    sql_0015 = (MIGRATIONS_DIR / "0015_branding_settings.sql").read_text(
+        encoding="utf-8"
+    )
+    for key, default in (
+        ("agency_display_name", "Transit Agency"),
+        ("brand_color_primary", "#1a5fb4"),
+        ("brand_color_accent", "#0b57d0"),
+        ("brand_logo_meta", "unset"),
+    ):
+        assert re.search(
+            rf"'{key}',\s*'{re.escape(default)}',\s*'text',", sql_0015
+        ), f"0015 must seed {key} = {default} as a 'text' setting"
+    # The guardrail promise, the AA line, and both surfaces are documented.
+    assert "colors that fail accessibility contrast are refused" in sql_0015, (
+        "0015 must carry the guardrail promise in plain language"
+    )
+    assert "4.5:1" in sql_0015 and "WCAG" in sql_0015, (
+        "0015 must cite the WCAG AA 4.5:1 line the guardrail enforces"
+    )
+    assert "#ffffff" in sql_0015 and "#f6f8fa" in sql_0015, (
+        "0015 must name both app surfaces the guardrail checks against"
+    )
+    # brand_logo_meta is system-maintained, and the description says so.
+    assert "POST /branding/logo" in sql_0015
+
+
 def test_immutability_triggers_present():
     sql = all_sql()
     assert re.search(r"BEFORE UPDATE OR DELETE ON raw\.records", sql)

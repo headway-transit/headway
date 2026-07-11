@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { ApiError, login } from "../api/client";
 import { isKnownRole, setSession } from "../auth/session";
 import { copy } from "../copy";
@@ -75,6 +75,10 @@ export function LoginView() {
           {copy.login.submit}
         </button>
       </form>
+      {/* The certified open-data page needs no account at all. */}
+      <p>
+        <Link to="/public">{copy.nav.publicData}</Link>
+      </p>
     </main>
   );
 }

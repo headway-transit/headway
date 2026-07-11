@@ -11,6 +11,7 @@
 
 import { clearSession, getSession } from "../auth/session";
 import type {
+  Branding,
   CertificationRequest,
   CertificationResponse,
   DqIssue,
@@ -18,9 +19,13 @@ import type {
   LineageNode,
   LoginRequest,
   LoginResponse,
+  LogoUploadResponse,
   MetricValue,
+  PublicMetricValue,
   ResolveRequest,
   ResolveResponse,
+  Setting,
+  UpdateSettingResponse,
 } from "./types";
 
 /** Base URL for the API; empty string = same origin (dev proxy / co-hosting). */
@@ -74,18 +79,34 @@ async function request<T>(
   method: string,
   path: string,
   body?: unknown,
+  opts: { auth?: boolean } = {},
 ): Promise<T> {
   const headers: Record<string, string> = { Accept: "application/json" };
-  if (body !== undefined) headers["Content-Type"] = "application/json";
+  // FormData (multipart upload) sets its own Content-Type with the boundary;
+  // JSON bodies get the explicit header.
+  const isFormData =
+    typeof FormData !== "undefined" && body instanceof FormData;
+  if (body !== undefined && !isFormData) {
+    headers["Content-Type"] = "application/json";
+  }
   const session = getSession();
-  if (session) headers["Authorization"] = `Bearer ${session.token}`;
+  // auth: false = a deliberately unauthenticated endpoint (/public/*): the
+  // bearer token is never attached, even when a session exists.
+  if (session && opts.auth !== false) {
+    headers["Authorization"] = `Bearer ${session.token}`;
+  }
 
   let response: Response;
   try {
     response = await fetch(`${BASE_URL}${path}`, {
       method,
       headers,
-      body: body === undefined ? undefined : JSON.stringify(body),
+      body:
+        body === undefined
+          ? undefined
+          : isFormData
+            ? (body as FormData)
+            : JSON.stringify(body),
     });
   } catch {
     throw new ApiError(NETWORK_ERROR_STATUS, NETWORK_ERROR_MESSAGE);
@@ -105,7 +126,7 @@ async function request<T>(
   return (await response.json()) as T;
 }
 
-// ---- endpoints (exactly the six paths in openapi.json) ----
+// ---- endpoints (exactly the paths this UI uses from openapi.json) ----
 
 export function login(credentials: LoginRequest): Promise<LoginResponse> {
   return request<LoginResponse>("POST", "/auth/login", credentials);
@@ -144,6 +165,28 @@ export function certify(
   return request<CertificationResponse>("POST", "/certifications", body);
 }
 
+/** The one deliberately unauthenticated path (handoff 0006, design point 8). */
+const PUBLIC_CERTIFIED_PATH = "/public/metrics/certified";
+
+/**
+ * The raw machine-readable URL of the certified open-data feed, for the
+ * "machine-readable version" link on /public.
+ */
+export function publicCertifiedValuesUrl(): string {
+  return `${BASE_URL}${PUBLIC_CERTIFIED_PATH}`;
+}
+
+/**
+ * GET /public/metrics/certified — UNAUTHENTICATED by design: only figures a
+ * certifying official has already attested to, values as strings verbatim,
+ * detail verbatim (simulated flags included), no PII. No token is sent.
+ */
+export function listPublicCertifiedValues(): Promise<PublicMetricValue[]> {
+  return request<PublicMetricValue[]>("GET", PUBLIC_CERTIFIED_PATH, undefined, {
+    auth: false,
+  });
+}
+
 export function listDqIssues(status?: string): Promise<DqIssue[]> {
   const qs = status ? `?${new URLSearchParams({ status })}` : "";
   return request<DqIssue[]>("GET", `/dq/issues${qs}`);
@@ -158,4 +201,57 @@ export function resolveDqIssue(
     `/dq/issues/${encodeURIComponent(issueId)}/resolve`,
     body,
   );
+}
+
+// ---- branding + settings (handoff 0008, pillar C) ----
+
+/**
+ * GET /branding — UNAUTHENTICATED by design: the shell brands itself before
+ * sign-in. Colors served here already passed the server-side WCAG AA
+ * contrast guardrail at write time.
+ */
+export function getBranding(): Promise<Branding> {
+  return request<Branding>("GET", "/branding", undefined, { auth: false });
+}
+
+/**
+ * The URL of GET /branding/logo (unauthenticated, cache-headed) for use as
+ * an <img src>. The shell only renders it when GET /branding says a logo
+ * exists.
+ */
+export function brandingLogoUrl(): string {
+  return `${BASE_URL}/branding/logo`;
+}
+
+/** GET /settings — any signed-in role may read agency policy settings. */
+export function listSettings(): Promise<Setting[]> {
+  return request<Setting[]>("GET", "/settings");
+}
+
+/**
+ * PUT /settings/{key} (certifying official only — enforced server-side).
+ * Brand colors are contrast-checked BY THE SERVER; a failing color comes
+ * back as a plain-language 422 that the UI surfaces verbatim.
+ */
+export function updateSetting(
+  settingKey: string,
+  value: string,
+): Promise<UpdateSettingResponse> {
+  return request<UpdateSettingResponse>(
+    "PUT",
+    `/settings/${encodeURIComponent(settingKey)}`,
+    { value },
+  );
+}
+
+/**
+ * POST /branding/logo (certifying official only — enforced server-side).
+ * Multipart, field name "file"; SVG or PNG, at most 512 KiB — oversize or
+ * wrong-type files come back as plain-language 413/415 errors, surfaced
+ * verbatim.
+ */
+export function uploadLogo(file: File): Promise<LogoUploadResponse> {
+  const form = new FormData();
+  form.append("file", file);
+  return request<LogoUploadResponse>("POST", "/branding/logo", form);
 }

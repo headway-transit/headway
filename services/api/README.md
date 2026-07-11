@@ -30,6 +30,9 @@ preserved end to end; floating point never touches a figure).
 | GET | `/webhooks` | `certifying_official` | Lists subscriptions (secret-free). |
 | DELETE | `/webhooks/{id}` | `certifying_official` | Removes a subscription (soft revoke). Audited. |
 | GET | `/public/metrics/certified` | **none — public open data** | ONLY figures a certifying official already attested (`certification_status='certified'`); values as strings, `detail` verbatim (simulated flags shown, figures never hidden); no PII; rate-limited per client IP. |
+| POST | `/branding/logo` | `certifying_official` | Upload the agency logo (multipart): SVG or PNG only (415 otherwise), ≤ 512 KiB (413 above), stored to the object store at `branding/logo`, content type recorded in `app.settings.brand_logo_meta`. Audited. |
+| GET | `/branding/logo` | **none — public** | The agency logo bytes with the stored content type, `Cache-Control: public, max-age=300`, `nosniff` (+ script-blocking CSP for SVG). Plain-language 404 while no logo is uploaded. Rate-limited per client IP. |
+| GET | `/branding` | **none — public** | `{display_name, primary, accent, has_logo}` for the app shell — colors already passed the contrast guardrail at write time. Rate-limited per client IP. |
 
 The full contract is `openapi.json` (regenerate with
 `python3 scripts/export_openapi.py`) — the artifact handed to the web team.
@@ -203,6 +206,56 @@ curl -s https://headway.agency.example/settings \
 curl -s -X PUT https://headway.agency.example/settings/coverage_threshold \
   -H "Authorization: Bearer $SESSION_TOKEN" -H 'Content-Type: application/json' \
   -d '{"value": "0.90"}'
+```
+
+## Agency branding — with the accessibility guardrail (migration 0015, handoff 0008)
+
+Agencies brand their Headway instance through the same settings surface:
+`agency_display_name` (text), `brand_color_primary` / `brand_color_accent`
+(`#rrggbb` hex), and a logo. **THE GUARDRAIL: the server refuses colors that
+fail accessibility contrast.** On every `PUT /settings/brand_color_*` the API
+computes the WCAG 2.1 contrast ratio server-side
+(`headway_api/branding.py` — formula and constants verified against the
+published W3C spec, cited in the module docstring) and refuses any color
+under **4.5:1 (WCAG 2.1 AA, SC 1.4.3)** against either app surface: the
+`#ffffff` page background (`--color-bg`) or the `#f6f8fa` raised card surface
+(`--color-surface`), both cited from `web/src/styles.css` `:root` tokens. The
+refusal is a plain-language 422 naming the failing surface and the measured
+ratio. You can brand it; you cannot brand it inaccessible.
+
+Notes:
+
+- Both shipped surfaces are light (the web app is single-light-theme today).
+  A true dark theme cannot reuse one brand color: no color reaches 4.5:1
+  against both `#ffffff` and a near-black surface (the math is in
+  `branding.py`) — dark mode will need a per-mode brand variant, validated
+  against its own surface, as a follow-up.
+- Charts never take brand colors: the dashboard palette is validated
+  separately (brand ≠ data encoding, handoff 0008).
+- `brand_logo_meta` is system-maintained (set by `POST /branding/logo`,
+  refused on direct `PUT`); the logo bytes live in the object store at
+  `branding/logo` via the same seam as ingest (MinIO in production, a fake
+  in tests; without a store the upload refuses with a 503, never a silent
+  accept).
+
+```sh
+# Set a brand color — a color without enough contrast is refused:
+curl -s -X PUT https://headway.agency.example/settings/brand_color_primary \
+  -H "Authorization: Bearer $SESSION_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"value": "#aabbcc"}'
+# -> 422 {"detail": "That color doesn't have enough contrast to be readable:
+#    '#aabbcc' measures 1.96:1 against the app's page background (#ffffff),
+#    and readable text needs at least 4.5:1 (WCAG 2.1 AA). ..."}
+
+# Upload the logo (certifying official; SVG or PNG, <= 512 KiB; audited)
+curl -s -X POST https://headway.agency.example/branding/logo \
+  -H "Authorization: Bearer $SESSION_TOKEN" \
+  -F "file=@logo.svg;type=image/svg+xml"
+
+# The app shell brands itself before sign-in (public, per-IP rate limited)
+curl -s https://headway.agency.example/branding
+# -> {"display_name": "...", "primary": "#1a5fb4", "accent": "#0b57d0", "has_logo": true}
+curl -s https://headway.agency.example/branding/logo -o logo.svg
 ```
 
 ## Audit guarantees

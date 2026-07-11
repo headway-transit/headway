@@ -503,7 +503,8 @@ class FakeConn:
         return self.settings[setting_key]
 
     def seed_default_settings(self):
-        """The four calc policy knobs exactly as migration 0014 seeds them."""
+        """The four calc policy knobs exactly as migration 0014 seeds them,
+        plus the branding keys exactly as migration 0015 seeds them."""
         self.add_setting(
             "coverage_threshold", "0.95", "decimal",
             description=(
@@ -527,6 +528,36 @@ class FakeConn:
             description=(
                 "The REAL FTA threshold (2026 NTD Policy Manual p. 146)."
             ),
+        )
+        # Branding keys (migration 0015, handoff 0008 pillar C).
+        self.add_setting(
+            "agency_display_name", "Transit Agency", "text",
+            description="The agency's display name for the app shell.",
+            updated_by="migration:0015",
+        )
+        self.add_setting(
+            "brand_color_primary", "#1a5fb4", "text",
+            description=(
+                "Primary brand color. GUARDRAIL: colors that fail "
+                "accessibility contrast are refused (WCAG 2.1 AA, 4.5:1)."
+            ),
+            updated_by="migration:0015",
+        )
+        self.add_setting(
+            "brand_color_accent", "#0b57d0", "text",
+            description=(
+                "Accent brand color. GUARDRAIL: colors that fail "
+                "accessibility contrast are refused (WCAG 2.1 AA, 4.5:1)."
+            ),
+            updated_by="migration:0015",
+        )
+        self.add_setting(
+            "brand_logo_meta", "unset", "text",
+            description=(
+                "Maintained by Headway: the uploaded logo's content type, "
+                "or 'unset' when none has been uploaded."
+            ),
+            updated_by="migration:0015",
         )
 
     def add_edge(self, output_kind, output_id, transform_name, transform_version,
@@ -559,6 +590,10 @@ class FakeObjectStore:
     def put(self, key, data, content_type):
         self.call_log.append(("store.put", key))
         self.objects[key] = bytes(data)
+
+    def get(self, key):
+        self.call_log.append(("store.get", key))
+        return self.objects.get(key)
 
 
 class FakeProducer:

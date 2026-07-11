@@ -751,10 +751,137 @@
           }
         }
       }
+    },
+    "/branding/logo": {
+      "get": {
+        "tags": [
+          "branding"
+        ],
+        "summary": "Get Logo",
+        "description": "Serve the agency logo. UNAUTHENTICATED by design \u2014 the app shell and\npublic pages show it before sign-in; the only per-caller control is the\nsame per-IP token bucket as the public open-data endpoint. The logo is\nthe least sensitive object in the system: a public image the agency\nchose to publish.",
+        "operationId": "get_logo_branding_logo_get",
+        "responses": {
+          "200": {
+            "description": "The agency logo bytes, with its stored content type.",
+            "content": {
+              "image/svg+xml": {},
+              "image/png": {}
+            }
+          },
+          "404": {
+            "description": "No logo has been uploaded yet."
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "branding"
+        ],
+        "summary": "Upload Logo",
+        "description": "Upload the agency logo (certifying official only \u2014 the same role that\nowns every other branding setting). SVG or PNG, at most 512 KiB. The\nbytes go to the object store BEFORE the settings row and audit event\ncommit together \u2014 the store-before-record ordering of ingest.",
+        "operationId": "upload_logo_branding_logo_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_logo_branding_logo_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LogoUploadResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/branding": {
+      "get": {
+        "tags": [
+          "branding"
+        ],
+        "summary": "Get Branding",
+        "description": "The branding bundle for the app shell: display name, the two brand\ncolors (contrast-guaranteed at write time), and whether a logo exists.\nUNAUTHENTICATED by design, per-IP rate limited \u2014 the shell brands itself\nbefore sign-in, and nothing here is sensitive.",
+        "operationId": "get_branding_branding_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrandingResponse"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
     "schemas": {
+      "Body_upload_logo_branding_logo_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream",
+            "title": "File"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_upload_logo_branding_logo_post"
+      },
+      "BrandingResponse": {
+        "properties": {
+          "display_name": {
+            "type": "string",
+            "title": "Display Name"
+          },
+          "primary": {
+            "type": "string",
+            "title": "Primary"
+          },
+          "accent": {
+            "type": "string",
+            "title": "Accent"
+          },
+          "has_logo": {
+            "type": "boolean",
+            "title": "Has Logo"
+          }
+        },
+        "type": "object",
+        "required": [
+          "display_name",
+          "primary",
+          "accent",
+          "has_logo"
+        ],
+        "title": "BrandingResponse",
+        "description": "What the app shell needs to brand itself. Colors here have already\npassed the WCAG AA contrast guardrail at write time."
+      },
       "CertificationRequest": {
         "properties": {
           "metric_value_ids": {
@@ -1239,6 +1366,29 @@
           "role"
         ],
         "title": "LoginResponse"
+      },
+      "LogoUploadResponse": {
+        "properties": {
+          "content_type": {
+            "type": "string",
+            "title": "Content Type"
+          },
+          "bytes": {
+            "type": "integer",
+            "title": "Bytes"
+          },
+          "audit_event_id": {
+            "type": "integer",
+            "title": "Audit Event Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "content_type",
+          "bytes",
+          "audit_event_id"
+        ],
+        "title": "LogoUploadResponse"
       },
       "MetricValue": {
         "properties": {

@@ -1,15 +1,38 @@
 /* Headway design tokens — every fg/bg pair below is WCAG 2.1 AA verified by
    scripts/check-contrast.mjs (npm run check:contrast). If you change a token,
-   update that script and re-run it. Single light theme for the walking
-   skeleton; theming is a later design-system increment. */
+   update that script and re-run it.
+
+   Two deliberately selected themes (handoff 0008, pillar A): the light set
+   here and the dark set under :root[data-theme="dark"]. The theme attribute
+   is stamped by src/theme.ts (explicit user choice persisted in
+   localStorage, else prefers-color-scheme) and inline in index.html before
+   first paint.
+
+   Chart colors (--series-*, --chart-*) are validated separately by the
+   dataviz palette validator against the chart surface of EACH mode — they
+   are data encodings, not chrome. Brand overrides (--brand-*) are CHROME
+   ONLY and never read by chart components: an agency brand color is
+   contrast-checked by the server against the light surfaces, but has never
+   been checked for CVD separation or chart-surface contrast, so it must not
+   color a data series. */
 
 :root {
-  --color-bg: #ffffff;
-  --color-surface: #f6f8fa;
+  /* Brand chrome overrides (handoff 0008, pillar C). Defaults mirror what
+     migration 0015 seeds; the app shell overwrites these two custom
+     properties from GET /branding. Every value the server accepts measures
+     >= 4.5:1 against BOTH light surfaces (services/api branding.py), which
+     is what lets --color-accent below take the brand accent safely in the
+     LIGHT theme. The dark theme pins its own accent instead — the server
+     guardrail does not cover dark surfaces (documented in branding.py). */
+  --brand-primary: #1a5fb4;
+  --brand-accent: #0b57d0;
+
+  --color-bg: #ffffff; /* card / content surface */
+  --color-surface: #f6f8fa; /* page plane + inset panels */
   --color-text: #1f2328; /* 15.80:1 on --color-bg */
   --color-text-muted: #57606a; /* 6.39:1 on --color-bg */
-  --color-accent: #0b57d0; /* links, primary actions, focus: 6.39:1 on bg */
-  --color-accent-text: #ffffff; /* 6.39:1 on --color-accent */
+  --color-accent: var(--brand-accent); /* links, primary actions, focus */
+  --color-accent-text: #ffffff; /* >= 4.5:1 on any accepted accent */
   --color-border: #d0d7de;
   --color-input-border: #57606a; /* 6.39:1 (>= 3:1 non-text) on bg */
 
@@ -22,11 +45,80 @@
   --color-success-text: #1c632f; /* 6.50:1 on --color-success-bg */
   --color-success-bg: #e8f5eb;
 
+  /* Chart tokens (handoff 0008, pillar B) — dataviz-validated, mode-paired.
+     Categorical slots 1–2 are the light column of the reference palette,
+     validated with the dataviz validator against the light chart surface
+     (#ffffff). Slot 2 sits below 3:1 there (2.82:1, a validator WARN): the
+     relief rule applies, and every chart ships direct labels AND a table
+     view. Status colors are RESERVED for severity (never "series 3") and
+     always ride with an icon + label. */
+  --series-1: #2a78d6;
+  --series-2: #1baf7a;
+  --chart-grid: #e6e9ed; /* hairline, recessive, solid */
+  --chart-baseline: #d0d7de;
+  --chart-status-blocking: #9f1b1b; /* 7.93:1 on the chart surface */
+  --chart-status-warning: #946300; /* 5.19:1 on the chart surface */
+  --chart-status-info: #1d4e89; /* 8.39:1 on the chart surface */
+
   --focus-ring: 3px solid var(--color-accent);
+
+  /* Spacing rhythm */
   --space-1: 0.25rem;
   --space-2: 0.5rem;
   --space-3: 1rem;
   --space-4: 1.5rem;
+  --space-5: 2.5rem;
+
+  /* Typographic scale (major second-ish, calm) */
+  --text-sm: 0.875rem;
+  --text-base: 1rem;
+  --text-lg: 1.25rem;
+  --text-xl: 1.6rem;
+  --text-hero: 2rem;
+
+  /* Card surfaces: subtle elevation, never decoration over data */
+  --radius-1: 6px;
+  --radius-2: 10px;
+  --shadow-1: 0 1px 2px rgba(31, 35, 40, 0.07), 0 1px 1px rgba(31, 35, 40, 0.04);
+  --shadow-2: 0 4px 12px rgba(31, 35, 40, 0.12);
+}
+
+/* The dark theme — a deliberately selected token set, not an inversion.
+   Every pair is verified by scripts/check-contrast.mjs (dark section);
+   --series-* are the dark column of the reference palette, validated against
+   the dark chart surface (#161b22). --color-accent is PINNED here: the
+   server's brand-color guardrail only certifies contrast against the light
+   surfaces, so brand accents never restyle dark-mode text/controls.
+   --brand-primary still paints the decorative header bar (non-text). */
+:root[data-theme="dark"] {
+  --color-bg: #161b22; /* card / content surface */
+  --color-surface: #0d1117; /* page plane + inset panels */
+  --color-text: #e6edf3; /* 14.64:1 on --color-bg */
+  --color-text-muted: #9ea7b3; /* 7.11:1 on --color-bg */
+  --color-accent: #58a6ff; /* 6.85:1 on --color-bg */
+  --color-accent-text: #0d1117; /* 7.49:1 on --color-accent */
+  --color-border: #30363d;
+  --color-input-border: #8b949e; /* 5.62:1 (>= 3:1 non-text) on bg */
+
+  --color-danger-text: #ffb3ab; /* 8.93:1 on --color-danger-bg */
+  --color-danger-bg: #3a1d1f;
+  --color-warning-text: #e8c06c; /* 8.47:1 on --color-warning-bg */
+  --color-warning-bg: #332711;
+  --color-info-text: #a8c7f0; /* 8.97:1 on --color-info-bg */
+  --color-info-bg: #172439;
+  --color-success-text: #8ddaa4; /* 9.35:1 on --color-success-bg */
+  --color-success-bg: #12291a;
+
+  --series-1: #3987e5;
+  --series-2: #199e70;
+  --chart-grid: #21262d;
+  --chart-baseline: #30363d;
+  --chart-status-blocking: #f2827f; /* 6.82:1 on the dark chart surface */
+  --chart-status-warning: #d4a72c; /* 7.71:1 on the dark chart surface */
+  --chart-status-info: #6cb6ff; /* 8.05:1 on the dark chart surface */
+
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.55), 0 1px 1px rgba(0, 0, 0, 0.4);
+  --shadow-2: 0 4px 12px rgba(0, 0, 0, 0.6);
 }
 
 * {
@@ -36,10 +128,11 @@
 body {
   margin: 0;
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  font-size: 1rem;
-  line-height: 1.5;
+  font-size: var(--text-base);
+  line-height: 1.55;
   color: var(--color-text);
-  background: var(--color-bg);
+  /* The page plane; cards sit on it in --color-bg with subtle elevation. */
+  background: var(--color-surface);
 }
 
 /* Visible focus everywhere (WCAG 2.4.7). */
@@ -56,10 +149,18 @@ a {
 }
 
 h1 {
-  font-size: 1.5rem;
+  font-size: var(--text-xl);
+  letter-spacing: -0.015em;
+  line-height: 1.25;
+  margin: 0 0 var(--space-3);
 }
 h2 {
-  font-size: 1.2rem;
+  font-size: var(--text-lg);
+  letter-spacing: -0.01em;
+  line-height: 1.3;
+}
+h3 {
+  font-size: var(--text-base);
 }
 
 /* ---- layout ---- */
@@ -82,19 +183,53 @@ h2 {
   flex-wrap: wrap;
   align-items: center;
   gap: var(--space-3);
-  padding: var(--space-2) var(--space-3);
+  padding: var(--space-2) var(--space-4);
   border-bottom: 1px solid var(--color-border);
-  background: var(--color-surface);
+  /* Brand chrome: the decorative top bar takes the agency's primary color
+     (non-text, both themes). Charts never take brand colors. */
+  border-top: 3px solid var(--brand-primary);
+  background: var(--color-bg);
 }
 .app-header .brand {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
   font-weight: 700;
+  font-size: var(--text-lg);
+  letter-spacing: -0.01em;
+}
+/* Agency logo (GET /branding/logo): header chrome, capped to the line. */
+.app-header .brand-logo {
+  display: block;
+  height: 1.5rem;
+  width: auto;
+  max-width: 10rem;
 }
 .app-header nav ul {
   display: flex;
-  gap: var(--space-3);
+  flex-wrap: wrap;
+  gap: var(--space-1);
   list-style: none;
   margin: 0;
   padding: 0;
+}
+.app-header nav a {
+  display: inline-block;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-1);
+  color: var(--color-text);
+  text-decoration: none;
+}
+.app-header nav a:hover {
+  background: var(--color-surface);
+}
+/* The current page: accent underline + weight, never color alone. */
+.app-header nav a[aria-current="page"] {
+  font-weight: 700;
+  text-decoration: underline;
+  text-decoration-color: var(--color-accent);
+  text-decoration-thickness: 3px;
+  text-underline-offset: 6px;
 }
 .app-header .session-info {
   margin-left: auto;
@@ -102,13 +237,23 @@ h2 {
   align-items: center;
   gap: var(--space-2);
   color: var(--color-text-muted);
-  font-size: 0.9rem;
+  font-size: var(--text-sm);
 }
 
 main {
-  max-width: 70rem;
+  max-width: 72rem;
   margin: 0 auto;
-  padding: var(--space-3);
+  padding: var(--space-4) var(--space-3) var(--space-5);
+}
+
+/* ---- card surface (subtle elevation; shared by receipts, issues,
+        chart cards, stat tiles, public cards, settings panels) ---- */
+
+.card {
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-2);
+  box-shadow: var(--shadow-1);
 }
 
 /* ---- forms & buttons ---- */
@@ -128,8 +273,9 @@ textarea {
   padding: var(--space-2);
   font: inherit;
   color: var(--color-text);
+  background: var(--color-bg);
   border: 1px solid var(--color-input-border);
-  border-radius: 4px;
+  border-radius: var(--radius-1);
   margin-bottom: var(--space-3);
 }
 textarea {
@@ -140,7 +286,7 @@ textarea {
 button {
   font: inherit;
   padding: var(--space-2) var(--space-3);
-  border-radius: 4px;
+  border-radius: var(--radius-1);
   border: 1px solid var(--color-input-border);
   background: var(--color-surface);
   color: var(--color-text);
@@ -150,6 +296,18 @@ button.primary {
   background: var(--color-accent);
   border-color: var(--color-accent);
   color: var(--color-accent-text);
+}
+/* An action refused for a stated reason: aria-disabled keeps the button
+   focusable and its click handled (the handler refuses and the adjacent
+   reason line says why), so the refusal is perceivable — unlike the native
+   disabled attribute, which swallows clicks and leaves the tab order.
+   Muted-on-surface is an AA-verified pair (check-contrast.mjs): the label
+   stays readable even though the control is off. */
+button.primary[aria-disabled="true"] {
+  background: var(--color-surface);
+  border-color: var(--color-input-border);
+  color: var(--color-text-muted);
+  cursor: not-allowed;
 }
 button.link-like {
   background: none;
@@ -165,7 +323,7 @@ button.link-like {
 .status,
 .banner {
   padding: var(--space-2) var(--space-3);
-  border-radius: 4px;
+  border-radius: var(--radius-1);
   margin: var(--space-3) 0;
   border: 1px solid currentColor;
 }
@@ -186,6 +344,11 @@ button.link-like {
 
 .table-wrap {
   overflow-x: auto;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-2);
+  box-shadow: var(--shadow-1);
+  padding: var(--space-3);
 }
 table {
   border-collapse: collapse;
@@ -207,6 +370,8 @@ th {
   background: var(--color-surface);
 }
 td.figure {
+  /* Tabular figures ONLY in columns that align vertically — large
+     standalone values (stat tiles) use proportional figures. */
   font-variant-numeric: tabular-nums;
   font-weight: 600;
 }
@@ -214,7 +379,7 @@ td.figure {
 .tag {
   display: inline-block;
   padding: 0 var(--space-2);
-  border-radius: 4px;
+  border-radius: var(--radius-1);
   font-size: 0.85rem;
   font-weight: 600;
   white-space: nowrap;
@@ -263,13 +428,14 @@ ul.detail-panel li {
 .receipt {
   margin: var(--space-2) 0;
   padding: var(--space-3);
-  background: var(--color-surface);
+  background: var(--color-bg);
   border: 1px solid var(--color-border);
-  border-radius: 6px;
+  border-radius: var(--radius-2);
+  box-shadow: var(--shadow-1);
   max-width: 46rem;
 }
 .receipt h2 {
-  font-size: 1rem;
+  font-size: var(--text-base);
   margin: var(--space-3) 0 var(--space-1);
 }
 .receipt-story {
@@ -291,7 +457,7 @@ ul.detail-panel li {
   flex: 1;
   display: block;
   height: 0.75rem;
-  background: var(--color-bg);
+  background: var(--color-surface);
   border: 1px solid var(--color-input-border);
   border-radius: 999px;
   overflow: hidden;
@@ -314,7 +480,7 @@ ul.detail-panel li {
   margin: 0;
   padding: var(--space-2) var(--space-3);
   border-left: 4px solid var(--color-accent);
-  background: var(--color-bg);
+  background: var(--color-surface);
 }
 .fta-quote blockquote p {
   margin: 0;
@@ -322,7 +488,7 @@ ul.detail-panel li {
 .fta-quote figcaption {
   margin-top: var(--space-1);
   color: var(--color-text-muted);
-  font-size: 0.9rem;
+  font-size: var(--text-sm);
 }
 .flag-list {
   list-style: none;
@@ -345,12 +511,15 @@ ul.detail-panel li {
   gap: var(--space-3);
 }
 .certify-figure {
+  background: var(--color-bg);
   border: 1px solid var(--color-border);
-  border-radius: 6px;
+  border-radius: var(--radius-2);
+  box-shadow: var(--shadow-1);
   padding: var(--space-3);
 }
 .certify-figure .receipt {
   margin-bottom: 0;
+  box-shadow: none;
 }
 /* An inline checkbox + label pair (consent and acknowledgement): the
    global block-level label rule does not apply here. */
@@ -368,6 +537,23 @@ ul.detail-panel li {
 .certify-warning h2 {
   margin-top: 0;
 }
+/* The always-visible reason line AT the certify button (finding 1 of the
+   2026-07-11 click-through): warning tokens, right where the user looks. */
+.certify-reason {
+  max-width: 46rem;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-1);
+  border: 1px solid currentColor;
+  background: var(--color-warning-bg);
+  color: var(--color-warning-text);
+}
+.certify-reason p {
+  margin: var(--space-1) 0;
+}
+.certify-reason a {
+  color: inherit;
+  font-weight: 600;
+}
 
 /* ---- monthly report month picker ---- */
 
@@ -381,7 +567,7 @@ ul.detail-panel li {
   color: var(--color-text);
   padding: var(--space-2);
   border: 1px solid var(--color-input-border);
-  border-radius: 4px;
+  border-radius: var(--radius-1);
   background: var(--color-bg);
 }
 
@@ -392,7 +578,7 @@ ul.detail-panel li {
   align-items: center;
   gap: var(--space-1);
   padding: 0 var(--space-2);
-  border-radius: 4px;
+  border-radius: var(--radius-1);
   font-weight: 600;
 }
 .severity svg {
@@ -411,6 +597,56 @@ ul.detail-panel li {
   color: var(--color-info-text);
 }
 
+/* ---- DQ queue at a glance (summary chips + filters) ---- */
+
+.dq-summary h2 {
+  margin-bottom: var(--space-1);
+}
+.dq-chips {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding: 0;
+  margin: var(--space-2) 0;
+}
+/* Stat chips: text + count (+ severity icon/color) — never color alone. */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  border-radius: 999px;
+  border: 1px solid currentColor;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.chip.resolved {
+  background: var(--color-success-bg);
+  color: var(--color-success-text);
+}
+.filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin: var(--space-2) 0;
+}
+.filter-bar-label {
+  font-weight: 600;
+}
+/* Selection is conveyed by aria-pressed + the filled style (not color alone:
+   the pressed button is the only filled one and keeps its label). */
+.filter-bar button[aria-pressed="true"] {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  color: var(--color-accent-text);
+  font-weight: 600;
+}
+.dq-showing {
+  margin: var(--space-2) 0;
+}
+
 /* ---- DQ issue cards ---- */
 
 .issue-list {
@@ -420,9 +656,11 @@ ul.detail-panel li {
   gap: var(--space-3);
 }
 .issue {
+  background: var(--color-bg);
   border: 1px solid var(--color-border);
   border-left: 6px solid var(--color-border);
-  border-radius: 4px;
+  border-radius: var(--radius-1);
+  box-shadow: var(--shadow-1);
   padding: var(--space-3);
 }
 .issue.blocking {
@@ -557,7 +795,7 @@ ul.detail-panel li {
 .modal-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(31, 35, 40, 0.6);
+  background: rgba(0, 0, 0, 0.6);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -565,7 +803,7 @@ ul.detail-panel li {
 }
 .modal {
   background: var(--color-bg);
-  border-radius: 6px;
+  border-radius: var(--radius-2);
   padding: var(--space-4);
   max-width: 44rem;
   width: 100%;
@@ -579,6 +817,49 @@ ul.detail-panel li {
   display: flex;
   gap: var(--space-2);
   margin-top: var(--space-3);
+}
+
+/* ---- public open-data page (/public) ---- */
+
+.public-list {
+  list-style: none;
+  padding: 0;
+  display: grid;
+  gap: var(--space-3);
+  max-width: 46rem;
+}
+.public-card {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-2);
+  box-shadow: var(--shadow-1);
+  padding: var(--space-3);
+  background: var(--color-bg);
+}
+.public-card h2 {
+  margin: 0 0 var(--space-1);
+}
+.public-value {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  font-size: var(--text-lg);
+  margin: 0 0 var(--space-2);
+}
+.public-card dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: var(--space-1) var(--space-3);
+  margin: var(--space-2) 0;
+}
+.public-card dt {
+  font-weight: 600;
+}
+.public-card dd {
+  margin: 0;
+}
+.public-calc {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  margin-bottom: 0;
 }
 
 .visually-hidden {
@@ -597,4 +878,301 @@ ul.detail-panel li {
   max-width: 28rem;
   margin: 10vh auto 0;
   padding: var(--space-3);
+}
+
+/* ---- dashboard (handoff 0008, pillar B) ---- */
+
+.stat-grid {
+  list-style: none;
+  padding: 0;
+  margin: var(--space-3) 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  gap: var(--space-3);
+}
+.stat-tile {
+  padding: var(--space-3);
+}
+.stat-tile .stat-label {
+  margin: 0 0 var(--space-1);
+  font-weight: 600;
+}
+/* Large standalone figure: PROPORTIONAL figures (tabular-nums makes a big
+   number look loose); the value is the API's string verbatim. */
+.stat-tile .stat-value {
+  margin: 0;
+  font-size: var(--text-hero);
+  font-weight: 600;
+  font-variant-numeric: normal;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+}
+.stat-tile .stat-unit {
+  font-size: var(--text-base);
+  font-weight: 400;
+  color: var(--color-text-muted);
+}
+.stat-tile .stat-period {
+  margin: var(--space-1) 0 var(--space-2);
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+.stat-tile .stat-flags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin: 0 0 var(--space-2);
+}
+
+.dashboard-grid {
+  display: grid;
+  gap: var(--space-4);
+  margin: var(--space-4) 0;
+}
+
+.chart-card {
+  padding: var(--space-3);
+}
+.chart-card > h2 {
+  margin: 0;
+}
+.chart-desc {
+  margin: var(--space-1) 0 var(--space-2);
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+.chart-card .view-toggle {
+  margin: var(--space-2) 0;
+}
+
+/* Small multiples: one panel per measure, one axis each — NEVER dual-axis. */
+.small-multiples {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
+  gap: var(--space-3);
+}
+.chart-panel h3 {
+  margin: 0 0 var(--space-1);
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  font-weight: 600;
+}
+
+.chart-figure {
+  position: relative;
+  margin: 0;
+}
+.chart-figure svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+/* SVG chart anatomy: recessive solid hairline grid, text in TEXT tokens
+   (marks carry the series color; words never do). */
+.chart-grid-line {
+  stroke: var(--chart-grid);
+  stroke-width: 1;
+}
+.chart-baseline-line {
+  stroke: var(--chart-baseline);
+  stroke-width: 1;
+}
+.chart-axis-text {
+  fill: var(--color-text-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums; /* ticks align vertically */
+}
+.chart-end-label {
+  fill: var(--color-text);
+  font-size: 11px;
+  font-weight: 600;
+}
+.chart-series-line {
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+/* End markers ride a 2px surface ring so they stay legible over the line. */
+.chart-end-dot {
+  stroke: var(--color-bg);
+  stroke-width: 2;
+}
+/* A reference line IS a threshold — dashed is its semantic (the grid itself
+   is always solid). */
+.chart-ref-line {
+  stroke: var(--color-text-muted);
+  stroke-width: 1;
+  stroke-dasharray: 4 3;
+}
+.chart-ref-label {
+  fill: var(--color-text-muted);
+  font-size: 11px;
+}
+.chart-crosshair {
+  stroke: var(--color-input-border);
+  stroke-width: 1;
+}
+
+/* The hover/keyboard reader layer over the plot area. */
+.chart-hover {
+  position: absolute;
+  background: transparent;
+  cursor: crosshair;
+}
+
+.chart-tooltip {
+  position: absolute;
+  z-index: 5;
+  pointer-events: none;
+  min-width: 9rem;
+  max-width: 16rem;
+  padding: var(--space-2);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-1);
+  box-shadow: var(--shadow-2);
+  font-size: var(--text-sm);
+}
+.chart-tooltip .tooltip-period {
+  margin: 0 0 var(--space-1);
+  color: var(--color-text-muted);
+}
+.chart-tooltip ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 2px;
+}
+.chart-tooltip li {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+/* Values lead, labels follow (the legend's hierarchy inverted). */
+.chart-tooltip .tooltip-value {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.chart-tooltip .tooltip-series {
+  color: var(--color-text-muted);
+}
+
+/* Legend (always present for >= 2 series): line keys mirror the mark. */
+.chart-legend {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  padding: 0;
+  margin: var(--space-2) 0 var(--space-1);
+  font-size: var(--text-sm);
+}
+.chart-legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+.line-key {
+  display: inline-block;
+  width: 16px;
+  height: 3px;
+  border-radius: 2px;
+  flex: none;
+}
+.swatch-key {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  flex: none;
+}
+
+/* DQ stacked bars: thin marks, 2px surface gaps between segments (the gap
+   separates, never a stroke); the hovered/focused segment lifts. */
+.dq-bar-segment {
+  cursor: default;
+}
+.dq-bar-segment:hover rect,
+.dq-bar-segment:focus rect {
+  stroke: var(--color-text);
+  stroke-width: 1.5;
+}
+.dq-bar-segment:focus {
+  outline: none;
+}
+
+/* ---- branding settings (/settings/branding — handoff 0008, pillar C) ---- */
+
+.branding-form {
+  display: grid;
+  gap: var(--space-4);
+  max-width: 46rem;
+}
+.branding-section {
+  padding: var(--space-3);
+}
+.branding-section h2 {
+  margin-top: 0;
+}
+.branding-hint {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  margin: var(--space-1) 0 var(--space-2);
+}
+.color-field {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+.color-field input[type="color"] {
+  width: 3rem;
+  height: 2.25rem;
+  padding: 2px;
+  border: 1px solid var(--color-input-border);
+  border-radius: var(--radius-1);
+  background: var(--color-bg);
+  cursor: pointer;
+}
+.color-field input[type="text"] {
+  max-width: 9rem;
+  margin-bottom: 0;
+  font-family: ui-monospace, monospace;
+}
+/* The live preview: a miniature of the header chrome, driven by the DRAFT
+   values (saving is what makes them real; the server is the contrast gate). */
+.branding-preview {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-1);
+  overflow: hidden;
+  margin: var(--space-2) 0;
+}
+.branding-preview .preview-header {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  background: #ffffff; /* the light surface the server validated against */
+  color: #1f2328;
+  border-bottom: 1px solid #d0d7de;
+}
+.branding-preview .preview-logo {
+  display: block;
+  height: 1.5rem;
+  width: auto;
+  max-width: 10rem;
+}
+.branding-preview .preview-name {
+  font-weight: 700;
+}
+.branding-preview .preview-note {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  background: #f6f8fa; /* the other validated light surface */
+  color: #57606a;
+  font-size: var(--text-sm);
 }

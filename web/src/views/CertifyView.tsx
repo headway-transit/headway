@@ -13,7 +13,11 @@
  *   (c) a blockers panel: the count of open blocking data-quality issues,
  *       in plain language, with the path to /dq. While any exist the
  *       certify action is DISABLED and the reason shown mirrors the API's
- *       own 409 refusal — screen and server tell the same story;
+ *       own 409 refusal — screen and server tell the same story. The button
+ *       itself uses aria-disabled (never the native disabled attribute,
+ *       which swallows clicks and hides the button from the tab order) and
+ *       EVERY disabled cause is restated in an always-visible reason line
+ *       directly beside the button (2026-07-11 click-through, finding 1);
  *   (d) unmissable aggregate warnings: if ANY selected figure is simulated
  *       or pre-verification, an alert restates what signing would mean and
  *       a separate acknowledge checkbox must be ticked before the button
@@ -69,12 +73,12 @@ export function CertifyView() {
   const initial = useMemo(() => previousMonth(new Date()), []);
   const [month, setMonth] = useState(initial.month);
   const [year, setYear] = useState(initial.year);
+  const reasonId = useId();
   const [values, setValues] = useState<MetricValue[] | null>(null);
   const [issues, setIssues] = useState<DqIssue[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [acknowledged, setAcknowledged] = useState(false);
-  const [selectionError, setSelectionError] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
@@ -135,15 +139,17 @@ export function CertifyView() {
   );
   const anySelectedPreVerification = selectedValues.some(isPreVerification);
   const needsAcknowledge = anySelectedSimulated || anySelectedPreVerification;
-  const certifyDisabled = blocked || (needsAcknowledge && !acknowledged);
+  const nothingSelected = selected.size === 0;
+  const certifyDisabled =
+    blocked || nothingSelected || (needsAcknowledge && !acknowledged);
 
   const openCertifyModal = () => {
+    // aria-disabled (unlike the native disabled attribute) keeps the button
+    // focusable and clickable, so the refusal is PERCEIVABLE: the click lands
+    // here and is refused while the always-visible reason line beside the
+    // button says why. Nothing is silently swallowed.
+    if (certifyDisabled) return;
     setSuccessMessage(null);
-    if (selected.size === 0) {
-      setSelectionError(copy.certify.nothingSelected);
-      return;
-    }
-    setSelectionError(null);
     setModalOpen(true);
   };
 
@@ -210,12 +216,6 @@ export function CertifyView() {
       {successMessage && (
         <div role="status" className="status">
           {successMessage}
-        </div>
-      )}
-
-      {selectionError && (
-        <div role="alert" className="alert">
-          {selectionError}
         </div>
       )}
 
@@ -328,19 +328,54 @@ export function CertifyView() {
         </div>
       )}
 
-      <p>
-        <button
-          type="button"
-          className="primary"
-          disabled={certifyDisabled}
-          onClick={openCertifyModal}
-        >
-          {copy.certify.certifySelected}
-        </button>
-      </p>
-      {needsAcknowledge && !acknowledged && !blocked && (
-        <p>{copy.certify.acknowledgeHint}</p>
-      )}
+      {/* The certify action + its reason line (2026-07-11 click-through,
+          finding 1). The button uses aria-disabled, NOT the native disabled
+          attribute: a natively disabled button swallows every click and
+          falls out of the tab order, so the refusal was invisible right
+          where the user was looking. Here the button stays perceivable and
+          every disabled cause is stated in an always-visible reason line
+          DIRECTLY beside it — the same story the blockers panel above and
+          the API's own 409 tell. */}
+      <div className="certify-action">
+        <p>
+          <button
+            type="button"
+            className="primary"
+            aria-disabled={certifyDisabled || undefined}
+            aria-describedby={certifyDisabled ? reasonId : undefined}
+            onClick={openCertifyModal}
+          >
+            {copy.certify.certifySelected}
+          </button>
+        </p>
+        {certifyDisabled && (
+          <div
+            id={reasonId}
+            role="status"
+            className="certify-reason"
+            aria-label={copy.certify.reasonLabel}
+          >
+            {issues === null && !loadError && (
+              <p>{copy.certify.blockersLoading}</p>
+            )}
+            {issues === null && loadError && (
+              <p>{copy.certify.blockersUnknown}</p>
+            )}
+            {openBlocking !== null && openBlocking > 0 && (
+              <p>
+                {copy.certify.reasonBlockers(String(openBlocking))}{" "}
+                <Link to="/dq">{copy.certify.reasonBlockersLink}</Link>
+              </p>
+            )}
+            {values !== null && nothingSelected && (
+              <p>{copy.certify.nothingSelected}</p>
+            )}
+            {needsAcknowledge && !acknowledged && (
+              <p>{copy.certify.acknowledgeHint}</p>
+            )}
+          </div>
+        )}
+      </div>
 
       {/* (e) the attestation dialog. */}
       {modalOpen && (

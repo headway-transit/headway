@@ -58,11 +58,30 @@ export type RouteHandler =
   | ((call: RecordedCall) => MockedResponse);
 
 /**
+ * The app shell fetches GET /branding on every mount (handoff 0008 pillar
+ * C), so the mock answers it by default with the server's seeded defaults.
+ * Tests exercising branding override the route.
+ */
+const DEFAULT_ROUTES: Record<string, RouteHandler> = {
+  "GET /branding": {
+    status: 200,
+    body: {
+      display_name: "Headway",
+      primary: "#1a5fb4",
+      accent: "#0b57d0",
+      has_logo: false,
+    },
+  },
+};
+
+/**
  * Install a fetch mock. Routes are keyed "METHOD /path" (query string
  * ignored). Unrouted requests fail the test loudly. Returns the list of
- * recorded calls for assertions on method, headers, and body.
+ * recorded calls for assertions on method, headers, and body. Multipart
+ * bodies (FormData) are recorded as-is; JSON bodies are parsed.
  */
 export function mockApi(routes: Record<string, RouteHandler>): RecordedCall[] {
+  const allRoutes = { ...DEFAULT_ROUTES, ...routes };
   const calls: RecordedCall[] = [];
   vi.stubGlobal(
     "fetch",
@@ -78,10 +97,12 @@ export function mockApi(routes: Record<string, RouteHandler>): RecordedCall[] {
           Object.entries((init?.headers ?? {}) as Record<string, string>),
         ),
         body:
-          typeof init?.body === "string" ? JSON.parse(init.body) : undefined,
+          typeof init?.body === "string"
+            ? JSON.parse(init.body)
+            : (init?.body ?? undefined),
       };
       calls.push(call);
-      const handler = routes[`${method} ${path}`];
+      const handler = allRoutes[`${method} ${path}`];
       if (!handler) {
         throw new Error(`Unexpected fetch in test: ${method} ${url}`);
       }

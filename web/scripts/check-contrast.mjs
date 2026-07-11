@@ -29,6 +29,14 @@ export function contrastRatio(fg, bg) {
 }
 
 // [description, foreground, background, minimum ratio]
+//
+// LIGHT theme pairs first, then the DARK theme set (handoff 0008 pillar A —
+// both themes are deliberately selected token sets and BOTH must pass).
+// Chart SERIES colors (--series-*) are NOT here: they are data encodings
+// validated by the dataviz palette validator (lightness band, chroma floor,
+// CVD separation, contrast vs the chart surface) per mode. Chart STATUS
+// fills are here as non-text marks (3:1) because they always ride with an
+// icon + label.
 const PAIRS = [
   ["body text on page background", "#1f2328", "#ffffff", 4.5],
   ["body text on raised surface", "#1f2328", "#f6f8fa", 4.5],
@@ -50,8 +58,51 @@ const PAIRS = [
   // panel, and the meter/graph strokes as non-text UI parts.
   ["muted text on raised surface (receipt cite, graph line2)", "#57606a", "#f6f8fa", 4.5],
   ["link / accent text on raised surface (receipt, graph button)", "#0b57d0", "#f6f8fa", 4.5],
-  ["meter fill / metric node stroke on white track (non-text, 3:1)", "#0b57d0", "#ffffff", 3.0],
+  ["meter fill / metric node stroke on surface track (non-text, 3:1)", "#0b57d0", "#f6f8fa", 3.0],
   ["graph node + meter track border on surface (non-text, 3:1)", "#57606a", "#f6f8fa", 3.0],
+  // 2026-07-11 click-through fixes: the aria-disabled certify button keeps a
+  // readable label; the at-button reason line (warning tokens) carries its
+  // /dq link in the same warning-text color.
+  ["aria-disabled certify button label on surface", "#57606a", "#f6f8fa", 4.5],
+  ["certify reason text + link on warning background", "#664b00", "#fff3d1", 4.5],
+
+  // Handoff 0008 pillar B: chart status fills (severity marks on the light
+  // chart surface — non-text, always paired with icon + label + table view).
+  ["chart status blocking fill on light chart surface (non-text, 3:1)", "#9f1b1b", "#ffffff", 3.0],
+  ["chart status warning fill on light chart surface (non-text, 3:1)", "#946300", "#ffffff", 3.0],
+  ["chart status info fill on light chart surface (non-text, 3:1)", "#1d4e89", "#ffffff", 3.0],
+  // Handoff 0008 pillar C: the DEFAULT brand chrome values (migration 0015
+  // seeds). Non-default brand colors are contrast-gated server-side
+  // (services/api branding.py refuses any color under 4.5:1 on either light
+  // surface), so every accepted override at least matches these checks.
+  ["default brand primary header bar on header (non-text, 3:1)", "#1a5fb4", "#ffffff", 3.0],
+  ["default brand accent as link on page background", "#0b57d0", "#ffffff", 4.5],
+  ["default brand accent as link on raised surface", "#0b57d0", "#f6f8fa", 4.5],
+
+  // ---- DARK theme (handoff 0008 pillar A) ----
+  // Card/content surface #161b22, page plane #0d1117. Brand color overrides
+  // are NOT applied to dark text/controls (server guardrail covers light
+  // surfaces only) — the dark accent below is pinned in styles.css.
+  ["dark: body text on card surface", "#e6edf3", "#161b22", 4.5],
+  ["dark: body text on page plane", "#e6edf3", "#0d1117", 4.5],
+  ["dark: muted text on card surface", "#9ea7b3", "#161b22", 4.5],
+  ["dark: muted text on page plane", "#9ea7b3", "#0d1117", 4.5],
+  ["dark: link / accent text on card surface", "#58a6ff", "#161b22", 4.5],
+  ["dark: link / accent text on page plane", "#58a6ff", "#0d1117", 4.5],
+  ["dark: primary button text on accent", "#0d1117", "#58a6ff", 4.5],
+  ["dark: blocking (danger) text on danger background", "#ffb3ab", "#3a1d1f", 4.5],
+  ["dark: warning text on warning background", "#e8c06c", "#332711", 4.5],
+  ["dark: info text on info background", "#a8c7f0", "#172439", 4.5],
+  ["dark: certified (success) text on success background", "#8ddaa4", "#12291a", 4.5],
+  ["dark: focus outline on card surface (non-text, 3:1)", "#58a6ff", "#161b22", 3.0],
+  ["dark: focus outline on page plane (non-text, 3:1)", "#58a6ff", "#0d1117", 3.0],
+  ["dark: input border on card surface (non-text, 3:1)", "#8b949e", "#161b22", 3.0],
+  ["dark: input border on page plane (non-text, 3:1)", "#8b949e", "#0d1117", 3.0],
+  ["dark: aria-disabled certify button label on page-plane fill", "#9ea7b3", "#0d1117", 4.5],
+  ["dark: meter fill / metric node stroke on page-plane track (non-text, 3:1)", "#58a6ff", "#0d1117", 3.0],
+  ["dark: chart status blocking fill on dark chart surface (non-text, 3:1)", "#f2827f", "#161b22", 3.0],
+  ["dark: chart status warning fill on dark chart surface (non-text, 3:1)", "#d4a72c", "#161b22", 3.0],
+  ["dark: chart status info fill on dark chart surface (non-text, 3:1)", "#6cb6ff", "#161b22", 3.0],
 ];
 
 let failed = false;

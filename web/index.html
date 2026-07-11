@@ -5,6 +5,26 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Headway</title>
+    <script>
+      // Stamp the theme before first paint (no light flash): the explicit
+      // choice persisted by the in-app toggle wins, else the OS preference.
+      // src/theme.ts re-resolves the same way once React mounts.
+      (function () {
+        try {
+          var theme = localStorage.getItem("headway-theme");
+          if (theme !== "light" && theme !== "dark") {
+            theme =
+              window.matchMedia &&
+              window.matchMedia("(prefers-color-scheme: dark)").matches
+                ? "dark"
+                : "light";
+          }
+          document.documentElement.setAttribute("data-theme", theme);
+        } catch (e) {
+          /* storage blocked: default (light) tokens apply */
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

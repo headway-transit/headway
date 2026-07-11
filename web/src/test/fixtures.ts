@@ -169,6 +169,93 @@ export const lineageTreeLarge: LineageNode = {
   })),
 };
 
+/**
+ * Dashboard fixtures (handoff 0008 pillar B): a short daily UPT history, two
+ * months of VRM/VRH with coverage detail (the detail JSONB history the
+ * coverage chart reads), and certified latest figures for the hero tiles.
+ * All values are decimal STRINGS with trailing zeros on purpose: the
+ * dashboard must render them verbatim.
+ */
+
+export const dashboardUptDaily: MetricValue[] = [
+  {
+    ...uptValue,
+    metric_value_id: "mv-upt-d1",
+    period_start: "2026-03-01",
+    period_end: "2026-03-01",
+    value: "1401.00",
+    detail: undefined,
+  },
+  {
+    ...uptValue,
+    metric_value_id: "mv-upt-d2",
+    period_start: "2026-03-02",
+    period_end: "2026-03-02",
+    value: "1250.50",
+    detail: undefined,
+  },
+  {
+    ...uptValue,
+    metric_value_id: "mv-upt-d3",
+    period_start: "2026-03-03",
+    period_end: "2026-03-03",
+    value: "1398.25",
+    certification_status: "certified",
+    // Simulated source: the hero tile must carry the SimulatedBadge.
+    detail: { source_mix: { tides: 1000, tides_simulated: 398 } },
+  },
+];
+
+export const dashboardVrmHistory: MetricValue[] = [
+  {
+    ...vrmValue,
+    metric_value_id: "mv-vrm-feb",
+    period_start: "2026-02-01",
+    period_end: "2026-02-28",
+    value: "11111.10",
+    calc_version: "0.2.0",
+    certification_status: "certified",
+    detail: { ...vrmCoverageDetail, coverage: "0.9126" },
+  },
+  {
+    ...vrmValue,
+    metric_value_id: "mv-vrm-mar",
+    period_start: "2026-03-01",
+    period_end: "2026-03-31",
+    value: "12345.60",
+    calc_version: "0.2.0",
+    detail: { ...vrmCoverageDetail, coverage: "0.8850" },
+  },
+];
+
+export const dashboardVrhHistory: MetricValue[] = [
+  {
+    ...vrhValue,
+    metric_value_id: "mv-vrh-feb",
+    period_start: "2026-02-01",
+    period_end: "2026-02-28",
+    value: "987.25",
+    calc_version: "0.2.0",
+    certification_status: "certified",
+    detail: { ...vrmCoverageDetail, coverage: "0.9500" },
+  },
+  {
+    ...vrhValue,
+    metric_value_id: "mv-vrh-mar",
+    period_start: "2026-03-01",
+    period_end: "2026-03-31",
+    value: "1002.75",
+    calc_version: "0.2.0",
+    detail: { ...vrmCoverageDetail, coverage: "0.9033" },
+  },
+];
+
+export const dashboardValues: MetricValue[] = [
+  ...dashboardUptDaily,
+  ...dashboardVrmHistory,
+  ...dashboardVrhHistory,
+];
+
 export const blockingIssue: DqIssue = {
   issue_id: "dq-1",
   issue_type: "telemetry_gap",
