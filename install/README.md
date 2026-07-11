@@ -126,9 +126,11 @@ asking for help.
 - Your data lives in Docker "volumes" on the computer's disk. It survives
   restarts and reboots; only the uninstaller deletes it, and only after
   you confirm.
-- To start collecting your agency's live feeds, see
-  `deploy/compose/README.md` — the feed collector runs under the `app`
-  services profile.
+- **Connect your data.** The step-by-step guide to hooking up your GTFS
+  feeds and passenger counts (including exports from SQL Server or a data
+  lake) is [`docs/connecting-your-data.md`](../docs/connecting-your-data.md).
+  For the mechanics of the stack itself, see `deploy/compose/README.md` —
+  the feed collector runs under the `app` services profile.
 - Keep `deploy/compose/.env` safe. It holds this installation's
   passwords. Do not email it or commit it anywhere.
 

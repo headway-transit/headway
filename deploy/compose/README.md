@@ -34,7 +34,7 @@ Plain `docker compose up` also runs two one-shot init containers — no manual
 topic or bucket creation is needed (the 2026-07-09 live run found both had to
 be created by hand; these close that gap):
 
-- `bootstrap-kafka` — creates the four v0 topics from
+- `bootstrap-kafka` — creates the five v0 topics from
   `contracts/topics.v0.md` with `kafka-topics.sh --create --if-not-exists`
   (single-node: 1 partition, replication factor 1).
 - `bootstrap-minio` — creates the raw-payload bucket (`S3_BUCKET`, default
@@ -60,7 +60,7 @@ never produces to missing topics or writes to a missing bucket.
 | `ingestion` (profile `app`) | The Go connector runtime that pulls agency feeds (GTFS/GTFS-RT) and produces content-addressed raw records to Kafka. |
 | `keycloak` (profile `sso-broker`, commented) | Optional identity broker for SAML-only IdPs or IdP aggregation (ADR-0011); the default stack uses the API's native OIDC + local accounts instead. |
 
-`transform`, `api`, and `web` have commented placeholders in `compose.yaml`
+`transform`, `api`, and `web` have live services under the `app` profile in `compose.yaml`
 and join the `app` profile in the next slice waves.
 
 Host-published ports (all bound to 127.0.0.1 only): Kafka dev listener 29092,

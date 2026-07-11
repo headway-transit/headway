@@ -39,6 +39,10 @@ Prefer to do it by hand? See [`deploy/compose/`](deploy/compose/) — copy
 `.env.example` to `.env`, set three passwords, and run
 `docker compose up -d`.
 
+After installing, connect your agency's data — GTFS feeds, passenger
+counts, or exports from your existing databases:
+[`docs/connecting-your-data.md`](docs/connecting-your-data.md).
+
 ## Repository layout (ADR-0010)
 
 | Path | Contents |
