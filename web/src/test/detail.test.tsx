@@ -64,8 +64,8 @@ describe("metrics detail panel", () => {
     await user.click(toggle);
     expect(toggle).toHaveAttribute("aria-expanded", "true");
 
-    const panel = screen.getByRole("list", {
-      name: "Calculation details for Unlinked Passenger Trips (UPT), 2026-03-01 to 2026-03-31",
+    const panel = screen.getByRole("region", {
+      name: "Receipt for Unlinked Passenger Trips (UPT), 2026-03-01 to 2026-03-31",
     });
     // The FTA factor-up rule, in plain language, with the API's strings.
     expect(panel).toHaveTextContent(
@@ -99,7 +99,9 @@ describe("metrics detail panel", () => {
     await screen.findByRole("table");
     await user.click(screen.getByRole("button", { name: /^Details/ }));
 
-    const panel = screen.getByRole("list", { name: /Calculation details/ });
+    // The Receipt absorbs the detail panel: the coverage sentence sits next
+    // to the meter, the remaining lines in the details list.
+    const panel = screen.getByRole("region", { name: /^Receipt for/ });
     expect(panel).toHaveTextContent(
       "Covers 91.26% of vehicle-trips; 202 excluded and documented.",
     );
@@ -140,22 +142,24 @@ describe("metrics detail panel", () => {
 
     await screen.findByRole("table");
     await user.click(screen.getByRole("button", { name: /^Details/ }));
-    const panel = screen.getByRole("list", { name: /Calculation details/ });
+    const panel = screen.getByRole("region", { name: /^Receipt for/ });
     expect(panel).toHaveTextContent("Covers 80% of vehicle-trips");
     expect(panel).toHaveTextContent("apc vendor note: spot-checked");
     expect(panel).toHaveTextContent("new threshold: 0.07");
   });
 
-  it("offers no detail toggle when the API served an empty detail object", async () => {
+  it("offers the Details toggle for EVERY figure — even one with no recorded detail (pillar 1: every figure is interactive)", async () => {
     signInAs("viewer");
     mockApi({
       "GET /metrics/values": { status: 200, body: [vrmValue] },
     });
     renderApp("/metrics");
     await screen.findByRole("table");
+    // vrmValue carries no detail; its Receipt still opens (its behavior for
+    // the detail-less case is asserted in receipt.test.tsx).
     expect(
-      screen.queryByRole("button", { name: /^Details/ }),
-    ).not.toBeInTheDocument();
+      screen.getByRole("button", { name: /^Details/ }),
+    ).toBeInTheDocument();
   });
 });
 

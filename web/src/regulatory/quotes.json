@@ -1,0 +1,120 @@
+{
+  "upt_v0": [
+    {
+      "quote": "Unlinked Passenger Trips (UPT) are the number of boardings on public transportation vehicles during the fiscal year. Transit agencies must count passengers each time they board vehicles, no matter how many vehicles they use to travel from their origin to their destination. If a transit vehicle changes routes while passengers are onboard (interlining), transit agencies should not recount the passengers. Employees or contractors on transit agency business are not passengers.",
+      "citation": "UPT definition — 2026 NTD Policy Manual, Full Reporting, p. 143"
+    },
+    {
+      "quote": "Sometimes transit agencies performing 100 percent counts will miss passenger counts on some vehicle trips because of personnel problems or equipment failures. If these vehicle trips are 2 percent or less of the total, transit agencies should factor up the data to account for the missing trips. However, if the vehicle trips with missing data exceed 2 percent of total trips, agencies must have a qualified statistician approve the factoring method used to account for the missing percentage.",
+      "citation": "100% counts / missing-trip rule — 2026 NTD Policy Manual, Full Reporting, p. 146"
+    },
+    {
+      "quote": "First, develop processes to throw out any trips with invalid APC data. … For example, agencies may flag trips or blocks where the difference between boardings and alightings is greater than 10 percent, or trips where the passenger load drops below zero.",
+      "citation": "APC validation examples — 2026 NTD Policy Manual, Full Reporting, p. 151"
+    },
+    {
+      "quote": "The use of APCs for NTD reporting requires FTA approval.",
+      "citation": "APC certification — 2026 NTD Policy Manual, Full Reporting, pp. 147–148"
+    },
+    {
+      "quote": "FTA will only certify APC systems for NTD reporting if the percent difference between manual and APC data in the sample, for both UPT and PMT, is less than 5 percent.",
+      "citation": "APC certification — 2026 NTD Policy Manual, Full Reporting, pp. 147–148"
+    },
+    {
+      "quote": "FTA will also only certify APC systems if the proportion of trips without valid APC data (the discard rate) is less than 50 percent of the number of trips on APC-equipped vehicles.",
+      "citation": "APC certification — 2026 NTD Policy Manual, Full Reporting, pp. 147–148"
+    },
+    {
+      "quote": "The next benchmarking year is Report Year (RY) 2028.",
+      "citation": "APC certification — 2026 NTD Policy Manual, Full Reporting, pp. 147–148"
+    },
+    {
+      "quote": "Minimum confidence of 95 percent; and Minimum precision level of ±10 percent.",
+      "citation": "Sampling floor — 2026 NTD Policy Manual, Full Reporting, p. 149"
+    }
+  ],
+  "vrh_v0": [
+    {
+      "quote": "A transit vehicle is in revenue service when it is providing public transportation and is available to carry passengers. Non-public transportation activities, such as exclusive school bus service and charter service are not considered revenue service. Revenue service includes both fare and fare-free services.",
+      "citation": "Revenue Service — 2026 NTD Policy Manual, Full Reporting, p. 128"
+    },
+    {
+      "quote": "Actual Vehicle Revenue Hours (VRH) and Actual Vehicle Revenue Miles (VRM) are the hours and miles vehicles travel while in revenue service. Revenue hours for conventional scheduled services include the following: • Running time • Layover/recovery time.",
+      "citation": "VRM/VRH — 2026 NTD Policy Manual, Full Reporting, p. 128"
+    },
+    {
+      "quote": "Revenue miles include the distances traveled during running time and layover/recovery time.",
+      "citation": "VRM/VRH — 2026 NTD Policy Manual, Full Reporting, p. 128"
+    },
+    {
+      "quote": "Usually, agencies schedule layover/recovery time at the end of each trip. … Layover time typically ranges from 10 to 20 percent of the running time.",
+      "citation": "Layover — 2026 NTD Policy Manual, Full Reporting, p. 128"
+    },
+    {
+      "quote": "VRM and VRH exclude the miles and hours related to the following: • Deadhead time • Operator training • Maintenance testing • Other non-revenue uses of the vehicles.",
+      "citation": "Exclusions — 2026 NTD Policy Manual, Full Reporting, p. 129"
+    },
+    {
+      "quote": "There are two different types of measures of VRH and VRM for rail service: train revenue hours/miles and passenger car revenue hours/miles. … a train with four passenger cars traveling one mile would be four passenger car revenue miles.",
+      "citation": "Rail measures — 2026 NTD Policy Manual, Full Reporting, p. 129"
+    },
+    {
+      "quote": "For DR service, revenue time includes all travel time from the point of the first passenger pick-up to the last passenger drop-off, as long as the vehicle does not return to the garage or dispatching point or have interruptions in service…",
+      "citation": "Demand Response — 2026 NTD Policy Manual, Full Reporting, p. 129"
+    },
+    {
+      "quote": "When transit vehicles are 'deadheading,' they operate closed door and do not carry passengers. Deadhead includes … Leaving or returning to the garage or yard facility …; Changing routes; When the driver does not have the duty to carry passengers.",
+      "citation": "Deadhead — 2026 NTD Policy Manual, Full Reporting, p. 129"
+    },
+    {
+      "quote": "Transit agencies must report accurate, true statistics for VRM (i.e., no estimates).",
+      "citation": "Accuracy requirement — 2026 NTD Policy Manual, Full Reporting, p. 135"
+    },
+    {
+      "quote": "Bus arrives at the end of the route, parks, and goes out of service… → Vehicle Revenue Hours: **No**",
+      "citation": "Exhibit 35, out-of-service row — 2026 NTD Policy Manual, Full Reporting, p. 133, bus; verified for calc vrh_v0 0.4.0, handoff 0004"
+    }
+  ],
+  "vrm_v0": [
+    {
+      "quote": "A transit vehicle is in revenue service when it is providing public transportation and is available to carry passengers. Non-public transportation activities, such as exclusive school bus service and charter service are not considered revenue service. Revenue service includes both fare and fare-free services.",
+      "citation": "Revenue Service — 2026 NTD Policy Manual, Full Reporting, p. 128"
+    },
+    {
+      "quote": "Actual Vehicle Revenue Hours (VRH) and Actual Vehicle Revenue Miles (VRM) are the hours and miles vehicles travel while in revenue service. Revenue hours for conventional scheduled services include the following: • Running time • Layover/recovery time.",
+      "citation": "VRM/VRH — 2026 NTD Policy Manual, Full Reporting, p. 128"
+    },
+    {
+      "quote": "Revenue miles include the distances traveled during running time and layover/recovery time.",
+      "citation": "VRM/VRH — 2026 NTD Policy Manual, Full Reporting, p. 128"
+    },
+    {
+      "quote": "Usually, agencies schedule layover/recovery time at the end of each trip. … Layover time typically ranges from 10 to 20 percent of the running time.",
+      "citation": "Layover — 2026 NTD Policy Manual, Full Reporting, p. 128"
+    },
+    {
+      "quote": "VRM and VRH exclude the miles and hours related to the following: • Deadhead time • Operator training • Maintenance testing • Other non-revenue uses of the vehicles.",
+      "citation": "Exclusions — 2026 NTD Policy Manual, Full Reporting, p. 129"
+    },
+    {
+      "quote": "There are two different types of measures of VRH and VRM for rail service: train revenue hours/miles and passenger car revenue hours/miles. … a train with four passenger cars traveling one mile would be four passenger car revenue miles.",
+      "citation": "Rail measures — 2026 NTD Policy Manual, Full Reporting, p. 129"
+    },
+    {
+      "quote": "For DR service, revenue time includes all travel time from the point of the first passenger pick-up to the last passenger drop-off, as long as the vehicle does not return to the garage or dispatching point or have interruptions in service…",
+      "citation": "Demand Response — 2026 NTD Policy Manual, Full Reporting, p. 129"
+    },
+    {
+      "quote": "When transit vehicles are 'deadheading,' they operate closed door and do not carry passengers. Deadhead includes … Leaving or returning to the garage or yard facility …; Changing routes; When the driver does not have the duty to carry passengers.",
+      "citation": "Deadhead — 2026 NTD Policy Manual, Full Reporting, p. 129"
+    },
+    {
+      "quote": "Transit agencies must report accurate, true statistics for VRM (i.e., no estimates).",
+      "citation": "Accuracy requirement — 2026 NTD Policy Manual, Full Reporting, p. 135"
+    },
+    {
+      "quote": "Bus arrives at the end of the route, parks, and goes out of service… → Vehicle Revenue Hours: **No**",
+      "citation": "Exhibit 35, out-of-service row — 2026 NTD Policy Manual, Full Reporting, p. 133, bus; verified for calc vrh_v0 0.4.0, handoff 0004"
+    }
+  ]
+}

@@ -142,6 +142,33 @@ export const lineageTree: LineageNode = {
   ],
 };
 
+/**
+ * A larger provenance tree (26 raw records) for the lineage GRAPH's collapsed
+ * raw tier and its 20-per-page expansion. Same shape as lineageTree: every
+ * canonical position produced by gtfsrt_normalizer 0.2.0 from one raw record.
+ */
+export const lineageTreeLarge: LineageNode = {
+  kind: "computed.metric_values",
+  id: "mv-vrm-1",
+  transform_name: "vrm_v0",
+  transform_version: "0.1.0",
+  inputs: Array.from({ length: 26 }, (_, i) => ({
+    kind: "canonical.vehicle_positions",
+    id: `vp-${100 + i}`,
+    transform_name: "gtfsrt_normalizer",
+    transform_version: "0.2.0",
+    inputs: [
+      {
+        kind: "raw.records",
+        id: `sha256:raw${String(i).padStart(4, "0")}`,
+        transform_name: null,
+        transform_version: null,
+        inputs: [],
+      },
+    ],
+  })),
+};
+
 export const blockingIssue: DqIssue = {
   issue_id: "dq-1",
   issue_type: "telemetry_gap",

@@ -14,13 +14,14 @@
  * itself as a submission.
  */
 
-import { useEffect, useId, useMemo, useState } from "react";
+import { Fragment, useEffect, useId, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { ApiError, listMetricValues } from "../api/client";
 import type { MetricValue } from "../api/types";
+import { Receipt } from "../components/Receipt";
 import { SimulatedBadge } from "../components/SimulatedBadge";
 import { copy } from "../copy";
-import { coverageSummary, isSimulated } from "../detail";
+import { coverageSummary, isPreVerification, isSimulated } from "../detail";
 import { buildMonthlyRidershipCsv } from "../reports/csv";
 import { monthPeriod, previousMonth } from "../reports/period";
 
@@ -35,10 +36,6 @@ function unitLabel(code: string): string {
   return copy.unitLabels[code] ?? code;
 }
 
-function isPreVerification(value: MetricValue): boolean {
-  return value.calc_version.startsWith("0.");
-}
-
 export function MonthlyReportView() {
   const monthId = useId();
   const yearId = useId();
@@ -50,6 +47,16 @@ export function MonthlyReportView() {
     MetricValue[]
   > | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [openDetails, setOpenDetails] = useState<Set<string>>(new Set());
+
+  const toggleDetails = (id: string) => {
+    setOpenDetails((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
 
   const currentYear = new Date().getFullYear();
   const yearOptions = Array.from(
@@ -183,6 +190,7 @@ export function MonthlyReportView() {
                   <th scope="col">{copy.report.columns.calc}</th>
                   <th scope="col">{copy.report.columns.status}</th>
                   <th scope="col">{copy.report.columns.coverage}</th>
+                  <th scope="col">{copy.report.columns.details}</th>
                   <th scope="col">{copy.report.columns.provenance}</th>
                 </tr>
               </thead>
@@ -194,56 +202,80 @@ export function MonthlyReportView() {
                     return (
                       <tr key={metric}>
                         <th scope="row">{metricLabel(metric)}</th>
-                        <td colSpan={6}>
+                        <td colSpan={7}>
                           {copy.report.noFigure(metricLabel(metric))}
                         </td>
                       </tr>
                     );
                   }
-                  return rows.map((v) => (
-                    <tr key={v.metric_value_id}>
-                      <th scope="row">
-                        {metricLabel(v.metric)}
-                        {isSimulated(v.detail) && (
-                          <>
-                            {" "}
-                            <SimulatedBadge />
-                          </>
-                        )}
-                      </th>
-                      {/* The figure, verbatim as the API served it. */}
-                      <td className="figure">{v.value}</td>
-                      <td>{unitLabel(v.unit)}</td>
-                      <td>
-                        {v.calc_name} {v.calc_version}
-                        {isPreVerification(v) && (
-                          <>
-                            {" "}
-                            <span className="tag pre-verification">
-                              {copy.metrics.preVerificationTag}
+                  return rows.map((v) => {
+                    const detailsOpen = openDetails.has(v.metric_value_id);
+                    return (
+                      <Fragment key={v.metric_value_id}>
+                        <tr>
+                          <th scope="row">
+                            {metricLabel(v.metric)}
+                            {isSimulated(v.detail) && (
+                              <>
+                                {" "}
+                                <SimulatedBadge />
+                              </>
+                            )}
+                          </th>
+                          {/* The figure, verbatim as the API served it. */}
+                          <td className="figure">{v.value}</td>
+                          <td>{unitLabel(v.unit)}</td>
+                          <td>
+                            {v.calc_name} {v.calc_version}
+                            {isPreVerification(v) && (
+                              <>
+                                {" "}
+                                <span className="tag pre-verification">
+                                  {copy.metrics.preVerificationTag}
+                                </span>
+                              </>
+                            )}
+                          </td>
+                          <td>
+                            <span className={`tag ${v.certification_status}`}>
+                              {v.certification_status}
                             </span>
-                          </>
+                          </td>
+                          <td>
+                            {coverageSummary(v.detail) ??
+                              copy.report.coverageNotReported}
+                          </td>
+                          <td>
+                            <button
+                              type="button"
+                              aria-expanded={detailsOpen}
+                              onClick={() => toggleDetails(v.metric_value_id)}
+                            >
+                              {copy.report.columns.details}
+                              <span className="visually-hidden">
+                                {` — ${metricLabel(v.metric)}, ${v.period_start} to ${v.period_end}`}
+                              </span>
+                            </button>
+                          </td>
+                          <td>
+                            <Link to={`/metrics/${v.metric_value_id}/lineage`}>
+                              {copy.metrics.explainLink}
+                              <span className="visually-hidden">
+                                {` — ${metricLabel(v.metric)}, ${v.period_start} to ${v.period_end}`}
+                              </span>
+                            </Link>
+                          </td>
+                        </tr>
+                        {detailsOpen && (
+                          <tr>
+                            <td colSpan={8}>
+                              <Receipt value={v} />
+                            </td>
+                          </tr>
                         )}
-                      </td>
-                      <td>
-                        <span className={`tag ${v.certification_status}`}>
-                          {v.certification_status}
-                        </span>
-                      </td>
-                      <td>
-                        {coverageSummary(v.detail) ??
-                          copy.report.coverageNotReported}
-                      </td>
-                      <td>
-                        <Link to={`/metrics/${v.metric_value_id}/lineage`}>
-                          {copy.metrics.explainLink}
-                          <span className="visually-hidden">
-                            {` — ${metricLabel(v.metric)}, ${v.period_start} to ${v.period_end}`}
-                          </span>
-                        </Link>
-                      </td>
-                    </tr>
-                  ));
+                      </Fragment>
+                    );
+                  });
                 })}
               </tbody>
             </table>

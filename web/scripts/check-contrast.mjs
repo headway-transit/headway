@@ -46,6 +46,12 @@ const PAIRS = [
   ["blocking icon on danger background (non-text, 3:1)", "#9f1b1b", "#fdeaea", 3.0],
   ["warning icon on warning background (non-text, 3:1)", "#664b00", "#fff3d1", 3.0],
   ["info icon on info background (non-text, 3:1)", "#1d4e89", "#e7f0fa", 3.0],
+  // Receipt + lineage graph (handoff 0007): text and links on the surface
+  // panel, and the meter/graph strokes as non-text UI parts.
+  ["muted text on raised surface (receipt cite, graph line2)", "#57606a", "#f6f8fa", 4.5],
+  ["link / accent text on raised surface (receipt, graph button)", "#0b57d0", "#f6f8fa", 4.5],
+  ["meter fill / metric node stroke on white track (non-text, 3:1)", "#0b57d0", "#ffffff", 3.0],
+  ["graph node + meter track border on surface (non-text, 3:1)", "#57606a", "#f6f8fa", 3.0],
 ];
 
 let failed = false;

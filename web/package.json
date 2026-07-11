@@ -9,10 +9,13 @@
     "lint": "oxlint",
     "preview": "vite preview",
     "test": "vitest",
-    "check:contrast": "node scripts/check-contrast.mjs"
+    "check:contrast": "node scripts/check-contrast.mjs",
+    "extract:quotes": "node scripts/extract-quotes.mjs"
   },
   "dependencies": {
     "react": "^19.2.7",
+    "react-aria": "^3.50.0",
+    "react-aria-components": "^1.19.0",
     "react-dom": "^19.2.7",
     "react-router-dom": "^7.18.1"
   },

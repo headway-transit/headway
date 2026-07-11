@@ -126,6 +126,28 @@ export const copy = {
     madeBy: (name: string, version: string) =>
       `made by ${name} (version ${version})`,
     rawLeaf: "raw source record as received — the end of the trail",
+    /** The visual lineage graph (handoff 0007, pillar 2). */
+    graph: {
+      viewToggleLabel: "How to show the trail",
+      graphView: "Graph view",
+      textView: "Text view",
+      graphLabel: "Lineage graph: from the reported figure to its raw records",
+      instructions:
+        "Use the arrow keys to move between steps (up and down within a column, left and right between columns). Press Enter on a group to expand or collapse it.",
+      tierMetric: "Reported figure",
+      tierTransforms: "Processing steps",
+      tierRaw: "Raw records",
+      metricNode: (id: string) => `Reported figure ${id}`,
+      transformNode: (name: string, version: string, produced: string) =>
+        `Processing step ${name}, version ${version} — produced ${produced} record${produced === "1" ? "" : "s"} in this trail`,
+      transformDetail: (version: string, produced: string) =>
+        `version ${version} — ${produced} record${produced === "1" ? "" : "s"}`,
+      rawGroupNode: (count: string) => `${count} raw records`,
+      rawGroupHint: "Press Enter to show or hide the raw records.",
+      rawNode: (id: string) => `Raw source record ${id}`,
+      showMore: (shown: string, total: string) =>
+        `Showing ${shown} of ${total} raw records. Show 20 more`,
+    },
     kindLabels: {
       "computed.metric_values": "Reported figure",
       "canonical.vehicle_positions": "Cleaned vehicle position",
@@ -216,6 +238,37 @@ export const copy = {
     } as Record<string, (value: string) => string>,
   },
 
+  /**
+   * The Receipt (handoff 0007, pillar 1): every displayed figure opens into
+   * a five-part receipt — plain-language story, coverage meter with
+   * exclusions, the verbatim FTA rule, flags, and the door to raw records.
+   */
+  receipt: {
+    label: (metric: string, period: string) =>
+      `Receipt for ${metric}, ${period}`,
+    /** The plain-language story line. Every number in it is the API's string verbatim. */
+    story: (value: string, unit: string, metric: string, period: string) =>
+      `${value} ${unit} — ${metric}, ${period}.`,
+    coverageHeading: "How complete is the data",
+    coverageMeterLabel: (metric: string, period: string) =>
+      `Data coverage for ${metric}, ${period}`,
+    coverageNotReported:
+      "The calculation reported no coverage information for this figure.",
+    ruleHeading: "The FTA rule inside this number",
+    ruleIntro: (calcName: string) =>
+      `The federal definitions verified for the ${calcName} calculation, quoted word for word from the manual:`,
+    ruleMissing: (calcName: string) =>
+      `No verified FTA quote is on file for the ${calcName} calculation. This figure cannot yet be traced to a verified federal definition — treat it as unverified.`,
+    flagsHeading: "Flags on this figure",
+    noFlags: "No flags. This figure carries no warnings.",
+    preVerificationNote:
+      "This number comes from an early calculation that has not yet been checked against FTA rules. It is not a certifiable figure yet.",
+    anomalyFlag: "Anomaly flagged",
+    anomalyNote:
+      "The calculation flagged something unusual about this figure. Review the details above before trusting it.",
+    walkLink: "Walk this number to its raw records",
+  },
+
   simulated: {
     badge: "Simulated data",
     tooltip:
@@ -245,6 +298,7 @@ export const copy = {
       calc: "Calculation",
       status: "Certification status",
       coverage: "How complete is the data",
+      details: "Details",
       provenance: "Provenance",
     },
     noFigure: (metric: string) =>

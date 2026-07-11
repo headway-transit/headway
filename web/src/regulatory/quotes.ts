@@ -1,0 +1,34 @@
+/**
+ * The FTA rule inside the number (handoff 0007, pillar 1).
+ *
+ * quotes.json is generated — never hand-edited — by scripts/extract-quotes.mjs
+ * from services/calc/REGULATORY_TRACKER.md's "Verified definitions" sections:
+ * the verbatim, page-cited FTA NTD Policy Manual quotes the NTD/Compliance
+ * Engineer verified for each calc. Regenerate with:  npm run extract:quotes
+ *
+ * The UI renders these quotes EXACTLY as extracted (blockquote + cite). It
+ * never paraphrases, never generates, and never hides an absence: a calc with
+ * no quotes on file is reported loudly by the Receipt (and fails the test
+ * suite — see src/test/quotes.test.ts).
+ */
+
+import quotesJson from "./quotes.json";
+
+export interface RegulatoryQuote {
+  /** Verbatim FTA NTD Policy Manual text, exactly as quoted in the tracker. */
+  quote: string;
+  /** Topic label — manual name, page reference (verbatim from the tracker). */
+  citation: string;
+}
+
+const quotesByCalc: Record<string, RegulatoryQuote[]> = quotesJson;
+
+/**
+ * The verified quotes for one calc_name, or null when none are on file.
+ * Callers MUST treat null as a loud condition (show the absence), never as
+ * "render nothing".
+ */
+export function quotesForCalc(calcName: string): RegulatoryQuote[] | null {
+  const quotes = quotesByCalc[calcName];
+  return quotes && quotes.length > 0 ? quotes : null;
+}

@@ -258,6 +258,84 @@ ul.detail-panel li {
   margin: var(--space-1) 0;
 }
 
+/* ---- the Receipt (handoff 0007 pillar 1) ---- */
+
+.receipt {
+  margin: var(--space-2) 0;
+  padding: var(--space-3);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  max-width: 46rem;
+}
+.receipt h2 {
+  font-size: 1rem;
+  margin: var(--space-3) 0 var(--space-1);
+}
+.receipt-story {
+  font-weight: 600;
+  margin: 0 0 var(--space-2);
+}
+.coverage-meter {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  max-width: 28rem;
+}
+.coverage-meter-value {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  min-width: 4.5rem;
+}
+.meter-track {
+  flex: 1;
+  display: block;
+  height: 0.75rem;
+  background: var(--color-bg);
+  border: 1px solid var(--color-input-border);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.meter-fill {
+  display: block;
+  height: 100%;
+  background: var(--color-accent);
+}
+.receipt-exclusions {
+  margin: var(--space-2) 0;
+}
+.receipt .detail-panel {
+  background: transparent;
+}
+.fta-quote {
+  margin: var(--space-2) 0;
+}
+.fta-quote blockquote {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border-left: 4px solid var(--color-accent);
+  background: var(--color-bg);
+}
+.fta-quote blockquote p {
+  margin: 0;
+}
+.fta-quote figcaption {
+  margin-top: var(--space-1);
+  color: var(--color-text-muted);
+  font-size: 0.9rem;
+}
+.flag-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: var(--space-2);
+}
+.receipt-walk {
+  margin-top: var(--space-3);
+  font-weight: 600;
+}
+
 /* ---- monthly report month picker ---- */
 
 .month-picker {
@@ -369,6 +447,76 @@ ul.detail-panel li {
 }
 .lineage-node .transform {
   color: var(--color-text-muted);
+}
+
+/* ---- lineage graph (handoff 0007 pillar 2) ---- */
+
+.view-toggle {
+  display: flex;
+  gap: var(--space-2);
+  margin: var(--space-3) 0;
+}
+/* Selection is conveyed by aria-pressed + the filled style (not color alone:
+   the pressed button is the only filled one and keeps its label). */
+.view-toggle button[aria-pressed="true"] {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  color: var(--color-accent-text);
+  font-weight: 600;
+}
+
+.lineage-graph-wrap {
+  overflow-x: auto;
+}
+.lineage-graph-instructions {
+  color: var(--color-text-muted);
+}
+.lineage-graph {
+  max-width: 100%;
+  height: auto;
+}
+.graph-heading {
+  font-weight: 700;
+  fill: var(--color-text);
+}
+.graph-edge {
+  stroke: var(--color-input-border);
+  stroke-width: 1.5;
+}
+.graph-node rect {
+  fill: var(--color-surface);
+  stroke: var(--color-input-border);
+  stroke-width: 1.5;
+}
+.graph-node-metric rect {
+  stroke: var(--color-accent);
+  stroke-width: 2;
+}
+.graph-node text {
+  fill: var(--color-text);
+}
+.graph-node-line1 {
+  font-weight: 600;
+}
+.graph-node-line2 {
+  font-size: 0.85rem;
+  fill: var(--color-text-muted);
+}
+.graph-node[role="button"] {
+  cursor: pointer;
+}
+.graph-node[role="button"] .graph-node-line1 {
+  fill: var(--color-accent);
+  text-decoration: underline;
+}
+/* Visible focus (WCAG 2.4.7): the node is outlined in the accent ring. */
+.graph-node:focus {
+  outline: none;
+}
+.graph-node:focus rect,
+.graph-node:focus-visible rect {
+  stroke: var(--color-accent);
+  stroke-width: 3;
 }
 
 /* ---- modal ---- */

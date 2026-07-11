@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
+import { ToggleButton } from "react-aria-components";
 import { ApiError, getLineage } from "../api/client";
 import type { LineageNode } from "../api/types";
+import { LineageGraph } from "../components/LineageGraph";
 import { copy } from "../copy";
 
 /**
@@ -10,13 +12,19 @@ import { copy } from "../copy";
  * produced it (ADR-0007). The tree is displayed exactly as served — never
  * reshaped, filtered, or recomputed.
  *
- * Accessible structure: nested <ul>/<li>. Nodes with inputs get a toggle
- * button carrying aria-expanded; leaves (raw records) are plain items.
+ * Two equivalent renderings (handoff 0007, pillar 2), one always-visible
+ * toggle apart:
+ *  - the GRAPH view (default): an accessible, keyboard-navigable SVG flow of
+ *    the three tiers (LineageGraph) — progressive enhancement;
+ *  - the TEXT view: the full nested <ul>/<li> tree, unsummarized, with every
+ *    node and complete record id. Nodes with inputs get a toggle button
+ *    carrying aria-expanded; leaves (raw records) are plain items.
  */
 export function LineageView() {
   const { id } = useParams<{ id: string }>();
   const [root, setRoot] = useState<LineageNode | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [view, setView] = useState<"graph" | "text">("graph");
 
   useEffect(() => {
     let cancelled = false;
@@ -49,9 +57,34 @@ export function LineageView() {
       )}
       {!root && !error && <p>{copy.loading}</p>}
       {root && (
-        <ul className="lineage-tree">
-          <LineageTreeNode node={root} />
-        </ul>
+        <>
+          {/* The toggle is ALWAYS visible: the graph is never the only path. */}
+          <div
+            className="view-toggle"
+            role="group"
+            aria-label={copy.lineage.graph.viewToggleLabel}
+          >
+            <ToggleButton
+              isSelected={view === "graph"}
+              onChange={(selected) => selected && setView("graph")}
+            >
+              {copy.lineage.graph.graphView}
+            </ToggleButton>
+            <ToggleButton
+              isSelected={view === "text"}
+              onChange={(selected) => selected && setView("text")}
+            >
+              {copy.lineage.graph.textView}
+            </ToggleButton>
+          </div>
+          {view === "graph" ? (
+            <LineageGraph root={root} />
+          ) : (
+            <ul className="lineage-tree">
+              <LineageTreeNode node={root} />
+            </ul>
+          )}
+        </>
       )}
     </>
   );

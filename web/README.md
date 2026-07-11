@@ -7,9 +7,10 @@ for a certifying official — perform the attested certification action.
 
 Built against the exported API contract at `services/api/openapi.json`
 (Headway API 0.1.0). Vite + React + TypeScript, React Router, plain semantic
-HTML with hand-rolled CSS tokens. No component library yet: adopting React
-Aria or Radix Primitives is the design-system increment per the Frontend
-Engineer role file and will be decided by ADR.
+HTML with hand-rolled CSS tokens. Per handoff 0007 the accessible foundation
+is **React Aria** (Adobe, Apache-2.0): new components (the Receipt's coverage
+meter, the lineage view toggle) use `react-aria` / `react-aria-components`;
+existing hand-rolled patterns migrate opportunistically, not big-bang.
 
 ## Non-negotiables encoded here
 
@@ -33,7 +34,19 @@ npm run dev        # dev server on http://localhost:5173
 npm run build      # type-check (tsc -b) + production build to dist/
 npm test -- --run  # vitest + Testing Library + axe-core checks
 npm run check:contrast  # verify the WCAG contrast of every color token pair
+npm run extract:quotes  # regenerate src/regulatory/quotes.json from the tracker
 ```
+
+### Regulatory quotes (`src/regulatory/quotes.json`)
+
+"The FTA rule inside the number" (handoff 0007, pillar 1):
+`scripts/extract-quotes.mjs` copies the VERBATIM FTA NTD Policy Manual quotes
+from `services/calc/REGULATORY_TRACKER.md`'s "Verified definitions" sections
+into a static, versioned JSON keyed by `calc_name`. Quotes are never
+paraphrased or generated; the script fails loudly (non-zero exit) if any calc
+in the tracker table lacks quotes, and `src/test/quotes.test.ts` fails the
+suite if any calc named in the fixtures lacks quotes. Regenerate after the
+NTD/Compliance Engineer updates the tracker; never hand-edit the JSON.
 
 ### API base URL
 
@@ -58,8 +71,9 @@ entirely. Any 401 clears the session and returns you to `/login`.
 | Route | What it does |
 |---|---|
 | `/login` | Local-account sign-in (ADR-0011). Failures announced via `role="alert"`, verbatim. |
-| `/metrics` | Computed values table: metric, unit, period, value (verbatim string), calculation name+version, certification status. Calc versions below 1.0.0 carry a "Pre-verification" tag and a plain-language banner (they are marked PRE-VERIFICATION in `services/calc/REGULATORY_TRACKER.md` — not certifiable figures yet). Certifying officials get labeled row checkboxes and the "Certify selected figures" action. |
-| `/metrics/:id/lineage` | "How this number was made": the provenance tree from `GET /metrics/values/{id}/lineage`, rendered as nested lists with `aria-expanded` toggles, down to content-addressed `raw.records` leaves. Displayed exactly as served, never reshaped. |
+| `/metrics` | Computed values table: metric, unit, period, value (verbatim string), calculation name+version, certification status. Calc versions below 1.0.0 carry a "Pre-verification" tag and a plain-language banner (they are marked PRE-VERIFICATION in `services/calc/REGULATORY_TRACKER.md` — not certifiable figures yet). EVERY figure's "Details" opens its **Receipt** (`src/components/Receipt.tsx`): story line, coverage meter + exclusions, the verbatim FTA rule + citation, flags, and the walk to raw records. Certifying officials get labeled row checkboxes and the "Certify selected figures" action. |
+| `/metrics/:id/lineage` | "How this number was made": the provenance tree from `GET /metrics/values/{id}/lineage`. Default is the **lineage graph** (`src/components/LineageGraph.tsx`) — a hand-rolled accessible SVG flow (figure → processing steps → raw records; raw tier collapsed to a count node, expanding 20 at a time; arrow keys move within/between tiers, Enter toggles). A "Text view" toggle is always visible and renders the FULL nested-list tree (every node, complete record ids) — the graph is progressive enhancement, never the only path. |
+| `/reports/monthly` | Monthly ridership preview: VRM/VRH/UPT for a picked month, verbatim, with certification status, coverage summary, per-row Receipt, provenance links, simulated-data banner, and CSV export of the exact served strings. |
 | `/dq` | Data-quality queue: severity as text + icon + color (never color alone), status/owner/description, blocking issues prominent with their consequence stated. Resolve action (required resolution note) appears for data stewards and above. |
 
 The certify flow: select figures → "Certify selected figures" → a
@@ -90,6 +104,8 @@ All pairs are verified by `scripts/check-contrast.mjs` (run
 | focus outline `#0b57d0` on `#ffffff` (non-text) | 6.39:1 | 3:1 |
 | input border `#57606a` on `#ffffff` (non-text) | 6.39:1 | 3:1 |
 | severity icons on their badge backgrounds (non-text) | ≥ 6.85:1 | 3:1 |
+| muted + accent text on surface `#f6f8fa` (receipt cite, graph) | 6.00:1 | 4.5:1 |
+| meter fill / graph strokes (non-text) | ≥ 6.00:1 | 3:1 |
 
 jsdom cannot evaluate color contrast, so the axe runs in the test suite
 disable only the `color-contrast` rule and this script is the contrast
@@ -107,8 +123,16 @@ verification. Severity is additionally encoded by distinct icon **shapes**
 - Certify dialog — focus moves in on open, `Tab`/`Shift+Tab` are trapped
   inside, `Escape` closes, focus returns to the opening button (APG dialog
   pattern, hand-rolled in `src/components/Modal.tsx`).
-- Lineage — each node with inputs has a toggle button (`Enter`/`Space`)
-  carrying `aria-expanded`.
+- Lineage graph — roving tabindex over the SVG nodes: `↑`/`↓` move within a
+  tier, `←`/`→` move between tiers, `Enter`/`Space` expand or collapse the
+  raw-records group and page in 20 more; focus is drawn as a 3px accent
+  stroke on the node. "Graph view"/"Text view" are real toggle buttons
+  (`aria-pressed`).
+- Lineage text view — each node with inputs has a toggle button
+  (`Enter`/`Space`) carrying `aria-expanded`.
+- Receipt — "Details" buttons carry `aria-expanded`; the coverage meter is a
+  `role="meter"` with `aria-valuetext` announcing the verbatim percent
+  string.
 - DQ — "Resolve: …" buttons open an inline form; the resolution textarea is
   labeled and described.
 
@@ -135,6 +159,7 @@ Read from the installed packages (`node_modules/*/package.json`):
 |---|---|---|
 | react, react-dom 19 | MIT | yes |
 | react-router-dom 7 | MIT | yes |
+| react-aria 3, react-aria-components 1 (Adobe) | Apache-2.0 | yes |
 | vite 8 | MIT | dev/build only |
 | typescript 6 | Apache-2.0 | dev only |
 | @vitejs/plugin-react | MIT | dev only |
@@ -143,10 +168,14 @@ Read from the installed packages (`node_modules/*/package.json`):
 | oxlint, @types/* | MIT | dev only |
 | **axe-core** | **MPL-2.0** | **dev only — never in the shipped artifact** |
 
-Everything that ships in `dist/` is MIT. axe-core (the accessibility test
-engine) is MPL-2.0 — weak file-level copyleft, used unmodified as a dev-only
-test dependency; it is not part of the built artifact. Flagged here for the
-Platform Architect's ADR-0001 review rather than silently assumed acceptable.
+Everything that ships in `dist/` is MIT or Apache-2.0 (both OSI-approved
+permissive; Apache-2.0 verified from the installed `react-aria` /
+`react-aria-components` package.json files — Adobe's React Spectrum stack is
+Apache-2.0 throughout, including its `@react-aria`/`@internationalized`
+transitive packages). axe-core (the accessibility test engine) is MPL-2.0 —
+weak file-level copyleft, used unmodified as a dev-only test dependency; it
+is not part of the built artifact. Flagged here for the Platform Architect's
+ADR-0001 review rather than silently assumed acceptable.
 
 ## Verification status
 
@@ -154,22 +183,28 @@ Platform Architect's ADR-0001 review rather than silently assumed acceptable.
 
 ```
 vite v8.1.4 building client environment for production...
-✓ 33 modules transformed.
-dist/index.html                   0.45 kB │ gzip:  0.29 kB
-dist/assets/index-C6p3II6v.css    5.47 kB │ gzip:  1.57 kB
-dist/assets/index-BIogkkng.js   252.93 kB │ gzip: 80.46 kB
-✓ built in 126ms
+✓ 1300 modules transformed.
+dist/index.html                   0.45 kB │ gzip:   0.29 kB
+dist/assets/index-Dh6dwN31.css    8.32 kB │ gzip:   2.12 kB
+dist/assets/index-DPNF6eeu.js   320.09 kB │ gzip: 101.33 kB
+✓ built in 200ms
 ```
 
 `npm test -- --run`:
 
 ```
  RUN  v4.1.10 /home/daniel/headway/web
- Test Files  5 passed (5)
-      Tests  21 passed (21)
+ Test Files  9 passed (9)
+      Tests  47 passed (47)
 ```
 
-`npm run check:contrast`: all 15 token pairs PASS (see table above).
+`node scripts/extract-quotes.mjs`:
+
+```
+extract-quotes: wrote …/web/src/regulatory/quotes.json (upt_v0: 8, vrh_v0: 10, vrm_v0: 10)
+```
+
+`npm run check:contrast`: all 19 token pairs PASS (see table above).
 
 **PENDING — live end-to-end against a running API.** Docker is unavailable in
 this environment, so the UI has only been exercised against the exported

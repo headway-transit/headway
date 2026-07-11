@@ -4,22 +4,11 @@ import { Link } from "react-router-dom";
 import { ApiError, certify, listMetricValues } from "../api/client";
 import type { MetricValue } from "../api/types";
 import { canCertify, useSession } from "../auth/session";
-import { MetricDetailPanel } from "../components/MetricDetail";
 import { Modal } from "../components/Modal";
+import { Receipt } from "../components/Receipt";
 import { SimulatedBadge } from "../components/SimulatedBadge";
 import { copy } from "../copy";
-import { isSimulated } from "../detail";
-
-/**
- * A calc version below 1.0.0 is marked PRE-VERIFICATION in
- * services/calc/REGULATORY_TRACKER.md: the calculation has not yet been
- * verified against the current FTA NTD Reporting Manual. This is a display
- * flag read off the version the API serves — the figure itself is never
- * touched client-side.
- */
-function isPreVerification(value: MetricValue): boolean {
-  return value.calc_version.startsWith("0.");
-}
+import { isPreVerification, isSimulated } from "../detail";
 
 function metricLabel(code: string): string {
   return copy.metricLabels[code] ?? code;
@@ -156,8 +145,10 @@ export function MetricsView() {
               </thead>
               <tbody>
                 {values.map((v) => {
-                  const detail = v.detail ?? {};
-                  const hasDetail = Object.keys(detail).length > 0;
+                  // Every figure opens a Receipt (handoff 0007 pillar 1:
+                  // "every displayed figure is interactive") — even a
+                  // detail-less one still has its story, its FTA rule, its
+                  // flags, and its walk to raw records.
                   const detailsOpen = openDetails.has(v.metric_value_id);
                   const columnCount = 8 + (showCertifyControls ? 1 : 0);
                   return (
@@ -213,18 +204,16 @@ export function MetricsView() {
                           </span>
                         </td>
                         <td>
-                          {hasDetail && (
-                            <button
-                              type="button"
-                              aria-expanded={detailsOpen}
-                              onClick={() => toggleDetails(v.metric_value_id)}
-                            >
-                              {copy.metrics.columns.details}
-                              <span className="visually-hidden">
-                                {` — ${metricLabel(v.metric)}, ${periodLabel(v)}`}
-                              </span>
-                            </button>
-                          )}
+                          <button
+                            type="button"
+                            aria-expanded={detailsOpen}
+                            onClick={() => toggleDetails(v.metric_value_id)}
+                          >
+                            {copy.metrics.columns.details}
+                            <span className="visually-hidden">
+                              {` — ${metricLabel(v.metric)}, ${periodLabel(v)}`}
+                            </span>
+                          </button>
                         </td>
                         <td>
                           <Link to={`/metrics/${v.metric_value_id}/lineage`}>
@@ -235,16 +224,10 @@ export function MetricsView() {
                           </Link>
                         </td>
                       </tr>
-                      {hasDetail && detailsOpen && (
+                      {detailsOpen && (
                         <tr>
                           <td colSpan={columnCount}>
-                            <MetricDetailPanel
-                              detail={detail}
-                              label={copy.metrics.detailListLabel(
-                                metricLabel(v.metric),
-                                periodLabel(v),
-                              )}
-                            />
+                            <Receipt value={v} />
                           </td>
                         </tr>
                       )}

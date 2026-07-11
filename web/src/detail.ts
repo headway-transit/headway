@@ -11,10 +11,22 @@
  * spaces), never hidden — forward-compatible with future calc versions.
  */
 
+import type { MetricValue } from "./api/types";
 import { copy } from "./copy";
 import { detailValueToString, ratioToPercentString } from "./format";
 
 export type Detail = Record<string, unknown>;
+
+/**
+ * A calc version below 1.0.0 is marked PRE-VERIFICATION in
+ * services/calc/REGULATORY_TRACKER.md: the calculation has not yet been
+ * verified against the current FTA NTD Reporting Manual. This is a display
+ * flag read off the version the API serves — the figure itself is never
+ * touched client-side.
+ */
+export function isPreVerification(value: MetricValue): boolean {
+  return value.calc_version.startsWith("0.");
+}
 
 /**
  * True when detail.source_mix names any source that is not a real feed —
