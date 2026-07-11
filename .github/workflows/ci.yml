@@ -244,7 +244,7 @@ jobs:
           python -m pip install \
             -e "services/calc[test,persist]" \
             -e "services/transform[test,kafka,db]" \
-            -e "services/api[test]" \
+            -e "services/api[test,ingest]" \
             -e "services/ai[test,ollama]" \
             -r db/requirements.txt
       - uses: actions/setup-node@v6
