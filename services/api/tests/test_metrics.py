@@ -1,10 +1,15 @@
 """Computed-value reads: Decimal-safe strings, filters, and the
-"explain this number" lineage tree."""
+"explain this number" lineage tree — for human sessions AND (handoff 0006
+follow-up) read:metrics machine keys, with one generic 401 for every
+authentication failure on the dual-credential endpoint."""
 
 import datetime as dt
+import json
 from decimal import Decimal
 
-from conftest import auth_header
+from conftest import auth_header, machine_header
+
+from headway_api.machine_auth import RateLimiter
 
 
 def test_values_are_strings_never_floats(client, fake_db):
@@ -124,3 +129,148 @@ def test_figure_without_lineage_fails_loudly_not_empty_200(client, fake_db):
     )
     assert r.status_code == 500
     assert "no recorded lineage" in r.json()["detail"]
+
+
+# ---------------------------------------------------------------------------
+# Dual-credential lineage (handoff 0006 follow-up): a read:metrics machine
+# key traverses lineage too; human sessions unchanged; every authentication
+# failure is ONE generic 401 that never reveals which credential type the
+# endpoint expected.
+# ---------------------------------------------------------------------------
+
+
+def _seed_lineage(fake_db):
+    """A canned three-level tree: figure -> canonical position -> raw record."""
+    mv = fake_db.add_metric_value()
+    mvid = mv["metric_value_id"]
+    fake_db.add_edge("computed.metric_values", mvid, "vrm_v0", "0.1.0",
+                     "canonical.vehicle_positions", "veh1|2026-06-01T00:00:00Z")
+    fake_db.add_edge("canonical.vehicle_positions", "veh1|2026-06-01T00:00:00Z",
+                     "gtfsrt_normalize", "0.2.0", "raw.records", "aa" * 32)
+    return mvid
+
+
+def _read_key(fake_db):
+    _, full_key = fake_db.add_api_key(
+        name="dashboard reader", scopes=("read:metrics",), source_label=None
+    )
+    return full_key
+
+
+def test_machine_key_traverses_lineage_and_is_audited(client, fake_db):
+    mvid = _seed_lineage(fake_db)
+    r = client.get(f"/metrics/values/{mvid}/lineage",
+                   headers=machine_header(_read_key(fake_db)))
+    assert r.status_code == 200
+    tree = r.json()
+    assert tree["kind"] == "computed.metric_values"
+    assert tree["id"] == mvid
+    assert tree["transform_name"] == "vrm_v0"
+    (pos,) = tree["inputs"]
+    assert pos["kind"] == "canonical.vehicle_positions"
+    (raw,) = pos["inputs"]
+    assert raw["kind"] == "raw.records"
+    assert raw["inputs"] == []
+    # Same tree a human session gets — the two paths cannot drift.
+    human = client.get(f"/metrics/values/{mvid}/lineage",
+                       headers=auth_header(fake_db, "vera"))
+    assert human.json() == tree
+    # Machine path audited: actor key:<prefix>, the id only, never figures.
+    events = [e for e in fake_db.audit_events
+              if e["action"] == "machine_read_lineage"]
+    assert len(events) == 1
+    assert events[0]["actor"].startswith("key:hwk_")
+    assert events[0]["subject_id"] == mvid
+    assert "lineage" in json.loads(events[0]["detail"])["path"]
+
+
+def test_ingest_only_key_lineage_403_scope_denied_and_audited(client, fake_db):
+    mvid = _seed_lineage(fake_db)
+    _, ingest_key = fake_db.add_api_key(
+        name="simulator key", scopes=("ingest:tides",),
+        source_label="tides_simulated",
+    )
+    r = client.get(f"/metrics/values/{mvid}/lineage",
+                   headers=machine_header(ingest_key))
+    assert r.status_code == 403
+    assert "read:metrics" in r.json()["detail"]
+    events = [e for e in fake_db.audit_events
+              if e["action"] == "machine_scope_denied"]
+    assert len(events) == 1
+    assert json.loads(events[0]["detail"])["required_scope"] == "read:metrics"
+
+
+def test_revoked_key_lineage_generic_401_still_audited(client, fake_db):
+    mvid = _seed_lineage(fake_db)
+    _, revoked_key = fake_db.add_api_key(
+        name="old reader", scopes=("read:metrics",), revoked=True
+    )
+    r = client.get(f"/metrics/values/{mvid}/lineage",
+                   headers=machine_header(revoked_key))
+    assert r.status_code == 401
+    # The wire response is generic — identical to a no-credential 401; the
+    # audit trail keeps the real reason.
+    no_credential = client.get(f"/metrics/values/{mvid}/lineage")
+    assert r.json()["detail"] == no_credential.json()["detail"]
+    events = [e for e in fake_db.audit_events
+              if e["action"] == "machine_auth_failed"]
+    assert len(events) == 1
+    assert json.loads(events[0]["detail"])["reason"] == "key revoked"
+
+
+def test_lineage_generic_401_never_leaks_expected_credential_type(client, fake_db):
+    mvid = _seed_lineage(fake_db)
+    _, revoked_key = fake_db.add_api_key(
+        name="old reader", scopes=("read:metrics",), revoked=True
+    )
+    url = f"/metrics/values/{mvid}/lineage"
+    failures = [
+        client.get(url),  # no credential at all
+        client.get(url, headers={"Authorization": "Bearer not-a-real-token"}),
+        client.get(url, headers=machine_header("hwk_unknown-key-material")),
+        client.get(url, headers=machine_header(revoked_key)),
+    ]
+    details = [r.json()["detail"] for r in failures]
+    assert all(r.status_code == 401 for r in failures)
+    # One identical, generic message for every failure mode...
+    assert len(set(details)) == 1
+    # ...that names neither credential type nor a next step specific to one.
+    lowered = details[0].lower()
+    for leak in ("machine", "api key", "session", "sign in", "hwk_"):
+        assert leak not in lowered
+
+
+def test_human_session_lineage_unchanged_no_rate_limit_no_audit(
+    client, app, fake_db
+):
+    mvid = _seed_lineage(fake_db)
+    # Even with the machine bucket exhausted, human sessions are untouched.
+    app.state.machine_rate_limiter = RateLimiter(requests_per_minute=1)
+    key = _read_key(fake_db)
+    assert client.get(f"/metrics/values/{mvid}/lineage",
+                      headers=machine_header(key)).status_code == 200
+    assert client.get(f"/metrics/values/{mvid}/lineage",
+                      headers=machine_header(key)).status_code == 429
+    r = client.get(f"/metrics/values/{mvid}/lineage",
+                   headers=auth_header(fake_db, "vera"))
+    assert r.status_code == 200
+    # No machine-read audit for the human read; the machine one is audited.
+    assert len([e for e in fake_db.audit_events
+                if e["action"] == "machine_read_lineage"]) == 1
+
+
+def test_lineage_rate_limit_429_with_retry_after_on_machine_path(
+    client, app, fake_db
+):
+    mvid = _seed_lineage(fake_db)
+    app.state.machine_rate_limiter = RateLimiter(requests_per_minute=2)
+    headers = machine_header(_read_key(fake_db))
+    url = f"/metrics/values/{mvid}/lineage"
+    assert client.get(url, headers=headers).status_code == 200
+    assert client.get(url, headers=headers).status_code == 200
+    r = client.get(url, headers=headers)
+    assert r.status_code == 429
+    assert int(r.headers["Retry-After"]) >= 1
+    assert "rate limit" in r.json()["detail"]
+    # It is the same per-key bucket the other machine endpoints spend from.
+    assert client.get("/machine/metrics", headers=headers).status_code == 429

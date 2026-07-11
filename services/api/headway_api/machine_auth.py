@@ -31,6 +31,7 @@ from dataclasses import dataclass
 from fastapi import Depends, HTTPException, Request
 
 from .audit import write_event
+from .auth import Identity, get_current_identity
 from .db import get_db
 
 KEY_PREFIX = "hwk_"
@@ -265,3 +266,81 @@ def enforce_rate_limit(limiter: RateLimiter, key: str) -> None:
             ),
             headers={"Retry-After": str(seconds)},
         )
+
+
+# ---------------------------------------------------------------------------
+# Dual-credential access: human session OR machine key (handoff 0006
+# follow-up — the lineage endpoint)
+# ---------------------------------------------------------------------------
+
+_DUAL_AUTH_401 = HTTPException(
+    status_code=401,
+    detail=(
+        "This request could not be authenticated. The credential is "
+        "missing, invalid, expired, or revoked. Please check it, or "
+        "contact your Headway administrator."
+    ),
+)
+
+
+def require_human_session_or_machine_scope(scope: str):
+    """Dependency factory: accept EITHER a signed-in human session OR a
+    machine API key holding ``scope``. Built for the lineage endpoint
+    (``GET /metrics/values/{id}/lineage``) — the follow-up increment noted
+    in handoff 0006's Response and routers/machine_read.py.
+
+    ORDER OF ATTEMPTS — dispatch on the Bearer token's shape, exactly one
+    path per request:
+
+    1. MACHINE: a Bearer token carrying the ``hwk_`` key prefix is treated
+       as a machine key and never as a session token. It must resolve to an
+       unrevoked auth.api_keys row (else 401) holding ``scope`` (else the
+       same audited, plain-language 403 as require_machine_scope), and the
+       request then spends from the same per-key token bucket as every
+       other machine endpoint (429 + Retry-After when dry). Returns the
+       MachineIdentity so the endpoint can audit the successful read with
+       actor ``key:<key_prefix>`` (design point 4).
+    2. HUMAN: any other credential is verified as a session token exactly
+       as auth.get_current_identity does. The human path is UNCHANGED —
+       any signed-in role, no rate limit, no extra audit; the same read
+       semantics as every other signed-in GET.
+
+    FAILURE MESSAGES MUST NOT LEAK WHICH CREDENTIAL TYPE WAS EXPECTED:
+    every authentication failure on either path — absent header, malformed
+    or expired session token, unknown or revoked machine key — raises the
+    SAME generic 401 (``_DUAL_AUTH_401``), so a probing caller learns
+    nothing about which kinds of credential the endpoint accepts or why
+    theirs failed. The audit trail keeps the specific reason (machine-key
+    failures are audit-logged with the presented prefix inside
+    get_machine_identity BEFORE the response is made generic); only the
+    HTTP response is generic. Scope denial stays a specific 403 — by then
+    the caller has already proven possession of a valid key.
+    """
+    machine_scope_check = require_machine_scope(scope)
+
+    def dependency(
+        request: Request, db=Depends(get_db)
+    ) -> Identity | MachineIdentity:
+        header = request.headers.get("Authorization", "")
+        scheme, _, token = header.partition(" ")
+        token = token.strip()
+        if scheme.lower() == "bearer" and token.startswith(KEY_PREFIX):
+            try:
+                identity = get_machine_identity(request, db)
+                machine_scope_check(request, identity, db)
+            except HTTPException as exc:
+                if exc.status_code == 401:
+                    # The specific reason is already in audit.events;
+                    # the wire response stays generic.
+                    raise _DUAL_AUTH_401
+                raise
+            enforce_rate_limit(
+                request.app.state.machine_rate_limiter, identity.key_prefix
+            )
+            return identity
+        try:
+            return get_current_identity(request)
+        except HTTPException:
+            raise _DUAL_AUTH_401
+
+    return dependency

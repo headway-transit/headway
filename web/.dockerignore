@@ -1,0 +1,4 @@
+# Keep the build context lean: dependencies are installed with `npm ci`
+# inside the build stage, and dist/ is produced there.
+node_modules
+dist

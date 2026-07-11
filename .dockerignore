@@ -1,0 +1,9 @@
+# Repo-root build context is used by services/transform/Dockerfile (it needs
+# contracts/). Keep that context lean — everything below is never COPY'd.
+.git
+dist
+web/node_modules
+web/dist
+**/__pycache__
+**/*.egg-info
+**/.pytest_cache

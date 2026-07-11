@@ -87,8 +87,10 @@ jobs:
           if-no-files-found: error
 
   # ---------------------------------------------------------------- images
-  # Matrix-ready: add future services as new include entries; each gets the
-  # same build -> SBOM -> scan-gate -> push -> sign -> attest sequence.
+  # One matrix entry per released image; each gets the same
+  # build -> SBOM -> scan-gate -> push -> sign -> attest sequence.
+  # `dockerfile` is explicit because transform builds from the REPO ROOT
+  # context (its envelope validator ships contracts/*.schema.json in-image).
   image:
     name: image / ${{ matrix.service }}
     runs-on: ubuntu-latest
@@ -102,7 +104,27 @@ jobs:
         include:
           - service: ingestion
             context: services/ingestion
+            dockerfile: services/ingestion/Dockerfile
             image: headway-ingestion
+          - service: api
+            context: services/api
+            dockerfile: services/api/Dockerfile
+            image: headway-api
+          - service: transform
+            context: . # repo root: the image bakes in contracts/ (ADR-0006)
+            dockerfile: services/transform/Dockerfile
+            image: headway-transform
+          - service: ai
+            context: services/ai
+            dockerfile: services/ai/Dockerfile
+            image: headway-ai
+          - service: web
+            # VITE_API_BASE_URL is intentionally NOT set here: the released
+            # bundle defaults to same-origin API requests (see web/Dockerfile;
+            # a deployment that needs another origin rebuilds with the arg).
+            context: web
+            dockerfile: web/Dockerfile
+            image: headway-web
     steps:
       - uses: actions/checkout@v7
 
@@ -110,6 +132,7 @@ jobs:
         run: |
           set -euo pipefail
           docker build \
+            -f "${{ matrix.dockerfile }}" \
             -t "${IMAGE_NAMESPACE}/${{ matrix.image }}:${{ github.ref_name }}" \
             "${{ matrix.context }}"
 
@@ -205,5 +228,5 @@ jobs:
           gh release create "$TAG" \
             --verify-tag \
             --title "Headway $TAG" \
-            --notes "Headway $TAG. Images: ${IMAGE_NAMESPACE}/headway-ingestion:$TAG (Cosign keyless-signed, CycloneDX SBOM attested — see docs/supply-chain.md for the verify command). SBOMs (CycloneDX + SPDX, source and image) attached below." \
+            --notes "Headway $TAG. Images: ${IMAGE_NAMESPACE}/headway-{ingestion,api,transform,ai,web}:$TAG (each Cosign keyless-signed, CycloneDX SBOM attested — see docs/supply-chain.md for the verify command). SBOMs (CycloneDX + SPDX, source and all images) attached below." \
             dist/sbom/*.json

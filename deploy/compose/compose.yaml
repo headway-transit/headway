@@ -302,51 +302,125 @@ services:
       # Writable: the connector moves handled files to processed/ inside it.
       - ./tides-drop:/data/tides-drop
 
-  # --- Next slice waves (placeholders; uncomment as each service lands) ------
-  #
-  # transform:                                  # Python normalization + dbt
-  #   profiles: [app]
-  #   build:
-  #     context: ../../services/transform
-  #   restart: unless-stopped
-  #   networks: [headway]
-  #   depends_on:
-  #     kafka:
-  #       condition: service_healthy
-  #     timescaledb:
-  #       condition: service_healthy
-  #   environment:
-  #     KAFKA_BROKERS: kafka:9092
-  #     # NOTE (2026-07-09 live-run finding): credentials interpolated into a
-  #     # URL must be percent-encoded — a password containing '@' or other
-  #     # reserved characters breaks URL parsing. Prefer the libpq-style
-  #     # PGHOST/PGPORT/PGUSER/PGPASSWORD/PGDATABASE variables (supported by
-  #     # db/migrate.py and psycopg), which avoid the encoding trap entirely.
-  #     DATABASE_URL: postgres://${POSTGRES_USER:-headway}:${POSTGRES_PASSWORD}@timescaledb:5432/${POSTGRES_DB:-headway}
-  #
-  # api:                                        # Python FastAPI backend
-  #   profiles: [app]
-  #   build:
-  #     context: ../../services/api
-  #   restart: unless-stopped
-  #   networks: [headway]
-  #   ports:
-  #     - "127.0.0.1:8000:8000"
-  #   depends_on:
-  #     timescaledb:
-  #       condition: service_healthy
-  #   environment:
-  #     # Same percent-encoding caveat as the transform placeholder above.
-  #     DATABASE_URL: postgres://${POSTGRES_USER:-headway}:${POSTGRES_PASSWORD}@timescaledb:5432/${POSTGRES_DB:-headway}
-  #
-  # web:                                        # TypeScript/React frontend
-  #   profiles: [app]
-  #   build:
-  #     context: ../../web
-  #   restart: unless-stopped
-  #   networks: [headway]
-  #   ports:
-  #     - "127.0.0.1:8080:80"
+  # Python normalization: Kafka raw.* -> canonical.* with lineage + DQ
+  # quarantine (services/transform). Build context is the REPO ROOT — the
+  # image bakes in contracts/raw-record-envelope.v0.schema.json (ADR-0006).
+  transform:
+    profiles: [app]
+    build:
+      context: ../..
+      dockerfile: services/transform/Dockerfile
+    image: ghcr.io/headway-transit/headway-transform:local
+    restart: unless-stopped
+    networks: [headway]
+    depends_on:
+      kafka:
+        condition: service_healthy
+      timescaledb:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      bootstrap-kafka:
+        condition: service_completed_successfully
+      bootstrap-minio:
+        condition: service_completed_successfully
+    environment:
+      KAFKA_BROKERS: kafka:9092
+      # libpq-style PG* variables, NOT a URL (2026-07-09 live-run finding:
+      # credentials interpolated into a URL must be percent-encoded — a
+      # password containing '@' or other reserved characters breaks parsing).
+      PGHOST: timescaledb
+      PGPORT: "5432"
+      PGUSER: ${POSTGRES_USER:-headway}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in deploy/compose/.env}
+      PGDATABASE: ${POSTGRES_DB:-headway}
+      # Object store for payload_encoding='object_ref' payloads (GTFS static
+      # zips, TIDES CSVs). Same surface as the ingestion connector above.
+      S3_ENDPOINT: minio:9000
+      S3_ACCESS_KEY: ${MINIO_ROOT_USER:-headway}
+      S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in deploy/compose/.env}
+      S3_BUCKET: ${S3_BUCKET:-headway-raw}
+      S3_USE_SSL: "false" # in-network MinIO; TLS termination is a hardening increment
+    # No healthcheck: the consumer exposes no port. The process IS the
+    # container (PID 1) — if the loop dies the container exits and
+    # restart: unless-stopped brings it back; docker ps shows the flapping.
+
+  # FastAPI backend: metrics with lineage, DQ workflow, audited
+  # certification, machine ingest (services/api).
+  api:
+    profiles: [app]
+    build:
+      context: ../../services/api
+    image: ghcr.io/headway-transit/headway-api:local
+    restart: unless-stopped
+    networks: [headway]
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      bootstrap-kafka:
+        condition: service_completed_successfully
+      bootstrap-minio:
+        condition: service_completed_successfully
+    environment:
+      # Session-token signing secret — REQUIRED (set it in .env). Not `:?`
+      # here: compose interpolates `:?` file-wide even when the `app` profile
+      # is inactive, which would break infra-only `docker compose up` for
+      # existing .env files. The API itself refuses to start on an empty
+      # secret (fail-loudly at the right layer, never a baked-in default).
+      HEADWAY_SESSION_SECRET: ${HEADWAY_SESSION_SECRET:-}
+      # libpq keyword conninfo, NOT a URL — sidesteps the percent-encoding
+      # trap (2026-07-09 live-run finding) without needing PG* support in
+      # the app. NOTE: a password containing spaces or quotes would still
+      # need libpq quoting here.
+      HEADWAY_DATABASE_URL: host=timescaledb port=5432 dbname=${POSTGRES_DB:-headway} user=${POSTGRES_USER:-headway} password=${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in deploy/compose/.env}
+      # Machine-ingest seams (handoff 0006): MinIO + Kafka, same env surface
+      # as the Go connectors. Unset would mean a loud 503 on ingest.
+      KAFKA_BROKERS: kafka:9092
+      S3_ENDPOINT: minio:9000
+      S3_ACCESS_KEY: ${MINIO_ROOT_USER:-headway}
+      S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in deploy/compose/.env}
+      S3_BUCKET: ${S3_BUCKET:-headway-raw}
+      S3_USE_SSL: "false"
+    healthcheck:
+      # python:3.12-slim ships no curl/wget; the interpreter probes the
+      # unauthenticated OpenAPI document.
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/openapi.json', timeout=3)\" || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  # React/Vite frontend, static files behind non-root nginx on 8080 (web/).
+  web:
+    profiles: [app]
+    build:
+      context: ../../web
+      args:
+        # LIMITATION (Vite): the API origin is baked into the JS bundle at
+        # BUILD time — changing it needs `docker compose build web`, not a
+        # restart. Default http://localhost:8000 matches the api port
+        # mapping above (the browser, not the container, calls the API).
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8000}
+    image: ghcr.io/headway-transit/headway-web:local
+    restart: unless-stopped
+    networks: [headway]
+    ports:
+      - "127.0.0.1:8080:8080" # nginx listens unprivileged (non-root)
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8080/ || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
 
   # ===========================================================================
   # Optional profile `sso-broker` — Keycloak (ADR-0011).

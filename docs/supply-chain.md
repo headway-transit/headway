@@ -13,9 +13,23 @@ on the critical path (ADR-0001).
 | Artifact | Formats | Producer |
 |---|---|---|
 | Source-tree SBOM (full monorepo dependency inventory) | CycloneDX 1.x JSON + SPDX 2.x JSON | Syft (`anchore/sbom-action`) |
-| Image SBOM, one per released container image | CycloneDX 1.x JSON + SPDX 2.x JSON | Syft (`anchore/sbom-action`) |
-| Vulnerability report | Grype table output in job logs | Grype (`anchore/scan-action`) |
-| Image signature + CycloneDX SBOM attestation | Sigstore (keyless, GitHub OIDC) | Cosign |
+| Image SBOM, one per released container image (see table below) | CycloneDX 1.x JSON + SPDX 2.x JSON | Syft (`anchore/sbom-action`) |
+| Vulnerability report, source + one per image | Grype table output in job logs | Grype (`anchore/scan-action`) |
+| Image signature + CycloneDX SBOM attestation, per image | Sigstore (keyless, GitHub OIDC) | Cosign |
+
+### Released images
+
+Every image goes through the identical matrix leg in `release.yml`:
+build → Syft image SBOM (both formats) → Grype gate (≥ high) → push →
+Cosign keyless sign + CycloneDX attestation.
+
+| Image (`ghcr.io/headway-transit/…`) | Source | Dockerfile / build context | Runs as |
+|---|---|---|---|
+| `headway-ingestion` | `services/ingestion` (Go connectors) | `services/ingestion/Dockerfile`, context `services/ingestion` | distroless nonroot |
+| `headway-api` | `services/api` (FastAPI backend, `[ingest]` extra) | `services/api/Dockerfile`, context `services/api` | nonroot (uid 65532) |
+| `headway-transform` | `services/transform` (`[kafka,db,s3]` extras) | `services/transform/Dockerfile`, context **repo root** (bakes in `contracts/raw-record-envelope.v0.schema.json`) | nonroot (uid 65532) |
+| `headway-ai` | `services/ai` (`[persist]` extra) — one-shot anomaly-runner **job** image | `services/ai/Dockerfile`, context `services/ai` | nonroot (uid 65532) |
+| `headway-web` | `web/` (Vite build → static nginx; `VITE_API_BASE_URL` baked at build time, default same-origin) | `web/Dockerfile`, context `web` | nginx user, port 8080 |
 
 ## Where it lands
 
@@ -23,10 +37,10 @@ on the critical path (ADR-0001).
   source-tree CycloneDX SBOM uploaded as a CI artifact
   (`sbom-source-<sha>`, 7-day retention) + Grype scan.
 - **Every release tag `v*.*.*`** (`.github/workflows/release.yml`):
-  source + image SBOMs (both formats) attached as **GitHub release assets**;
-  images pushed to `ghcr.io/headway-transit/headway-ingestion` (matrix-ready
-  for future services), Cosign-signed by digest, with the CycloneDX image
-  SBOM attached as an in-registry **attestation**.
+  source + all image SBOMs (both formats) attached as **GitHub release
+  assets**; the five images in the table above pushed to
+  `ghcr.io/headway-transit/headway-<service>`, each Cosign-signed by digest,
+  with its CycloneDX image SBOM attached as an in-registry **attestation**.
 - **Locally**: `scripts/sbom_local.sh` reproduces the source SBOM + scan via
   the official `anchore/syft` / `anchore/grype` container images (no local
   install needed); outputs to `dist/sbom/` (gitignored).
@@ -87,6 +101,13 @@ release past a red gate" guardrail).
   a GitHub Actions runner and OIDC; none exist in the authoring environment.
   These are unverified until the first `v*.*.*` tag runs the pipeline, and
   must be treated as such.
-- **Pending:** image-SBOM path (Syft against a *built* image) — the ingestion
-  image had not been release-built in this environment; only the source-tree
-  path was exercised locally.
+- **Verified locally (2026-07-11):** the four new Dockerfiles
+  (`headway-api`, `headway-transform`, `headway-ai`, `headway-web`) each
+  `docker build` to completion in this environment; `release.yml` and
+  `deploy/compose/compose.yaml` re-validated with pyyaml after the matrix /
+  app-service extension. The images were **built, not run** — runtime
+  behavior in compose is pending the next live `--profile app up`.
+- **Pending:** image-SBOM path (Syft against a *built* image) in CI — no
+  image has been release-built by the pipeline yet; only local builds and
+  the source-tree SBOM path have been exercised. The ingestion image remains
+  unbuilt in this environment (Go toolchain image pull not attempted here).

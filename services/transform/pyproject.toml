@@ -30,6 +30,11 @@ kafka = [
 # Production DB driver (LGPL-3.0 with linking exception; driver only, not
 # linked into core logic — writer takes any DB-API connection).
 db = ["psycopg[binary]>=3.1"]
+# Object-store client (Apache-2.0) — ONLY for the __main__ process boundary,
+# which builds the ObjectFetcher for payload_encoding='object_ref' envelopes
+# (GTFS static zips, TIDES CSVs). Library code takes an injected fetcher and
+# never imports it. Same client + env surface as headway-api[ingest].
+s3 = ["minio>=7.2"]
 test = ["pytest>=8"]
 
 [tool.setuptools.packages.find]

@@ -12,12 +12,18 @@ import json
 from decimal import Decimal
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 
+from ..audit import write_event
 from ..auth import Identity
 from ..authz import require_authenticated
 from ..db import get_db
+from ..machine_auth import (
+    SCOPE_READ_METRICS,
+    MachineIdentity,
+    require_human_session_or_machine_scope,
+)
 
 router = APIRouter(tags=["metrics"])
 
@@ -168,11 +174,19 @@ _SELECT_VALUE_EXISTS = (
 )
 def explain_metric_value(
     metric_value_id: str,
-    identity: Identity = Depends(require_authenticated),
+    request: Request,
+    identity: Identity | MachineIdentity = Depends(
+        require_human_session_or_machine_scope(SCOPE_READ_METRICS)
+    ),
     db=Depends(get_db),
 ) -> LineageNode:
     """"Explain this number": the full provenance tree from the reported
-    figure down to the raw records that produced it (ADR-0007)."""
+    figure down to the raw records that produced it (ADR-0007).
+
+    Dual credential (handoff 0006 follow-up): a signed-in human session OR a
+    ``read:metrics`` machine key. The machine path is rate-limited per key
+    and audited with actor ``key:<key_prefix>``; the human path is unchanged.
+    """
     exists = db.execute(_SELECT_VALUE_EXISTS, (metric_value_id,)).fetchone()
     if exists is None:
         raise HTTPException(
@@ -222,4 +236,19 @@ def explain_metric_value(
             inputs=inputs,
         )
 
-    return build("computed.metric_values", str(metric_value_id), frozenset())
+    tree = build("computed.metric_values", str(metric_value_id), frozenset())
+    if isinstance(identity, MachineIdentity):
+        # Successful key use is audited at endpoint level, actor key:<prefix>
+        # (handoff 0006, design point 4) — the id only, never the figures.
+        # The human path is unchanged: no per-read audit, like every other
+        # signed-in GET.
+        with db.transaction():
+            write_event(
+                db,
+                actor=identity.actor,
+                action="machine_read_lineage",
+                subject_kind="computed.metric_values",
+                subject_id=str(metric_value_id),
+                detail={"path": request.url.path},
+            )
+    return tree

@@ -105,6 +105,24 @@ def create_app(
     app.state.public_rate_limiter = RateLimiter(
         app.state.settings.public_requests_per_minute
     )
+    # CORS: off by default (production serves web same-origin / behind a
+    # reverse proxy). Set HEADWAY_CORS_ORIGINS to a comma-separated origin
+    # list for split-origin deployments (e.g. the Vite dev server at
+    # http://localhost:5173). Found live 2026-07-11: the first real-browser
+    # login failed silently cross-origin because no CORS headers existed —
+    # mocked-fetch tests can never see this class of gap.
+    _cors = [o.strip() for o in os.environ.get("HEADWAY_CORS_ORIGINS", "").split(",") if o.strip()]
+    if _cors:
+        from fastapi.middleware.cors import CORSMiddleware
+
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=_cors,
+            allow_credentials=False,  # bearer tokens in headers, not cookies
+            allow_methods=["GET", "POST", "PUT", "DELETE"],
+            allow_headers=["Authorization", "Content-Type"],
+        )
+
     app.include_router(auth.router)
     app.include_router(metrics.router)
     app.include_router(certify.router)

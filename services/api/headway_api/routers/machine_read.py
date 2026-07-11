@@ -13,9 +13,9 @@ calc library persisted it.
 
 LINEAGE: every row's ``metric_value_id`` is the input to the existing
 "explain this number" endpoint, ``GET /metrics/values/{metric_value_id}/
-lineage``. That endpoint takes a human session token in v0 — accepting
-``read:metrics`` keys there too is the follow-up increment; nothing about
-this endpoint's shape changes then.
+lineage``, which accepts the SAME ``read:metrics`` key (dual-credential
+dependency, machine_auth.require_human_session_or_machine_scope) — the
+follow-up noted here in v0, now closed.
 
 Per handoff 0006 design points 4 and 6: every successful read is audited
 with actor ``key:<key_prefix>`` (auth failures and scope denials are audited
@@ -55,7 +55,7 @@ def machine_list_metric_values(
     """Computed values for machine consumers (scope ``read:metrics``): same
     filters and shape as the human ``GET /metrics/values``. Each row's
     lineage is available from ``GET /metrics/values/{metric_value_id}/
-    lineage`` (see the module docstring for the v0 credential note)."""
+    lineage`` with this same key."""
     # Per-key token bucket — the same limiter, and therefore the same budget,
     # as ingest (handoff 0006, design point 6; in-process limitation
     # documented on machine_auth.RateLimiter).

@@ -15,7 +15,7 @@ preserved end to end; floating point never touches a figure).
 | --- | --- | --- | --- |
 | POST | `/auth/login` | none (credentials) | Local-account login; returns a short-lived HS256 session token. Success/failure is audit-logged. |
 | GET | `/metrics/values` | any signed-in role | Computed values from `computed.metric_values`; filter by `metric`, `period_start`, `period_end`. `value` is a string. |
-| GET | `/metrics/values/{id}/lineage` | any signed-in role | "Explain this number": recursive traversal of `lineage.edges` (recursive CTE) from the figure down to `raw.records`, returned as a tree `{kind, id, transform_name, transform_version, inputs: [...]}`. A figure with no lineage is a loud 500, never an empty 200. |
+| GET | `/metrics/values/{id}/lineage` | any signed-in role, **or** machine key scope `read:metrics` | "Explain this number": recursive traversal of `lineage.edges` (recursive CTE) from the figure down to `raw.records`, returned as a tree `{kind, id, transform_name, transform_version, inputs: [...]}`. A figure with no lineage is a loud 500, never an empty 200. Machine path rate-limited per key + audited (actor `key:<prefix>`); every auth failure is one generic 401 that never reveals which credential type was expected. |
 | POST | `/certifications` | `certifying_official` only | Inserts `cert.certifications`, marks the figures `certified`, and writes the `audit.events` row — all in ONE transaction. Refuses with 409 while any blocking DQ issue is unresolved. |
 | GET | `/dq/issues` | any signed-in role | Data-quality issues; filter by `status`. |
 | POST | `/dq/issues/{id}/resolve` | `data_steward` or above | Resolves an issue with a resolution note + audit event, in one transaction. |
@@ -23,7 +23,7 @@ preserved end to end; floating point never touches a figure).
 | GET | `/machine/keys` | `certifying_official` | Lists keys: prefix, name, scopes, source label, created/revoked — never hashes, never key material. |
 | DELETE | `/machine/keys/{id}` | `certifying_official` | Revokes a key (sets `revoked_at`; rows are never deleted — audit history). Audited. |
 | POST | `/ingest/tides/passenger-events` | machine key, scope `ingest:tides` | Push a TIDES passenger_events CSV (≤ 32 MiB) over HTTPS. Content-addressed (sha256 → `record_id`), stored to MinIO, produced as a v0 envelope to `raw.tides.passenger_events` — store before produce. 202 `{record_id, parse_status}`; malformed is still landed + produced, flagged. Audited per request. |
-| GET | `/machine/metrics` | machine key, scope `read:metrics` | Machine read of computed values: same filters and row shape as `GET /metrics/values` (same query function — the two cannot drift). `value` a string, `detail` verbatim. Each row's lineage: feed its `metric_value_id` to `GET /metrics/values/{id}/lineage`. Rate-limited per key; every read audited, actor `key:<prefix>`. |
+| GET | `/machine/metrics` | machine key, scope `read:metrics` | Machine read of computed values: same filters and row shape as `GET /metrics/values` (same query function — the two cannot drift). `value` a string, `detail` verbatim. Each row's lineage: feed its `metric_value_id` to `GET /metrics/values/{id}/lineage` — the same key works there. Rate-limited per key; every read audited, actor `key:<prefix>`. |
 | GET | `/settings` | any signed-in role | The per-agency policy settings (migration 0014 seeds them), each with its plain-language description, basis, and who last changed it. |
 | PUT | `/settings/{key}` | `certifying_official` only | Change one policy setting. Value validated against the setting's `value_type` (decimal parsed via `Decimal` — never float; 422 in plain language); old→new audited; unknown key 404 (settings are seeded, never client-creatable). |
 | POST | `/webhooks` | `certifying_official` | Subscribe a URL to `certification.created`. The HMAC secret is accepted here and never returned by anything. Audited. |
@@ -90,9 +90,16 @@ shared query function, so they can never drift: `value` is a **string**
 library persisted it (ratio/factor strings stay strings; simulated-source
 flags shown). **Lineage**: each row's `metric_value_id` is the input to the
 existing "explain this number" endpoint,
-`GET /metrics/values/{metric_value_id}/lineage`; that endpoint takes a human
-session token in v0 — accepting `read:metrics` keys there too is a follow-up
-increment. Every successful read is audited (action `machine_read_metrics`,
+`GET /metrics/values/{metric_value_id}/lineage`, which accepts the **same
+`read:metrics` key** (or a human session — dual-credential dependency
+`machine_auth.require_human_session_or_machine_scope`; the v0 human-only
+follow-up is closed). On the lineage endpoint the machine path spends from
+the same per-key bucket and each successful traversal is audited (action
+`machine_read_lineage`, actor `key:<prefix>`, id only — never figures); the
+human path is unchanged, and every authentication failure there is one
+generic 401 that does not leak which credential type was expected (the audit
+trail keeps the specific reason). Every successful read is audited (action
+`machine_read_metrics`,
 actor `key:<key_prefix>`, filters + row count in detail — never the figures);
 denials and auth failures are audited by the shared machine-auth dependency.
 Spends from the same per-key token bucket as ingest.
@@ -146,6 +153,10 @@ curl -s -X POST https://headway.agency.example/webhooks \
 
 # Machine read of computed values (key issued with scope read:metrics)
 curl -s "https://headway.agency.example/machine/metrics?metric=vrm&period_start=2026-06-01" \
+  -H "Authorization: Bearer hwk_..."
+
+# ...and "explain this number" with the same key (dual-credential endpoint)
+curl -s https://headway.agency.example/metrics/values/<metric_value_id>/lineage \
   -H "Authorization: Bearer hwk_..."
 
 # Public open data — no auth at all
@@ -229,7 +240,7 @@ python3 -m pytest tests/ -q
 
 ## Verification status
 
-- `pytest tests/ -q`: **90 passed** (2026-07-10, Python 3.12, this repo) —
+- `pytest tests/ -q`: **96 passed** (2026-07-11, Python 3.12, this repo) —
   covers login/token lifecycle, password-hash round trip, expired/invalid
   token 401s, role denials (viewer cannot certify), certification happy path
   (cert row + status update + audit event in one transaction), blocking-DQ
@@ -249,7 +260,13 @@ python3 -m pytest tests/ -q
   401 (credential-type separation), values/detail byte-identical to the
   human endpoint's response, filters, per-key 429 with Retry-After, and
   the per-request `machine_read_metrics` audit event with actor
-  `key:<prefix>`; and the settings surface: seeded reads for any role,
+  `key:<prefix>`; plus the dual-credential lineage endpoint: a
+  `read:metrics` key traverses the same canned tree a human session gets,
+  ingest-only key 403 (audited), revoked key 401 (audited, generic on the
+  wire), one identical generic 401 for every auth-failure mode (no
+  credential-type leak), human path untouched by the machine bucket and
+  never machine-audited, per-key 429 shared with `/machine/metrics`;
+  and the settings surface: seeded reads for any role,
   writer gated to certifying_official, decimal/integer 422s in plain
   language, old→new in the audit detail, unknown key 404.
 - `openapi.json` generated: OpenAPI 3.1.0, 15 paths.

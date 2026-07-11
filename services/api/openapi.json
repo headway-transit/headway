@@ -142,7 +142,7 @@
           "metrics"
         ],
         "summary": "Explain Metric Value",
-        "description": "\"Explain this number\": the full provenance tree from the reported\nfigure down to the raw records that produced it (ADR-0007).",
+        "description": "\"Explain this number\": the full provenance tree from the reported\nfigure down to the raw records that produced it (ADR-0007).\n\nDual credential (handoff 0006 follow-up): a signed-in human session OR a\n``read:metrics`` machine key. The machine path is rate-limited per key\nand audited with actor ``key:<key_prefix>``; the human path is unchanged.",
         "operationId": "explain_metric_value_metrics_values__metric_value_id__lineage_get",
         "parameters": [
           {
@@ -437,7 +437,7 @@
           "machine"
         ],
         "summary": "Machine List Metric Values",
-        "description": "Computed values for machine consumers (scope ``read:metrics``): same\nfilters and shape as the human ``GET /metrics/values``. Each row's\nlineage is available from ``GET /metrics/values/{metric_value_id}/\nlineage`` (see the module docstring for the v0 credential note).",
+        "description": "Computed values for machine consumers (scope ``read:metrics``): same\nfilters and shape as the human ``GET /metrics/values``. Each row's\nlineage is available from ``GET /metrics/values/{metric_value_id}/\nlineage`` with this same key.",
         "operationId": "machine_list_metric_values_machine_metrics_get",
         "parameters": [
           {
