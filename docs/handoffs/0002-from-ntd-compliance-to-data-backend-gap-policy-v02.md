@@ -69,3 +69,42 @@ passed (76 pre-existing + 14 new); `db` static migration suite 13 passed
 (new `test_app_settings_seeded_with_calc_policy_knobs`); `openapi.json`
 regenerated — 15 paths, now including `/settings`, `/settings/{setting_key}`,
 and `/machine/metrics` (the `read:metrics` consumer from handoff 0006).
+
+### Note — backend-engineer (runner-reads-settings shipped, 2026-07-11)
+
+The **EXPLICIT LIMITATION** paragraph above is now REMOVED — the paragraph
+itself stands unedited as history; this dated note supersedes it. The
+runner-reads-settings increment shipped: `run_period` reads the four seeded
+knobs from `app.settings` via the new `headway_calc/settings.py`
+(`load_policy_settings` → frozen `PolicySettings`; decimal values parsed with
+`Decimal`, never float; integers for the seconds knobs), so a threshold set
+through the audited `PUT /settings/{key}` API governs the next run with no
+flag needed.
+
+**Precedence (per threshold, highest wins): explicit CLI flag/argument >
+app.settings row > code default** — and every RunReport now records each
+threshold's provenance (`threshold_sources`:
+`"explicit" | "settings" | "default"`), so the persisted detail JSONB's
+threshold values have their origin story in the report.
+(`imbalance_threshold` is not a settings knob: only explicit/default.)
+
+Failure is loud and typed: a table that exists but is missing a knob row or
+holds an unparseable/wrong-typed value raises
+`headway_calc.settings.SettingsError` and the run REFUSES before reading any
+canonical row — no silent code-default fallback once the table exists, never
+a guessed threshold. The ONE tolerated absence is the table itself
+(relation-does-not-exist, SQLSTATE 42P01 — a pre-0014 database): the runner
+proceeds on code defaults with an explicit WARNING log.
+
+New CLI flag `--ignore-settings` skips the `app.settings` read entirely, for
+reproducing historical runs: per REGULATORY_TRACKER.md's rule ("shipped
+versions are never deleted or rewritten"), a historical reproduction uses the
+PINNED calc versions plus the EXPLICIT thresholds recorded in the original
+RunReport — never whatever `app.settings` holds today.
+
+Verification (2026-07-11, Python 3.12, fakes only — live DB untouched):
+`services/calc` suite 185 passed (157 pre-existing + 28 new:
+`tests/test_settings.py` and the settings-precedence/provenance runner tests
+in `tests/test_runner.py`, including the full explicit>settings>default
+matrix over all four knobs, corrupt-value refusal, missing-table fallback
+with warning, and determinism across the settings path).

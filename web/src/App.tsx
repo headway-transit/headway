@@ -10,6 +10,7 @@ import {
 import { setUnauthorizedHandler } from "./api/client";
 import { useSession } from "./auth/session";
 import { Layout } from "./components/Layout";
+import { CertifyView } from "./views/CertifyView";
 import { DqView } from "./views/DqView";
 import { LineageView } from "./views/LineageView";
 import { LoginView } from "./views/LoginView";
@@ -55,6 +56,9 @@ export function AppRoutes() {
         <Route path="/metrics/:id/lineage" element={<LineageView />} />
         <Route path="/reports/monthly" element={<MonthlyReportView />} />
         <Route path="/dq" element={<DqView />} />
+        {/* Role-gated in the UI (nav link + in-page notice); the API
+            enforces certifying_official on POST /certifications. */}
+        <Route path="/certify" element={<CertifyView />} />
       </Route>
     </Routes>
   );

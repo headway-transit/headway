@@ -27,6 +27,7 @@ export const copy = {
     metrics: "Metrics",
     reports: "Monthly ridership",
     dq: "Data quality",
+    certify: "Certify",
   },
 
   login: {
@@ -69,8 +70,10 @@ export const copy = {
     preVerificationTag: "Pre-verification",
     explainLink: "How this number was made",
     empty: "No computed values yet. Values appear here after the pipeline runs.",
+    certifyMoved:
+      "Certification has moved to its own room. This page is for reading figures; signing them happens on the Certify page, which shows exactly what your signature would cover.",
+    certifyMovedLink: "Go to the Certify page",
     columns: {
-      select: "Select",
       metric: "Metric",
       unit: "Unit",
       period: "Period",
@@ -86,15 +89,61 @@ export const copy = {
       `Calculation details for ${metric}, ${period}`,
     detailEmpty:
       "The calculation recorded no extra detail for this figure.",
-    selectRow: (metric: string, period: string) =>
-      `Select ${metric}, ${period}, for certification`,
+  },
+
+  /**
+   * The certification cockpit (/certify — handoff 0007's deferred pillar):
+   * one screen showing exactly what a signature covers. Attestation is
+   * informed consent: each figure is selected explicitly against its full
+   * receipt, blockers and warnings are stated before the button works, and
+   * the blocked-state wording mirrors the API's own 409 refusal so the
+   * screen and the server tell the same story.
+   */
+  certify: {
+    heading: "Certify figures",
+    intro:
+      "This page shows exactly what your signature would cover. Pick a month, read each figure's receipt, and tick the figures you are certifying. Nothing is certified until you confirm in the final step, and the API records the certification — not this page.",
+    notAllowed:
+      "Only a certifying official can certify figures. You can still read every figure and its receipt on the Metrics page, and review data-quality issues on the Data quality page.",
+    figuresHeading: "Figures in this period",
+    figuresIntro:
+      "Ticking a figure means you have read its receipt and intend to put your name on it.",
+    empty:
+      "No figures have been computed for this period. Pick another month, or wait for the pipeline to run.",
+    selectFigure: (metric: string, period: string) =>
+      `Certify ${metric}, ${period}`,
     alreadyCertified: "Already certified",
+    blockersHeading: "Blockers",
+    blockersNone:
+      "No blocking data-quality issues are open. Certification is allowed.",
+    /**
+     * Mirrors the API's 409 refusal (services/api routers/certify.py)
+     * word for word after the lead-in, so the reason the button is off is
+     * the same reason the server would give.
+     */
+    blockersReason: (count: string) =>
+      `Certification is blocked: ${count} blocking data-quality issue(s) are still unresolved. Every blocking issue must be resolved before any figure can be certified, because certifying over a known data gap would attest to numbers we know may be wrong.`,
+    blockersUnknown:
+      "Headway could not load the data-quality issues, so it cannot confirm certification is allowed. Certifying is disabled until the issue list loads.",
+    reviewDqLink: "Review the data-quality issues",
+    warningsHeading: "Read this before you sign",
+    simulatedWarning:
+      "You are about to attest to figures computed from simulated test data. Simulated figures must never be submitted to the FTA. Certifying them would put your name on numbers that do not come from real service.",
+    preVerificationWarning:
+      "You are about to attest to figures from an early calculation that has not yet been checked against FTA rules. They are not certifiable figures yet.",
+    acknowledgeLabel:
+      "I have read these warnings and I understand what certifying these figures would mean.",
+    acknowledgeHint:
+      "The certify button stays off until you confirm the warning above.",
     certifySelected: "Certify selected figures",
     nothingSelected:
-      "Select at least one figure to certify. Use the checkboxes in the first column.",
-    certifySuccess: (count: number, certificationId: string) =>
-      `Certification recorded for ${count} figure${count === 1 ? "" : "s"}. Certification ID ${certificationId}. The API has audit-logged who certified and when.`,
-    reviewDqLink: "Review the data-quality issues",
+      "Select at least one figure to certify. Use the checkbox above each receipt.",
+    certifySuccess: (
+      count: number,
+      certificationId: string,
+      auditEventId: string,
+    ) =>
+      `Certification recorded for ${count} figure${count === 1 ? "" : "s"}. Certification ID ${certificationId}. Audit event ${auditEventId}. The API has audit-logged who certified and when.`,
   },
 
   certifyModal: {

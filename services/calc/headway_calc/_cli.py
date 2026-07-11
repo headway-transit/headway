@@ -105,6 +105,23 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
             "than 10 percent). The value used is recorded in the RunReport."
         ),
     )
+    parser.add_argument(
+        "--ignore-settings",
+        action="store_true",
+        help=(
+            "Do NOT read app.settings (migration 0014): thresholds come from "
+            "the explicit flags above, falling back to the calc library's "
+            "code defaults (every threshold's source is recorded in the "
+            "RunReport as 'explicit' or 'default', never 'settings'). For "
+            "reproducing historical runs: per REGULATORY_TRACKER.md's rule "
+            "('shipped versions are never deleted or rewritten'), a "
+            "historical reproduction uses the PINNED calc versions plus the "
+            "EXPLICIT thresholds recorded in the original RunReport — never "
+            "whatever app.settings holds today. Without this flag, an "
+            "app.settings row governs any threshold not given explicitly "
+            "(explicit flag > settings row > code default)."
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -136,6 +153,7 @@ def main(argv: list[str] | None = None) -> int:
             layover_max_seconds=args.layover_max_seconds,
             missing_trip_threshold=args.missing_trip_threshold,
             imbalance_threshold=args.imbalance_threshold,
+            read_settings=not args.ignore_settings,
         )
 
     print(report.to_json())

@@ -7,7 +7,7 @@
 import { useEffect, useRef } from "react";
 import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { copy } from "../copy";
-import { clearSession, useSession } from "../auth/session";
+import { canCertify, clearSession, useSession } from "../auth/session";
 
 export function Layout() {
   const session = useSession();
@@ -47,6 +47,13 @@ export function Layout() {
             <li>
               <Link to="/dq">{copy.nav.dq}</Link>
             </li>
+            {/* Shown only to the certifying official — UX, not security:
+                the API enforces the role on POST /certifications. */}
+            {canCertify(session) && (
+              <li>
+                <Link to="/certify">{copy.nav.certify}</Link>
+              </li>
+            )}
           </ul>
         </nav>
         {session && (

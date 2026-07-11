@@ -21,11 +21,13 @@ failure never rolls back already-committed dq issues). No live database.
 from __future__ import annotations
 
 import json
+import logging
 from datetime import date
 from decimal import Decimal
 
 import pytest
 from conftest import (
+    SEEDED_SETTINGS_ROWS,
     RecordingConnection,
     events_to_rows,
     load_events,
@@ -34,8 +36,10 @@ from conftest import (
 )
 
 import headway_calc.runner as runner_module
+from headway_calc._cli import _parse_args as cli_parse_args
 from headway_calc._cli import main as cli_main
 from headway_calc.runner import run_period
+from headway_calc.settings import InvalidSettingValueError
 from headway_calc.types import CalcResult, Finding
 
 PERIOD_START = date(2026, 1, 1)
@@ -402,16 +406,16 @@ def test_persist_failure_does_not_roll_back_committed_dq_issues(
         run_period(conn, PERIOD_START, PERIOD_END)
 
     # The dq issues were inserted AND committed before the failing insert:
-    # statements are [3 reader SELECTs (positions, passenger events,
-    # operated trips), vrm blocking dq insert, vrh's 2 info dq inserts,
-    # failing mv insert]; the sole commit boundary covers exactly the first
-    # six.
-    for sql, _ in conn.executed[0:3]:
+    # statements are [4 SELECTs (app.settings, then the 3 reader SELECTs:
+    # positions, passenger events, operated trips), vrm blocking dq insert,
+    # vrh's 2 info dq inserts, failing mv insert]; the sole commit boundary
+    # covers exactly the first seven.
+    for sql, _ in conn.executed[0:4]:
         assert sql.lstrip().startswith("SELECT")
-    for sql, _ in conn.executed[3:6]:
+    for sql, _ in conn.executed[4:7]:
         assert "INSERT INTO dq.issues" in sql
-    assert "INSERT INTO computed.metric_values" in conn.executed[6][0]
-    assert conn.commits == [6]  # committed through the dq inserts, no further
+    assert "INSERT INTO computed.metric_values" in conn.executed[7][0]
+    assert conn.commits == [7]  # committed through the dq inserts, no further
     # The value phase alone was rolled back; the commit record stands.
     assert conn.rollback_count == 1
 
@@ -442,6 +446,15 @@ def test_run_report_json_is_parseable_and_complete(clean_rows):
     assert parsed["layover_max_seconds"] == 1800.0
     assert parsed["missing_trip_threshold"] == "0.02"
     assert parsed["imbalance_threshold"] == "0.10"
+    # Provenance: the fake serves the migration-0014 seed rows, so the four
+    # knobs came from app.settings; imbalance is not a settings knob.
+    assert parsed["threshold_sources"] == {
+        "gap_threshold_seconds": "settings",
+        "coverage_threshold": "settings",
+        "layover_max_seconds": "settings",
+        "missing_trip_threshold": "settings",
+        "imbalance_threshold": "default",
+    }
     assert parsed["positions_loaded"] == 22
     assert parsed["passenger_events_loaded"] == 0
     assert parsed["operated_trips_loaded"] == 0
@@ -588,6 +601,286 @@ def test_upt_blocked_case_routes_blocking_and_persists_nothing_for_upt(
     assert [p[0] for p in mv_params] == ["vrm", "vrh"]
     edges = conn.statements_matching("INSERT INTO lineage.edges")
     assert all(p[2] != "upt_v0" for _, p in edges)
+
+
+# --- app.settings wiring: explicit > settings > default (handoff 0002) -------
+
+#: Agency-set app.settings rows, every knob deliberately different from the
+#: code defaults (and from the migration-0014 seeds).
+AGENCY_SETTINGS_ROWS = [
+    ("coverage_threshold", "0.90", "decimal"),
+    ("gap_threshold_seconds", "600", "integer"),
+    ("layover_max_seconds", "900", "integer"),
+    ("missing_trip_threshold", "0.05", "decimal"),
+]
+
+#: The four settings knobs: explicit run_period argument, the value the
+#: report records for it, the AGENCY_SETTINGS_ROWS value, the code default.
+PRECEDENCE_MATRIX = [
+    ("gap_threshold_seconds", 450, 450.0, 600.0, 300.0),
+    (
+        "coverage_threshold",
+        Decimal("0.85"),
+        Decimal("0.85"),
+        Decimal("0.90"),
+        Decimal("0.95"),
+    ),
+    ("layover_max_seconds", 1200, 1200.0, 900.0, 1800.0),
+    (
+        "missing_trip_threshold",
+        Decimal("0.03"),
+        Decimal("0.03"),
+        Decimal("0.05"),
+        Decimal("0.02"),
+    ),
+]
+
+
+def test_settings_rows_govern_the_run_when_no_flag_is_given(gapped_rows):
+    """A coverage_threshold set through the audited settings API (0.5 here —
+    below the gapped fixture's 2/3 coverage) governs the run with NO flag:
+    the previously-blocked metrics persist, and the report says so."""
+    conn = RecordingConnection(
+        position_rows=gapped_rows,
+        settings_rows=[
+            ("coverage_threshold", "0.5", "decimal"),
+            ("gap_threshold_seconds", "300", "integer"),
+            ("layover_max_seconds", "1800", "integer"),
+            ("missing_trip_threshold", "0.02", "decimal"),
+        ],
+    )
+    report = run_period(conn, PERIOD_START, PERIOD_END)
+
+    assert report.coverage_threshold == Decimal("0.5")
+    assert report.threshold_sources == {
+        "gap_threshold_seconds": "settings",
+        "coverage_threshold": "settings",
+        "layover_max_seconds": "settings",
+        "missing_trip_threshold": "settings",
+        "imbalance_threshold": "default",  # not an app.settings knob
+    }
+    # Identical behavior to the explicit --coverage-threshold 0.5 run: the
+    # settings row, not the code default 0.95, drew the certifiability line.
+    assert report.persisted_count == 3 and report.blocked_count == 0
+    assert report.routed_blocking_count == 0
+    # The persisted detail JSONB carries the settings-provided value; its
+    # origin story is the report's threshold_sources.
+    vrm = report.outcomes[0]
+    assert vrm.detail["coverage_threshold"] == "0.5"
+    mv_inserts = conn.statements_matching("INSERT INTO computed.metric_values")
+    assert len(mv_inserts) == 3
+    assert json.loads(mv_inserts[0][1][8])["coverage_threshold"] == "0.5"
+
+
+def test_explicit_flag_wins_over_settings_row(gapped_rows):
+    """Settings say 0.5 (would persist); the explicit argument says 0.95 —
+    the explicit flag governs and the report attributes it."""
+    conn = RecordingConnection(
+        position_rows=gapped_rows,
+        settings_rows=[
+            ("coverage_threshold", "0.5", "decimal"),
+            ("gap_threshold_seconds", "300", "integer"),
+            ("layover_max_seconds", "1800", "integer"),
+            ("missing_trip_threshold", "0.02", "decimal"),
+        ],
+    )
+    report = run_period(
+        conn, PERIOD_START, PERIOD_END, coverage_threshold=Decimal("0.95")
+    )
+
+    assert report.coverage_threshold == Decimal("0.95")
+    assert report.threshold_sources["coverage_threshold"] == "explicit"
+    # The un-flagged knobs still come from settings.
+    assert report.threshold_sources["gap_threshold_seconds"] == "settings"
+    # 0.95 blocks the gapped fixture exactly as in the default-threshold test.
+    assert report.blocked_count == 2 and report.routed_blocking_count == 2
+
+
+def test_missing_settings_table_falls_back_to_code_defaults_with_warning(
+    clean_rows, caplog
+):
+    """Pre-migration-0014 databases keep working: relation-does-not-exist is
+    the ONE tolerated absence — code defaults, sources 'default', an explicit
+    WARNING, and the aborted statement rolled back."""
+    conn = RecordingConnection(position_rows=clean_rows, settings_table_missing=True)
+    with caplog.at_level(logging.WARNING, logger="headway_calc.settings"):
+        report = run_period(conn, PERIOD_START, PERIOD_END)
+
+    assert report.gap_threshold_seconds == 300.0
+    assert report.coverage_threshold == Decimal("0.95")
+    assert report.layover_max_seconds == 1800.0
+    assert report.missing_trip_threshold == Decimal("0.02")
+    assert set(report.threshold_sources.values()) == {"default"}
+    assert report.persisted_count == 3
+    assert any(
+        "app.settings does not exist" in r.getMessage() for r in caplog.records
+    )
+    # The failed settings SELECT was rolled back; the run then proceeded
+    # normally (issues transaction + values transaction).
+    assert conn.rollback_count == 1
+    assert len(conn.commits) == 2
+
+
+def test_corrupt_setting_value_refuses_the_run_before_any_canonical_read(
+    gapped_rows,
+):
+    """A row that cannot be parsed NEVER becomes a guessed threshold: the
+    typed error propagates and the run stops before reading canonical rows,
+    routing findings, or writing values."""
+    conn = RecordingConnection(
+        position_rows=gapped_rows,
+        settings_rows=[
+            ("coverage_threshold", "ninety-five percent", "decimal"),
+            ("gap_threshold_seconds", "300", "integer"),
+            ("layover_max_seconds", "1800", "integer"),
+            ("missing_trip_threshold", "0.02", "decimal"),
+        ],
+    )
+    with pytest.raises(InvalidSettingValueError, match="coverage_threshold"):
+        run_period(conn, PERIOD_START, PERIOD_END)
+
+    # Only the settings SELECT ran: no canonical reads, no dq rows, no
+    # metric values, no commits.
+    assert len(conn.executed) == 1
+    assert "app.settings" in conn.executed[0][0]
+    assert conn.statements_matching("INSERT INTO") == []
+    assert conn.commits == []
+
+
+def test_read_settings_false_skips_the_settings_read(clean_rows):
+    """The library face of --ignore-settings: app.settings is never queried,
+    so an agency's rows cannot govern a historical reproduction."""
+    conn = RecordingConnection(
+        position_rows=clean_rows, settings_rows=AGENCY_SETTINGS_ROWS
+    )
+    report = run_period(conn, PERIOD_START, PERIOD_END, read_settings=False)
+
+    assert conn.statements_matching("app.settings") == []
+    assert report.coverage_threshold == Decimal("0.95")
+    assert report.gap_threshold_seconds == 300.0
+    assert set(report.threshold_sources.values()) == {"default"}
+
+
+def test_read_settings_false_still_honors_explicit_flags(clean_rows):
+    conn = RecordingConnection(
+        position_rows=clean_rows, settings_rows=AGENCY_SETTINGS_ROWS
+    )
+    report = run_period(
+        conn,
+        PERIOD_START,
+        PERIOD_END,
+        coverage_threshold=Decimal("0.85"),
+        read_settings=False,
+    )
+    assert report.coverage_threshold == Decimal("0.85")
+    assert report.threshold_sources["coverage_threshold"] == "explicit"
+    assert report.threshold_sources["gap_threshold_seconds"] == "default"
+
+
+@pytest.mark.parametrize(
+    "knob, explicit_arg, explicit_value, settings_value, default_value",
+    PRECEDENCE_MATRIX,
+    ids=[row[0] for row in PRECEDENCE_MATRIX],
+)
+def test_precedence_matrix_explicit_over_settings_over_default(
+    clean_rows, knob, explicit_arg, explicit_value, settings_value, default_value
+):
+    """For each of the four knobs: explicit argument > app.settings row >
+    code default, with the source recorded per threshold."""
+    # explicit beats a differing settings row
+    report = run_period(
+        RecordingConnection(
+            position_rows=clean_rows, settings_rows=AGENCY_SETTINGS_ROWS
+        ),
+        PERIOD_START,
+        PERIOD_END,
+        **{knob: explicit_arg},
+    )
+    assert getattr(report, knob) == explicit_value
+    assert report.threshold_sources[knob] == "explicit"
+    # ...and the OTHER three knobs still come from settings.
+    other_sources = {
+        k: v
+        for k, v in report.threshold_sources.items()
+        if k not in (knob, "imbalance_threshold")
+    }
+    assert set(other_sources.values()) == {"settings"}
+
+    # settings row beats the code default
+    report = run_period(
+        RecordingConnection(
+            position_rows=clean_rows, settings_rows=AGENCY_SETTINGS_ROWS
+        ),
+        PERIOD_START,
+        PERIOD_END,
+    )
+    assert getattr(report, knob) == settings_value
+    assert report.threshold_sources[knob] == "settings"
+
+    # code default when the table does not exist
+    report = run_period(
+        RecordingConnection(position_rows=clean_rows, settings_table_missing=True),
+        PERIOD_START,
+        PERIOD_END,
+    )
+    assert getattr(report, knob) == default_value
+    assert report.threshold_sources[knob] == "default"
+
+
+def test_imbalance_threshold_is_not_a_settings_knob(clean_rows):
+    """imbalance_threshold is not seeded in app.settings: its source is only
+    ever explicit or default, even when every other knob comes from settings."""
+    report = run_period(
+        RecordingConnection(
+            position_rows=clean_rows, settings_rows=AGENCY_SETTINGS_ROWS
+        ),
+        PERIOD_START,
+        PERIOD_END,
+        imbalance_threshold=Decimal("0.20"),
+    )
+    assert report.threshold_sources["imbalance_threshold"] == "explicit"
+    assert report.imbalance_threshold == Decimal("0.20")
+
+
+def test_seeded_settings_values_reproduce_the_default_run_exactly(gapped_rows):
+    """The migration-0014 seeds equal the code defaults, so a settings-read
+    run and an --ignore-settings run over the same rows differ ONLY in the
+    recorded sources — determinism intact across the settings path."""
+    report_settings = run_period(
+        RecordingConnection(
+            position_rows=gapped_rows, settings_rows=SEEDED_SETTINGS_ROWS
+        ),
+        PERIOD_START,
+        PERIOD_END,
+    )
+    report_defaults = run_period(
+        RecordingConnection(position_rows=gapped_rows, settings_table_missing=True),
+        PERIOD_START,
+        PERIOD_END,
+    )
+    a = _stable_projection(report_settings)
+    b = _stable_projection(report_defaults)
+    assert a.pop("threshold_sources") == {
+        "gap_threshold_seconds": "settings",
+        "coverage_threshold": "settings",
+        "layover_max_seconds": "settings",
+        "missing_trip_threshold": "settings",
+        "imbalance_threshold": "default",
+    }
+    assert b.pop("threshold_sources") == {
+        "gap_threshold_seconds": "default",
+        "coverage_threshold": "default",
+        "layover_max_seconds": "default",
+        "missing_trip_threshold": "default",
+        "imbalance_threshold": "default",
+    }
+    assert a == b
+
+
+def test_cli_ignore_settings_flag_parses_and_defaults_off():
+    base = ["--period-start", "2026-06-01", "--period-end", "2026-07-01"]
+    assert cli_parse_args(base).ignore_settings is False
+    assert cli_parse_args(base + ["--ignore-settings"]).ignore_settings is True
 
 
 def test_cli_refuses_without_database_url(monkeypatch):

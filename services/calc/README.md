@@ -73,13 +73,26 @@ are `Decimal`, never float.
   (0.1.0 entry point) is retained and refuses non-blocking findings. Never
   swallows an insert failure; never commits (transaction control is the
   runner's).
+- `headway_calc/settings.py` — injectable reader for `app.settings`
+  (migration 0014, the audited per-agency policy surface):
+  `load_policy_settings(conn)` returns a frozen `PolicySettings` with the
+  four seeded knobs (`coverage_threshold`, `gap_threshold_seconds`,
+  `layover_max_seconds`, `missing_trip_threshold`; decimals parsed via
+  `Decimal`, never float; ints for the seconds knobs). Fails LOUDLY
+  (typed `SettingsError`) when the table exists but a knob is missing or
+  unparseable — never a silently substituted code default; the ONE
+  tolerated absence is the table itself (SQLSTATE 42P01, a
+  pre-migration-0014 database → `None` + a WARNING, code defaults apply).
 - `headway_calc/runner.py` — `run_period(conn, start, end,
   gap_threshold_seconds=None, coverage_threshold=None,
   layover_max_seconds=None, missing_trip_threshold=None,
-  imbalance_threshold=None)`: closes the canonical→computed loop (reader →
+  imbalance_threshold=None, read_settings=True)`: closes the
+  canonical→computed loop (settings → reader →
   compute_vrm 0.2.0 / compute_vrh 0.4.0 / compute_upt 0.1.0 → dq routing →
-  persist) and returns a frozen `RunReport` carrying all five inputs and
-  per-metric detail. See "Runner" below.
+  persist) and returns a frozen `RunReport` carrying all five inputs, each
+  threshold's provenance (`threshold_sources`) and
+  per-metric detail. Threshold precedence: explicit argument >
+  `app.settings` row > code default. See "Runner" below.
 - `headway_calc/_cli.py` — the ONE process boundary (argv, env, psycopg);
   exempt from the stdlib-purity guardrail, contains no calculation logic.
 - `REGULATORY_TRACKER.md` — calc/version → citation → verification status.
@@ -266,8 +279,39 @@ export HEADWAY_DATABASE_URL=postgresql://…/agency_db
 python -m headway_calc.runner --period-start 2026-06-01 --period-end 2026-07-01
 # optional: --gap-threshold-seconds 300 --coverage-threshold 0.95 \
 #           --layover-max-seconds 1800 --missing-trip-threshold 0.02 \
-#           --imbalance-threshold 0.10
+#           --imbalance-threshold 0.10 --ignore-settings
 ```
+
+### Threshold precedence — explicit flag > app.settings row > code default
+
+Per threshold, the highest-precedence source wins, and the `RunReport`
+records each threshold's provenance in `threshold_sources`
+(`"explicit" | "settings" | "default"`):
+
+1. **explicit** — the CLI flag / `run_period` argument;
+2. **settings** — the `app.settings` row (migration 0014, the ONE audited
+   place an agency sets calc policy — a value set through the settings API
+   governs the next run with no flag needed). Applies to the four seeded
+   knobs: `coverage_threshold`, `gap_threshold_seconds`,
+   `layover_max_seconds`, `missing_trip_threshold` (`imbalance_threshold`
+   is not a settings knob);
+3. **default** — the calc library's documented code defaults. Reached only
+   when `app.settings` does not exist (a pre-migration-0014 database —
+   the runner logs a WARNING and proceeds, never silently) or under
+   `--ignore-settings`.
+
+A settings table that exists but cannot be trusted (a seeded knob row
+missing, or a value unparseable / of the wrong `value_type`) raises a typed
+`headway_calc.settings.SettingsError` and the run REFUSES before reading a
+single canonical row — the runner never substitutes a guessed threshold for
+an agency's audited policy.
+
+`--ignore-settings` skips the `app.settings` read entirely (thresholds:
+explicit flags, else code defaults). It exists for **reproducing historical
+runs**: per `REGULATORY_TRACKER.md`'s rule ("shipped versions are never
+deleted or rewritten"), a historical reproduction uses the PINNED calc
+versions plus the EXPLICIT thresholds recorded in the original `RunReport` —
+never whatever `app.settings` holds today.
 
 Loads `canonical.vehicle_positions` (with `block_id` joined),
 `canonical.passenger_events` and the operated trip_ids for the
@@ -281,7 +325,8 @@ report carries the trip coverage plus `trips_excised`/`blocks_touched`/
 (`--missing-trip-threshold`/`--imbalance-threshold` pass through; its
 `detail` carries the counted boardings, missing share, applied factor and
 source mix), and prints the `RunReport` as JSON (all five
-inputs recorded). Per metric:
+inputs recorded, each with its provenance in `threshold_sources` — see
+"Threshold precedence" above). Per metric:
 
 - **every finding is routed to `dq.issues` with its own severity** —
   block-fallback infos stay info, excised-trip and over-cap-layover
@@ -330,14 +375,14 @@ handoff 0001).
 
 ## Verification status
 
-### What ran (2026-07-10, Python 3.12.3, hypothesis 6.156.4)
+### What ran (2026-07-11, Python 3.12.3, hypothesis 6.156.4)
 
 ```
 $ cd services/calc && python3 -m pytest tests/ -q
-........................................................................ [ 45%]
-........................................................................ [ 91%]
-.............                                                            [100%]
-157 passed in 10.25s
+........................................................................ [ 38%]
+........................................................................ [ 77%]
+.........................................                                [100%]
+185 passed in 10.31s
 ```
 
 upt_v0 golden tests explicitly (handoff 0005, hand-worked in
@@ -405,6 +450,23 @@ deterministic order, NULL passthrough); runner end-to-end for the UPT
 golden through `run_period` (factored persists with 49 lineage edges;
 blocked routes info/warnings/blocking with their own severities and
 persists no upt value while vrm/vrh persist independently).
+
+NEW for the app.settings wiring (handoff 0002 Response follow-up,
+2026-07-11) — `tests/test_settings.py` (`load_policy_settings`: seeded rows
+→ frozen `PolicySettings` with Decimal-never-float parsing; missing table →
+`None` + rollback + WARNING; missing knob row / unparseable decimal or
+integer (incl. `NaN`/`Infinity`) / wrong `value_type` → typed
+`SettingsError`; non-42P01 database errors propagate) and settings
+precedence/provenance runner tests in `tests/test_runner.py`
+(settings-govern-when-no-flag over the gapped fixture — the agency's 0.5
+coverage row persists what the code default would block, sources
+`"settings"`; explicit-flag-wins — sources `"explicit"`; missing table →
+code defaults + `"default"` + warning; corrupt value → loud typed refusal
+before ANY canonical read, no commit; the full explicit>settings>default
+precedence matrix over all four knobs; `read_settings=False` /
+`--ignore-settings` never queries the table and still honors explicit
+flags; imbalance_threshold never `"settings"`; seeded settings reproduce
+the default run exactly — determinism intact across the settings path).
 
 ### What is PENDING
 

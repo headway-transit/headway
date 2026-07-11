@@ -2,7 +2,8 @@
 
 The RecordingConnection below is the shared fake-DB used by the reader/dq/
 runner tests: it records every executed statement and every commit/rollback
-boundary, serves canned canonical.vehicle_positions rows to SELECTs, and
+boundary, serves canned canonical.vehicle_positions (and passenger-events,
+operated-trips, app.settings) rows to SELECTs, and
 returns deterministic generated ids (issue-0001, mv-0001, ...) so whole
 RunReports are reproducible. It can be told to fail on a specific INSERT
 target to simulate a mid-run persist failure.
@@ -166,6 +167,25 @@ def events_to_rows(events: list[PassengerEvent]) -> list[tuple]:
     ]
 
 
+#: app.settings rows exactly as seeded by migration 0014, in the reader's
+#: deterministic ORDER BY setting_key — the fake connection serves these by
+#: default so a plain RecordingConnection models a post-0014 database whose
+#: settings still hold the seeded defaults.
+SEEDED_SETTINGS_ROWS: list[tuple] = [
+    ("coverage_threshold", "0.95", "decimal"),
+    ("gap_threshold_seconds", "300", "integer"),
+    ("layover_max_seconds", "1800", "integer"),
+    ("missing_trip_threshold", "0.02", "decimal"),
+]
+
+
+class FakeUndefinedTable(Exception):
+    """Duck-types a driver's relation-does-not-exist error (SQLSTATE 42P01),
+    the way psycopg3 exposes it (an ``sqlstate`` attribute)."""
+
+    sqlstate = "42P01"
+
+
 class RecordingCursor:
     def __init__(self, conn: "RecordingConnection"):
         self._conn = conn
@@ -181,7 +201,13 @@ class RecordingCursor:
             # Dispatch canned rows per reader query (handoff 0005 added the
             # passenger-events and operated-trips SELECTs alongside the
             # positions SELECT).
-            if "canonical.passenger_events" in sql:
+            if "app.settings" in sql:
+                if conn.settings_table_missing:
+                    raise FakeUndefinedTable(
+                        'relation "app.settings" does not exist'
+                    )
+                self._pending_all = list(conn.settings_rows)
+            elif "canonical.passenger_events" in sql:
                 self._pending_all = list(conn.passenger_event_rows)
             elif "SELECT DISTINCT trip_id" in sql:
                 self._pending_all = list(conn.operated_trip_rows)
@@ -215,10 +241,19 @@ class RecordingConnection:
         fail_on: str | None = None,
         passenger_event_rows: list[tuple] | None = None,
         operated_trip_rows: list[tuple] | None = None,
+        settings_rows: list[tuple] | None = None,
+        settings_table_missing: bool = False,
     ):
         self.position_rows = position_rows or []
         self.passenger_event_rows = passenger_event_rows or []
         self.operated_trip_rows = operated_trip_rows or []
+        # app.settings (migration 0014): by default the fake serves the
+        # seeded rows; settings_table_missing=True models a pre-0014
+        # database (the SELECT raises the 42P01 duck-typed error).
+        self.settings_rows = (
+            SEEDED_SETTINGS_ROWS if settings_rows is None else settings_rows
+        )
+        self.settings_table_missing = settings_table_missing
         self.fail_on = fail_on
         self.executed: list[tuple[str, tuple | None]] = []
         # Each commit records how many statements were executed at that point,

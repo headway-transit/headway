@@ -1,8 +1,11 @@
 """run_period — closes the canonical→computed loop for one reporting period.
 
-Orchestration only: load canonical.vehicle_positions (headway_calc.reader,
-block_id joined per handoff 0003) plus canonical.passenger_events and the
-operated trip_ids (handoff 0005), run the v0 calculations (compute_vrm at
+Orchestration only: resolve the policy thresholds (explicit argument >
+app.settings row > code default — headway_calc.settings, migration 0014; see
+run_period's docstring), load canonical.vehicle_positions
+(headway_calc.reader, block_id joined per handoff 0003) plus
+canonical.passenger_events and the operated trip_ids (handoff 0005), run the
+v0 calculations (compute_vrm at
 0.2.0, compute_vrh at 0.4.0, compute_upt at 0.1.0 — the default paths,
 handoffs 0002/0004/0005), route
 EVERY finding to dq.issues with its own severity
@@ -54,6 +57,7 @@ from headway_calc.reader import (
     load_passenger_events,
     load_vehicle_positions,
 )
+from headway_calc.settings import load_policy_settings
 from headway_calc.types import CalcResult
 from headway_calc.upt import IMBALANCE_THRESHOLD, MISSING_TRIP_THRESHOLD, compute_upt
 from headway_calc.vrh import compute_vrh
@@ -119,7 +123,17 @@ class MetricOutcome:
 
 @dataclass(frozen=True)
 class RunReport:
-    """Immutable report of one run_period execution."""
+    """Immutable report of one run_period execution.
+
+    ``threshold_sources`` is each threshold's provenance — the origin story
+    of every threshold value the persisted detail JSONB already carries:
+    ``"explicit"`` (a run_period argument / CLI flag), ``"settings"`` (the
+    audited app.settings row, migration 0014) or ``"default"`` (the calc
+    library's code default — used when neither of the above, i.e. when
+    app.settings does not exist yet or was skipped via read_settings=False).
+    ``imbalance_threshold`` is not an app.settings knob, so its source is
+    only ever ``"explicit"`` or ``"default"``.
+    """
 
     period_start: date
     period_end: date
@@ -128,6 +142,7 @@ class RunReport:
     layover_max_seconds: float
     missing_trip_threshold: Decimal
     imbalance_threshold: Decimal
+    threshold_sources: dict[str, str]
     positions_loaded: int
     passenger_events_loaded: int
     operated_trips_loaded: int
@@ -172,6 +187,8 @@ class RunReport:
             "layover_max_seconds": self.layover_max_seconds,
             "missing_trip_threshold": str(self.missing_trip_threshold),
             "imbalance_threshold": str(self.imbalance_threshold),
+            # Per-threshold provenance: "explicit" | "settings" | "default".
+            "threshold_sources": dict(self.threshold_sources),
             "positions_loaded": self.positions_loaded,
             "passenger_events_loaded": self.passenger_events_loaded,
             "operated_trips_loaded": self.operated_trips_loaded,
@@ -197,9 +214,32 @@ def run_period(
     layover_max_seconds: float | None = None,
     missing_trip_threshold: Decimal | float | str | None = None,
     imbalance_threshold: Decimal | float | str | None = None,
+    read_settings: bool = True,
 ) -> RunReport:
     """Run vrm_v0 (0.2.0), vrh_v0 (0.4.0) and upt_v0 (0.1.0) over one
     half-open period.
+
+    Threshold precedence (per threshold, highest wins) — recorded per
+    threshold in ``RunReport.threshold_sources``:
+
+    1. **explicit argument** to this function (a CLI flag) — ``"explicit"``;
+    2. **app.settings row** (migration 0014, the audited per-agency policy
+       surface; read via headway_calc.settings.load_policy_settings) —
+       ``"settings"``. A value set through the settings API therefore
+       governs the next run with no flag needed. Applies to the four seeded
+       knobs: coverage_threshold, gap_threshold_seconds,
+       layover_max_seconds, missing_trip_threshold (imbalance_threshold is
+       not a settings knob);
+    3. **code default** (the calc library's documented constants) —
+       ``"default"``. Reached only when app.settings does not exist (a
+       pre-migration-0014 database — logged as a WARNING, never silent) or
+       when ``read_settings=False`` (the CLI's ``--ignore-settings``, for
+       reproducing historical runs).
+
+    A settings table that exists but cannot be trusted (a knob row missing
+    or unparseable) raises a typed headway_calc.settings.SettingsError and
+    the run REFUSES before reading any canonical row — a guessed threshold
+    could certify a figure the agency never approved.
 
     Loads positions (block_id joined), passenger events and operated
     trip_ids via headway_calc.reader, computes the three metrics — VRM under
@@ -209,7 +249,7 @@ def run_period(
     per handoff 0005 with ``missing_trip_threshold`` (default 0.02 — the
     REAL FTA p. 146 threshold) and ``imbalance_threshold`` (default 0.10 —
     the p. 151 validation example) passed through; all five inputs are
-    recorded in the report — then:
+    recorded in the report with their provenance — then:
     - EVERY finding (block_unavailable infos, excised-trip and
       layover_exceeds_max warnings, blocking coverage refusals) is routed to
       dq.issues with its own severity, committed first;
@@ -225,31 +265,59 @@ def run_period(
     failure propagates after rolling back only the in-flight value phase;
     already-committed dq issues survive. Returns a frozen RunReport.
     """
-    threshold = (
-        GAP_THRESHOLD_SECONDS
-        if gap_threshold_seconds is None
-        else float(gap_threshold_seconds)
-    )
-    cov_threshold = (
-        COVERAGE_THRESHOLD
-        if coverage_threshold is None
-        else Decimal(str(coverage_threshold))
-    )
-    layover_max = (
-        LAYOVER_MAX_SECONDS
-        if layover_max_seconds is None
-        else float(layover_max_seconds)
-    )
-    missing_threshold = (
-        MISSING_TRIP_THRESHOLD
-        if missing_trip_threshold is None
-        else Decimal(str(missing_trip_threshold))
-    )
-    imbal_threshold = (
-        IMBALANCE_THRESHOLD
-        if imbalance_threshold is None
-        else Decimal(str(imbalance_threshold))
-    )
+    # Threshold resolution: explicit argument > app.settings row > code
+    # default (docstring). Reading (and refusing on a broken table) happens
+    # BEFORE any canonical row is touched. A SettingsError propagates here.
+    settings = load_policy_settings(conn) if read_settings else None
+    sources: dict[str, str] = {}
+
+    if gap_threshold_seconds is not None:
+        threshold = float(gap_threshold_seconds)
+        sources["gap_threshold_seconds"] = "explicit"
+    elif settings is not None:
+        threshold = float(settings.gap_threshold_seconds)
+        sources["gap_threshold_seconds"] = "settings"
+    else:
+        threshold = GAP_THRESHOLD_SECONDS
+        sources["gap_threshold_seconds"] = "default"
+
+    if coverage_threshold is not None:
+        cov_threshold = Decimal(str(coverage_threshold))
+        sources["coverage_threshold"] = "explicit"
+    elif settings is not None:
+        cov_threshold = settings.coverage_threshold
+        sources["coverage_threshold"] = "settings"
+    else:
+        cov_threshold = COVERAGE_THRESHOLD
+        sources["coverage_threshold"] = "default"
+
+    if layover_max_seconds is not None:
+        layover_max = float(layover_max_seconds)
+        sources["layover_max_seconds"] = "explicit"
+    elif settings is not None:
+        layover_max = float(settings.layover_max_seconds)
+        sources["layover_max_seconds"] = "settings"
+    else:
+        layover_max = LAYOVER_MAX_SECONDS
+        sources["layover_max_seconds"] = "default"
+
+    if missing_trip_threshold is not None:
+        missing_threshold = Decimal(str(missing_trip_threshold))
+        sources["missing_trip_threshold"] = "explicit"
+    elif settings is not None:
+        missing_threshold = settings.missing_trip_threshold
+        sources["missing_trip_threshold"] = "settings"
+    else:
+        missing_threshold = MISSING_TRIP_THRESHOLD
+        sources["missing_trip_threshold"] = "default"
+
+    # imbalance_threshold is not an app.settings knob: explicit or default.
+    if imbalance_threshold is not None:
+        imbal_threshold = Decimal(str(imbalance_threshold))
+        sources["imbalance_threshold"] = "explicit"
+    else:
+        imbal_threshold = IMBALANCE_THRESHOLD
+        sources["imbalance_threshold"] = "default"
     positions = load_vehicle_positions(conn, period_start, period_end)
     passenger_events = load_passenger_events(conn, period_start, period_end)
     operated_trip_ids = load_operated_trip_ids(conn, period_start, period_end)
@@ -357,6 +425,7 @@ def run_period(
         layover_max_seconds=layover_max,
         missing_trip_threshold=missing_threshold,
         imbalance_threshold=imbal_threshold,
+        threshold_sources=sources,
         positions_loaded=len(positions),
         passenger_events_loaded=len(passenger_events),
         operated_trips_loaded=len(operated_trip_ids),

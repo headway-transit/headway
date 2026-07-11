@@ -71,17 +71,21 @@ entirely. Any 401 clears the session and returns you to `/login`.
 | Route | What it does |
 |---|---|
 | `/login` | Local-account sign-in (ADR-0011). Failures announced via `role="alert"`, verbatim. |
-| `/metrics` | Computed values table: metric, unit, period, value (verbatim string), calculation name+version, certification status. Calc versions below 1.0.0 carry a "Pre-verification" tag and a plain-language banner (they are marked PRE-VERIFICATION in `services/calc/REGULATORY_TRACKER.md` — not certifiable figures yet). EVERY figure's "Details" opens its **Receipt** (`src/components/Receipt.tsx`): story line, coverage meter + exclusions, the verbatim FTA rule + citation, flags, and the walk to raw records. Certifying officials get labeled row checkboxes and the "Certify selected figures" action. |
+| `/metrics` | Computed values table: metric, unit, period, value (verbatim string), calculation name+version, certification status. Calc versions below 1.0.0 carry a "Pre-verification" tag and a plain-language banner (they are marked PRE-VERIFICATION in `services/calc/REGULATORY_TRACKER.md` — not certifiable figures yet). EVERY figure's "Details" opens its **Receipt** (`src/components/Receipt.tsx`): story line, coverage meter + exclusions, the verbatim FTA rule + citation, flags, and the walk to raw records. Read-only: the certify flow moved to `/certify`; certifying officials see a plain note linking there. |
 | `/metrics/:id/lineage` | "How this number was made": the provenance tree from `GET /metrics/values/{id}/lineage`. Default is the **lineage graph** (`src/components/LineageGraph.tsx`) — a hand-rolled accessible SVG flow (figure → processing steps → raw records; raw tier collapsed to a count node, expanding 20 at a time; arrow keys move within/between tiers, Enter toggles). A "Text view" toggle is always visible and renders the FULL nested-list tree (every node, complete record ids) — the graph is progressive enhancement, never the only path. |
 | `/reports/monthly` | Monthly ridership preview: VRM/VRH/UPT for a picked month, verbatim, with certification status, coverage summary, per-row Receipt, provenance links, simulated-data banner, and CSV export of the exact served strings. |
 | `/dq` | Data-quality queue: severity as text + icon + color (never color alone), status/owner/description, blocking issues prominent with their consequence stated. Resolve action (required resolution note) appears for data stewards and above. |
+| `/certify` | The **certification cockpit** (handoff 0007's deferred pillar): one screen showing exactly what a signature covers. Nav entry and controls appear only for the certifying official (UX only — the API enforces the role). Anatomy, in order: month/year period picker → every figure of the period as a full Receipt with a labeled consent checkbox ("Certify …") → a blockers panel counting open blocking DQ issues (reason mirrors the API's 409 wording; certify disabled while any exist; link to `/dq`) → an unmissable warning + separate acknowledge checkbox whenever any selected figure is simulated or pre-verification (acknowledgement clears on any selection change) → the attestation dialog. |
 
-The certify flow: select figures → "Certify selected figures" → a
-focus-trapped `aria-modal` dialog that lists **exactly** which figures (value,
-period, calculation + version, each with its provenance link) are being
-attested → required attestation statement → `POST /certifications`. The API
-is the system of record: success shows the certification id the API returned,
-and the table is re-read from the API rather than assumed.
+The certify flow (`src/views/CertifyView.tsx`): tick figures against their
+receipts → "Certify selected figures" → a focus-trapped `aria-modal` dialog
+that restates **exactly** which figures (metric, value verbatim, period,
+calculation + version, each with its provenance link) are being attested →
+required attestation statement → `POST /certifications`. The API is the
+system of record: success shows the certification id and audit event
+reference the API returned verbatim, and figures + blockers are re-read from
+the API rather than assumed. A 409 refusal is shown word for word with the
+`/dq` link.
 
 ## Accessibility (WCAG 2.1 AA)
 
@@ -118,8 +122,12 @@ verification. Severity is additionally encoded by distinct icon **shapes**
   focus ring (`:focus-visible`, 3px accent outline).
 - First `Tab` on any page — "Skip to main content" link.
 - Route change — focus moves to `<main>` so the new page is announced.
-- Metrics: `Space` toggles a row checkbox; `Enter` on "Certify selected
-  figures" opens the dialog.
+- Certify cockpit: `Tab` runs picker → per-figure consent checkboxes (each
+  receipt's links in between) → the blockers panel's `/dq` link → the
+  acknowledge checkbox (when warnings apply) → the certify button; `Space`
+  toggles the checkboxes; `Enter` on "Certify selected figures" opens the
+  dialog. The disabled button is skipped until its stated blockers /
+  acknowledgement are cleared.
 - Certify dialog — focus moves in on open, `Tab`/`Shift+Tab` are trapped
   inside, `Escape` closes, focus returns to the opening button (APG dialog
   pattern, hand-rolled in `src/components/Modal.tsx`).
@@ -183,19 +191,19 @@ ADR-0001 review rather than silently assumed acceptable.
 
 ```
 vite v8.1.4 building client environment for production...
-✓ 1300 modules transformed.
+✓ 1301 modules transformed.
 dist/index.html                   0.45 kB │ gzip:   0.29 kB
-dist/assets/index-Dh6dwN31.css    8.32 kB │ gzip:   2.12 kB
-dist/assets/index-DPNF6eeu.js   320.09 kB │ gzip: 101.33 kB
-✓ built in 200ms
+dist/assets/index-CATADfQP.css    8.73 kB │ gzip:   2.19 kB
+dist/assets/index-IFM_iTuE.js   326.19 kB │ gzip: 102.45 kB
+✓ built in 208ms
 ```
 
 `npm test -- --run`:
 
 ```
  RUN  v4.1.10 /home/daniel/headway/web
- Test Files  9 passed (9)
-      Tests  47 passed (47)
+ Test Files  10 passed (10)
+      Tests  51 passed (51)
 ```
 
 `node scripts/extract-quotes.mjs`:
