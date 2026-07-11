@@ -17,6 +17,11 @@ dependencies = []
 # OpenAI-compatible adapter (OllamaProvider); lazily imported, never on the
 # test or harness path.
 ollama = ["httpx>=0.27"]
+# psycopg: LGPL-3.0 with linking exception (same extra shape as
+# headway-calc[persist]) — needed ONLY by the anomaly_runner CLI process
+# boundary; every library path takes an injected DB-API connection and the
+# core stays stdlib-only.
+persist = ["psycopg[binary]>=3.1"]
 # pytest: MIT (OSI permissive).
 test = ["pytest>=8"]
 

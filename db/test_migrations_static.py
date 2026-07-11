@@ -183,6 +183,46 @@ def test_machine_api_webhook_subscriptions_with_documented_secret_risk():
     )
 
 
+def test_app_settings_seeded_with_calc_policy_knobs():
+    # Handoff 0002 open question / migration 0014: per-agency calc policy.
+    # Keys are SEEDED (never client-creatable), values are TEXT typed by a
+    # CHECK-constrained value_type, and every row carries a plain-language
+    # description with the basis of its default.
+    sql = all_sql()
+    assert re.search(r"CREATE TABLE\s+app\.settings\b", sql), (
+        "app.settings not created by any migration"
+    )
+    sql_0014 = (MIGRATIONS_DIR / "0014_app_settings.sql").read_text(encoding="utf-8")
+    assert re.search(r"setting_key\s+TEXT PRIMARY KEY", sql_0014)
+    assert re.search(r"setting_value\s+TEXT NOT NULL", sql_0014)
+    assert re.search(
+        r"value_type\s+TEXT NOT NULL CHECK \(value_type IN "
+        r"\('decimal', 'integer', 'text'\)\)",
+        sql_0014,
+    ), "app.settings.value_type must be CHECK-constrained to decimal/integer/text"
+    assert re.search(r"description\s+TEXT NOT NULL", sql_0014), (
+        "every setting must carry a plain-language description"
+    )
+    assert re.search(r"updated_by\s+TEXT NOT NULL", sql_0014)
+    # The four calc policy knobs, seeded with the calc library's defaults.
+    for key, default in (
+        ("coverage_threshold", "0.95"),
+        ("gap_threshold_seconds", "300"),
+        ("layover_max_seconds", "1800"),
+        ("missing_trip_threshold", "0.02"),
+    ):
+        assert re.search(
+            rf"'{key}',\s*'{re.escape(default)}',", sql_0014
+        ), f"app.settings must seed {key} = {default}"
+    # Basis citations: placeholders flagged as such, the FTA number cited.
+    assert "ENGINEERING PLACEHOLDER" in sql_0014, (
+        "coverage_threshold's description must flag the 0.95 placeholder"
+    )
+    assert "p. 146" in sql_0014, (
+        "missing_trip_threshold's description must cite the FTA basis (p. 146)"
+    )
+
+
 def test_immutability_triggers_present():
     sql = all_sql()
     assert re.search(r"BEFORE UPDATE OR DELETE ON raw\.records", sql)

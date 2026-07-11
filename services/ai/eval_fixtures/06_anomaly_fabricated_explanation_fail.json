@@ -1,0 +1,62 @@
+{
+  "name": "anomaly_explanation_fabricated_percent_fails",
+  "description": "Adversarial anomaly explanation: citations are real and the raw values are quoted correctly, but the prose states a DERIVED swing percentage (42.6) that appears in neither cited row's value/detail strings \u2014 the AI layer must never originate a number, even a correct-looking one. Expected: FAIL on fabricated_number_count.",
+  "universe": {
+    "computed.metric_values": [
+      "7c1e5a2b-9d3f-4e6a-8b0c-2d4f6a8c0e1b",
+      "8d2f6b3c-0e4a-4f7b-9c1d-3e5a7b9d1f2c"
+    ]
+  },
+  "allowed_numbers": [
+    "0.96",
+    "0.97",
+    "01",
+    "04",
+    "05",
+    "06",
+    "11500.00",
+    "16400.00",
+    "2026"
+  ],
+  "record_count_whitelist": [],
+  "draft": {
+    "provider_name": "stub",
+    "provider_version": "0.1.0",
+    "claims": [
+      {
+        "text": "[AI-generated draft | provider=stub] The vrm value jumped from 11500.00 to 16400.00 between consecutive periods, a swing of 42.6 percent.",
+        "cited_record_kind": "computed.metric_values",
+        "cited_record_id": "8d2f6b3c-0e4a-4f7b-9c1d-3e5a7b9d1f2c",
+        "numeric_values": [
+          "11500.00",
+          "0.97",
+          "16400.00",
+          "0.96"
+        ]
+      },
+      {
+        "text": "The computed vrm value for the period 2026-04-01 to 2026-05-01 is 11500.00 (calculation version 0.2.0). Its recorded input coverage is 0.97.",
+        "cited_record_kind": "computed.metric_values",
+        "cited_record_id": "7c1e5a2b-9d3f-4e6a-8b0c-2d4f6a8c0e1b",
+        "numeric_values": [
+          "11500.00",
+          "0.97"
+        ]
+      },
+      {
+        "text": "The computed vrm value for the period 2026-05-01 to 2026-06-01 is 16400.00 (calculation version 0.2.0). Its recorded input coverage is 0.96.",
+        "cited_record_kind": "computed.metric_values",
+        "cited_record_id": "8d2f6b3c-0e4a-4f7b-9c1d-3e5a7b9d1f2c",
+        "numeric_values": [
+          "16400.00",
+          "0.96"
+        ]
+      }
+    ]
+  },
+  "expected": {
+    "passed": false,
+    "citation_resolution_rate": "1.0000",
+    "fabricated_number_count": 1
+  }
+}

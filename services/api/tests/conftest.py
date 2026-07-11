@@ -68,6 +68,7 @@ class FakeConn:
         self.audit_events: list[dict] = []
         self.api_keys: dict[str, dict] = {}
         self.webhook_subscriptions: dict[str, dict] = {}
+        self.settings: dict[str, dict] = {}
         self._next_event_id = 1
         self.executed: list[tuple[str, tuple]] = []
         self.tx_log: list[str] = []
@@ -84,6 +85,7 @@ class FakeConn:
                 self.audit_events,
                 self.api_keys,
                 self.webhook_subscriptions,
+                self.settings,
                 self._next_event_id,
             )
         )
@@ -98,6 +100,7 @@ class FakeConn:
                 self.audit_events,
                 self.api_keys,
                 self.webhook_subscriptions,
+                self.settings,
                 self._next_event_id,
             ) = snapshot
             self.tx_log.append("rollback")
@@ -291,6 +294,32 @@ class FakeConn:
                 ]
             )
 
+        # -- per-agency settings (migration 0014) ----------------------------
+        if q.startswith("SELECT setting_key, setting_value, value_type"):
+            if "WHERE setting_key = %s" in q:
+                rows = [self.settings[params[0]]] if params[0] in self.settings else []
+            else:
+                rows = sorted(self.settings.values(), key=lambda s: s["setting_key"])
+            return FakeCursor(
+                [
+                    (
+                        s["setting_key"], s["setting_value"], s["value_type"],
+                        s["description"], s["updated_by"], s["updated_at"],
+                    )
+                    for s in rows
+                ]
+            )
+
+        if q.startswith("UPDATE app.settings SET setting_value"):
+            new_value, updated_by, setting_key = params
+            setting = self.settings.get(setting_key)
+            if setting is None:
+                return FakeCursor([])
+            setting["setting_value"] = new_value
+            setting["updated_by"] = updated_by
+            setting["updated_at"] = dt.datetime.now(UTC)
+            return FakeCursor([(setting["updated_at"],)])
+
         # -- webhook subscriptions (handoff 0006) ---------------------------
         if q.startswith("INSERT INTO auth.webhook_subscriptions"):
             url, event_types, secret, created_by = params
@@ -461,6 +490,45 @@ class FakeConn:
         self.webhook_subscriptions[sub["subscription_id"]] = sub
         return sub
 
+    def add_setting(self, setting_key, setting_value, value_type,
+                    description="A policy setting.", updated_by="migration:0014"):
+        self.settings[setting_key] = {
+            "setting_key": setting_key,
+            "setting_value": setting_value,
+            "value_type": value_type,
+            "description": description,
+            "updated_by": updated_by,
+            "updated_at": dt.datetime(2026, 7, 1, 0, 0, tzinfo=UTC),
+        }
+        return self.settings[setting_key]
+
+    def seed_default_settings(self):
+        """The four calc policy knobs exactly as migration 0014 seeds them."""
+        self.add_setting(
+            "coverage_threshold", "0.95", "decimal",
+            description=(
+                "Coverage certifiability line. 0.95 is an ENGINEERING "
+                "PLACEHOLDER, not an FTA number (REGULATORY_TRACKER.md)."
+            ),
+        )
+        self.add_setting(
+            "gap_threshold_seconds", "300", "integer",
+            description="Telemetry-gap threshold (engineering default).",
+        )
+        self.add_setting(
+            "layover_max_seconds", "1800", "integer",
+            description=(
+                "Layover cap; data-informed + Exhibit 35 aligned, "
+                "per-agency configurable."
+            ),
+        )
+        self.add_setting(
+            "missing_trip_threshold", "0.02", "decimal",
+            description=(
+                "The REAL FTA threshold (2026 NTD Policy Manual p. 146)."
+            ),
+        )
+
     def add_edge(self, output_kind, output_id, transform_name, transform_version,
                  input_kind, input_id):
         self.lineage_edges.append(
@@ -529,6 +597,7 @@ def fake_db():
     db.add_user("petra", "report_preparer")
     db.add_user("cora", "certifying_official")
     db.add_user("dora", "viewer", disabled=True)
+    db.seed_default_settings()
     return db
 
 

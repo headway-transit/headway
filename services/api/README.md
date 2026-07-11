@@ -23,6 +23,9 @@ preserved end to end; floating point never touches a figure).
 | GET | `/machine/keys` | `certifying_official` | Lists keys: prefix, name, scopes, source label, created/revoked — never hashes, never key material. |
 | DELETE | `/machine/keys/{id}` | `certifying_official` | Revokes a key (sets `revoked_at`; rows are never deleted — audit history). Audited. |
 | POST | `/ingest/tides/passenger-events` | machine key, scope `ingest:tides` | Push a TIDES passenger_events CSV (≤ 32 MiB) over HTTPS. Content-addressed (sha256 → `record_id`), stored to MinIO, produced as a v0 envelope to `raw.tides.passenger_events` — store before produce. 202 `{record_id, parse_status}`; malformed is still landed + produced, flagged. Audited per request. |
+| GET | `/machine/metrics` | machine key, scope `read:metrics` | Machine read of computed values: same filters and row shape as `GET /metrics/values` (same query function — the two cannot drift). `value` a string, `detail` verbatim. Each row's lineage: feed its `metric_value_id` to `GET /metrics/values/{id}/lineage`. Rate-limited per key; every read audited, actor `key:<prefix>`. |
+| GET | `/settings` | any signed-in role | The per-agency policy settings (migration 0014 seeds them), each with its plain-language description, basis, and who last changed it. |
+| PUT | `/settings/{key}` | `certifying_official` only | Change one policy setting. Value validated against the setting's `value_type` (decimal parsed via `Decimal` — never float; 422 in plain language); old→new audited; unknown key 404 (settings are seeded, never client-creatable). |
 | POST | `/webhooks` | `certifying_official` | Subscribe a URL to `certification.created`. The HMAC secret is accepted here and never returned by anything. Audited. |
 | GET | `/webhooks` | `certifying_official` | Lists subscriptions (secret-free). |
 | DELETE | `/webhooks/{id}` | `certifying_official` | Removes a subscription (soft revoke). Audited. |
@@ -70,14 +73,29 @@ session JWTs.
    to defend against and a fast hash is the correct at-rest protection
    (see `headway_api/machine_auth.py` docstring).
 2. **Use**: `Authorization: Bearer hwk_...` on machine endpoints. Scopes are
-   deny-by-default (`ingest:tides`, `read:metrics` — the latter is issued but
-   has no endpoint consumer yet; the machine-read endpoint is a next
-   increment). Ingest keys are bound to a `source_label` — the ONLY envelope
+   deny-by-default (`ingest:tides` → the ingest endpoint, `read:metrics` →
+   `GET /machine/metrics`). Ingest keys are bound to a `source_label` — the ONLY envelope
    `source` they can write (a simulator key gets `tides_simulated`; a
    client-supplied source is ignored). Success and denial are both audited,
    actor `key:<key_prefix>`.
 3. **Revoke**: `DELETE /machine/keys/{id}` sets `revoked_at`; a revoked key
    gets a plain-language 401 (audited). Keys are never deleted.
+
+**Machine read (`GET /machine/metrics`, scope `read:metrics`)**: computed
+values for dashboards and downstream agency systems, without a human session.
+Same filters (`metric`, `period_start`, `period_end`) and exactly the same
+row shape as the human `GET /metrics/values` — both endpoints call the one
+shared query function, so they can never drift: `value` is a **string**
+(exact NUMERIC, never float) and `detail` is served **verbatim** as the calc
+library persisted it (ratio/factor strings stay strings; simulated-source
+flags shown). **Lineage**: each row's `metric_value_id` is the input to the
+existing "explain this number" endpoint,
+`GET /metrics/values/{metric_value_id}/lineage`; that endpoint takes a human
+session token in v0 — accepting `read:metrics` keys there too is a follow-up
+increment. Every successful read is audited (action `machine_read_metrics`,
+actor `key:<key_prefix>`, filters + row count in detail — never the figures);
+denials and auth failures are audited by the shared machine-auth dependency.
+Spends from the same per-key token bucket as ingest.
 
 **Rate limits**: in-process token bucket, 60 req/min per key (and per client
 IP on the public endpoint), 429 + `Retry-After`. Single-instance limitation
@@ -126,8 +144,54 @@ curl -s -X POST https://headway.agency.example/webhooks \
        "event_types": ["certification.created"],
        "secret": "<random shared secret, min 16 chars>"}'
 
+# Machine read of computed values (key issued with scope read:metrics)
+curl -s "https://headway.agency.example/machine/metrics?metric=vrm&period_start=2026-06-01" \
+  -H "Authorization: Bearer hwk_..."
+
 # Public open data — no auth at all
 curl -s https://headway.agency.example/public/metrics/certified
+```
+
+## Per-agency settings (migration 0014)
+
+`app.settings` is the ONE audited place an agency sets calculation policy.
+Migration 0014 seeds the four calc policy knobs — settings are **never
+client-creatable** (unknown key → 404):
+
+| Key | Default | Type | Basis |
+| --- | --- | --- | --- |
+| `coverage_threshold` | `0.95` | decimal | ENGINEERING PLACEHOLDER, not an FTA number (`services/calc/REGULATORY_TRACKER.md`); the measured MBTA trip-level structural coverage is ~0.914 — the reason this is per-agency policy. |
+| `gap_threshold_seconds` | `300` | integer | Engineering default for the telemetry-gap rule (handoff 0002). |
+| `layover_max_seconds` | `1800` | integer | Data-informed (97.3% of measured MBTA in-block intervals under it) and aligned with NTD Policy Manual Exhibit 35's out-of-service exclusion; not an FTA-published number. |
+| `missing_trip_threshold` | `0.02` | decimal | The REAL FTA threshold — 2026 NTD Policy Manual p. 146 (≤ 2% missing trips: factor up; above: statistician approval, a human workflow, so the calc refuses). |
+
+Any signed-in role reads (`GET /settings` — policy must be visible to the
+people it governs); changing one (`PUT /settings/{key}`) is gated to exactly
+the **certifying official** (v0 admin, the machine-keys precedent), because
+these knobs move the certifiability line itself. Values are strings validated
+against the row's `value_type` — `decimal` parses via `Decimal` (floating
+point never touches a policy number), `integer` must be a whole number; a
+value that does not parse is a plain-language 422 and changes nothing. Every
+change is audited with the **old and new value** in the audit detail, in the
+same transaction as the update.
+
+**DOCUMENTED LIMITATION — the calc runner does not read these yet.** Runs
+are still governed by the runner's explicit CLI flags
+(`--coverage-threshold`, `--gap-threshold-seconds`, `--layover-max-seconds`,
+`--missing-trip-threshold`); wiring runner-reads-settings is the follow-up
+increment (see the Response on handoff 0002). This surface exists now so
+agencies have one audited place to set policy, and so the web team can build
+against a stable contract.
+
+```sh
+# Read the policy settings (any signed-in role)
+curl -s https://headway.agency.example/settings \
+  -H "Authorization: Bearer $SESSION_TOKEN"
+
+# Change one (certifying official; old→new lands in audit.events)
+curl -s -X PUT https://headway.agency.example/settings/coverage_threshold \
+  -H "Authorization: Bearer $SESSION_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"value": "0.90"}'
 ```
 
 ## Audit guarantees
@@ -165,7 +229,7 @@ python3 -m pytest tests/ -q
 
 ## Verification status
 
-- `pytest tests/ -q`: **76 passed** (2026-07-10, Python 3.12, this repo) —
+- `pytest tests/ -q`: **90 passed** (2026-07-10, Python 3.12, this repo) —
   covers login/token lifecycle, password-hash round trip, expired/invalid
   token 401s, role denials (viewer cannot certify), certification happy path
   (cert row + status update + audit event in one transaction), blocking-DQ
@@ -179,10 +243,18 @@ python3 -m pytest tests/ -q
   malformed CSV still landed + produced, 32 MiB 413, unconfigured deps 503,
   per-key and per-IP 429 with Retry-After, webhook HMAC recomputed and
   verified in test, one retry, delivery failure never failing the 201, and
-  the public endpoint serving only certified figures with no auth.
-- `openapi.json` generated: OpenAPI 3.1.0, 12 paths.
+  the public endpoint serving only certified figures with no auth;
+  plus the machine read (`GET /machine/metrics`): ingest-only key 403
+  (audited scope denial), revoked key 401 (audited), human session token
+  401 (credential-type separation), values/detail byte-identical to the
+  human endpoint's response, filters, per-key 429 with Retry-After, and
+  the per-request `machine_read_metrics` audit event with actor
+  `key:<prefix>`; and the settings surface: seeded reads for any role,
+  writer gated to certifying_official, decimal/integer 422s in plain
+  language, old→new in the audit detail, unknown key 404.
+- `openapi.json` generated: OpenAPI 3.1.0, 15 paths.
 - **PENDING**: live verification against real PostgreSQL/TimescaleDB,
-  MinIO, and Kafka (migrations 0001–0013 applied, psycopg connection,
+  MinIO, and Kafka (migrations 0001–0014 applied, psycopg connection,
   `uvicorn` boot, a real ingest → envelope consumed). The authoring
   environment must not touch the live stack; the first environment cleared
   to do so must run the suite against live services before this increment is

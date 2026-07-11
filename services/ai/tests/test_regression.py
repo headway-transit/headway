@@ -55,6 +55,27 @@ class TestShippedFixtureVerdicts:
         assert report.citation_resolution_rate == "0.5000"
         assert report.fabricated_number_count == 0
 
+    def test_anomaly_fixtures_ship(self):
+        names = {load_fixture(path)["name"] for path in FIXTURES}
+        assert {
+            "anomaly_swing_explanation_grounded_passes",
+            "anomaly_explanation_fabricated_percent_fails",
+        } <= names
+
+    def test_anomaly_grounded_explanation_passes(self):
+        report = run_fixture(fixture_by_name("anomaly_swing_explanation_grounded_passes"))
+        assert report.passed is True
+        assert report.citation_resolution_rate == "1.0000"
+        assert report.fabricated_number_count == 0
+
+    def test_anomaly_fabricated_percent_fails(self):
+        # Citations real, raw values quoted correctly — but the prose states
+        # a DERIVED swing percentage found in no cited row. Must fail.
+        report = run_fixture(fixture_by_name("anomaly_explanation_fabricated_percent_fails"))
+        assert report.passed is False
+        assert report.citation_resolution_rate == "1.0000"
+        assert report.fabricated_number_count == 1
+
 
 class TestGateBehavior:
     def test_gate_exits_zero_on_shipped_fixtures(self, capsys):

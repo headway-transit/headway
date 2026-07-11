@@ -82,14 +82,15 @@ def _detail_as_dict(raw: object) -> dict[str, Any]:
     return json.loads(raw)
 
 
-@router.get("/metrics/values", response_model=list[MetricValue])
-def list_metric_values(
-    metric: Optional[str] = Query(default=None, description="e.g. 'vrm' or 'vrh'"),
-    period_start: Optional[dt.date] = Query(default=None),
-    period_end: Optional[dt.date] = Query(default=None),
-    identity: Identity = Depends(require_authenticated),
-    db=Depends(get_db),
+def query_metric_values(
+    db,
+    metric: Optional[str],
+    period_start: Optional[dt.date],
+    period_end: Optional[dt.date],
 ) -> list[MetricValue]:
+    """The one query behind every metric-values read (human, machine): same
+    filters, same shape, value as a Decimal-exact string, detail verbatim.
+    Shared so the machine endpoint can never drift from the human one."""
     clauses: list[str] = []
     params: list[object] = []
     if metric is not None:
@@ -123,6 +124,17 @@ def list_metric_values(
         )
         for r in rows
     ]
+
+
+@router.get("/metrics/values", response_model=list[MetricValue])
+def list_metric_values(
+    metric: Optional[str] = Query(default=None, description="e.g. 'vrm' or 'vrh'"),
+    period_start: Optional[dt.date] = Query(default=None),
+    period_end: Optional[dt.date] = Query(default=None),
+    identity: Identity = Depends(require_authenticated),
+    db=Depends(get_db),
+) -> list[MetricValue]:
+    return query_metric_values(db, metric, period_start, period_end)
 
 
 # Recursive CTE: walk lineage.edges downward from the metric value until the

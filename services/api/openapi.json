@@ -431,6 +431,175 @@
         }
       }
     },
+    "/machine/metrics": {
+      "get": {
+        "tags": [
+          "machine"
+        ],
+        "summary": "Machine List Metric Values",
+        "description": "Computed values for machine consumers (scope ``read:metrics``): same\nfilters and shape as the human ``GET /metrics/values``. Each row's\nlineage is available from ``GET /metrics/values/{metric_value_id}/\nlineage`` (see the module docstring for the v0 credential note).",
+        "operationId": "machine_list_metric_values_machine_metrics_get",
+        "parameters": [
+          {
+            "name": "metric",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "e.g. 'vrm' or 'vrh'",
+              "title": "Metric"
+            },
+            "description": "e.g. 'vrm' or 'vrh'"
+          },
+          {
+            "name": "period_start",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Period Start"
+            }
+          },
+          {
+            "name": "period_end",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Period End"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/MetricValue"
+                  },
+                  "title": "Response Machine List Metric Values Machine Metrics Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/settings": {
+      "get": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "List Settings",
+        "description": "Every agency policy setting, with its plain-language description and\nwho last changed it. Any signed-in role may read \u2014 policy must be\nvisible to the people it governs.",
+        "operationId": "list_settings_settings_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Setting"
+                  },
+                  "type": "array",
+                  "title": "Response List Settings Settings Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/settings/{setting_key}": {
+      "put": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Update Setting",
+        "description": "Change one policy setting (certifying official only). The old and new\nvalues land together in the audit trail; the change and its audit event\ncommit in one transaction.",
+        "operationId": "update_setting_settings__setting_key__put",
+        "parameters": [
+          {
+            "name": "setting_key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Setting Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateSettingRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateSettingResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/ingest/tides/passenger-events": {
       "post": {
         "tags": [
@@ -1312,6 +1481,45 @@
         ],
         "title": "RevokeSubscriptionResponse"
       },
+      "Setting": {
+        "properties": {
+          "setting_key": {
+            "type": "string",
+            "title": "Setting Key"
+          },
+          "setting_value": {
+            "type": "string",
+            "title": "Setting Value"
+          },
+          "value_type": {
+            "type": "string",
+            "title": "Value Type"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "updated_by": {
+            "type": "string",
+            "title": "Updated By"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "setting_key",
+          "setting_value",
+          "value_type",
+          "description",
+          "updated_by",
+          "updated_at"
+        ],
+        "title": "Setting"
+      },
       "SubscriptionResponse": {
         "properties": {
           "subscription_id": {
@@ -1362,6 +1570,64 @@
         ],
         "title": "SubscriptionResponse",
         "description": "Subscription shape served back \u2014 deliberately secret-free."
+      },
+      "UpdateSettingRequest": {
+        "properties": {
+          "value": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Value"
+          }
+        },
+        "type": "object",
+        "required": [
+          "value"
+        ],
+        "title": "UpdateSettingRequest"
+      },
+      "UpdateSettingResponse": {
+        "properties": {
+          "setting_key": {
+            "type": "string",
+            "title": "Setting Key"
+          },
+          "setting_value": {
+            "type": "string",
+            "title": "Setting Value"
+          },
+          "value_type": {
+            "type": "string",
+            "title": "Value Type"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "updated_by": {
+            "type": "string",
+            "title": "Updated By"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "audit_event_id": {
+            "type": "integer",
+            "title": "Audit Event Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "setting_key",
+          "setting_value",
+          "value_type",
+          "description",
+          "updated_by",
+          "updated_at",
+          "audit_event_id"
+        ],
+        "title": "UpdateSettingResponse"
       },
       "ValidationError": {
         "properties": {

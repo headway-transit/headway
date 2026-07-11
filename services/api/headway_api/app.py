@@ -16,7 +16,16 @@ from fastapi import FastAPI
 from . import __version__, auth, webhooks
 from .db import lifespan
 from .machine_auth import RateLimiter
-from .routers import certify, dq, ingest, machine_keys, metrics, public
+from .routers import (
+    certify,
+    dq,
+    ingest,
+    machine_keys,
+    machine_read,
+    metrics,
+    public,
+    settings as settings_router,
+)
 
 
 @dataclass(frozen=True)
@@ -101,6 +110,8 @@ def create_app(
     app.include_router(certify.router)
     app.include_router(dq.router)
     app.include_router(machine_keys.router)
+    app.include_router(machine_read.router)
+    app.include_router(settings_router.router)
     app.include_router(ingest.router)
     app.include_router(webhooks.router)
     app.include_router(public.router)

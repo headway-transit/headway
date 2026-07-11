@@ -35,3 +35,37 @@ The 2026-07-09 live run proved vrm_v0/vrh_v0 0.1.0's all-or-nothing gap refusal 
   - Full workflow: certify refused (409, 246 open blocking) → steward resolved 246 with documented resolutions → certification 201 → **verified in psql**: both metrics `certified`, 1 certification row, audit trail dq_resolve ×246 + certify ×1.
   - **Critical bug found by live verification and fixed:** the API's psycopg3 connection defaulted to `autocommit=False`; the first read opened an implicit transaction nothing committed, so every router `transaction()` block nested as a savepoint — the API returned 201 while zero rows reached disk (a certification that would have evaporated on restart). Fix: `autocommit=True` in the lifespan (db.py) + regression tests (`test_transaction_discipline.py`, 39 API tests green) including a fake that honestly models psycopg3 nesting semantics. The unit-test fake had masked this — a CI integration job against a real PostgreSQL (Actions service container) is the standing follow-up.
 - Backend response to rule 4 (compose-with-certify check): confirmed live — sub-threshold runs persist nothing; the passing run carried only warnings; certification became reachable exactly when blocking issues were resolved.
+
+## Response — backend-engineer (per-agency config surface, 2026-07-10)
+
+The first Open Question's config half is now built: migration
+`db/migrations/0014_app_settings.sql` creates `app.settings` and SEEDS the
+four calc policy knobs with plain-language descriptions citing each default's
+basis — `coverage_threshold` `0.95` (ENGINEERING PLACEHOLDER, not an FTA
+number, per REGULATORY_TRACKER.md; the measured MBTA trip-level structural
+coverage ~0.914 is why this must be per-agency policy), `gap_threshold_seconds`
+`300` (engineering default, this handoff's rule 2), `layover_max_seconds`
+`1800` (data-informed + Exhibit 35-aligned, per-agency configurable per the
+tracker), and `missing_trip_threshold` `0.02` (the REAL FTA threshold, 2026
+NTD Policy Manual p. 146). API surface: `GET /settings` (any signed-in role —
+policy visible to the people it governs) and `PUT /settings/{key}`
+(certifying_official only; value validated against the row's `value_type`,
+decimal via `Decimal` — floating point never touches a policy number; plain-
+language 422 on a bad value; old→new in the audit detail; unknown key 404 —
+settings are seeded, never client-creatable).
+
+**EXPLICIT LIMITATION — the calc runner does NOT yet read `app.settings`.**
+Every run is still governed by the runner's explicit CLI flags
+(`--coverage-threshold`, `--gap-threshold-seconds`, `--layover-max-seconds`,
+`--missing-trip-threshold`); a value set through the API changes no
+calculation until the runner-reads-settings increment wires the two together
+(owner: Backend, next increment; the NTD role's placeholder-verification
+question above stays open regardless). This surface ships first so agencies
+have ONE audited place to set policy and the web team a stable contract.
+
+Verification (2026-07-10, Python 3.12, fakes only — live DB/stack untouched;
+migration 0014 NOT applied live by this work): `services/api` suite 90
+passed (76 pre-existing + 14 new); `db` static migration suite 13 passed
+(new `test_app_settings_seeded_with_calc_policy_knobs`); `openapi.json`
+regenerated — 15 paths, now including `/settings`, `/settings/{setting_key}`,
+and `/machine/metrics` (the `read:metrics` consumer from handoff 0006).
