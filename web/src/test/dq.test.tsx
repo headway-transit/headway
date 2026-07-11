@@ -198,6 +198,131 @@ describe("/dq", () => {
     await expectNoAxeViolations();
   });
 
+  it("records optional time spent (whole minutes), shows it on the resolved card, and totals documented effort in the header", async () => {
+    signInAs("data_steward");
+    const calls = mockApi({
+      "GET /dq/issues": { status: 200, body: [blockingIssue, resolvedIssue] },
+      "POST /dq/issues/dq-1/resolve": {
+        status: 200,
+        body: {
+          issue_id: "dq-1",
+          status: "resolved",
+          resolved_at: "2026-03-05T10:00:00Z",
+          resolution: "Radio outage confirmed.",
+          resolution_minutes: 30,
+          audit_event_id: 12,
+        },
+      },
+    });
+    const user = userEvent.setup();
+    renderApp("/dq");
+
+    // The fixture's 90 recorded minutes already show as ≈1.5 hours — UI
+    // arithmetic on effort metadata (workflow minutes), never a figure.
+    const summary = await screen.findByRole("region", {
+      name: "Queue at a glance",
+    });
+    expect(summary).toHaveTextContent(
+      "≈1.5 hours of documented data-quality work",
+    );
+
+    await user.click(screen.getByRole("button", { name: /^Resolve:/ }));
+
+    // The effort field is labeled in plain language, with the why.
+    const minutesField = screen.getByLabelText(
+      "Time spent resolving (minutes)",
+    );
+    expect(
+      screen.getByText(
+        "Optional. A whole number of minutes, like 45. Recording it helps show the work behind data quality.",
+      ),
+    ).toBeInTheDocument();
+
+    // A non-numeric entry is refused with an announced explanation and the
+    // issue stays unresolved.
+    await user.type(
+      screen.getByLabelText("How was this issue resolved?"),
+      "Radio outage confirmed.",
+    );
+    await user.type(minutesField, "twenty");
+    await user.click(screen.getByRole("button", { name: "Mark as resolved" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Time spent must be a whole number of minutes (like 45), or left blank.",
+    );
+    expect(calls.filter((c) => c.method === "POST")).toHaveLength(0);
+
+    // A whole number is accepted and sent as an integer.
+    await user.clear(minutesField);
+    await user.type(minutesField, "30");
+    await user.click(screen.getByRole("button", { name: "Mark as resolved" }));
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "is now resolved",
+    );
+    const post = calls.find((c) => c.method === "POST");
+    expect(post?.body).toEqual({
+      resolution: "Radio outage confirmed.",
+      resolution_minutes: 30,
+    });
+
+    // The resolved card displays the recorded effort…
+    const card = screen
+      .getByRole("heading", { name: /Bus 1207/ })
+      .closest("article") as HTMLElement;
+    expect(card).toHaveTextContent("Time spent resolving");
+    expect(card).toHaveTextContent("30 minutes");
+    // …and the header total now covers 90 + 30 minutes = 2.0 hours.
+    expect(summary).toHaveTextContent(
+      "≈2.0 hours of documented data-quality work",
+    );
+
+    await expectNoAxeViolations();
+  });
+
+  it("keeps the effort field optional: a blank field sends no resolution_minutes and shows no total when none are recorded", async () => {
+    signInAs("data_steward");
+    const calls = mockApi({
+      "GET /dq/issues": { status: 200, body: [blockingIssue] },
+      "POST /dq/issues/dq-1/resolve": {
+        status: 200,
+        body: {
+          issue_id: "dq-1",
+          status: "resolved",
+          resolved_at: "2026-03-05T10:00:00Z",
+          resolution: "Checked and settled.",
+          resolution_minutes: null,
+          audit_event_id: 13,
+        },
+      },
+    });
+    const user = userEvent.setup();
+    renderApp("/dq");
+
+    // No recorded minutes anywhere: no effort total is claimed.
+    const summary = await screen.findByRole("region", {
+      name: "Queue at a glance",
+    });
+    expect(summary).not.toHaveTextContent("documented data-quality work");
+
+    await user.click(screen.getByRole("button", { name: /^Resolve:/ }));
+    await user.type(
+      screen.getByLabelText("How was this issue resolved?"),
+      "Checked and settled.",
+    );
+    await user.click(screen.getByRole("button", { name: "Mark as resolved" }));
+
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "is now resolved",
+    );
+    // The body carries NO resolution_minutes key — blank means unstated.
+    const post = calls.find((c) => c.method === "POST");
+    expect(post?.body).toEqual({ resolution: "Checked and settled." });
+    // The card claims no effort it does not have.
+    const card = screen
+      .getByRole("heading", { name: /Bus 1207/ })
+      .closest("article") as HTMLElement;
+    expect(card).not.toHaveTextContent("Time spent resolving");
+  });
+
   it("shows a resolve refusal from the API verbatim", async () => {
     signInAs("data_steward");
     const refusal =

@@ -16,17 +16,22 @@
 
 import { Fragment, useEffect, useId, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { ApiError, listMetricValues } from "../api/client";
-import type { MetricValue } from "../api/types";
+import { ApiError, getMr20Report, listMetricValues } from "../api/client";
+import type { Mr20Fetch } from "../api/client";
+import type { MetricValue, Mr20Cell, Mr20Cells } from "../api/types";
 import { Receipt } from "../components/Receipt";
 import { SimulatedBadge } from "../components/SimulatedBadge";
 import { copy } from "../copy";
 import { coverageSummary, isPreVerification, isSimulated } from "../detail";
+import { ratioToPercentString } from "../format";
 import { buildMonthlyRidershipCsv } from "../reports/csv";
 import { monthPeriod, previousMonth } from "../reports/period";
 
 /** The metrics of the Monthly Ridership preview, in display order. */
 const REPORT_METRICS = ["vrm", "vrh", "upt"] as const;
+
+/** The MR-20 measures, in the package's column order. */
+const MR20_MEASURES = ["upt", "vrm", "vrh", "voms"] as const;
 
 function metricLabel(code: string): string {
   return copy.metricLabels[code] ?? code;
@@ -34,6 +39,92 @@ function metricLabel(code: string): string {
 
 function unitLabel(code: string): string {
   return copy.unitLabels[code] ?? code;
+}
+
+/**
+ * One flag badge on an MR-20 cell. "simulated" reuses the SimulatedBadge
+ * (same rule, same rendering everywhere); known flags get their
+ * plain-language label plus a visually-hidden note; unknown flags are shown
+ * raw — a flag the UI does not know is displayed, never hidden.
+ */
+function Mr20FlagBadge({ flag }: { flag: string }) {
+  const key = flag.toLowerCase().replace(/-/g, "_");
+  if (key === "simulated") return <SimulatedBadge />;
+  const label = copy.report.mr20.flagLabels[key] ?? flag;
+  const note = copy.report.mr20.flagNotes[key];
+  return (
+    <span className="tag mr20-flag">
+      {label}
+      {note && <span className="visually-hidden"> — {note}</span>}
+    </span>
+  );
+}
+
+/**
+ * One MR-20 value cell. The figure is the package's string VERBATIM; a null
+ * value shows the package's plain-language reason instead. Flags and
+ * certification status ride with the figure, and any figure that has a
+ * metric_value_id keeps its provenance path.
+ */
+function Mr20CellView({
+  cell,
+  measure,
+  modeLabel,
+}: {
+  cell: Mr20Cell | undefined;
+  measure: string;
+  modeLabel: string;
+}) {
+  if (!cell) {
+    return <td>{copy.report.mr20.cellMissing}</td>;
+  }
+  if (cell.value === null) {
+    // A missing figure is stated in the package's own words, plus any flags
+    // (e.g. the rail pending-D2 hold) — never a silent blank.
+    return (
+      <td>
+        {cell.reason ?? copy.report.mr20.noReason}
+        {cell.flags.map((flag) => (
+          <Fragment key={flag}>
+            {" "}
+            <Mr20FlagBadge flag={flag} />
+          </Fragment>
+        ))}
+      </td>
+    );
+  }
+  return (
+    <td>
+      {/* The figure, verbatim as the API packaged it. */}
+      <span className="figure">{cell.value}</span>{" "}
+      <span className="mr20-unit">
+        {copy.unitLabels[cell.unit] ?? cell.unit}
+      </span>
+      <span className="mr20-cell-meta">
+        {cell.certification_status && (
+          <span className={`tag ${cell.certification_status}`}>
+            {cell.certification_status}
+          </span>
+        )}
+        {cell.flags.map((flag) => (
+          <Mr20FlagBadge key={flag} flag={flag} />
+        ))}
+        {typeof cell.coverage === "string" && (
+          <span>
+            {copy.report.mr20.cellCoverage(ratioToPercentString(cell.coverage))}
+          </span>
+        )}
+        {cell.metric_value_id && (
+          <Link to={`/metrics/${cell.metric_value_id}/lineage`}>
+            {copy.metrics.explainLink}
+            <span className="visually-hidden">
+              {` — ${copy.metricLabels[measure] ?? measure}, ${modeLabel}`}
+            </span>
+          </Link>
+        )}
+      </span>
+    </td>
+  );
 }
 
 export function MonthlyReportView() {
@@ -48,6 +139,11 @@ export function MonthlyReportView() {
   > | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [openDetails, setOpenDetails] = useState<Set<string>>(new Set());
+  /** Which report section is shown: the ridership preview or MR-20. */
+  const [section, setSection] = useState<"preview" | "mr20">("preview");
+  const [mr20, setMr20] = useState<Mr20Fetch | null>(null);
+  const [mr20Error, setMr20Error] = useState<string | null>(null);
+  const [caveatsOpen, setCaveatsOpen] = useState(false);
 
   const toggleDetails = (id: string) => {
     setOpenDetails((prev) => {
@@ -92,6 +188,27 @@ export function MonthlyReportView() {
     };
   }, [year, month]);
 
+  // The MR-20 package is fetched only when its section is open (and
+  // refetched when the picked month changes while it is open).
+  useEffect(() => {
+    if (section !== "mr20") return;
+    let cancelled = false;
+    setMr20(null);
+    setMr20Error(null);
+    setCaveatsOpen(false);
+    getMr20Report(`${year}-${String(month).padStart(2, "0")}`)
+      .then((result) => {
+        if (!cancelled) setMr20(result);
+      })
+      .catch((err) => {
+        if (!cancelled)
+          setMr20Error(err instanceof ApiError ? err.message : String(err));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [section, year, month]);
+
   const allValues = REPORT_METRICS.flatMap(
     (metric) => byMetric?.[metric] ?? [],
   );
@@ -110,6 +227,25 @@ export function MonthlyReportView() {
       String(year),
       String(month).padStart(2, "0"),
     );
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleDownloadMr20 = () => {
+    if (!mr20) return;
+    // The saved file is the FETCHED RESPONSE TEXT, byte for byte (mr20.raw).
+    // Re-serializing the parsed object (JSON.stringify) could reorder keys
+    // or reformat values, so it is never used here — byte-identity is
+    // asserted in tests.
+    const blob = new Blob([mr20.raw], {
+      type: "application/json;charset=utf-8",
+    });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = copy.report.mr20.downloadFileName(mr20.pkg.month);
     document.body.appendChild(anchor);
     anchor.click();
     anchor.remove();
@@ -155,14 +291,144 @@ export function MonthlyReportView() {
         </div>
       </div>
 
-      {error && (
+      {/* Section toggle (the ChartCard / lineage pattern: aria-pressed
+          buttons; the pressed one is filled AND keeps its label). */}
+      <div
+        className="view-toggle"
+        role="group"
+        aria-label={copy.report.mr20.sectionToggleLabel}
+      >
+        <button
+          type="button"
+          aria-pressed={section === "preview"}
+          onClick={() => setSection("preview")}
+        >
+          {copy.report.mr20.previewTab}
+        </button>
+        <button
+          type="button"
+          aria-pressed={section === "mr20"}
+          onClick={() => setSection("mr20")}
+        >
+          {copy.report.mr20.mr20Tab}
+        </button>
+      </div>
+
+      {section === "mr20" && (
+        <section aria-label={copy.report.mr20.heading}>
+          <h2>{copy.report.mr20.heading}</h2>
+          <p>{copy.report.mr20.intro}</p>
+          {mr20Error && (
+            <div role="alert" className="alert">
+              {mr20Error}
+            </div>
+          )}
+          {!mr20 && !mr20Error && <p>{copy.loading}</p>}
+          {mr20 && (
+            <>
+              {/* The package's own NOT-REPORTABLE banner, verbatim and
+                  unmissable (the existing alert pattern). */}
+              {mr20.pkg.banner && (
+                <div className="alert mr20-banner">{mr20.pkg.banner}</div>
+              )}
+              {/* The citation line, verbatim from the package. */}
+              <p className="mr20-citation">{mr20.pkg.citation}</p>
+              <div
+                className="table-wrap"
+                role="region"
+                aria-label={copy.report.mr20.tableCaption(
+                  monthName,
+                  String(year),
+                )}
+                tabIndex={0}
+              >
+                <table>
+                  <caption>
+                    {copy.report.mr20.tableCaption(monthName, String(year))}
+                  </caption>
+                  <thead>
+                    <tr>
+                      <th scope="col">{copy.report.mr20.columns.mode}</th>
+                      {MR20_MEASURES.map((measure) => (
+                        <th scope="col" key={measure}>
+                          {copy.metricLabels[measure] ?? measure}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <th scope="row">{copy.report.mr20.fleetRow}</th>
+                      {MR20_MEASURES.map((measure) => (
+                        <Mr20CellView
+                          key={measure}
+                          cell={mr20.pkg.fleet[measure]}
+                          measure={measure}
+                          modeLabel={copy.report.mr20.fleetRow}
+                        />
+                      ))}
+                    </tr>
+                    {Object.entries(mr20.pkg.modes).map(
+                      ([mode, cells]: [string, Mr20Cells]) => {
+                        const modeLabel =
+                          copy.report.mr20.modeLabels[mode] ?? mode;
+                        return (
+                          <tr key={mode}>
+                            <th scope="row">{modeLabel}</th>
+                            {MR20_MEASURES.map((measure) => (
+                              <Mr20CellView
+                                key={measure}
+                                cell={cells[measure]}
+                                measure={measure}
+                                modeLabel={modeLabel}
+                              />
+                            ))}
+                          </tr>
+                        );
+                      },
+                    )}
+                  </tbody>
+                </table>
+              </div>
+              {mr20.pkg.caveats.length > 0 && (
+                <div className="mr20-caveats">
+                  {/* Disclosure: collapsed by default, state announced. */}
+                  <button
+                    type="button"
+                    aria-expanded={caveatsOpen}
+                    onClick={() => setCaveatsOpen((open) => !open)}
+                  >
+                    {copy.report.mr20.caveatsToggle(
+                      String(mr20.pkg.caveats.length),
+                    )}
+                  </button>
+                  {caveatsOpen && (
+                    <ul>
+                      {mr20.pkg.caveats.map((caveat) => (
+                        <li key={caveat}>{caveat}</li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
+              <p>
+                <button type="button" onClick={handleDownloadMr20}>
+                  {copy.report.mr20.download}
+                </button>
+              </p>
+            </>
+          )}
+        </section>
+      )}
+
+      {section === "preview" && error && (
         <div role="alert" className="alert">
           {error}
         </div>
       )}
-      {!byMetric && !error && <p>{copy.loading}</p>}
+      {section === "preview" && !byMetric && !error && <p>{copy.loading}</p>}
 
-      {byMetric && (
+      {section === "preview" && byMetric && (
         <>
           {anySimulated && (
             <div className="alert">

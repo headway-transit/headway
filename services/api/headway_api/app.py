@@ -25,6 +25,7 @@ from .routers import (
     machine_read,
     metrics,
     public,
+    reports,
     settings as settings_router,
 )
 
@@ -133,6 +134,7 @@ def create_app(
     app.include_router(settings_router.router)
     app.include_router(ingest.router)
     app.include_router(webhooks.router)
+    app.include_router(reports.router)
     app.include_router(public.router)
     app.include_router(branding.router)
     return app

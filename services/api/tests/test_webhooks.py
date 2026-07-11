@@ -211,6 +211,141 @@ def test_revoked_subscription_gets_nothing(client, fake_db, fake_webhook_sender)
     assert fake_webhook_sender.deliveries == []
 
 
+# ---------------------------------------------------------------------------
+# dq.issue.resolved (dated addition on handoff 0006, 2026-07-11)
+# ---------------------------------------------------------------------------
+
+
+def _resolve(client, fake_db, issue, minutes=30):
+    body = {"resolution": "Vendor confirmed the outage; data replayed."}
+    if minutes is not None:
+        body["resolution_minutes"] = minutes
+    return client.post(
+        f"/dq/issues/{issue['issue_id']}/resolve",
+        json=body,
+        headers=auth_header(fake_db, "stella"),
+    )
+
+
+def test_subscription_accepts_dq_issue_resolved_event_type(client, fake_db):
+    r = client.post(
+        "/webhooks",
+        json={
+            "url": "https://tickets.example/hooks/headway",
+            "event_types": ["dq.issue.resolved", "certification.created"],
+            "secret": SECRET,
+        },
+        headers=auth_header(fake_db, "cora"),
+    )
+    assert r.status_code == 201
+    assert sorted(r.json()["event_types"]) == [
+        "certification.created",
+        "dq.issue.resolved",
+    ]
+
+
+def test_dq_resolve_dispatches_post_commit_with_verifiable_hmac(
+    client, fake_db, fake_webhook_sender
+):
+    sub = fake_db.add_webhook_subscription(
+        event_types=("dq.issue.resolved",), secret=SECRET
+    )
+    issue = fake_db.add_dq_issue(issue_type="gap", severity="blocking")
+    r = _resolve(client, fake_db, issue, minutes=30)
+    assert r.status_code == 200
+
+    assert len(fake_webhook_sender.deliveries) == 1
+    url, body, headers = fake_webhook_sender.deliveries[0]
+    assert url == sub["url"]
+    # The signature verifies when recomputed exactly as a receiver would.
+    expected = hmac.new(SECRET.encode(), body, hashlib.sha256).hexdigest()
+    assert headers["X-Headway-Signature"] == f"sha256={expected}"
+    assert int(headers["X-Headway-Timestamp"]) > 0
+    payload = json.loads(body)
+    assert payload == {
+        "event_type": "dq.issue.resolved",
+        "issue_id": issue["issue_id"],
+        "issue_type": "gap",
+        "severity": "blocking",
+        "resolved_by": "stella",
+        "resolution_minutes": 30,
+        "resolved_at": issue["resolved_at"].isoformat(),
+    }
+    # Post-commit: the resolve transaction committed BEFORE any delivery
+    # audit — the dq_resolve audit event precedes the delivery event.
+    resolve_id = next(
+        e["event_id"] for e in fake_db.audit_events if e["action"] == "dq_resolve"
+    )
+    delivered = next(
+        e for e in fake_db.audit_events if e["action"] == "webhook_delivered"
+    )
+    assert resolve_id < delivered["event_id"]
+    detail = json.loads(delivered["detail"])
+    assert detail["event_type"] == "dq.issue.resolved"
+    assert detail["issue_id"] == issue["issue_id"]
+
+
+def test_dq_resolve_without_minutes_delivers_null_minutes(
+    client, fake_db, fake_webhook_sender
+):
+    fake_db.add_webhook_subscription(
+        event_types=("dq.issue.resolved",), secret=SECRET
+    )
+    issue = fake_db.add_dq_issue()
+    r = _resolve(client, fake_db, issue, minutes=None)
+    assert r.status_code == 200
+    (_, body, _) = fake_webhook_sender.deliveries[0]
+    assert json.loads(body)["resolution_minutes"] is None
+
+
+def test_dq_delivery_failure_never_fails_the_resolve_response(
+    client, fake_db, fake_webhook_sender
+):
+    fake_db.add_webhook_subscription(
+        event_types=("dq.issue.resolved",), secret=SECRET
+    )
+    issue = fake_db.add_dq_issue()
+    fake_webhook_sender.outcomes = [500, ConnectionError("receiver down")]
+    r = _resolve(client, fake_db, issue)
+    # The resolution is COMMITTED and answers 200 regardless.
+    assert r.status_code == 200
+    assert issue["status"] == "resolved"
+    # Exactly one retry (two attempts), then an audited failure.
+    assert len(fake_webhook_sender.deliveries) == 2
+    (event,) = [
+        e for e in fake_db.audit_events if e["action"] == "webhook_delivery_failed"
+    ]
+    detail = json.loads(event["detail"])
+    assert detail["attempts"] == 2 and "receiver down" in detail["error"]
+    assert detail["issue_id"] == issue["issue_id"]
+
+
+def test_certification_only_subscription_gets_no_dq_events_and_vice_versa(
+    client, fake_db, fake_webhook_sender
+):
+    cert_sub = fake_db.add_webhook_subscription(
+        url="https://cert-only.example/hook",
+        event_types=("certification.created",),
+        secret=SECRET,
+    )
+    dq_sub = fake_db.add_webhook_subscription(
+        url="https://dq-only.example/hook",
+        event_types=("dq.issue.resolved",),
+        secret=SECRET,
+    )
+    issue = fake_db.add_dq_issue()
+    assert _resolve(client, fake_db, issue).status_code == 200
+    mv = fake_db.add_metric_value()
+    assert _certify(client, fake_db, [mv["metric_value_id"]]).status_code == 201
+    urls_by_event = {}
+    for url, body, _headers in fake_webhook_sender.deliveries:
+        urls_by_event.setdefault(json.loads(body)["event_type"], []).append(url)
+    assert urls_by_event == {
+        "dq.issue.resolved": [dq_sub["url"]],
+        "certification.created": [cert_sub["url"]],
+    }
+
+
 def test_no_sender_configured_is_an_audited_failure_not_an_error(
     fake_db, settings
 ):

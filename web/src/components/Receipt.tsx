@@ -65,7 +65,7 @@ function meterValueFromPercentString(percent: string): number | null {
   return value <= 100 ? value : null;
 }
 
-interface CoverageMeterProps {
+export interface CoverageMeterProps {
   /** The string-shifted percent, displayed and announced verbatim. */
   percent: string;
   /** Integer 0–100 derived from the percent STRING — position/aria-valuenow only. */
@@ -99,7 +99,7 @@ function CoverageMeter({ percent, meterValue, label }: CoverageMeterProps) {
   );
 }
 
-interface ReceiptProps {
+export interface ReceiptProps {
   value: MetricValue;
 }
 

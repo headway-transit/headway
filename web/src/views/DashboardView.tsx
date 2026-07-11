@@ -25,10 +25,16 @@
  * contrast).
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { Link } from "react-router-dom";
 import { ApiError, listDqIssues, listMetricValues } from "../api/client";
 import type { DqIssue, MetricValue } from "../api/types";
+import {
+  GRANULARITIES,
+  misalignedCount,
+  overlapsRange,
+} from "../reports/granularity";
+import type { Granularity } from "../reports/granularity";
 import { ChartCard } from "../components/charts/ChartCard";
 import {
   ChartLegend,
@@ -109,6 +115,106 @@ const SEVERITY_COLOR: Record<string, string> = {
   info: "var(--chart-status-info)",
 };
 
+/**
+ * The honest coarse-bucket note (docket #1). Bucketing is date math on
+ * period boundaries ONLY: when the reported periods do not line up with the
+ * selected granularity, the chart keeps showing every reported period
+ * verbatim and says so — summing display values into a coarser bucket
+ * client-side is FORBIDDEN (it would invent a figure nobody computed).
+ * See src/reports/granularity.ts.
+ */
+function AsReportedNote({
+  rows,
+  granularity,
+}: {
+  rows: MetricValue[];
+  granularity: Granularity;
+}) {
+  if (rows.length === 0 || misalignedCount(rows, granularity) === 0) {
+    return null;
+  }
+  return (
+    <p className="chart-desc as-reported-note">
+      {copy.dashboard.filters.asReported(
+        formatCount(rows.length),
+        copy.dashboard.filters.granularityOptions[granularity] ?? granularity,
+      )}
+    </p>
+  );
+}
+
+/**
+ * The one filter row above the charts (dataviz interaction.md): date range
+ * first, then the period-granularity aria-pressed group. Everything below
+ * the row — every chart AND its table view — re-renders against the same
+ * slice. Filter changes never recolor a series: colors are assigned to the
+ * ENTITY (--series-* slot per metric) and never re-derived from what is
+ * currently visible (recolor-on-filter is the anti-pattern).
+ */
+function ChartFilterRow({
+  from,
+  to,
+  granularity,
+  onFrom,
+  onTo,
+  onGranularity,
+}: {
+  from: string;
+  to: string;
+  granularity: Granularity;
+  onFrom: (value: string) => void;
+  onTo: (value: string) => void;
+  onGranularity: (value: Granularity) => void;
+}) {
+  const fromId = useId();
+  const toId = useId();
+  return (
+    <div
+      className="chart-filters"
+      role="group"
+      aria-label={copy.dashboard.filters.rowLabel}
+    >
+      <div className="date-range-field">
+        <label htmlFor={fromId}>{copy.dashboard.filters.fromLabel}</label>
+        <input
+          id={fromId}
+          type="date"
+          value={from}
+          onChange={(e) => onFrom(e.target.value)}
+        />
+      </div>
+      <div className="date-range-field">
+        <label htmlFor={toId}>{copy.dashboard.filters.toLabel}</label>
+        <input
+          id={toId}
+          type="date"
+          value={to}
+          onChange={(e) => onTo(e.target.value)}
+        />
+      </div>
+      <div
+        className="filter-bar"
+        role="group"
+        aria-label={copy.dashboard.filters.granularityLabel}
+      >
+        <span className="filter-bar-label">
+          {copy.dashboard.filters.granularityLabel}:
+        </span>
+        {GRANULARITIES.map((g) => (
+          <button
+            key={g}
+            type="button"
+            aria-pressed={granularity === g}
+            onClick={() => onGranularity(g)}
+          >
+            {copy.dashboard.filters.granularityOptions[g]}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function StatTile({ values, metric }: { values: MetricValue[]; metric: string }) {
   const latest = latestCertified(values, metric);
   if (!latest) {
@@ -149,6 +255,11 @@ export function DashboardView() {
   const [issues, setIssues] = useState<DqIssue[] | null>(null);
   const [valuesError, setValuesError] = useState<string | null>(null);
   const [issuesError, setIssuesError] = useState<string | null>(null);
+  // The chart filters (docket #1). Monthly is the app's reporting rhythm.
+  // Empty date bounds mean "everything the API served".
+  const [granularity, setGranularity] = useState<Granularity>("monthly");
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
 
   useEffect(() => {
     listMetricValues()
@@ -164,9 +275,17 @@ export function DashboardView() {
   }, []);
 
   const all = values ?? [];
+  // Date-range SELECTION (string comparison on ISO dates — see
+  // granularity.ts): every chart and table below the filter row shows the
+  // same slice, so the numbers always agree. The hero tiles sit ABOVE the
+  // row and keep their fixed "latest certified" meaning.
   const byMetric = (metric: string) =>
     all
-      .filter((v) => v.metric === metric)
+      .filter(
+        (v) =>
+          v.metric === metric &&
+          overlapsRange(v.period_start, v.period_end, fromDate, toDate),
+      )
       .sort((a, b) => (a.period_start < b.period_start ? -1 : 1));
 
   const uptValues = byMetric("upt");
@@ -264,7 +383,21 @@ export function DashboardView() {
       : undefined;
 
   // ---- DQ: unresolved issues by workflow status × severity (tallies) ----
-  const unresolved = (issues ?? []).filter((i) => i.status !== "resolved");
+  // The card obeys the same date slice as everything below the filter row
+  // (an issue's date is its created_at day), but nothing is hidden silently:
+  // the held-back count is always stated, and no issue ever looks resolved
+  // because a filter excluded it. Granularity does not apply — these are
+  // queue tallies, not a time series.
+  const allUnresolved = (issues ?? []).filter((i) => i.status !== "resolved");
+  const unresolved = allUnresolved.filter((i) =>
+    overlapsRange(
+      i.created_at.slice(0, 10),
+      i.created_at.slice(0, 10),
+      fromDate,
+      toDate,
+    ),
+  );
+  const dqHeldBack = allUnresolved.length - unresolved.length;
   const dqBars: StackedBar[] = ["open", "owned"]
     .map((status) => {
       const ofStatus = unresolved.filter((i) => i.status === status);
@@ -322,6 +455,17 @@ export function DashboardView() {
           {all.length === 0 ? (
             <p>{copy.dashboard.empty}</p>
           ) : (
+            <>
+            {/* ONE filter row, above everything it scopes (interaction.md):
+                date range first, then granularity. */}
+            <ChartFilterRow
+              from={fromDate}
+              to={toDate}
+              granularity={granularity}
+              onFrom={setFromDate}
+              onTo={setToDate}
+              onGranularity={setGranularity}
+            />
             <div className="dashboard-grid">
               {/* (2) daily UPT line */}
               <ChartCard
@@ -349,11 +493,14 @@ export function DashboardView() {
                 {uptValues.length === 0 ? (
                   <p>{copy.dashboard.upt.empty}</p>
                 ) : (
-                  <TimeSeriesChart
-                    series={uptSeries}
-                    ariaLabel={copy.dashboard.upt.heading}
-                    unit={unitLabel("unlinked_passenger_trips")}
-                  />
+                  <>
+                    <TimeSeriesChart
+                      series={uptSeries}
+                      ariaLabel={copy.dashboard.upt.heading}
+                      unit={unitLabel("unlinked_passenger_trips")}
+                    />
+                    <AsReportedNote rows={uptValues} granularity={granularity} />
+                  </>
                 )}
               </ChartCard>
 
@@ -385,24 +532,30 @@ export function DashboardView() {
                 {vrmValues.length === 0 && vrhValues.length === 0 ? (
                   <p>{copy.dashboard.service.empty}</p>
                 ) : (
-                  <div className="small-multiples">
-                    <div className="chart-panel">
-                      <h3>{copy.dashboard.service.vrmPanel}</h3>
-                      <TimeSeriesChart
-                        series={vrmSeries}
-                        ariaLabel={copy.dashboard.service.vrmPanel}
-                        unit={unitLabel("miles")}
-                      />
+                  <>
+                    <div className="small-multiples">
+                      <div className="chart-panel">
+                        <h3>{copy.dashboard.service.vrmPanel}</h3>
+                        <TimeSeriesChart
+                          series={vrmSeries}
+                          ariaLabel={copy.dashboard.service.vrmPanel}
+                          unit={unitLabel("miles")}
+                        />
+                      </div>
+                      <div className="chart-panel">
+                        <h3>{copy.dashboard.service.vrhPanel}</h3>
+                        <TimeSeriesChart
+                          series={vrhSeries}
+                          ariaLabel={copy.dashboard.service.vrhPanel}
+                          unit={unitLabel("hours")}
+                        />
+                      </div>
                     </div>
-                    <div className="chart-panel">
-                      <h3>{copy.dashboard.service.vrhPanel}</h3>
-                      <TimeSeriesChart
-                        series={vrhSeries}
-                        ariaLabel={copy.dashboard.service.vrhPanel}
-                        unit={unitLabel("hours")}
-                      />
-                    </div>
-                  </div>
+                    <AsReportedNote
+                      rows={[...vrmValues, ...vrhValues]}
+                      granularity={granularity}
+                    />
+                  </>
                 )}
               </ChartCard>
 
@@ -441,6 +594,10 @@ export function DashboardView() {
                       yMax={100}
                       referenceLine={referenceLine}
                     />
+                    <AsReportedNote
+                      rows={[...vrmCoverage.rows, ...vrhCoverage.rows]}
+                      granularity={granularity}
+                    />
                   </>
                 )}
               </ChartCard>
@@ -472,22 +629,40 @@ export function DashboardView() {
                 ) : !issues ? (
                   <p>{copy.loading}</p>
                 ) : dqBars.length === 0 ? (
-                  <p>{copy.dashboard.dq.empty}</p>
+                  // The date slice may hold back issues — say so; the plain
+                  // "queue is clear" line only appears when it is true.
+                  <p>
+                    {dqHeldBack > 0
+                      ? copy.dashboard.filters.dqOutsideRange(
+                          formatCount(dqHeldBack),
+                        )
+                      : copy.dashboard.dq.empty}
+                  </p>
                 ) : (
-                  <SeverityStackedBar
-                    bars={dqBars}
-                    legend={SEVERITY_ORDER.map((severity) => ({
-                      severity,
-                      label: copy.dq.severityLabels[severity] ?? severity,
-                      color: SEVERITY_COLOR[severity],
-                    }))}
-                  />
+                  <>
+                    <SeverityStackedBar
+                      bars={dqBars}
+                      legend={SEVERITY_ORDER.map((severity) => ({
+                        severity,
+                        label: copy.dq.severityLabels[severity] ?? severity,
+                        color: SEVERITY_COLOR[severity],
+                      }))}
+                    />
+                    {dqHeldBack > 0 && (
+                      <p className="chart-desc">
+                        {copy.dashboard.filters.dqOutsideRange(
+                          formatCount(dqHeldBack),
+                        )}
+                      </p>
+                    )}
+                  </>
                 )}
                 <p>
                   <Link to="/dq">{copy.dashboard.dq.goToQueue}</Link>
                 </p>
               </ChartCard>
             </div>
+            </>
           )}
         </>
       )}

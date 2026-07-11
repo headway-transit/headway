@@ -128,11 +128,19 @@ export interface DqIssue {
   /** ISO date-time */
   resolved_at: string | null;
   resolution: string | null;
+  /**
+   * Minutes a steward reported spending on the resolution — EFFORT METADATA
+   * about the workflow, never a reported regulatory figure. Optional so the
+   * UI tolerates an API that predates the field.
+   */
+  resolution_minutes?: number | null;
 }
 
 export interface ResolveRequest {
   /** minLength 1 */
   resolution: string;
+  /** Optional whole minutes spent resolving (effort metadata). */
+  resolution_minutes?: number;
 }
 
 export interface ResolveResponse {
@@ -141,7 +149,61 @@ export interface ResolveResponse {
   /** ISO date-time */
   resolved_at: string;
   resolution: string;
+  /** Echoed effort metadata; optional for an API that predates the field. */
+  resolution_minutes?: number | null;
   audit_event_id: number;
+}
+
+// ---- /reports/mr20 ----
+
+/**
+ * One MR-20 cell (GET /reports/mr20). `value` is a JSON STRING verbatim
+ * (never a float) or null; a null cell carries a plain-language `reason`.
+ * `flags` are machine codes (e.g. "pending_d2" on rail cells awaiting the
+ * D-2 form definition) that the UI translates to labels, never hides.
+ */
+export interface Mr20Cell {
+  value: string | null;
+  unit: string;
+  metric_value_id: string | null;
+  calc_name: string | null;
+  calc_version: string | null;
+  certification_status: string | null;
+  flags: string[];
+  /** Ratio string (e.g. "0.9126"), when the calculation reported one. */
+  coverage?: string | null;
+  /** Plain-language reason, present when value is null. */
+  reason?: string | null;
+}
+
+/** The four MR-20 measures, for fleet and for each mode. */
+export interface Mr20Cells {
+  upt?: Mr20Cell;
+  vrm?: Mr20Cell;
+  vrh?: Mr20Cell;
+  voms?: Mr20Cell;
+}
+
+/**
+ * GET /reports/mr20?month=YYYY-MM — the MR-20 package. `reportable` is
+ * false today and `banner` states why; the UI renders banner, citation,
+ * caveats, and every cell VERBATIM, and the JSON download is the fetched
+ * response byte for byte.
+ */
+export interface Mr20Package {
+  form: string;
+  /** YYYY-MM */
+  month: string;
+  /** ISO date */
+  period_start: string;
+  /** ISO date */
+  period_end: string;
+  citation: string;
+  reportable: boolean;
+  banner: string;
+  caveats: string[];
+  fleet: Mr20Cells;
+  modes: Record<string, Mr20Cells>;
 }
 
 // ---- /branding + /settings (handoff 0008, pillar C) ----

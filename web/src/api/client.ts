@@ -21,6 +21,7 @@ import type {
   LoginResponse,
   LogoUploadResponse,
   MetricValue,
+  Mr20Package,
   PublicMetricValue,
   ResolveRequest,
   ResolveResponse,
@@ -79,7 +80,7 @@ async function request<T>(
   method: string,
   path: string,
   body?: unknown,
-  opts: { auth?: boolean } = {},
+  opts: { auth?: boolean; rawText?: boolean } = {},
 ): Promise<T> {
   const headers: Record<string, string> = { Accept: "application/json" };
   // FormData (multipart upload) sets its own Content-Type with the boundary;
@@ -122,6 +123,12 @@ async function request<T>(
 
   if (!response.ok) {
     throw new ApiError(response.status, await extractErrorMessage(response));
+  }
+  // rawText: the caller needs the response BYTES verbatim (e.g. the MR-20
+  // "download package" button must save exactly what was fetched, never a
+  // re-serialization that could reorder keys or reformat numbers).
+  if (opts.rawText) {
+    return (await response.text()) as T;
   }
   return (await response.json()) as T;
 }
@@ -190,6 +197,27 @@ export function listPublicCertifiedValues(): Promise<PublicMetricValue[]> {
 export function listDqIssues(status?: string): Promise<DqIssue[]> {
   const qs = status ? `?${new URLSearchParams({ status })}` : "";
   return request<DqIssue[]>("GET", `/dq/issues${qs}`);
+}
+
+/**
+ * GET /reports/mr20?month=YYYY-MM. Returns BOTH the parsed package (for
+ * rendering) and the raw response text: the "Download package (JSON)" button
+ * saves the raw text so the file is byte-identical to what the API served —
+ * JSON.stringify(pkg) could reorder keys or reformat and is never used.
+ */
+export interface Mr20Fetch {
+  pkg: Mr20Package;
+  raw: string;
+}
+
+export async function getMr20Report(month: string): Promise<Mr20Fetch> {
+  const raw = await request<string>(
+    "GET",
+    `/reports/mr20?${new URLSearchParams({ month })}`,
+    undefined,
+    { rawText: true },
+  );
+  return { pkg: JSON.parse(raw) as Mr20Package, raw };
 }
 
 export function resolveDqIssue(

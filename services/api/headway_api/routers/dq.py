@@ -11,9 +11,10 @@ from __future__ import annotations
 import datetime as dt
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from pydantic import BaseModel, Field, field_validator
 
+from .. import webhooks
 from ..audit import write_event
 from ..auth import Identity
 from ..authz import require_at_least, require_authenticated
@@ -36,10 +37,26 @@ class DqIssue(BaseModel):
     created_at: dt.datetime
     resolved_at: Optional[dt.datetime]
     resolution: Optional[str]
+    # Migration 0016: minutes of human effort the fix took, recorded at
+    # resolve time. Null when not recorded — never coalesced to zero.
+    resolution_minutes: Optional[int]
 
 
 class ResolveRequest(BaseModel):
     resolution: str = Field(min_length=1)
+    # Optional effort measurement (migration 0016). Whole minutes, >= 0.
+    resolution_minutes: Optional[int] = None
+
+    @field_validator("resolution_minutes")
+    @classmethod
+    def _minutes_not_negative(cls, v: Optional[int]) -> Optional[int]:
+        if v is not None and v < 0:
+            raise ValueError(
+                "resolution_minutes records how many minutes the fix took, "
+                "so it must be a whole number of zero or more. Leave it out "
+                "entirely if the effort was not measured."
+            )
+        return v
 
 
 class ResolveResponse(BaseModel):
@@ -47,18 +64,25 @@ class ResolveResponse(BaseModel):
     status: str
     resolved_at: dt.datetime
     resolution: str
+    resolution_minutes: Optional[int]
     audit_event_id: int
 
 
 _SELECT_ISSUES = (
     "SELECT issue_id, issue_type, severity, status, owner, title, description, "
-    "source_record_ids, created_at, resolved_at, resolution FROM dq.issues"
+    "source_record_ids, created_at, resolved_at, resolution, resolution_minutes "
+    "FROM dq.issues"
 )
 
 _RESOLVE_ISSUE = (
     "UPDATE dq.issues SET status = 'resolved', resolved_at = now(), "
-    "resolution = %s WHERE issue_id = %s AND status <> 'resolved' "
-    "RETURNING issue_id, resolved_at"
+    "resolution = %s, resolution_minutes = %s "
+    "WHERE issue_id = %s AND status <> 'resolved' "
+    "RETURNING issue_id, issue_type, severity, resolved_at"
+)
+
+_SELECT_OLD_RESOLUTION_MINUTES = (
+    "SELECT resolution_minutes FROM dq.issues WHERE issue_id = %s"
 )
 
 _SELECT_ISSUE_STATUS = "SELECT status FROM dq.issues WHERE issue_id = %s"
@@ -77,6 +101,7 @@ def _issue_from_row(r) -> DqIssue:
         created_at=r[8],
         resolved_at=r[9],
         resolution=r[10],
+        resolution_minutes=r[11],
     )
 
 
@@ -108,12 +133,19 @@ def list_issues(
 def resolve_issue(
     issue_id: str,
     body: ResolveRequest,
+    request: Request,
     identity: Identity = Depends(require_at_least("data_steward")),
     db=Depends(get_db),
 ) -> ResolveResponse:
     # One transaction: the status change and its audit event commit together.
     with db.transaction():
-        row = db.execute(_RESOLVE_ISSUE, (body.resolution, issue_id)).fetchone()
+        old_row = db.execute(
+            _SELECT_OLD_RESOLUTION_MINUTES, (issue_id,)
+        ).fetchone()
+        old_minutes = old_row[0] if old_row is not None else None
+        row = db.execute(
+            _RESOLVE_ISSUE, (body.resolution, body.resolution_minutes, issue_id)
+        ).fetchone()
         if row is None:
             current = db.execute(_SELECT_ISSUE_STATUS, (issue_id,)).fetchone()
             if current is None:
@@ -129,19 +161,41 @@ def resolve_issue(
                     "need a new issue so the history stays honest."
                 ),
             )
-        resolved_id, resolved_at = str(row[0]), row[1]
+        resolved_id, issue_type, severity, resolved_at = (
+            str(row[0]), row[1], row[2], row[3],
+        )
         audit_event_id = write_event(
             db,
             actor=identity.username,
             action="dq_resolve",
             subject_kind="dq.issues",
             subject_id=resolved_id,
-            detail={"resolution": body.resolution},
+            detail={
+                "resolution": body.resolution,
+                # old→new, the settings-router precedent (migration 0016).
+                "resolution_minutes_old": old_minutes,
+                "resolution_minutes_new": body.resolution_minutes,
+            },
         )
+    # STRICTLY POST-COMMIT (the certify.py precedent, handoff 0006 design
+    # point 7): the resolve transaction above is already committed; delivery
+    # is best-effort with one retry, audit-logged, and can never fail this
+    # response.
+    webhooks.dispatch_dq_issue_resolved(
+        db,
+        getattr(request.app.state, "webhook_sender", None),
+        issue_id=resolved_id,
+        issue_type=issue_type,
+        severity=severity,
+        resolved_by=identity.username,
+        resolution_minutes=body.resolution_minutes,
+        resolved_at=resolved_at,
+    )
     return ResolveResponse(
         issue_id=resolved_id,
         status="resolved",
         resolved_at=resolved_at,
         resolution=body.resolution,
+        resolution_minutes=body.resolution_minutes,
         audit_event_id=audit_event_id,
     )

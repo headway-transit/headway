@@ -41,6 +41,18 @@ export function DqView() {
       );
   }, []);
 
+  // Documented-effort total: UI ARITHMETIC ON EFFORT METADATA (the minutes
+  // stewards typed into the resolve form) — a workflow tally like the issue
+  // counts, NEVER a reported regulatory figure (those are displayed verbatim
+  // from the API and never computed client-side). Sum of minutes / 60, one
+  // decimal.
+  const totalEffortMinutes = (issues ?? []).reduce(
+    (sum, i) =>
+      sum + (typeof i.resolution_minutes === "number" ? i.resolution_minutes : 0),
+    0,
+  );
+  const effortHours = (totalEffortMinutes / 60).toFixed(1);
+
   const handleResolved = (updated: DqIssue) => {
     setIssues(
       (prev) =>
@@ -103,6 +115,11 @@ export function DqView() {
               <li className="chip resolved">
                 {copy.dq.summaryResolved(formatCount(resolvedCount))}
               </li>
+              {totalEffortMinutes > 0 && (
+                <li className="chip effort">
+                  {copy.dq.summaryEffort(effortHours)}
+                </li>
+              )}
             </ul>
             <FilterBar
               label={copy.dq.severityFilterLabel}
@@ -260,6 +277,17 @@ function IssueCard({ issue, mayResolve, onResolved }: IssueCardProps) {
               <dd>{issue.resolved_at}</dd>
               <dt>{copy.dq.resolutionLabel}</dt>
               <dd>{issue.resolution}</dd>
+              {issue.resolution_minutes != null && (
+                <>
+                  <dt>{copy.dq.minutesSpentLabel}</dt>
+                  {/* Effort metadata (workflow minutes), not a figure. */}
+                  <dd>
+                    {copy.dq.minutesSpentValue(
+                      formatCount(issue.resolution_minutes),
+                    )}
+                  </dd>
+                </>
+              )}
             </>
           )}
         </dl>
@@ -279,8 +307,11 @@ interface ResolveFormProps {
 function ResolveForm({ issue, onResolved }: ResolveFormProps) {
   const inputId = useId();
   const hintId = useId();
+  const minutesId = useId();
+  const minutesHintId = useId();
   const [open, setOpen] = useState(false);
   const [resolution, setResolution] = useState("");
+  const [minutes, setMinutes] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -290,15 +321,33 @@ function ResolveForm({ issue, onResolved }: ResolveFormProps) {
       setError(copy.dq.resolutionRequired);
       return;
     }
+    // Optional effort field: blank is fine; anything typed must be a whole
+    // number of minutes (this is workflow metadata a person typed, so the
+    // form validates it — it is never a served figure).
+    const trimmedMinutes = minutes.trim();
+    let resolutionMinutes: number | undefined;
+    if (trimmedMinutes !== "") {
+      if (!/^\d+$/.test(trimmedMinutes) || Number(trimmedMinutes) === 0) {
+        setError(copy.dq.minutesInvalid);
+        return;
+      }
+      resolutionMinutes = Number(trimmedMinutes);
+    }
     setError(null);
     setSubmitting(true);
     try {
-      const response = await resolveDqIssue(issue.issue_id, { resolution });
+      const response = await resolveDqIssue(issue.issue_id, {
+        resolution,
+        ...(resolutionMinutes !== undefined && {
+          resolution_minutes: resolutionMinutes,
+        }),
+      });
       onResolved({
         ...issue,
         status: response.status,
         resolved_at: response.resolved_at,
         resolution: response.resolution,
+        resolution_minutes: response.resolution_minutes ?? null,
       });
     } catch (err) {
       setError(err instanceof ApiError ? err.message : String(err));
@@ -329,6 +378,16 @@ function ResolveForm({ issue, onResolved }: ResolveFormProps) {
         aria-describedby={hintId}
         value={resolution}
         onChange={(e) => setResolution(e.target.value)}
+      />
+      <label htmlFor={minutesId}>{copy.dq.minutesLabel}</label>
+      <p id={minutesHintId}>{copy.dq.minutesHint}</p>
+      <input
+        id={minutesId}
+        type="text"
+        inputMode="numeric"
+        aria-describedby={minutesHintId}
+        value={minutes}
+        onChange={(e) => setMinutes(e.target.value)}
       />
       <button type="submit" className="primary" disabled={submitting}>
         {copy.dq.submitResolution}

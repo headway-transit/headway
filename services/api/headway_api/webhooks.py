@@ -1,4 +1,5 @@
-"""Outbound webhooks: certification.created (handoff 0006, design point 7).
+"""Outbound webhooks: certification.created (handoff 0006, design point 7)
+and dq.issue.resolved (dated addition on handoff 0006, 2026-07-11).
 
 Delivery model, deliberately v0-simple:
 - The certification TRANSACTION COMMITS FIRST. Dispatch is strictly
@@ -42,7 +43,14 @@ logger = logging.getLogger(__name__)
 
 # v0 event registry — deny-by-default, like machine scopes.
 EVENT_CERTIFICATION_CREATED = "certification.created"
-KNOWN_EVENT_TYPES = (EVENT_CERTIFICATION_CREATED,)
+EVENT_DQ_ISSUE_RESOLVED = "dq.issue.resolved"
+KNOWN_EVENT_TYPES = (EVENT_CERTIFICATION_CREATED, EVENT_DQ_ISSUE_RESOLVED)
+# HONEST SCOPE NOTE: "dq.issue.created" is NOT in this registry and cannot be
+# — issues are written by the calc/transform services outside this API's
+# process, so the API has no post-commit moment to dispatch from. An
+# outbox/DB-trigger mechanism is the documented follow-up for full ticketing
+# sync; v0 ticketing integration = this resolved-event push + polling
+# GET /dq/issues (see the service README and handoff 0006's dated note).
 
 # The audit actor for delivery outcomes: deliveries are performed by the
 # system post-commit, not by the certifying human (whose own act is already
@@ -126,28 +134,92 @@ def dispatch_certification_created(
             "certified_by": certified_by,
             "certified_at": certified_at.isoformat(),
         }
-        body = json.dumps(body_dict).encode("utf-8")
-        timestamp = str(int(clock()))
-        for subscription_id, url, _event_types, secret in matching:
-            headers = {
-                "Content-Type": "application/json",
-                "X-Headway-Signature": sign_body(secret, body),
-                "X-Headway-Timestamp": timestamp,
-            }
-            _deliver_one(
-                db,
-                sender,
-                subscription_id=str(subscription_id),
-                url=url,
-                body=body,
-                headers=headers,
-                certification_id=certification_id,
-            )
+        _deliver_to_matching(db, sender, matching, body_dict, clock=clock)
     except Exception:  # noqa: BLE001 — last-resort guard, see docstring
         logger.exception(
             "webhook dispatch failed after certification %s committed "
             "(certification unaffected)",
             certification_id,
+        )
+
+
+def dispatch_dq_issue_resolved(
+    db,
+    sender: Optional[WebhookSender],
+    *,
+    issue_id: str,
+    issue_type: str,
+    severity: str,
+    resolved_by: str,
+    resolution_minutes: Optional[int],
+    resolved_at: dt.datetime,
+    clock=time.time,
+) -> None:
+    """Deliver dq.issue.resolved to every matching live subscription.
+
+    Same contract as dispatch_certification_created: MUST be called only
+    AFTER the resolve transaction committed; never raises — every failure
+    path is audit-logged (or logged to the process log if even that fails).
+    A notification problem must never turn an earned resolution into an
+    error. ``resolution_minutes`` is served as-is: null when the resolver
+    recorded no effort (never coalesced to zero).
+    """
+    try:
+        rows = db.execute(_SELECT_ACTIVE_SUBSCRIPTIONS, ()).fetchall()
+        matching = [r for r in rows if EVENT_DQ_ISSUE_RESOLVED in list(r[2])]
+        if not matching:
+            return
+        body_dict = {
+            "event_type": EVENT_DQ_ISSUE_RESOLVED,
+            "issue_id": issue_id,
+            "issue_type": issue_type,
+            "severity": severity,
+            "resolved_by": resolved_by,
+            "resolution_minutes": resolution_minutes,
+            "resolved_at": resolved_at.isoformat(),
+        }
+        _deliver_to_matching(db, sender, matching, body_dict, clock=clock)
+    except Exception:  # noqa: BLE001 — last-resort guard, see docstring
+        logger.exception(
+            "webhook dispatch failed after dq issue %s resolved "
+            "(resolution unaffected)",
+            issue_id,
+        )
+
+
+#: The one body key per event type that identifies the subject in delivery
+#: audit detail (ids only — never figures, never secrets).
+_AUDIT_SUBJECT_KEY = {
+    EVENT_CERTIFICATION_CREATED: "certification_id",
+    EVENT_DQ_ISSUE_RESOLVED: "issue_id",
+}
+
+
+def _deliver_to_matching(db, sender, matching, body_dict: dict, *, clock) -> None:
+    """Shared delivery core: sign the exact body bytes once, deliver to each
+    matching subscription with one retry, audit every outcome."""
+    event_type = body_dict["event_type"]
+    subject_key = _AUDIT_SUBJECT_KEY[event_type]
+    audit_context = {
+        "event_type": event_type,
+        subject_key: body_dict[subject_key],
+    }
+    body = json.dumps(body_dict).encode("utf-8")
+    timestamp = str(int(clock()))
+    for subscription_id, url, _event_types, secret in matching:
+        headers = {
+            "Content-Type": "application/json",
+            "X-Headway-Signature": sign_body(secret, body),
+            "X-Headway-Timestamp": timestamp,
+        }
+        _deliver_one(
+            db,
+            sender,
+            subscription_id=str(subscription_id),
+            url=url,
+            body=body,
+            headers=headers,
+            audit_context=audit_context,
         )
 
 
@@ -159,7 +231,7 @@ def _deliver_one(
     url: str,
     body: bytes,
     headers: dict[str, str],
-    certification_id: str,
+    audit_context: dict,
 ) -> None:
     """One subscription: try, retry once, audit the outcome."""
     if sender is None:
@@ -168,7 +240,7 @@ def _deliver_one(
             action="webhook_delivery_failed",
             subscription_id=subscription_id,
             detail={
-                "certification_id": certification_id,
+                **audit_context,
                 "reason": "no webhook sender configured on this instance",
             },
         )
@@ -186,7 +258,7 @@ def _deliver_one(
                 action="webhook_delivered",
                 subscription_id=subscription_id,
                 detail={
-                    "certification_id": certification_id,
+                    **audit_context,
                     "status": status,
                     "attempts": attempt,
                 },
@@ -197,7 +269,7 @@ def _deliver_one(
         db,
         action="webhook_delivery_failed",
         subscription_id=subscription_id,
-        detail={"certification_id": certification_id, **outcome},
+        detail={**audit_context, **outcome},
     )
 
 

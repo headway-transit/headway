@@ -1,4 +1,9 @@
-import type { DqIssue, LineageNode, MetricValue } from "../api/types";
+import type {
+  DqIssue,
+  LineageNode,
+  MetricValue,
+  Mr20Package,
+} from "../api/types";
 
 /** Values as the API serves them: `value` is a decimal STRING, never a number. */
 export const vrmValue: MetricValue = {
@@ -269,6 +274,7 @@ export const blockingIssue: DqIssue = {
   created_at: "2026-03-04T02:00:00Z",
   resolved_at: null,
   resolution: null,
+  resolution_minutes: null,
 };
 
 export const warningIssue: DqIssue = {
@@ -284,6 +290,7 @@ export const warningIssue: DqIssue = {
   created_at: "2026-03-06T02:00:00Z",
   resolved_at: null,
   resolution: null,
+  resolution_minutes: null,
 };
 
 export const resolvedIssue: DqIssue = {
@@ -299,4 +306,148 @@ export const resolvedIssue: DqIssue = {
   created_at: "2026-03-01T12:00:00Z",
   resolved_at: "2026-03-02T09:00:00Z",
   resolution: "Confirmed the new field is informational only; mapping updated.",
+  // Effort metadata (docket #3): 90 minutes -> "≈1.5 hours" in the header.
+  resolution_minutes: 90,
+};
+
+/**
+ * The MR-20 package (docket #2) exactly as GET /reports/mr20 would serve it:
+ * reportable:false with its banner and citation, fleet + per-mode cells with
+ * value strings VERBATIM (trailing zeros on purpose), a null rail UPT cell
+ * with a plain-language reason, and the pending_d2 flag on rail cells.
+ */
+export const mr20Package: Mr20Package = {
+  form: "MR-20",
+  month: "2026-03",
+  period_start: "2026-03-01",
+  period_end: "2026-03-31",
+  citation:
+    "49 U.S.C. 5335; NTD Monthly Module Reporting Manual, form MR-20 (Monthly Ridership).",
+  reportable: false,
+  banner:
+    "Not reportable: this MR-20 package is assembled from Headway's computed figures for preview only. It has not been verified against FTA's reporting system documentation and must not be submitted.",
+  caveats: [
+    "VOMS is derived from scheduled maximum service, not observed pull-outs.",
+    "Rail figures are on hold until the D-2 form definition is verified.",
+  ],
+  fleet: {
+    upt: {
+      value: "41985.90",
+      unit: "unlinked_passenger_trips",
+      metric_value_id: "mv-upt-1",
+      calc_name: "upt_v0",
+      calc_version: "0.5.0",
+      certification_status: "uncertified",
+      flags: [],
+      coverage: "0.9902",
+    },
+    vrm: {
+      value: "12345.60",
+      unit: "miles",
+      metric_value_id: "mv-vrm-1",
+      calc_name: "vrm_v0",
+      calc_version: "0.2.0",
+      certification_status: "certified",
+      flags: [],
+      coverage: "0.9126",
+    },
+    vrh: {
+      value: "987.25",
+      unit: "hours",
+      metric_value_id: "mv-vrh-1",
+      calc_name: "vrh_v0",
+      calc_version: "0.2.0",
+      certification_status: "uncertified",
+      flags: [],
+    },
+    voms: {
+      value: "38",
+      unit: "vehicles",
+      metric_value_id: "mv-voms-1",
+      calc_name: "voms_v0",
+      calc_version: "0.1.0",
+      certification_status: "uncertified",
+      flags: [],
+    },
+  },
+  modes: {
+    MB: {
+      upt: {
+        value: "40100.50",
+        unit: "unlinked_passenger_trips",
+        metric_value_id: "mv-upt-mb",
+        calc_name: "upt_v0",
+        calc_version: "0.5.0",
+        certification_status: "uncertified",
+        flags: [],
+      },
+      vrm: {
+        value: "11145.60",
+        unit: "miles",
+        metric_value_id: "mv-vrm-mb",
+        calc_name: "vrm_v0",
+        calc_version: "0.2.0",
+        certification_status: "certified",
+        flags: [],
+      },
+      vrh: {
+        value: "900.00",
+        unit: "hours",
+        metric_value_id: "mv-vrh-mb",
+        calc_name: "vrh_v0",
+        calc_version: "0.2.0",
+        certification_status: "uncertified",
+        flags: [],
+      },
+      voms: {
+        value: "35",
+        unit: "vehicles",
+        metric_value_id: "mv-voms-mb",
+        calc_name: "voms_v0",
+        calc_version: "0.1.0",
+        certification_status: "uncertified",
+        flags: [],
+      },
+    },
+    HR: {
+      upt: {
+        value: null,
+        unit: "unlinked_passenger_trips",
+        metric_value_id: null,
+        calc_name: null,
+        calc_version: null,
+        certification_status: null,
+        flags: ["pending_d2"],
+        reason:
+          "Rail passenger counts are on hold until the D-2 form definition is verified.",
+      },
+      vrm: {
+        value: "1200.00",
+        unit: "miles",
+        metric_value_id: "mv-vrm-hr",
+        calc_name: "vrm_v0",
+        calc_version: "0.2.0",
+        certification_status: "uncertified",
+        flags: ["pending_d2"],
+      },
+      vrh: {
+        value: "87.25",
+        unit: "hours",
+        metric_value_id: "mv-vrh-hr",
+        calc_name: "vrh_v0",
+        calc_version: "0.2.0",
+        certification_status: "uncertified",
+        flags: ["pending_d2"],
+      },
+      voms: {
+        value: "3",
+        unit: "vehicles",
+        metric_value_id: "mv-voms-hr",
+        calc_name: "voms_v0",
+        calc_version: "0.1.0",
+        certification_status: "uncertified",
+        flags: ["pending_d2"],
+      },
+    },
+  },
 };

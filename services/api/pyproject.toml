@@ -18,6 +18,13 @@ dependencies = [
                           # moved from the test extra (it also backs fastapi.testclient)
     "python-multipart>=0.0.9",  # Apache-2.0 — multipart parsing for the
                                 # branding logo upload (handoff 0008 pillar C)
+    "headway-calc>=0.5",  # Apache-2.0 — SIBLING PATH PACKAGE (services/calc,
+                          # not on PyPI): GET /reports/mr20 imports
+                          # headway_calc.mr20 and serves its package verbatim
+                          # (handoff 0009). Install from the repo first
+                          # (`pip install services/calc`); the api Docker
+                          # image must do the same — Dockerfile follow-up,
+                          # see README "MR-20 preview report".
 ]
 
 [project.optional-dependencies]

@@ -254,6 +254,32 @@ def test_branding_settings_seeded_with_contrast_guardrail():
     assert "POST /branding/logo" in sql_0015
 
 
+def test_dq_resolution_minutes_nullable_nonnegative_no_default():
+    # Migration 0016: optional resolution effort on dq.issues. Nullable
+    # INTEGER (recording effort is optional; existing resolutions have no
+    # measurement — never invented), CHECK >= 0, and NO default (an
+    # unmeasured resolution must read as NULL, not as zero minutes).
+    sql_0016 = (MIGRATIONS_DIR / "0016_dq_effort.sql").read_text(encoding="utf-8")
+    assert re.search(
+        r"ALTER TABLE\s+dq\.issues\s+"
+        r"ADD COLUMN\s+resolution_minutes\s+INTEGER",
+        sql_0016,
+    ), "dq.issues.resolution_minutes must be added as INTEGER"
+    assert re.search(r"CHECK \(resolution_minutes >= 0\)", sql_0016), (
+        "dq.issues.resolution_minutes must carry CHECK (resolution_minutes >= 0)"
+    )
+    statements = "\n".join(
+        line for line in sql_0016.splitlines() if not line.lstrip().startswith("--")
+    )
+    assert "NOT NULL" not in statements, (
+        "dq.issues.resolution_minutes must stay nullable (effort is optional)"
+    )
+    assert "DEFAULT" not in statements.upper(), (
+        "dq.issues.resolution_minutes must have no default (unmeasured is "
+        "NULL, never zero)"
+    )
+
+
 def test_immutability_triggers_present():
     sql = all_sql()
     assert re.search(r"BEFORE UPDATE OR DELETE ON raw\.records", sql)

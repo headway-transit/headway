@@ -45,7 +45,7 @@ export interface StackedBar {
   displayTotal: string;
 }
 
-interface SeverityStackedBarProps {
+export interface SeverityStackedBarProps {
   bars: StackedBar[];
   /** Legend entries (icon + label + swatch), in severity order. */
   legend: { severity: string; label: string; color: string }[];

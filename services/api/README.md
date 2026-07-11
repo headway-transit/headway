@@ -17,8 +17,9 @@ preserved end to end; floating point never touches a figure).
 | GET | `/metrics/values` | any signed-in role | Computed values from `computed.metric_values`; filter by `metric`, `period_start`, `period_end`. `value` is a string. |
 | GET | `/metrics/values/{id}/lineage` | any signed-in role, **or** machine key scope `read:metrics` | "Explain this number": recursive traversal of `lineage.edges` (recursive CTE) from the figure down to `raw.records`, returned as a tree `{kind, id, transform_name, transform_version, inputs: [...]}`. A figure with no lineage is a loud 500, never an empty 200. Machine path rate-limited per key + audited (actor `key:<prefix>`); every auth failure is one generic 401 that never reveals which credential type was expected. |
 | POST | `/certifications` | `certifying_official` only | Inserts `cert.certifications`, marks the figures `certified`, and writes the `audit.events` row — all in ONE transaction. Refuses with 409 while any blocking DQ issue is unresolved. |
-| GET | `/dq/issues` | any signed-in role | Data-quality issues; filter by `status`. |
-| POST | `/dq/issues/{id}/resolve` | `data_steward` or above | Resolves an issue with a resolution note + audit event, in one transaction. |
+| GET | `/dq/issues` | any signed-in role | Data-quality issues; filter by `status`. Rows include `resolution_minutes` (migration 0016) — null when the effort was not recorded. |
+| POST | `/dq/issues/{id}/resolve` | `data_steward` or above | Resolves an issue with a resolution note + audit event, in one transaction. Optional `resolution_minutes` (int ≥ 0; plain-language 422 otherwise) records the effort, audited old→new. Post-commit, dispatches the `dq.issue.resolved` webhook (best-effort — a delivery problem never fails the resolve). |
+| GET | `/reports/mr20?month=YYYY-MM` | any signed-in role | The `headway_calc.mr20` MR-20 preview package for the month, served **VERBATIM** (NOT-REPORTABLE banner + caveats included; this API never edits a figure). Plain-language 422 on a bad month. |
 | POST | `/machine/keys` | `certifying_official` (v0 admin) | Issues a machine API key. The full key appears ONCE in this response with an explicit warning; only its SHA-256 hash is stored. Audited. |
 | GET | `/machine/keys` | `certifying_official` | Lists keys: prefix, name, scopes, source label, created/revoked — never hashes, never key material. |
 | DELETE | `/machine/keys/{id}` | `certifying_official` | Revokes a key (sets `revoked_at`; rows are never deleted — audit history). Audited. |
@@ -26,7 +27,7 @@ preserved end to end; floating point never touches a figure).
 | GET | `/machine/metrics` | machine key, scope `read:metrics` | Machine read of computed values: same filters and row shape as `GET /metrics/values` (same query function — the two cannot drift). `value` a string, `detail` verbatim. Each row's lineage: feed its `metric_value_id` to `GET /metrics/values/{id}/lineage` — the same key works there. Rate-limited per key; every read audited, actor `key:<prefix>`. |
 | GET | `/settings` | any signed-in role | The per-agency policy settings (migration 0014 seeds them), each with its plain-language description, basis, and who last changed it. |
 | PUT | `/settings/{key}` | `certifying_official` only | Change one policy setting. Value validated against the setting's `value_type` (decimal parsed via `Decimal` — never float; 422 in plain language); old→new audited; unknown key 404 (settings are seeded, never client-creatable). |
-| POST | `/webhooks` | `certifying_official` | Subscribe a URL to `certification.created`. The HMAC secret is accepted here and never returned by anything. Audited. |
+| POST | `/webhooks` | `certifying_official` | Subscribe a URL to `certification.created` and/or `dq.issue.resolved`. The HMAC secret is accepted here and never returned by anything. Audited. |
 | GET | `/webhooks` | `certifying_official` | Lists subscriptions (secret-free). |
 | DELETE | `/webhooks/{id}` | `certifying_official` | Removes a subscription (soft revoke). Audited. |
 | GET | `/public/metrics/certified` | **none — public open data** | ONLY figures a certifying official already attested (`certification_status='certified'`); values as strings, `detail` verbatim (simulated flags shown, figures never hidden); no PII; rate-limited per client IP. |
@@ -112,14 +113,33 @@ IP on the public endpoint), 429 + `Retry-After`. Single-instance limitation
 documented in `machine_auth.RateLimiter`; distributed limiting is the
 hosted-tier increment.
 
-**Webhooks**: on certification (post-commit, never blocking the 201), each
-live `certification.created` subscription gets a JSON POST signed with
+**Webhooks**: two event types (deny-by-default registry, like machine
+scopes):
+
+- `certification.created` — on certification (post-commit, never blocking
+  the 201): certification id, metric ids, values as strings, certified_by,
+  certified_at.
+- `dq.issue.resolved` (added 2026-07-11, dated note on handoff 0006) — on DQ
+  resolution (post-commit, never blocking the 200): `{event_type, issue_id,
+  issue_type, severity, resolved_by, resolution_minutes, resolved_at}`;
+  `resolution_minutes` is null when the resolver recorded no effort.
+
+Every delivery is a JSON POST signed with
 `X-Headway-Signature: sha256=<HMAC-SHA256(body, secret)>` plus
 `X-Headway-Timestamp` (receivers should reject stale timestamps; binding the
 timestamp into the signature is a tracked hardening increment). One retry;
-outcomes audit-logged. The subscription secret is stored plaintext with a
+outcomes audit-logged; a delivery failure never fails the action that
+triggered it. The subscription secret is stored plaintext with a
 documented risk note + compensating control (migration 0013) — encryption at
 rest of that column is the secrets-management increment.
+
+**HONEST SCOPE NOTE — no `dq.issue.created` event.** DQ issues are written
+by the calc/transform services, outside this API's process, so the API has
+no post-commit moment to dispatch a created-event from — it cannot honestly
+offer one. An outbox table (or DB trigger) drained by a dispatcher is the
+documented follow-up for full ticketing sync. **v0 ticketing integration**
+= the `dq.issue.resolved` push above + polling `GET /dq/issues` (filter by
+`status`) for new/open issues.
 
 **Ingest dependencies** (`pip install '.[ingest]'`): MinIO (`minio`) and
 Kafka (`kafka-python-ng`), wired from the same env vars as the Go connectors
@@ -147,11 +167,11 @@ curl -s -X POST https://headway.agency.example/ingest/tides/passenger-events \
 curl -s -X DELETE https://headway.agency.example/machine/keys/<key_id> \
   -H "Authorization: Bearer $SESSION_TOKEN"
 
-# Subscribe an external system to certifications
+# Subscribe an external system to certifications and DQ resolutions
 curl -s -X POST https://headway.agency.example/webhooks \
   -H "Authorization: Bearer $SESSION_TOKEN" -H 'Content-Type: application/json' \
   -d '{"url": "https://city.example/hooks/headway",
-       "event_types": ["certification.created"],
+       "event_types": ["certification.created", "dq.issue.resolved"],
        "secret": "<random shared secret, min 16 chars>"}'
 
 # Machine read of computed values (key issued with scope read:metrics)
@@ -165,6 +185,43 @@ curl -s https://headway.agency.example/metrics/values/<metric_value_id>/lineage 
 # Public open data — no auth at all
 curl -s https://headway.agency.example/public/metrics/certified
 ```
+
+## MR-20 preview report (`GET /reports/mr20?month=YYYY-MM`)
+
+Serves the `headway_calc.mr20` package (handoff 0009) **VERBATIM**: the API
+imports the calc library, calls `build_mr20_package(conn, month)`, and
+returns exactly those bytes — the NOT-REPORTABLE banner, the
+programmatically enumerated caveats (fixed divergence list D1–D6 plus
+flag-derived), and the four MR-20 data points per mode + fleet totals, each
+cell carrying full provenance (`metric_value_id`, `calc_name`,
+`calc_version`, `certification_status`, `flags`, `coverage`) or an explicit
+`{"value": null, "reason": ...}`. No reshaping, no recomputation — this API
+never originates or edits a figure. Any signed-in role reads it (it is a
+preview with its own governing caveats, not a certification surface); a
+month that is not `YYYY-MM` is a plain-language 422.
+
+**DEPLOYMENT ASSUMPTION (Dockerfile follow-up — not yet edited):**
+`headway-calc` is a sibling path package (`services/calc`, not on PyPI),
+declared in `pyproject.toml` and installed into the shared venv from the
+repo (`pip install services/calc`). The api Docker image must install
+`services/calc` the same way before installing/running this service;
+updating `services/api/Dockerfile` to COPY + install it is a tracked
+follow-up.
+
+```sh
+curl -s "https://headway.agency.example/reports/mr20?month=2026-07" \
+  -H "Authorization: Bearer $SESSION_TOKEN"
+```
+
+## DQ resolution effort (migration 0016)
+
+`dq.issues.resolution_minutes` (nullable INTEGER, `CHECK >= 0`, no default)
+records how many human minutes a fix took. `POST /dq/issues/{id}/resolve`
+accepts an optional `resolution_minutes` (int ≥ 0; a negative or non-integer
+value is a plain-language 422 that changes nothing); the value is persisted
+with the resolution and audited **old→new** in the same transaction. Bodies
+without the field behave exactly as before — the column stays NULL
+(unmeasured is null, never zero). `GET /dq/issues` rows include it.
 
 ## Per-agency settings (migration 0014)
 
@@ -322,9 +379,22 @@ python3 -m pytest tests/ -q
   and the settings surface: seeded reads for any role,
   writer gated to certifying_official, decimal/integer 422s in plain
   language, old→new in the audit detail, unknown key 404.
-- `openapi.json` generated: OpenAPI 3.1.0, 15 paths.
+- `pytest tests/ -q`: **136 passed** (2026-07-11, migration 0016 + MR-20 +
+  dq.issue.resolved increment): the 123 pre-existing tests unchanged and
+  green, plus the MR-20 endpoint (canned calc package served byte-identical,
+  any signed-in role incl. viewer, anonymous 401, plain-language 422 on six
+  bad month shapes that never reach the calc library), DQ resolution effort
+  (minutes persisted + audited old→new, body without minutes fully backward
+  compatible with NULL never zero, negative minutes plain-language 422
+  changing nothing, list rows include the field), and the `dq.issue.resolved`
+  webhook (HMAC recomputed and verified, post-commit ordering — the
+  dq_resolve audit event precedes the delivery event, retry-then-audited
+  failure never failing the 200, null minutes delivered as null, and
+  event-type matching in both directions between certification-only and
+  dq-only subscriptions).
+- `openapi.json` generated: OpenAPI 3.1.0, 18 paths.
 - **PENDING**: live verification against real PostgreSQL/TimescaleDB,
-  MinIO, and Kafka (migrations 0001–0014 applied, psycopg connection,
+  MinIO, and Kafka (migrations 0001–0016 applied, psycopg connection,
   `uvicorn` boot, a real ingest → envelope consumed). The authoring
   environment must not touch the live stack; the first environment cleared
   to do so must run the suite against live services before this increment is

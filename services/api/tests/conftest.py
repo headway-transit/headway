@@ -223,24 +223,39 @@ class FakeConn:
                         r["owner"], r["title"], r["description"],
                         r["source_record_ids"], r["created_at"],
                         r["resolved_at"], r["resolution"],
+                        r["resolution_minutes"],
                     )
                     for r in rows
                 ]
             )
 
         if q.startswith("UPDATE dq.issues SET status = 'resolved'"):
-            resolution, issue_id = params
+            resolution, resolution_minutes, issue_id = params
             issue = self.dq_issues.get(str(issue_id))
             if issue is None or issue["status"] == "resolved":
                 return FakeCursor([])
             issue["status"] = "resolved"
             issue["resolved_at"] = dt.datetime.now(UTC)
             issue["resolution"] = resolution
-            return FakeCursor([(issue["issue_id"], issue["resolved_at"])])
+            issue["resolution_minutes"] = resolution_minutes
+            return FakeCursor(
+                [
+                    (
+                        issue["issue_id"], issue["issue_type"],
+                        issue["severity"], issue["resolved_at"],
+                    )
+                ]
+            )
 
         if q.startswith("SELECT status FROM dq.issues"):
             issue = self.dq_issues.get(str(params[0]))
             return FakeCursor([(issue["status"],)] if issue else [])
+
+        if q.startswith("SELECT resolution_minutes FROM dq.issues"):
+            issue = self.dq_issues.get(str(params[0]))
+            return FakeCursor(
+                [(issue["resolution_minutes"],)] if issue else []
+            )
 
         # -- machine API keys (handoff 0006) --------------------------------
         if "FROM auth.api_keys WHERE key_hash" in q:
@@ -451,6 +466,7 @@ class FakeConn:
             "created_at": dt.datetime(2026, 6, 15, 9, 0, tzinfo=UTC),
             "resolved_at": None,
             "resolution": None,
+            "resolution_minutes": None,  # migration 0016 — null when unmeasured
         }
         issue.update(overrides)
         self.dq_issues[issue["issue_id"]] = issue

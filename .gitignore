@@ -49,3 +49,10 @@ out/
 
 # TIDES drop directory: runtime data (simulator output / agency drops), never source
 deploy/compose/tides-drop/
+
+# design-sync machine state
+.ds-sync/
+ds-bundle/
+.design-sync/.cache/
+.design-sync/learnings/
+.design-sync/node_modules

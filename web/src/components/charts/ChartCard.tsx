@@ -21,7 +21,7 @@ export interface ChartTable {
   rows: ReactNode[][];
 }
 
-interface ChartCardProps {
+export interface ChartCardProps {
   heading: string;
   description: string;
   table: ChartTable;

@@ -60,6 +60,7 @@ export const copy = {
     vrm: "Vehicle Revenue Miles (VRM)",
     vrh: "Vehicle Revenue Hours (VRH)",
     upt: "Unlinked Passenger Trips (UPT)",
+    voms: "Vehicles Operated in Maximum Service (VOMS)",
   } as Record<string, string>,
 
   /**
@@ -70,6 +71,7 @@ export const copy = {
     miles: "miles",
     hours: "hours",
     unlinked_passenger_trips: "unlinked passenger trips",
+    vehicles: "vehicles",
   } as Record<string, string>,
 
   metrics: {
@@ -282,6 +284,23 @@ export const copy = {
     submitResolution: "Mark as resolved",
     cancelResolution: "Cancel",
     resolveSuccess: (title: string) => `“${title}” is now resolved.`,
+    /** The optional effort field on the resolve form (docket #3). */
+    minutesLabel: "Time spent resolving (minutes)",
+    minutesHint:
+      "Optional. A whole number of minutes, like 45. Recording it helps show the work behind data quality.",
+    minutesInvalid:
+      "Time spent must be a whole number of minutes (like 45), or left blank.",
+    minutesSpentLabel: "Time spent resolving",
+    minutesSpentValue: (minutes: string) =>
+      `${minutes} minute${minutes === "1" ? "" : "s"}`,
+    /**
+     * The documented-effort total in the queue header. This is UI arithmetic
+     * on EFFORT METADATA (minutes stewards typed into the resolve form) —
+     * a workflow tally like the issue counts above it, never a reported
+     * regulatory figure, which would be displayed verbatim from the API.
+     */
+    summaryEffort: (hours: string) =>
+      `≈${hours} hours of documented data-quality work`,
   },
 
   /**
@@ -405,6 +424,58 @@ export const copy = {
     exportCsv: "Download CSV (preview only)",
     exportFileName: (year: string, month: string) =>
       `headway-monthly-ridership-${year}-${month}-preview.csv`,
+    /**
+     * The MR-20 package section (docket #2): a rendering of GET
+     * /reports/mr20. Everything regulatory in it — the banner, the citation,
+     * the caveats, every value and null-reason — is the API's text VERBATIM;
+     * this catalog only holds the frame around it.
+     */
+    mr20: {
+      sectionToggleLabel: "Report section",
+      previewTab: "Monthly ridership preview",
+      mr20Tab: "MR-20 package",
+      heading: "MR-20 package",
+      intro:
+        "The Monthly Ridership (MR-20) figures assembled for this month, exactly as the API packaged them: fleet totals and one row per mode. Nothing here is recalculated, and the package says itself whether it may be reported.",
+      tableCaption: (monthName: string, year: string) =>
+        `MR-20 package for ${monthName} ${year}: fleet and per-mode figures, exactly as packaged by the API.`,
+      columns: {
+        mode: "Mode",
+      },
+      fleetRow: "Fleet (all modes)",
+      /** NTD mode codes; unknown codes fall back to the raw code, honestly. */
+      modeLabels: {
+        MB: "Bus (MB)",
+        RB: "Bus rapid transit (RB)",
+        CB: "Commuter bus (CB)",
+        DR: "Demand response (DR)",
+        LR: "Light rail (LR)",
+        HR: "Heavy rail (HR)",
+        CR: "Commuter rail (CR)",
+        SR: "Streetcar rail (SR)",
+        YR: "Hybrid rail (YR)",
+        FB: "Ferryboat (FB)",
+        TB: "Trolleybus (TB)",
+        VP: "Vanpool (VP)",
+      } as Record<string, string>,
+      /** Plain-language labels for cell flags; unknown flags shown raw. */
+      flagLabels: {
+        pending_d2: "Pending D-2",
+      } as Record<string, string>,
+      flagNotes: {
+        pending_d2:
+          "This rail figure is on hold until the D-2 form definition is verified.",
+      } as Record<string, string>,
+      cellCoverage: (percent: string) => `Coverage ${percent}%`,
+      /** Fallback only — the API normally states a reason for a null cell. */
+      noReason: "Not reported. The package gave no reason.",
+      cellMissing: "Not included in this package.",
+      caveatsToggle: (count: string) =>
+        `Caveats (${count}) — read these before using the package`,
+      download: "Download package (JSON)",
+      /** The saved file is the fetched response, byte for byte. */
+      downloadFileName: (month: string) => `headway-mr20-${month}.json`,
+    },
   },
 
   /**
@@ -521,6 +592,41 @@ export const copy = {
       status: "Status",
     },
     pointLabel: (period: string, entries: string) => `${period}: ${entries}`,
+    /**
+     * The one filter row above the charts (dataviz interaction.md: filters
+     * sit in a single row above everything they scope, and every chart and
+     * table below re-renders against the same slice). Bucketing is date math
+     * on period boundaries; figures are NEVER added together in the browser
+     * (see src/reports/granularity.ts).
+     */
+    filters: {
+      rowLabel: "Filter the charts",
+      fromLabel: "From date",
+      toLabel: "To date",
+      granularityLabel: "Show periods as",
+      granularityOptions: {
+        hourly: "Hourly",
+        daily: "Daily",
+        weekly: "Weekly",
+        monthly: "Monthly",
+        quarterly: "Quarterly",
+      } as Record<string, string>,
+      /**
+       * The honest coarse-bucket note: when the reported periods do not line
+       * up with the selected granularity, the chart shows every reported
+       * period as-is. Summing them client-side would invent a figure nobody
+       * computed or certified — so Headway never does.
+       */
+      asReported: (count: string, granularityLabel: string) =>
+        `Showing ${count} period${count === "1" ? "" : "s"} as reported. The reported periods do not line up with ${granularityLabel.toLowerCase()} periods, and Headway never adds figures together in the browser.`,
+      /**
+       * The DQ card obeys the same date slice as every chart below the
+       * filter row, but an issue outside the range is never made to look
+       * resolved or gone: the held-back count is always stated.
+       */
+      dqOutsideRange: (count: string) =>
+        `${count} unresolved issue${count === "1" ? " falls" : "s fall"} outside the selected dates. The queue still holds ${count === "1" ? "it" : "them"} — go to the data-quality queue for the full list.`,
+    },
   },
 
   /**

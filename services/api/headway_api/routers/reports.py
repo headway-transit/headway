@@ -1,0 +1,75 @@
+"""MR-20 preview report: the calc library's package, served VERBATIM.
+
+GET /reports/mr20?month=YYYY-MM assembles nothing itself — it imports
+``headway_calc.mr20`` (handoff 0009) and returns exactly the package that
+``build_mr20_package`` produced, serialized once with ``json.dumps`` and sent
+as raw bytes. No reshaping, no re-keying, no response model: the NOT-
+REPORTABLE banner, the programmatically enumerated caveats, and every
+per-cell provenance field reach the web client exactly as the calc library
+wrote them (this API never originates or edits a figure).
+
+Any signed-in role may read it — the package is a preview with its own
+governing caveats, not a certification surface.
+
+DEPLOYMENT ASSUMPTION: ``headway_calc`` must be importable in the API's
+environment (the shared venv installs services/calc; the api Docker image
+must install services/calc too — Dockerfile follow-up, see README).
+"""
+
+from __future__ import annotations
+
+import json
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
+
+from headway_calc import mr20
+
+from ..auth import Identity
+from ..authz import require_authenticated
+from ..db import get_db
+
+router = APIRouter(tags=["reports"])
+
+
+@router.get(
+    "/reports/mr20",
+    responses={
+        200: {
+            "content": {"application/json": {}},
+            "description": (
+                "The headway_calc.mr20 package for the month, verbatim: "
+                "form/generator/period header, reportable=false + banner, "
+                "programmatically enumerated caveats, and the four MR-20 "
+                "data points per mode plus fleet totals, each cell carrying "
+                "full provenance or an explicit null + reason."
+            ),
+        }
+    },
+)
+def get_mr20_report(
+    month: str = Query(
+        ...,
+        description="Calendar month as YYYY-MM (e.g. 2026-07), UTC, half-open period.",
+    ),
+    identity: Identity = Depends(require_authenticated),
+    db=Depends(get_db),
+) -> Response:
+    """Serve the MR-20 preview package (NOT reportable) for one month."""
+    try:
+        # The calc library owns the month convention; we only translate its
+        # refusal into a plain-language 422.
+        mr20.month_period(month)
+    except ValueError:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"'{month}' is not a month Headway understands. Please use "
+                f"the form YYYY-MM — for example 2026-07 for July 2026 — "
+                f"with a month number from 01 to 12."
+            ),
+        )
+    package = mr20.build_mr20_package(db, month)
+    # Serialized here, once, and sent as-is: byte-identical to the package.
+    return Response(
+        content=json.dumps(package), media_type="application/json"
+    )

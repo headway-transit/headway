@@ -1176,3 +1176,65 @@ ul.detail-panel li {
   color: #57606a;
   font-size: var(--text-sm);
 }
+
+/* ---- dashboard chart filter row (docket #1) ----
+   One row, above everything it scopes (dataviz interaction.md): date range
+   first, then the granularity toggle group (reuses .filter-bar — selection
+   is aria-pressed + fill + label, never color alone). All colors here are
+   existing AA-verified token pairs; no new pairs to add to
+   scripts/check-contrast.mjs. */
+.chart-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-3);
+  margin: var(--space-3) 0;
+}
+.chart-filters .date-range-field label {
+  display: block;
+  font-weight: 600;
+  margin-bottom: var(--space-1);
+}
+.chart-filters input[type="date"] {
+  font: inherit;
+  color: var(--color-text);
+  padding: var(--space-2);
+  border: 1px solid var(--color-input-border);
+  border-radius: var(--radius-1);
+  background: var(--color-bg);
+}
+.chart-filters .filter-bar {
+  margin: 0;
+}
+
+/* ---- MR-20 package section (docket #2) ---- */
+.mr20-banner {
+  font-weight: 600;
+}
+.mr20-citation {
+  color: var(--color-text-muted);
+}
+.mr20-unit {
+  color: var(--color-text-muted);
+}
+.mr20-cell-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+  margin-top: var(--space-1);
+}
+/* Cell flags (e.g. Pending D-2): warning tokens — an AA-verified pair. */
+.tag.mr20-flag {
+  background: var(--color-warning-bg);
+  color: var(--color-warning-text);
+}
+.mr20-caveats ul {
+  margin: var(--space-2) 0;
+}
+
+/* ---- DQ documented-effort chip (docket #3): info tokens, AA-verified. ---- */
+.chip.effort {
+  background: var(--color-info-bg);
+  color: var(--color-info-text);
+}

@@ -727,6 +727,49 @@
         }
       }
     },
+    "/reports/mr20": {
+      "get": {
+        "tags": [
+          "reports"
+        ],
+        "summary": "Get Mr20 Report",
+        "description": "Serve the MR-20 preview package (NOT reportable) for one month.",
+        "operationId": "get_mr20_report_reports_mr20_get",
+        "parameters": [
+          {
+            "name": "month",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Calendar month as YYYY-MM (e.g. 2026-07), UTC, half-open period.",
+              "title": "Month"
+            },
+            "description": "Calendar month as YYYY-MM (e.g. 2026-07), UTC, half-open period."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The headway_calc.mr20 package for the month, verbatim: form/generator/period header, reportable=false + banner, programmatically enumerated caveats, and the four MR-20 data points per mode plus fleet totals, each cell carrying full provenance or an explicit null + reason.",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/public/metrics/certified": {
       "get": {
         "tags": [
@@ -1150,6 +1193,17 @@
               }
             ],
             "title": "Resolution"
+          },
+          "resolution_minutes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolution Minutes"
           }
         },
         "type": "object",
@@ -1164,7 +1218,8 @@
           "source_record_ids",
           "created_at",
           "resolved_at",
-          "resolution"
+          "resolution",
+          "resolution_minutes"
         ],
         "title": "DqIssue"
       },
@@ -1541,6 +1596,17 @@
             "type": "string",
             "minLength": 1,
             "title": "Resolution"
+          },
+          "resolution_minutes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolution Minutes"
           }
         },
         "type": "object",
@@ -1568,6 +1634,17 @@
             "type": "string",
             "title": "Resolution"
           },
+          "resolution_minutes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolution Minutes"
+          },
           "audit_event_id": {
             "type": "integer",
             "title": "Audit Event Id"
@@ -1579,6 +1656,7 @@
           "status",
           "resolved_at",
           "resolution",
+          "resolution_minutes",
           "audit_event_id"
         ],
         "title": "ResolveResponse"

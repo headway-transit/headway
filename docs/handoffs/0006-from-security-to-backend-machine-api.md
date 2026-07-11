@@ -72,3 +72,39 @@ Verification (2026-07-11, Python 3.12, `/home/daniel/venv`, fakes only — live 
 
 ## Live verification (orchestrator, 2026-07-10 evening)
 Migration 0013 applied; API restarted with real MinIO/Kafka wiring. Live flow: key issued (`hwk_m8FQxcdG…`, shown once with warning) → TIDES CSV pushed over HTTP with the key → 202 `{record_id: 574af469…, parse_status: ok}` → drained through transform → **1 row in canonical.passenger_events with source=tides_simulated (bound from the key) and the content-addressed record id intact**. Human session token on the machine endpoint → 401 (credential-type separation). `GET /public/metrics/certified` unauthenticated → both certified figures served. Suites: api 76, db 12, all green.
+
+## Contract change — backend-engineer (2026-07-11): second webhook event type, `dq.issue.resolved`
+
+Design point 7's v0 event registry (`certification.created` only) is extended
+with a second event type, **`dq.issue.resolved`** — a contract change to this
+design, recorded here dated rather than silently absorbed.
+
+- **Trigger**: `POST /dq/issues/{id}/resolve`, strictly **post-commit** (the
+  resolve transaction commits first; a delivery problem can never fail the
+  resolve response) — the same discipline as design point 7.
+- **Body**: `{event_type, issue_id, issue_type, severity, resolved_by,
+  resolution_minutes, resolved_at}`. `resolution_minutes` is the new optional
+  effort measurement (migration 0016, `dq.issues.resolution_minutes` INTEGER
+  nullable CHECK >= 0); null when not recorded — never coalesced to zero.
+- **Mechanics unchanged and shared**: same subscription table, same
+  `X-Headway-Signature: sha256=<HMAC-SHA256(body, secret)>` +
+  `X-Headway-Timestamp` signing over the exact body bytes, same
+  one-retry-then-audited-failure delivery (`webhooks._deliver_to_matching`,
+  now the shared core both dispatchers call). Subscriptions name the events
+  they want; the registry stays deny-by-default. Existing
+  `certification.created`-only subscriptions receive no dq events (tested in
+  both directions).
+- **HONEST SCOPE — no `dq.issue.created`**: dq.issues rows are written by the
+  calc/transform services outside the API process, so the API has no
+  post-commit moment to dispatch a created-event from and does not pretend to
+  offer one. The follow-up for full ticketing sync is an outbox table (or DB
+  trigger) drained by a dispatcher; **v0 ticketing integration** =
+  `dq.issue.resolved` push + polling `GET /dq/issues`.
+
+Verification (2026-07-11, Python 3.12, `/home/daniel/venv`, fakes only — live
+stack untouched): `cd services/api && python3 -m pytest tests/ -q` → **136
+passed** (123 pre-existing unchanged); `cd db && python3 -m pytest
+test_migrations_static.py -q` → **15 passed** (0016 registered);
+`openapi.json` regenerated — OpenAPI 3.1.0, 18 paths (adds `/reports/mr20`;
+resolve request/response and DqIssue gain `resolution_minutes`). Migration
+0016 is NOT applied to the live DB by this work.

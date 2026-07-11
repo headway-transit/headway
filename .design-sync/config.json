@@ -1,0 +1,44 @@
+{
+  "projectId": "be902e0a-f5a5-4735-a133-94d0a6e44497",
+  "shape": "package",
+  "pkg": "web",
+  "globalName": "Headway",
+  "srcDir": "src/components",
+  "tsconfig": "tsconfig.app.json",
+  "cssEntry": "src/styles.css",
+  "componentSrcMap": {
+    "Receipt": "src/components/Receipt.tsx",
+    "SimulatedBadge": "src/components/SimulatedBadge.tsx",
+    "Modal": "src/components/Modal.tsx",
+    "SeverityIcon": "src/components/SeverityIcon.tsx",
+    "LineageGraph": "src/components/LineageGraph.tsx",
+    "ChartCard": "src/components/charts/ChartCard.tsx",
+    "TimeSeriesChart": "src/components/charts/TimeSeriesChart.tsx",
+    "SeverityStackedBar": "src/components/charts/SeverityStackedBar.tsx",
+    "Layout": "src/components/Layout.tsx"
+  },
+  "dtsPropsFor": {
+    "Receipt": "/** The computed metric value this receipt explains (values are verbatim API strings \u2014 never parsed to float). */ value: { metric: string; value: string; unit: string; period_start: string; period_end: string; calc_name: string; calc_version: string; certification_status: 'uncertified' | 'certified'; metric_value_id?: string; scope?: string; detail?: Record<string, unknown> };",
+    "SimulatedBadge": "",
+    "SeverityIcon": "/** One of 'blocking' | 'warning' | 'info' (any string renders the neutral form). */ severity: string;",
+    "Modal": "/** id of the element (inside the modal) that names the dialog. */ titleId: string; onClose: () => void; children: React.ReactNode;",
+    "Layout": "",
+    "LineageGraph": "/** Root of the lineage tree (kind 'computed.metric_values' at the top, 'raw.records' leaves). */ root: { kind: string; id: string; transform_name?: string | null; transform_version?: string | null; inputs?: { kind: string; id: string; transform_name?: string | null; transform_version?: string | null; inputs?: unknown[] }[] };",
+    "ChartCard": "heading: string; description: string; /** Accessible table twin of the chart. */ table: { caption: string; columns: string[]; rows: React.ReactNode[][] }; /** Shown under the description in chart view (e.g. the keyboard hint). */ hint?: string; children: React.ReactNode;",
+    "TimeSeriesChart": "series: { id: string; label: string; /** A validated --series-* token, e.g. 'var(--series-1)'. */ color: string; points: { x: number; xLabel: string; /** displayed figure: the API string verbatim */ display: string; y: number }[] }[]; /** Accessible name for the reader layer. */ ariaLabel: string; unit: string; yMax?: number; referenceLine?: { y: number; label: string };",
+    "SeverityStackedBar": "bars: { key: string; label: string; segments: { severity: string; label: string; count: number; /** formatted tally for display */ displayCount: string; /** status token, e.g. 'var(--chart-status-warning)' */ color: string }[]; displayTotal: string }[]; legend: { severity: string; label: string; color: string }[];"
+  },
+  "extraEntries": [
+    "./src/design-sync-provider.tsx"
+  ],
+  "provider": {
+    "component": "DesignSyncProvider"
+  },
+  "overrides": {
+    "Modal": {
+      "cardMode": "single",
+      "viewport": "900x700"
+    }
+  },
+  "readmeHeader": ".design-sync/conventions.md"
+}

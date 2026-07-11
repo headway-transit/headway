@@ -61,7 +61,7 @@ export interface ReferenceLine {
   label: string;
 }
 
-interface TimeSeriesChartProps {
+export interface TimeSeriesChartProps {
   series: ChartSeries[];
   /** Accessible name for the reader layer. */
   ariaLabel: string;
@@ -91,7 +91,13 @@ function niceTicks(maxValue: number): number[] {
     [1, 2, 2.5, 5, 10].map((m) => m * power).find((s) => s >= rough) ??
     10 * power;
   const ticks: number[] = [];
-  for (let v = 0; v <= maxValue + step * 0.001; v += step) ticks.push(v);
+  // The last tick must COVER maxValue: stopping below it made py() clamp
+  // every larger point to a flat line at the top gridline (found by
+  // design-sync preview verification, 2026-07-11 — real Dashboard bug).
+  for (let v = 0; ; v += step) {
+    ticks.push(v);
+    if (v >= maxValue) break;
+  }
   return ticks;
 }
 

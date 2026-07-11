@@ -14,7 +14,7 @@ import type { ReactNode } from "react";
 const FOCUSABLE =
   'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
-interface ModalProps {
+export interface ModalProps {
   /** id of the element (inside the modal) that names the dialog. */
   titleId: string;
   onClose: () => void;
