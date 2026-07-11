@@ -65,6 +65,17 @@ async def lifespan(app: FastAPI):
             # transaction() blocks are genuine BEGIN/COMMIT atomic units.
             opened_here = psycopg.connect(dsn, autocommit=True)
             app.state.db = opened_here
+    # Ingest seams (handoff 0006): when not injected, wire MinIO and Kafka
+    # from the same env vars the Go connectors use. Imported here (not at
+    # module top) because routers.ingest imports this module. None stays None:
+    # the ingest endpoint then refuses with a plain-language 503 rather than
+    # ever silently accepting bytes it cannot land.
+    from .routers.ingest import object_store_from_env, producer_from_env
+
+    if getattr(app.state, "object_store", None) is None:
+        app.state.object_store = object_store_from_env()
+    if getattr(app.state, "producer", None) is None:
+        app.state.producer = producer_from_env()
     try:
         yield
     finally:

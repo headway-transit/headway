@@ -324,6 +324,264 @@
           }
         }
       }
+    },
+    "/machine/keys": {
+      "get": {
+        "tags": [
+          "machine-keys"
+        ],
+        "summary": "List Keys",
+        "operationId": "list_keys_machine_keys_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/KeyListItem"
+                  },
+                  "type": "array",
+                  "title": "Response List Keys Machine Keys Get"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "machine-keys"
+        ],
+        "summary": "Issue Key",
+        "operationId": "issue_key_machine_keys_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateKeyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateKeyResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/machine/keys/{key_id}": {
+      "delete": {
+        "tags": [
+          "machine-keys"
+        ],
+        "summary": "Revoke Key",
+        "operationId": "revoke_key_machine_keys__key_id__delete",
+        "parameters": [
+          {
+            "name": "key_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Key Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RevokeKeyResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ingest/tides/passenger-events": {
+      "post": {
+        "tags": [
+          "ingest"
+        ],
+        "summary": "Ingest Passenger Events",
+        "operationId": "ingest_passenger_events_ingest_tides_passenger_events_post",
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IngestResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/webhooks": {
+      "get": {
+        "tags": [
+          "webhooks"
+        ],
+        "summary": "List Subscriptions",
+        "operationId": "list_subscriptions_webhooks_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SubscriptionResponse"
+                  },
+                  "type": "array",
+                  "title": "Response List Subscriptions Webhooks Get"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "webhooks"
+        ],
+        "summary": "Create Subscription",
+        "operationId": "create_subscription_webhooks_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSubscriptionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubscriptionResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/webhooks/{subscription_id}": {
+      "delete": {
+        "tags": [
+          "webhooks"
+        ],
+        "summary": "Revoke Subscription",
+        "operationId": "revoke_subscription_webhooks__subscription_id__delete",
+        "parameters": [
+          {
+            "name": "subscription_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Subscription Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RevokeSubscriptionResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/public/metrics/certified": {
+      "get": {
+        "tags": [
+          "public"
+        ],
+        "summary": "List Certified Values",
+        "operationId": "list_certified_values_public_metrics_certified_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PublicMetricValue"
+                  },
+                  "type": "array",
+                  "title": "Response List Certified Values Public Metrics Certified Get"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -392,6 +650,131 @@
           "audit_event_id"
         ],
         "title": "CertificationResponse"
+      },
+      "CreateKeyRequest": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Name",
+            "description": "Human label, e.g. 'APC vendor X'"
+          },
+          "scopes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Scopes"
+          },
+          "source_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Label",
+            "description": "The envelope source this key is bound to (required for ingest keys); e.g. 'tides_simulated' for a simulator key."
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "scopes"
+        ],
+        "title": "CreateKeyRequest"
+      },
+      "CreateKeyResponse": {
+        "properties": {
+          "key_id": {
+            "type": "string",
+            "title": "Key Id"
+          },
+          "key": {
+            "type": "string",
+            "title": "Key"
+          },
+          "warning": {
+            "type": "string",
+            "title": "Warning"
+          },
+          "key_prefix": {
+            "type": "string",
+            "title": "Key Prefix"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "scopes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Scopes"
+          },
+          "source_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Label"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "key_id",
+          "key",
+          "warning",
+          "key_prefix",
+          "name",
+          "scopes",
+          "source_label",
+          "created_at"
+        ],
+        "title": "CreateKeyResponse"
+      },
+      "CreateSubscriptionRequest": {
+        "properties": {
+          "url": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Url"
+          },
+          "event_types": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Event Types"
+          },
+          "secret": {
+            "type": "string",
+            "minLength": 16,
+            "title": "Secret",
+            "description": "HMAC signing secret (min 16 chars)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "url",
+          "event_types",
+          "secret"
+        ],
+        "title": "CreateSubscriptionRequest"
       },
       "DqIssue": {
         "properties": {
@@ -501,6 +884,92 @@
         },
         "type": "object",
         "title": "HTTPValidationError"
+      },
+      "IngestResponse": {
+        "properties": {
+          "record_id": {
+            "type": "string",
+            "title": "Record Id"
+          },
+          "parse_status": {
+            "type": "string",
+            "title": "Parse Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "record_id",
+          "parse_status"
+        ],
+        "title": "IngestResponse"
+      },
+      "KeyListItem": {
+        "properties": {
+          "key_id": {
+            "type": "string",
+            "title": "Key Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "key_prefix": {
+            "type": "string",
+            "title": "Key Prefix"
+          },
+          "scopes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Scopes"
+          },
+          "source_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Label"
+          },
+          "created_by": {
+            "type": "string",
+            "title": "Created By"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "revoked_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revoked At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "key_id",
+          "name",
+          "key_prefix",
+          "scopes",
+          "source_label",
+          "created_by",
+          "created_at",
+          "revoked_at"
+        ],
+        "title": "KeyListItem",
+        "description": "Listing shape: prefix + metadata only \u2014 never the hash, never the key."
       },
       "LineageNode": {
         "properties": {
@@ -674,6 +1143,79 @@
         ],
         "title": "MetricValue"
       },
+      "PublicMetricValue": {
+        "properties": {
+          "metric_value_id": {
+            "type": "string",
+            "title": "Metric Value Id"
+          },
+          "metric": {
+            "type": "string",
+            "title": "Metric"
+          },
+          "unit": {
+            "type": "string",
+            "title": "Unit"
+          },
+          "period_start": {
+            "type": "string",
+            "format": "date",
+            "title": "Period Start"
+          },
+          "period_end": {
+            "type": "string",
+            "format": "date",
+            "title": "Period End"
+          },
+          "scope": {
+            "type": "string",
+            "title": "Scope"
+          },
+          "value": {
+            "type": "string",
+            "title": "Value"
+          },
+          "calc_name": {
+            "type": "string",
+            "title": "Calc Name"
+          },
+          "calc_version": {
+            "type": "string",
+            "title": "Calc Version"
+          },
+          "computed_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Computed At"
+          },
+          "certification_status": {
+            "type": "string",
+            "title": "Certification Status"
+          },
+          "detail": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Detail",
+            "default": {}
+          }
+        },
+        "type": "object",
+        "required": [
+          "metric_value_id",
+          "metric",
+          "unit",
+          "period_start",
+          "period_end",
+          "scope",
+          "value",
+          "calc_name",
+          "calc_version",
+          "computed_at",
+          "certification_status"
+        ],
+        "title": "PublicMetricValue",
+        "description": "A certified figure, publishable form. No PII, no certifier identity."
+      },
       "ResolveRequest": {
         "properties": {
           "resolution": {
@@ -721,6 +1263,105 @@
           "audit_event_id"
         ],
         "title": "ResolveResponse"
+      },
+      "RevokeKeyResponse": {
+        "properties": {
+          "key_id": {
+            "type": "string",
+            "title": "Key Id"
+          },
+          "revoked_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Revoked At"
+          },
+          "audit_event_id": {
+            "type": "integer",
+            "title": "Audit Event Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "key_id",
+          "revoked_at",
+          "audit_event_id"
+        ],
+        "title": "RevokeKeyResponse"
+      },
+      "RevokeSubscriptionResponse": {
+        "properties": {
+          "subscription_id": {
+            "type": "string",
+            "title": "Subscription Id"
+          },
+          "revoked_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Revoked At"
+          },
+          "audit_event_id": {
+            "type": "integer",
+            "title": "Audit Event Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "subscription_id",
+          "revoked_at",
+          "audit_event_id"
+        ],
+        "title": "RevokeSubscriptionResponse"
+      },
+      "SubscriptionResponse": {
+        "properties": {
+          "subscription_id": {
+            "type": "string",
+            "title": "Subscription Id"
+          },
+          "url": {
+            "type": "string",
+            "title": "Url"
+          },
+          "event_types": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Event Types"
+          },
+          "created_by": {
+            "type": "string",
+            "title": "Created By"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "revoked_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revoked At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "subscription_id",
+          "url",
+          "event_types",
+          "created_by",
+          "created_at",
+          "revoked_at"
+        ],
+        "title": "SubscriptionResponse",
+        "description": "Subscription shape served back \u2014 deliberately secret-free."
       },
       "ValidationError": {
         "properties": {

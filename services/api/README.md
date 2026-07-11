@@ -19,6 +19,14 @@ preserved end to end; floating point never touches a figure).
 | POST | `/certifications` | `certifying_official` only | Inserts `cert.certifications`, marks the figures `certified`, and writes the `audit.events` row — all in ONE transaction. Refuses with 409 while any blocking DQ issue is unresolved. |
 | GET | `/dq/issues` | any signed-in role | Data-quality issues; filter by `status`. |
 | POST | `/dq/issues/{id}/resolve` | `data_steward` or above | Resolves an issue with a resolution note + audit event, in one transaction. |
+| POST | `/machine/keys` | `certifying_official` (v0 admin) | Issues a machine API key. The full key appears ONCE in this response with an explicit warning; only its SHA-256 hash is stored. Audited. |
+| GET | `/machine/keys` | `certifying_official` | Lists keys: prefix, name, scopes, source label, created/revoked — never hashes, never key material. |
+| DELETE | `/machine/keys/{id}` | `certifying_official` | Revokes a key (sets `revoked_at`; rows are never deleted — audit history). Audited. |
+| POST | `/ingest/tides/passenger-events` | machine key, scope `ingest:tides` | Push a TIDES passenger_events CSV (≤ 32 MiB) over HTTPS. Content-addressed (sha256 → `record_id`), stored to MinIO, produced as a v0 envelope to `raw.tides.passenger_events` — store before produce. 202 `{record_id, parse_status}`; malformed is still landed + produced, flagged. Audited per request. |
+| POST | `/webhooks` | `certifying_official` | Subscribe a URL to `certification.created`. The HMAC secret is accepted here and never returned by anything. Audited. |
+| GET | `/webhooks` | `certifying_official` | Lists subscriptions (secret-free). |
+| DELETE | `/webhooks/{id}` | `certifying_official` | Removes a subscription (soft revoke). Audited. |
+| GET | `/public/metrics/certified` | **none — public open data** | ONLY figures a certifying official already attested (`certification_status='certified'`); values as strings, `detail` verbatim (simulated flags shown, figures never hidden); no PII; rate-limited per client IP. |
 
 The full contract is `openapi.json` (regenerate with
 `python3 scripts/export_openapi.py`) — the artifact handed to the web team.
@@ -45,6 +53,82 @@ disabled`.
   Any signed-in role reads; resolving DQ issues needs data_steward or above;
   **certification is gated to exactly `certifying_official`** (separation of
   duties). Every denial is a plain-language 403.
+
+## Machine API (handoff 0006)
+
+Vendors and agency systems push data and consume results without human
+sessions, via **service-account API keys**: `hwk_<32 bytes url-safe random>`.
+The `hwk_` prefix makes leaked keys grep-able and distinguishes them from
+session JWTs.
+
+**Key lifecycle:**
+
+1. **Issue** (admin — `certifying_official` in v0): the response contains the
+   full key exactly once, with a warning string. Only the SHA-256 hash is
+   stored (`auth.api_keys.key_hash`, migration 0013). SHA-256 — not bcrypt —
+   is deliberate: the key is high-entropy random, so there is no dictionary
+   to defend against and a fast hash is the correct at-rest protection
+   (see `headway_api/machine_auth.py` docstring).
+2. **Use**: `Authorization: Bearer hwk_...` on machine endpoints. Scopes are
+   deny-by-default (`ingest:tides`, `read:metrics` — the latter is issued but
+   has no endpoint consumer yet; the machine-read endpoint is a next
+   increment). Ingest keys are bound to a `source_label` — the ONLY envelope
+   `source` they can write (a simulator key gets `tides_simulated`; a
+   client-supplied source is ignored). Success and denial are both audited,
+   actor `key:<key_prefix>`.
+3. **Revoke**: `DELETE /machine/keys/{id}` sets `revoked_at`; a revoked key
+   gets a plain-language 401 (audited). Keys are never deleted.
+
+**Rate limits**: in-process token bucket, 60 req/min per key (and per client
+IP on the public endpoint), 429 + `Retry-After`. Single-instance limitation
+documented in `machine_auth.RateLimiter`; distributed limiting is the
+hosted-tier increment.
+
+**Webhooks**: on certification (post-commit, never blocking the 201), each
+live `certification.created` subscription gets a JSON POST signed with
+`X-Headway-Signature: sha256=<HMAC-SHA256(body, secret)>` plus
+`X-Headway-Timestamp` (receivers should reject stale timestamps; binding the
+timestamp into the signature is a tracked hardening increment). One retry;
+outcomes audit-logged. The subscription secret is stored plaintext with a
+documented risk note + compensating control (migration 0013) — encryption at
+rest of that column is the secrets-management increment.
+
+**Ingest dependencies** (`pip install '.[ingest]'`): MinIO (`minio`) and
+Kafka (`kafka-python-ng`), wired from the same env vars as the Go connectors
+(`S3_ENDPOINT`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`, `S3_BUCKET`,
+`KAFKA_BROKERS`). Both live behind small protocols on `app.state`
+(injectable fakes in tests); unconfigured means a loud 503, never a silent
+accept.
+
+**curl examples:**
+
+```sh
+# Issue a key (as a certifying official; save the key — it is shown once)
+curl -s -X POST https://headway.agency.example/machine/keys \
+  -H "Authorization: Bearer $SESSION_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"name": "TIDES simulator", "scopes": ["ingest:tides"],
+       "source_label": "tides_simulated"}'
+
+# Push a passenger_events CSV with that key
+curl -s -X POST https://headway.agency.example/ingest/tides/passenger-events \
+  -H "Authorization: Bearer hwk_..." -H 'Content-Type: text/csv' \
+  --data-binary @passenger_events_2026-06-01.csv
+# -> {"record_id": "<sha256 of the bytes>", "parse_status": "ok"}
+
+# Revoke it
+curl -s -X DELETE https://headway.agency.example/machine/keys/<key_id> \
+  -H "Authorization: Bearer $SESSION_TOKEN"
+
+# Subscribe an external system to certifications
+curl -s -X POST https://headway.agency.example/webhooks \
+  -H "Authorization: Bearer $SESSION_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"url": "https://city.example/hooks/headway",
+       "event_types": ["certification.created"],
+       "secret": "<random shared secret, min 16 chars>"}'
+
+# Public open data — no auth at all
+curl -s https://headway.agency.example/public/metrics/certified
+```
 
 ## Audit guarantees
 
@@ -81,14 +165,25 @@ python3 -m pytest tests/ -q
 
 ## Verification status
 
-- `pytest tests/ -q`: **36 passed** (2026-07-08, Python 3.12, this repo) —
+- `pytest tests/ -q`: **76 passed** (2026-07-10, Python 3.12, this repo) —
   covers login/token lifecycle, password-hash round trip, expired/invalid
   token 401s, role denials (viewer cannot certify), certification happy path
   (cert row + status update + audit event in one transaction), blocking-DQ
-  409 with rollback, lineage tree from canned edges, DQ resolve + audit.
-- `openapi.json` generated: OpenAPI 3.1.0, 6 paths.
-- **PENDING**: live verification against real PostgreSQL/TimescaleDB
-  (migrations 0001–0009 applied, psycopg connection, `uvicorn` boot,
-  recursive CTE executed by a real planner). Docker/Postgres is unavailable
-  in the authoring environment; the first environment with Docker must run
-  the suite against a live database before this service is declared Done.
+  409 with rollback, lineage tree from canned edges, DQ resolve + audit;
+  plus the machine API (handoff 0006): key issuance shows the key once and
+  stores only the hash (no plaintext in any captured SQL parameter), revoked
+  key 401 / wrong scope 403 (both audited), ingest happy path with the
+  envelope validated against `contracts/raw-record-envelope.v0.schema.json`,
+  client-supplied source ignored in favor of the key's `source_label`,
+  store-before-produce ordering asserted on a shared fake call log,
+  malformed CSV still landed + produced, 32 MiB 413, unconfigured deps 503,
+  per-key and per-IP 429 with Retry-After, webhook HMAC recomputed and
+  verified in test, one retry, delivery failure never failing the 201, and
+  the public endpoint serving only certified figures with no auth.
+- `openapi.json` generated: OpenAPI 3.1.0, 12 paths.
+- **PENDING**: live verification against real PostgreSQL/TimescaleDB,
+  MinIO, and Kafka (migrations 0001–0013 applied, psycopg connection,
+  `uvicorn` boot, a real ingest → envelope consumed). The authoring
+  environment must not touch the live stack; the first environment cleared
+  to do so must run the suite against live services before this increment is
+  declared Done.

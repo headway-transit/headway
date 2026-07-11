@@ -144,6 +144,45 @@ def test_passenger_events_hypertable_unique_key_and_columns():
     )
 
 
+def test_machine_api_keys_hashed_at_rest_and_soft_revoked():
+    # Handoff 0006 / migration 0013: service-account keys. The key is stored
+    # only as a SHA-256 hash (never plaintext), identified by a short prefix,
+    # and revoked softly (never deleted — audit history).
+    sql = all_sql()
+    assert re.search(r"CREATE TABLE\s+auth\.api_keys\b", sql), (
+        "auth.api_keys not created by any migration"
+    )
+    sql_0013 = (MIGRATIONS_DIR / "0013_machine_api.sql").read_text(encoding="utf-8")
+    assert re.search(r"key_hash\s+TEXT NOT NULL UNIQUE", sql_0013), (
+        "auth.api_keys.key_hash must be TEXT NOT NULL UNIQUE (hash-at-rest)"
+    )
+    assert re.search(r"key_prefix\s+TEXT NOT NULL", sql_0013)
+    assert re.search(r"scopes\s+TEXT\[\] NOT NULL", sql_0013)
+    assert re.search(r"revoked_at\s+TIMESTAMPTZ", sql_0013), (
+        "auth.api_keys must soft-revoke via revoked_at (keys never deleted)"
+    )
+    assert "key_plaintext" not in sql_0013 and not re.search(
+        r"\bkey\s+TEXT", sql_0013
+    ), "auth.api_keys must never have a plaintext key column"
+
+
+def test_machine_api_webhook_subscriptions_with_documented_secret_risk():
+    # Handoff 0006 / migration 0013: webhook subscriptions. The HMAC secret is
+    # plaintext BY DOCUMENTED DESIGN (it must be read back to sign) — the
+    # migration must carry the risk note and the compensating control.
+    sql = all_sql()
+    assert re.search(r"CREATE TABLE\s+auth\.webhook_subscriptions\b", sql), (
+        "auth.webhook_subscriptions not created by any migration"
+    )
+    sql_0013 = (MIGRATIONS_DIR / "0013_machine_api.sql").read_text(encoding="utf-8")
+    assert re.search(r"secret\s+TEXT NOT NULL", sql_0013)
+    assert re.search(r"event_types\s+TEXT\[\] NOT NULL", sql_0013)
+    assert "DOCUMENTED RISK" in sql_0013 and "COMPENSATING CONTROL" in sql_0013, (
+        "0013 must document the plaintext webhook-secret risk and its "
+        "compensating control (handoff 0006, design point 7)"
+    )
+
+
 def test_immutability_triggers_present():
     sql = all_sql()
     assert re.search(r"BEFORE UPDATE OR DELETE ON raw\.records", sql)

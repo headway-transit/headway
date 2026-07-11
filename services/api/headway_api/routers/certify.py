@@ -17,9 +17,10 @@ from __future__ import annotations
 
 import datetime as dt
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from .. import webhooks
 from ..audit import write_event
 from ..auth import Identity
 from ..authz import require_certifying_official
@@ -68,6 +69,7 @@ _MARK_CERTIFIED = (
 )
 def certify(
     body: CertificationRequest,
+    request: Request,
     identity: Identity = Depends(require_certifying_official),
     db=Depends(get_db),
 ) -> CertificationResponse:
@@ -138,6 +140,17 @@ def certify(
                 "certified_by_role": identity.role,
             },
         )
+    # STRICTLY POST-COMMIT (handoff 0006, design point 7): the certification
+    # transaction above is already committed; webhook delivery is best-effort
+    # with one retry, audit-logged, and can never fail this response.
+    webhooks.dispatch_certification_created(
+        db,
+        getattr(request.app.state, "webhook_sender", None),
+        certification_id=certification_id,
+        metric_value_ids=ids,
+        certified_by=identity.username,
+        certified_at=certified_at,
+    )
     return CertificationResponse(
         certification_id=certification_id,
         metric_value_ids=ids,

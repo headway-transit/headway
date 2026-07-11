@@ -14,12 +14,21 @@ dependencies = [
     "psycopg[binary]>=3.1",
     "PyJWT>=2.8",         # MIT
     "bcrypt>=4.1",        # Apache-2.0 — password hashing choice (ADR-0001: OSI permissive)
+    "httpx>=0.27",        # BSD-3-Clause — signed webhook delivery (handoff 0006);
+                          # moved from the test extra (it also backs fastapi.testclient)
 ]
 
 [project.optional-dependencies]
+# Machine ingest (handoff 0006): object store + broker clients. Optional so a
+# read-only deployment carries neither; without them the ingest endpoint
+# refuses with a plain-language 503 (never a silent accept).
+ingest = [
+    "minio>=7.2",           # Apache-2.0 — MinIO/S3 object store client
+    "kafka-python-ng>=2.2", # Apache-2.0 — Kafka producer (maintained fork)
+]
 test = [
     "pytest>=8",
-    "httpx>=0.27",        # required by fastapi.testclient
+    "jsonschema>=4.21",   # MIT — ingest envelopes validated against the actual contract schema
 ]
 
 [tool.setuptools.packages.find]

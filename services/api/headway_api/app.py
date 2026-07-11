@@ -13,15 +13,20 @@ from dataclasses import dataclass
 
 from fastapi import FastAPI
 
-from . import __version__, auth
+from . import __version__, auth, webhooks
 from .db import lifespan
-from .routers import certify, dq, metrics
+from .machine_auth import RateLimiter
+from .routers import certify, dq, ingest, machine_keys, metrics, public
 
 
 @dataclass(frozen=True)
 class Settings:
     session_secret: str
     token_ttl_seconds: int = auth.DEFAULT_TOKEN_TTL_SECONDS
+    # In-process token buckets (handoff 0006, design point 6): per machine
+    # key for ingest, per client IP for the public open-data endpoint.
+    machine_requests_per_minute: int = 60
+    public_requests_per_minute: int = 60
 
 
 class MissingSessionSecret(RuntimeError):
@@ -40,12 +45,26 @@ def settings_from_env() -> Settings:
     return Settings(session_secret=secret, token_ttl_seconds=ttl)
 
 
-def create_app(settings: Settings | None = None, db=None) -> FastAPI:
+def create_app(
+    settings: Settings | None = None,
+    db=None,
+    *,
+    object_store=None,
+    producer=None,
+    webhook_sender=None,
+) -> FastAPI:
     """Build the API.
 
     - ``settings``: pass explicitly (tests) or omit to read from env.
     - ``db``: an injected connection (tests / embedding); omit to let the
       lifespan open a psycopg3 connection from HEADWAY_DATABASE_URL.
+    - ``object_store`` / ``producer``: injected ingest seams (handoff 0006 —
+      fakes in tests); omit to let the lifespan wire MinIO/Kafka from the
+      environment (S3_*/KAFKA_BROKERS, the ``ingest`` extra). When neither
+      injection nor environment provides them, ingest refuses with a
+      plain-language 503 — never a silent accept.
+    - ``webhook_sender``: injected webhook HTTP seam (fake in tests); omit
+      for the httpx sender (httpx is a core dependency).
     """
     app = FastAPI(
         title="Headway API",
@@ -64,8 +83,25 @@ def create_app(settings: Settings | None = None, db=None) -> FastAPI:
     )
     app.state.settings = settings if settings is not None else settings_from_env()
     app.state.db = db
+    app.state.object_store = object_store
+    app.state.producer = producer
+    app.state.webhook_sender = (
+        webhook_sender
+        if webhook_sender is not None
+        else webhooks.HttpxWebhookSender()
+    )
+    app.state.machine_rate_limiter = RateLimiter(
+        app.state.settings.machine_requests_per_minute
+    )
+    app.state.public_rate_limiter = RateLimiter(
+        app.state.settings.public_requests_per_minute
+    )
     app.include_router(auth.router)
     app.include_router(metrics.router)
     app.include_router(certify.router)
     app.include_router(dq.router)
+    app.include_router(machine_keys.router)
+    app.include_router(ingest.router)
+    app.include_router(webhooks.router)
+    app.include_router(public.router)
     return app
