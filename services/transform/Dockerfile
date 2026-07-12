@@ -8,7 +8,7 @@
 # non-root. python-snappy>=0.7 is a pure-Python shim over cramjam (ships
 # manylinux wheels), so no C toolchain / libsnappy-dev is needed; if that
 # ever regresses, add the apt build deps HERE in the build stage only.
-FROM python:3.13-slim AS build
+FROM python:3.14-slim AS build
 WORKDIR /src
 COPY services/transform/pyproject.toml ./
 COPY services/transform/headway_transform ./headway_transform
@@ -16,7 +16,7 @@ COPY services/transform/headway_transform ./headway_transform
 # snappy by default); db: psycopg; s3: MinIO client for object_ref payloads.
 RUN pip wheel --no-cache-dir --wheel-dir /wheels ".[kafka,db,s3]"
 
-FROM python:3.13-slim
+FROM python:3.14-slim
 RUN useradd --system --uid 65532 --user-group --home-dir /nonexistent \
       --shell /usr/sbin/nologin nonroot
 COPY --from=build /wheels /tmp/wheels

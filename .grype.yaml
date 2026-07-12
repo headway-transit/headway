@@ -1,0 +1,10 @@
+# Grype policy for image scans (Security-role decision, 2026-07-12):
+# the release gate blocks FIXABLE vulnerabilities >= high. Findings the
+# distro has explicitly marked "won't fix" (Debian libc/perl/ncurses in
+# every python:*-slim base) are unactionable by image consumers and do
+# not block - they are tracked, not shipped-blind: the SBOM published
+# with every release makes them auditable. Fixable findings still fail
+# the build. See docs/supply-chain.md.
+ignore:
+  - fix-state: wont-fix
+  - fix-state: not-fixed

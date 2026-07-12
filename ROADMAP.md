@@ -139,3 +139,4 @@ The full ranked analysis with sources: [`docs/research/feature-gap-report-2026-0
 - **Safety & Security module incl. new cybersecurity event reporting** (report #3).
 - **Divergence closers the ecosystem is building toward**: TIDES v2 consists table → D2; Cal-ITP TODS connector → D3/D6; GTFS-Flex + DR revenue-time calc → D5 (reports #9, #5, #10).
 - **Ops analytics from data already held** (OTP, headway adherence — trip updates are ingested but unused today) (report #8).
+- Distroless runtime bases for the Python images (api/transform/ai) — removes the won't-fix Debian CVE surface entirely; ingestion already proves the pattern (source: docs/supply-chain.md scan policy)

@@ -111,3 +111,7 @@ release past a red gate" guardrail).
   image has been release-built by the pipeline yet; only local builds and
   the source-tree SBOM path have been exercised. The ingestion image remains
   unbuilt in this environment (Go toolchain image pull not attempted here).
+
+## Scan policy: fixable findings gate; "won't fix" distro findings do not
+
+As of 2026-07-12 (`.grype.yaml`): the release gate fails on fixable vulnerabilities of high severity or above. Findings the upstream distribution has explicitly marked won't-fix (common in Debian-based Python images: libc, perl-base, ncurses) cannot be remediated by us or by any image consumer; they are excluded from the gate but remain fully visible in every release's published SBOM. The long-term remediation is distroless runtime bases (the ingestion image already uses one and passes untouched) — tracked in ROADMAP.md.
