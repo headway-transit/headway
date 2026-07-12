@@ -1,17 +1,22 @@
 # headway-api — FastAPI backend (metrics with lineage, DQ workflow, audited
-# certification, machine ingest). Build: docker build -t headway-api services/api
+# certification, machine ingest).
+# BUILD FROM THE REPO ROOT (headway-api depends on the in-repo headway-calc):
+#   docker build -f services/api/Dockerfile -t headway-api .
 #
 # Two stages, same shape as services/ingestion/Dockerfile: build tooling never
 # reaches the runtime image; the runtime runs as a non-root user.
-FROM python:3.12-slim AS build
+FROM python:3.13-slim AS build
 WORKDIR /src
-COPY pyproject.toml ./
-COPY headway_api ./headway_api
+# headway-calc is a path dependency (not on PyPI) - install it first.
+COPY services/calc /calc
+RUN pip wheel --no-cache-dir --wheel-dir /wheels /calc
+COPY services/api/pyproject.toml ./
+COPY services/api/headway_api ./headway_api
 # [ingest] pulls the MinIO + Kafka clients so the machine-ingest endpoint is
 # live; without them it would 503 (see services/api/README.md).
-RUN pip wheel --no-cache-dir --wheel-dir /wheels ".[ingest]"
+RUN pip wheel --no-cache-dir --wheel-dir /wheels --find-links /wheels ".[ingest]"
 
-FROM python:3.12-slim
+FROM python:3.13-slim
 RUN useradd --system --uid 65532 --user-group --home-dir /nonexistent \
       --shell /usr/sbin/nologin nonroot
 COPY --from=build /wheels /tmp/wheels

@@ -7,13 +7,13 @@
 # Two stages, same shape as services/ingestion/Dockerfile; runtime is
 # non-root. Core headway-ai is stdlib-only; [persist] adds psycopg for this
 # CLI process boundary only.
-FROM python:3.12-slim AS build
+FROM python:3.13-slim AS build
 WORKDIR /src
 COPY pyproject.toml ./
 COPY headway_ai ./headway_ai
 RUN pip wheel --no-cache-dir --wheel-dir /wheels ".[persist]"
 
-FROM python:3.12-slim
+FROM python:3.13-slim
 RUN useradd --system --uid 65532 --user-group --home-dir /nonexistent \
       --shell /usr/sbin/nologin nonroot
 COPY --from=build /wheels /tmp/wheels

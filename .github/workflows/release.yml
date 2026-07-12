@@ -107,7 +107,7 @@ jobs:
             dockerfile: services/ingestion/Dockerfile
             image: headway-ingestion
           - service: api
-            context: services/api
+            context: . # repo root: headway-api installs the in-repo headway-calc
             dockerfile: services/api/Dockerfile
             image: headway-api
           - service: transform
