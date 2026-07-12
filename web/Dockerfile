@@ -18,6 +18,8 @@ ENV VITE_API_BASE_URL=${VITE_API_BASE_URL}
 RUN npm run build
 
 FROM nginx:1.29-alpine-slim
+# Patch base-image packages: the release gate blocks fixable vulns (see .grype.yaml policy)
+RUN apk upgrade --no-cache
 COPY deploy/nginx.conf /etc/nginx/nginx.conf
 # Drop the stock server config: nginx.conf above is the whole config and the
 # image entrypoint's IPv6 tweak script must not race a root-owned file.
