@@ -5,6 +5,7 @@ Headway handles transit operations data and produces figures agencies certify to
 ## Reporting a vulnerability
 
 - **Preferred**: GitHub's private vulnerability reporting on this repository (*Security* tab → *Report a vulnerability*). This reaches the maintainers privately.
+- **Email**: support@bekus.co (mark the subject SECURITY).
 - Please include: affected component/path, reproduction steps, impact assessment, and any suggested fix. **Never include real rider or agency data** in a report — synthetic reproduction data only.
 - Please do **not** open public issues for suspected vulnerabilities before we've had a chance to respond.
 

@@ -108,3 +108,6 @@ Verification (2026-07-11, Python 3.12, fakes only — live DB untouched):
 in `tests/test_runner.py`, including the full explicit>settings>default
 matrix over all four knobs, corrupt-value refusal, missing-table fallback
 with warning, and determinism across the settings path).
+
+### Evidence addendum — the migration-0014 seed bug (recorded 2026-07-11, occurred 2026-07-10)
+For the record (it was fixed in-session but never written down): migration 0014's seed INSERT was authored with adjacent-string-literal concatenation that produced a column/value count mismatch — the static text-matching test passed, and the LIVE apply failed immediately ("INSERT has more target columns than expressions"). Rewritten with plain literals, re-applied clean. Second teaching example of the same lesson as the autocommit bug above: only a real database proves the system; text-matching fakes cannot.

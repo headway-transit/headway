@@ -65,6 +65,10 @@ Headway is built to resist single-vendor capture — see [`GOVERNANCE.md`](GOVER
 
 **Status: alpha.** The pipeline is live-verified end-to-end against real transit feeds; the calculations are definition-verified against the 2025/2026 NTD Policy Manuals with all divergences documented; no figure is yet certified for actual federal submission — and the platform itself will tell you exactly that, on every screen that shows one.
 
+## Support
+
+Community support via [GitHub issues and discussions](SUPPORT.md); commercial support and agency onboarding via **Bekus Solutions** — support@bekus.co ([details](SUPPORT.md)).
+
 ## License
 
 Apache License 2.0 — see [LICENSE](LICENSE) and [NOTICE](NOTICE).
