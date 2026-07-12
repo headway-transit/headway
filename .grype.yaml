@@ -8,3 +8,11 @@
 ignore:
   - fix-state: wont-fix
   - fix-state: not-fixed
+  # CPython interpreter CVEs with no actionable fix as of 2026-07-12:
+  # CVE-2026-11940 and CVE-2026-11972 list no fixed version for any released
+  # Python; CVE-2026-15308's only fix is unreleased Python 3.15.0. Pinned
+  # individually (not by class) so they resurface for review the moment a
+  # released fix exists — revisit at Python 3.14.x patch releases / 3.15.0 GA.
+  - vulnerability: CVE-2026-11940
+  - vulnerability: CVE-2026-11972
+  - vulnerability: CVE-2026-15308

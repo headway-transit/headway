@@ -115,3 +115,5 @@ release past a red gate" guardrail).
 ## Scan policy: fixable findings gate; "won't fix" distro findings do not
 
 As of 2026-07-12 (`.grype.yaml`): the release gate fails on fixable vulnerabilities of high severity or above. Findings the upstream distribution has explicitly marked won't-fix (common in Debian-based Python images: libc, perl-base, ncurses) cannot be remediated by us or by any image consumer; they are excluded from the gate but remain fully visible in every release's published SBOM. The long-term remediation is distroless runtime bases (the ingestion image already uses one and passes untouched) — tracked in ROADMAP.md.
+
+Additionally pinned (2026-07-12, individually with rationale in `.grype.yaml`): three CPython interpreter CVEs with no released fix (two have no fix version at all; one is fixed only in unreleased Python 3.15.0). Each pin names its CVE so it resurfaces for review rather than hiding in a class-wide waiver; all remain visible in published SBOMs.
