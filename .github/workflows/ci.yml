@@ -109,7 +109,9 @@ jobs:
       - name: install service with test extra
         # each pyproject defines a [test] optional-dependency set
         # (calc: pytest+hypothesis; transform: pytest; api: pytest+httpx; ai: pytest)
-        run: python -m pip install -e "services/${{ matrix.service }}[test]"
+        # headway-calc is a sibling path package, not on PyPI — install it alongside
+        # so api's `headway-calc>=0.5` resolves (harmless no-op for the other services)
+        run: python -m pip install -e services/calc -e "services/${{ matrix.service }}[test]"
       - name: pytest
         working-directory: services/${{ matrix.service }}
         run: python -m pytest -q
@@ -173,7 +175,8 @@ jobs:
           cache: pip
           cache-dependency-path: services/api/pyproject.toml
       - name: install API service + integration suite deps
-        run: python -m pip install -e "services/api[test]" -r tests/integration/requirements.txt
+        # services/calc first: headway-calc is a sibling path package, not on PyPI
+        run: python -m pip install -e services/calc -e "services/api[test]" -r tests/integration/requirements.txt
       - name: pytest (integration, real postgres)
         run: python -m pytest tests/integration -q
 

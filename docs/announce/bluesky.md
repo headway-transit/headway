@@ -6,7 +6,7 @@
 - Bio (≤256): Open-source transit data platform where every number can prove itself. Deterministic NTD reporting, full lineage to raw records, the FTA rule quoted inside every figure. AI assists — never computes a reported number. Apache-2.0.
 - Avatar: the 🚌 mark / favicon from web/public (export as PNG); banner: the Receipt screenshot (docs/images/receipt.png).
 
-## Announcement thread (post after the repo is public)
+## Announcement thread — POSTED 2026-07-12 from @headway-transit.bsky.social
 
 **1/**
 Meet Headway: an open-source data platform for public transit agencies, built on one idea — every reported number should be able to prove itself.
