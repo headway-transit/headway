@@ -247,6 +247,203 @@ export interface LogoUploadResponse {
   audit_event_id: number;
 }
 
+// ---- /safety (handoff 0010 — Safety & Security module v0) ----
+//
+// Typed against services/api routers/safety.py's response models EXACTLY
+// (SafetyEventCreate/Created/Superseded/Record, ClassificationResult,
+// Ss40Deadline/Ss50Deadline/DeadlinesResponse). If the router changes, the
+// Backend Engineer issues a new handoff and these are updated against the
+// new export — never guessed.
+
+/** The classifier's verdict — sscls_v0 (calc-discipline code, Exhibit 5). */
+export type SafetyClassification = "major" | "non_major" | "not_reportable";
+
+/**
+ * POST /safety/events request body (router SafetyEventCreate): the
+ * threshold-supporting fields of migration 0017's safety.events.
+ * property_damage_usd is a decimal STRING (exact NUMERIC, never a float) —
+ * the same discipline as MetricValue.value; this UI never parses it.
+ */
+export interface SafetyEventRequest {
+  /** ISO date-time WITH a timezone (the API refuses a naive timestamp). */
+  occurred_at: string;
+  /**
+   * Headway's canonical mode vocabulary (the transform's GTFS
+   * route_type→mode map — the same strings the classifier's rail test
+   * uses). Agency-supplied per the manual's Predominant Use Rule (p. 15).
+   */
+  mode: string;
+  type_of_service?: string | null;
+  /** collision | derailment | fire | evacuation | security | assault | cyber | other */
+  event_category: string;
+  narrative: string;
+  location?: string | null;
+  fatalities: number;
+  /** Immediate-transport definition (Exhibit 5): people, not severity guesses. */
+  injuries: number;
+  /** Decimal string, e.g. "30000.00"; null/absent = not (yet) assessed. */
+  property_damage_usd?: string | null;
+  /** Rail criteria (Exhibit 5, p. 16). */
+  serious_injury?: boolean;
+  /** Rail (Exhibit 5, p. 16); for cyber events: the intrusion disrupted operations. */
+  substantial_damage?: boolean;
+  towed?: boolean;
+  evacuation_life_safety?: boolean;
+  assault_on_worker?: boolean;
+  involves_transit_vehicle?: boolean;
+  involves_second_rail_vehicle?: boolean;
+  grade_crossing?: boolean;
+  /** Rail (migration 0018): uncommanded/uncontrolled/unmanned movement. */
+  runaway_train?: boolean;
+  /** Rail (migration 0018): evacuation to the controlled rail ROW. */
+  evacuation_to_rail_row?: boolean;
+}
+
+/**
+ * POST /safety/events/{id}/supersede body (router SupersedeRequest): the
+ * corrected event PLUS the required reason, kept in the audit log — the
+ * original event itself is never edited.
+ */
+export interface SafetySupersedeRequest extends SafetyEventRequest {
+  reason: string;
+}
+
+/** One met threshold (or non-major basis), explained by the classifier. */
+export interface ThresholdExplanation {
+  /** Machine token (threshold_id / basis id in headway_calc/sscls.py). */
+  threshold: string;
+  /** The classifier's plain-language sentence, shown verbatim. */
+  plain_language: string;
+  /** The classifier's citation pointer, shown verbatim. */
+  citation: string;
+}
+
+/**
+ * The classifier's verdict as the entry/supersede response carries it
+ * (router ClassificationResult). thresholds_met tokens are machine codes;
+ * the UI maps known tokens to the verified manual quotes and shows unknown
+ * tokens raw, never hidden. Every plain_language / citation / summary
+ * string is the classifier's own text, shown verbatim.
+ */
+export interface SafetyClassificationResult {
+  classification: SafetyClassification;
+  /** Major thresholds only, in the classifier's fixed evaluation order. */
+  thresholds_met: string[];
+  explanations: ThresholdExplanation[];
+  /** Why a non-major event belongs on the S&S-50 (empty otherwise). */
+  non_major_basis: ThresholdExplanation[];
+  /** 'collision' for an assault with transit-vehicle contact (Scenario E). */
+  effective_category: string;
+  is_rail_mode: boolean;
+  /** One plain-language sentence for the entry response, shown verbatim. */
+  summary: string;
+  classifier_version: string;
+}
+
+/** POST /safety/events 201 response (router SafetyEventCreated). */
+export interface SafetyEventCreated {
+  event_id: string;
+  /** ISO date-time */
+  entered_at: string;
+  result: SafetyClassificationResult;
+  audit_event_id: number;
+}
+
+/** POST /safety/events/{id}/supersede 201 response. */
+export interface SafetyEventSuperseded {
+  original_event_id: string;
+  replacement_event_id: string;
+  /** ISO date-time */
+  entered_at: string;
+  result: SafetyClassificationResult;
+  audit_event_id: number;
+}
+
+/**
+ * One recorded event as GET /safety/events serves it (router
+ * SafetyEventRecord — classification fields FLAT and nullable; the rich
+ * explanations exist only on the entry response). Corrections are
+ * append-only: a corrected event carries superseded_by and is NEVER
+ * deleted — the UI must keep it visible (struck and linked), because
+ * hiding it would break the audit story.
+ */
+export interface SafetyEventRecord {
+  event_id: string;
+  /** ISO date-time */
+  occurred_at: string;
+  mode: string;
+  type_of_service: string | null;
+  event_category: string;
+  narrative: string;
+  location: string | null;
+  fatalities: number;
+  injuries: number;
+  /** Exact NUMERIC as a JSON string, never a float; null = not assessed. */
+  property_damage_usd: string | null;
+  serious_injury: boolean;
+  substantial_damage: boolean;
+  towed: boolean;
+  evacuation_life_safety: boolean;
+  assault_on_worker: boolean;
+  involves_transit_vehicle: boolean;
+  involves_second_rail_vehicle: boolean;
+  grade_crossing: boolean;
+  runaway_train: boolean;
+  evacuation_to_rail_row: boolean;
+  entered_by: string;
+  /** ISO date-time */
+  entered_at: string;
+  /** event_id of the correcting event, or null while this record stands. */
+  superseded_by: string | null;
+  classification: string | null;
+  thresholds_met: string[] | null;
+  classifier_version: string | null;
+  /** ISO date-time */
+  classified_at: string | null;
+}
+
+/**
+ * GET /safety/deadlines — computed BY THE API (occurred_at + 30 days for
+ * S&S-40 per Exhibit 2; end of the following month for S&S-50 per Exhibit
+ * 3, INCLUDING zero-event rows for every operated mode). The UI derives
+ * only presentation urgency (days between the served due date and today —
+ * calendar workflow math, never a regulatory figure).
+ */
+export interface Ss40Deadline {
+  event_id: string;
+  /** ISO date-time of the event the report covers. */
+  occurred_at: string;
+  mode: string;
+  event_category: string;
+  /** ISO date, API-computed: occurred_at + 30 days (Exhibit 2, p. 4). */
+  due_date: string;
+}
+
+export interface Ss50Deadline {
+  /** YYYY-MM reporting month. */
+  month: string;
+  mode: string;
+  /** ISO date, API-computed: end of the following month (Exhibit 3, p. 5). */
+  due_date: string;
+  /** Unsuperseded non-major events for this month/mode (workflow count). */
+  non_major_event_count: number;
+  /** The manual's trap: a zero-event row is STILL due. */
+  zero_event: boolean;
+}
+
+/** GET /safety/deadlines response (router DeadlinesResponse). */
+export interface SafetyDeadlines {
+  /** The YYYY-MM month the ss50 rows cover (S&S-40s are month-independent). */
+  month: string;
+  ss40: Ss40Deadline[];
+  /** The API's citation text, shown verbatim where useful. */
+  ss40_citation: string;
+  /** Semantics caveat (v0 has no submission tracking), shown verbatim. */
+  ss40_note: string;
+  ss50: Ss50Deadline[];
+  ss50_citation: string;
+}
+
 // ---- error envelopes (FastAPI) ----
 
 export interface ValidationErrorItem {

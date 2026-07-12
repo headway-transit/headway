@@ -1,6 +1,7 @@
 // Extracts the VERBATIM FTA manual quotes from
-// services/calc/REGULATORY_TRACKER.md ("Verified definitions" sections) into
-// src/regulatory/quotes.json, keyed by calc_name.
+// services/calc/REGULATORY_TRACKER.md ("Verified definitions" sections, plus
+// the "Verified — Safety & Security reporting" section for the S&S
+// classifier) into src/regulatory/quotes.json, keyed by calc_name.
 //
 // The tracker is the NTD/Compliance Engineer's durable memory: every quote in
 // it was verified against the published FTA NTD Policy Manual, with a page
@@ -45,6 +46,17 @@ function calcNamesForHeading(heading) {
   );
   if (named.length > 0) return named;
   if (heading.includes("FTA NTD Policy Manual")) return ["vrm_v0", "vrh_v0"];
+  // The S&S section backs the Safety & Security classifier (handoff 0010,
+  // design point 2: services/calc sscls_v0) and the /safety UI's receipts.
+  if (heading.startsWith("Verified — Safety & Security reporting")) {
+    return ["sscls_v0"];
+  }
+  // The MR-20 section holds the verified Monthly VOMS quote (handoff 0009
+  // added voms_v0 to the tracker table with its rule verified here, not in
+  // a "Verified definitions" section).
+  if (heading.startsWith("Verified — Monthly Ridership form MR-20")) {
+    return ["voms_v0"];
+  }
   return null;
 }
 
@@ -66,13 +78,24 @@ if (tableCalcNames.size === 0) {
   fail(`no calc rows found in the tracker table (${trackerPath})`);
 }
 
-// Slice the file into "## Verified definitions …" sections.
+// Slice the file into quote-bearing sections: every "## Verified
+// definitions …" section, plus the S&S section by its exact heading (other
+// "## Verified — …" sections, e.g. MR-20, carry no calc quotes and are
+// deliberately NOT sliced — a new quote-bearing section is added here on
+// purpose, never guessed).
+function isQuoteSection(line) {
+  return (
+    line.startsWith("## Verified definitions") ||
+    line.startsWith("## Verified — Safety & Security reporting") ||
+    line.startsWith("## Verified — Monthly Ridership form MR-20")
+  );
+}
 const sections = [];
 let current = null;
 for (const line of lines) {
   if (line.startsWith("## ")) {
     if (current) sections.push(current);
-    current = line.startsWith("## Verified definitions")
+    current = isQuoteSection(line)
       ? { heading: line.slice(3).trim(), body: [] }
       : null;
     continue;
@@ -120,16 +143,27 @@ for (const section of sections) {
   const entries = [];
   for (const bullet of bullets) {
     if (bullet === null) continue;
-    // **Label** (page reference): …quotes…
-    const head = /^\*\*(.+?)\*\*\s*\(([^)]+)\)/.exec(bullet);
+    // Two labeled-bullet shapes exist in the tracker:
+    //   **Label** (page reference): …quotes…        (Verified definitions)
+    //   **Label (page reference)[ — trailing note]:** …   (S&S sections)
+    const head =
+      /^\*\*(.+?)\*\*\s*\(([^)]+)\)/.exec(bullet) ??
+      /^\*\*(.+?)\s*\(([^()]+)\)[^*]*\*\*/.exec(bullet);
     if (!head) continue; // not a labeled quote bullet
     const label = head[1];
     const pageRef = head[2]; // verbatim, e.g. "p. 128" or "pp. 147–148"
+    // Tracker meta-commentary after "NOTE:" (verification-method lessons) is
+    // ABOUT the manual's wording, not manual text — quoted words inside it
+    // (e.g. a spelling that greps to zero hits) must never ship as verified
+    // quotes, so the quotable text stops there.
+    const quotable = bullet.split("NOTE:")[0];
     // Every double-quoted segment in the bullet is a verbatim manual quote;
-    // the inner text is copied EXACTLY (never trimmed, edited, or rephrased).
-    for (const m of bullet.matchAll(/"([^"]+)"/g)) {
+    // the inner text is copied EXACTLY — the only in-quote cleanup is
+    // removing "**" pairs, which are the tracker's own markdown emphasis
+    // (styling around the manual's words, not part of them).
+    for (const m of quotable.matchAll(/"([^"]+)"/g)) {
       entries.push({
-        quote: m[1],
+        quote: m[1].replaceAll("**", ""),
         citation: `${label} — ${manualName}, ${pageRef}`,
       });
     }

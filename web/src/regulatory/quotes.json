@@ -1,4 +1,162 @@
 {
+  "sscls_v0": [
+    {
+      "quote": "CR and AR modes must only report non-major assaults on a transit worker",
+      "citation": "The five forms — 2026 Safety & Security Policy Manual V1, Exhibit 1, p. 3"
+    },
+    {
+      "quote": "The S&S reporting module covers the 12-month calendar year",
+      "citation": "Reporting cycle — 2026 Safety & Security Policy Manual V1, p. 4"
+    },
+    {
+      "quote": "until the end of April the following calendar year.",
+      "citation": "Reporting cycle — 2026 Safety & Security Policy Manual V1, p. 4"
+    },
+    {
+      "quote": "due no later than 30 days after the date of the event.",
+      "citation": "S&S-40 timing — 2026 Safety & Security Policy Manual V1, Exhibit 2, p. 4"
+    },
+    {
+      "quote": "for each mode and TOS … every month, even if no event occurs",
+      "citation": "S&S-50 timing — 2026 Safety & Security Policy Manual V1, p. 4 + Exhibit 3, p. 5"
+    },
+    {
+      "quote": "Once submitted, agencies cannot resubmit",
+      "citation": "S&S-20 — 2026 Safety & Security Policy Manual V1, p. 7"
+    },
+    {
+      "quote": "Confirmed within 30 days, and include suicides.",
+      "citation": "Major-event thresholds — 2026 Safety & Security Policy Manual V1, Exhibit 5, p. 16"
+    },
+    {
+      "quote": "Immediate transport away from the scene for medical attention for one or more persons.",
+      "citation": "Major-event thresholds — 2026 Safety & Security Policy Manual V1, Exhibit 5, p. 16"
+    },
+    {
+      "quote": "equal to or exceeding $25,000.",
+      "citation": "Major-event thresholds — 2026 Safety & Security Policy Manual V1, Exhibit 5, p. 16"
+    },
+    {
+      "quote": "is reportable as a Cyber Security Major Event.",
+      "citation": "Cyber Security Major Event — 2026 Safety & Security Policy Manual V1, Scenario G, p. 19"
+    },
+    {
+      "quote": "Assaults on a transit worker do not require an injury to be reportable on the S&S-50.",
+      "citation": "Non-major — 2026 Safety & Security Policy Manual V1, S&S-50 scope, p. 3"
+    },
+    {
+      "quote": "Meet an injury, fatality, substantial damage, or evacuation threshold; Include suicides, attempted suicides, and assaults or homicides that involve contact with a transit vehicle; Occur at a rail grade crossing or intersection; Involve an individual; Involve a rail transit vehicle and a second rail transit vehicle; or Include collisions that do not involve a transit vehicle but meet a threshold.",
+      "citation": "Collisions, rail — 2026 Safety & Security Policy Manual V1, p. 17"
+    },
+    {
+      "quote": "Meet an injury, fatality, property damage, or evacuation threshold; Involve a transit revenue vehicle and the towing away of any vehicles (transit or non-transit) from the scene; Include suicides, attempted suicides, assaults, or homicides resulting in an injury or fatality that involve contact with a transit vehicle; or Include collisions that do not involve a transit revenue vehicle but meet a threshold.",
+      "citation": "Collisions, non-rail/ferry — 2026 Safety & Security Policy Manual V1, p. 17"
+    },
+    {
+      "quote": "Evacuation of a transit facility or vehicle for life-safety reasons.",
+      "citation": "Evacuations — 2026 Safety & Security Policy Manual V1, p. 17"
+    },
+    {
+      "quote": "Evacuations to controlled rail right-of-way (excludes evacuation to a platform, except for life safety),",
+      "citation": "Evacuations — 2026 Safety & Security Policy Manual V1, p. 17"
+    },
+    {
+      "quote": "Both transit-directed evacuations and self-evacuations.",
+      "citation": "Evacuations — 2026 Safety & Security Policy Manual V1, p. 17"
+    },
+    {
+      "quote": "Both mainline and yard derailments and non-revenue vehicle derailments.",
+      "citation": "Derailments — 2026 Safety & Security Policy Manual V1, p. 17, rail only"
+    },
+    {
+      "quote": "movement of a rail transit vehicle on the mainline, yard, or shop that is uncommanded, uncontrolled, or unmanned due to an incapacitated, sleeping, or absent operator, or the failure of a rail transit vehicle's electrical, mechanical, or software system or subsystem.",
+      "citation": "Runaway Train — 2026 Safety & Security Policy Manual V1, p. 17, rail only, revenue vehicles"
+    },
+    {
+      "quote": "events that are NOT collisions, fires, security events, hazardous material spills, acts of God, or derailments … include slips, trips, falls, smoke events, fumes, runaway trains and electric shock. Only report these events when they meet either the fatality, evacuation, or property damage threshold or result in two or more injured persons. Other Safety Events that result in one person immediately transported from the scene for medical attention but do not trigger any other major reporting thresholds are reported on the Non-Major Summary Report.",
+      "citation": "Other Safety Events exception — 2026 Safety & Security Policy Manual V1, p. 22"
+    },
+    {
+      "quote": "Deaths of undetermined cause in a rail right-of-way that may be the result of collision or electrocution are reportable",
+      "citation": "Fatality nuances — 2026 Safety & Security Policy Manual V1, p. 20"
+    },
+    {
+      "quote": "if it is confirmed to have occurred within 30 days of the event.",
+      "citation": "Fatality nuances — 2026 Safety & Security Policy Manual V1, p. 20"
+    },
+    {
+      "quote": "Declarations or allegations of self-harm with no evident injury",
+      "citation": "Injury exclusions — 2026 Safety & Security Policy Manual V1, p. 22"
+    },
+    {
+      "quote": "reportable as a Rail Transit Collision (include one Other vehicle).",
+      "citation": "Example 4 solutions verbatim — 2026 Safety & Security Policy Manual V1, pp. 18–19"
+    },
+    {
+      "quote": "reportable as an Other Safety Event",
+      "citation": "Example 4 solutions verbatim — 2026 Safety & Security Policy Manual V1, pp. 18–19"
+    },
+    {
+      "quote": "reportable to the NTD as a fatal rail collision.",
+      "citation": "Example 4 solutions verbatim — 2026 Safety & Security Policy Manual V1, pp. 18–19"
+    },
+    {
+      "quote": "Reportable as a Major Safety Event due to the involvement of a transit vehicle.",
+      "citation": "Example 4 solutions verbatim — 2026 Safety & Security Policy Manual V1, pp. 18–19"
+    },
+    {
+      "quote": "any harm to persons as a result of an event that requires immediate medical attention away from the scene. It does not include harm resulting from a drug overdose, exposure to the elements, illness, natural causes, or occupational safety events occurring in administrative buildings.",
+      "citation": "Injury — 2026 Safety & Security Policy Manual V1, p. 21"
+    },
+    {
+      "quote": "You must report each person transported away from the scene for medical attention as an injury, whether or not the person appears to be injured.",
+      "citation": "Injury — 2026 Safety & Security Policy Manual V1, p. 21"
+    },
+    {
+      "quote": "do not constitute immediate medical transportation away from the scene.",
+      "citation": "Injury — 2026 Safety & Security Policy Manual V1, p. 21"
+    },
+    {
+      "quote": "by transit vehicle, an ambulance, another emergency vehicle, private vehicle, or via stretcher to the hospital",
+      "citation": "Injury — 2026 Safety & Security Policy Manual V1, p. 21"
+    },
+    {
+      "quote": "Requires hospitalization for more than 48 hours within 7 days of the event; Results in a fracture of any bone (except simple fractures of fingers, toes, or nose); Causes severe hemorrhages, or nerve, muscle, or tendon damage; Involves an internal organ; or Involves second- or third-degree burns or any burns affecting more than 5 percent of the body surface.",
+      "citation": "Serious injury — 2026 Safety & Security Policy Manual V1, rail, p. 21"
+    },
+    {
+      "quote": "estimated property damage equal to or exceeding $25,000, regardless of injuries or other thresholds. Estimated damage includes not only damage to transit property but also the cost of clearing wreckage and damage to all other vehicles and property involved in or affected by the event.",
+      "citation": "Property damage, non-rail — 2026 Safety & Security Policy Manual V1, p. 25"
+    },
+    {
+      "quote": "While the damage threshold for a major event is $25,000, any damage incurred must be included for any reportable event.",
+      "citation": "Property damage, non-rail — 2026 Safety & Security Policy Manual V1, p. 25"
+    },
+    {
+      "quote": "damage to any involved vehicles, facilities, equipment, rolling stock, or infrastructure that: Disrupts the operations of the rail transit agency, AND Adversely affects the structural strength, performance, or operating characteristics of the vehicle, facility, equipment, rolling stock, or infrastructure, such that it requires towing, rescue, on-site maintenance, or immediate removal prior to safe operation.",
+      "citation": "Substantial damage, rail — 2026 Safety & Security Policy Manual V1, p. 25"
+    },
+    {
+      "quote": "Cracked windows; Dents, bends, or small puncture holes in the body; Broken lights or mirrors; or Removal from service under the vehicle's own power for minor repair or maintenance, testing, or video and event recorder download.",
+      "citation": "Substantial damage, rail — 2026 Safety & Security Policy Manual V1, p. 25"
+    },
+    {
+      "quote": "The same scenario resulting from a collision with a bus would not be reportable.",
+      "citation": "Example 6 — 2026 Safety & Security Policy Manual V1, p. 23"
+    },
+    {
+      "quote": "not reported on the S&S-40. However, the assault on a transit worker is reported on the S&S-50 Monthly Summary form.",
+      "citation": "Example 6 — 2026 Safety & Security Policy Manual V1, p. 23"
+    },
+    {
+      "quote": "Substantial damage.",
+      "citation": "Example 7 — 2026 Safety & Security Policy Manual V1, p. 27"
+    },
+    {
+      "quote": "Substantial damage.",
+      "citation": "Example 7 — 2026 Safety & Security Policy Manual V1, p. 27"
+    }
+  ],
   "upt_v0": [
     {
       "quote": "Unlinked Passenger Trips (UPT) are the number of boardings on public transportation vehicles during the fiscal year. Transit agencies must count passengers each time they board vehicles, no matter how many vehicles they use to travel from their origin to their destination. If a transit vehicle changes routes while passengers are onboard (interlining), transit agencies should not recount the passengers. Employees or contractors on transit agency business are not passengers.",
@@ -31,6 +189,24 @@
     {
       "quote": "Minimum confidence of 95 percent; and Minimum precision level of ±10 percent.",
       "citation": "Sampling floor — 2026 NTD Policy Manual, Full Reporting, p. 149"
+    }
+  ],
+  "voms_v0": [
+    {
+      "quote": "The MR-20 form requires agencies to report the following data points: • Unlinked Passenger Trips (UPT) • Actual Vehicle (Passenger Car) Revenue Hours • Actual Vehicle (Passenger Car) Revenue Miles • Vehicles Operated in Annual Maximum Service (VOMS)",
+      "citation": "The four MR-20 data points, quoted — 2025 NTD Monthly and Weekly Reference Policy Manual, p. 32"
+    },
+    {
+      "quote": "Full Reporters must report Monthly Ridership data for each mode of public transportation service that the agency operates … required to report on all modes reported on an agency's P-20 form.",
+      "citation": "Per-mode reporting — 2025 NTD Monthly and Weekly Reference Policy Manual, p. 32"
+    },
+    {
+      "quote": "may not meet FTA's confidence and precision levels for annual data (±10 percent precision for a 95 percent confidence level) but does meet FTA's requirements for reporting monthly data on the … MR-20.",
+      "citation": "Monthly sampling relief — 2025 NTD Monthly and Weekly Reference Policy Manual, p. 32"
+    },
+    {
+      "quote": "VOMS is the number of revenue vehicles/passenger cars operated to meet the maximum service requirement during the month … excludes atypical days or one-time special events",
+      "citation": "Monthly VOMS — 2025 NTD Monthly and Weekly Reference Policy Manual, p. 33"
     }
   ],
   "vrh_v0": [
@@ -71,7 +247,7 @@
       "citation": "Accuracy requirement — 2026 NTD Policy Manual, Full Reporting, p. 135"
     },
     {
-      "quote": "Bus arrives at the end of the route, parks, and goes out of service… → Vehicle Revenue Hours: **No**",
+      "quote": "Bus arrives at the end of the route, parks, and goes out of service… → Vehicle Revenue Hours: No",
       "citation": "Exhibit 35, out-of-service row — 2026 NTD Policy Manual, Full Reporting, p. 133, bus; verified for calc vrh_v0 0.4.0, handoff 0004"
     }
   ],
@@ -113,7 +289,7 @@
       "citation": "Accuracy requirement — 2026 NTD Policy Manual, Full Reporting, p. 135"
     },
     {
-      "quote": "Bus arrives at the end of the route, parks, and goes out of service… → Vehicle Revenue Hours: **No**",
+      "quote": "Bus arrives at the end of the route, parks, and goes out of service… → Vehicle Revenue Hours: No",
       "citation": "Exhibit 35, out-of-service row — 2026 NTD Policy Manual, Full Reporting, p. 133, bus; verified for calc vrh_v0 0.4.0, handoff 0004"
     }
   ]

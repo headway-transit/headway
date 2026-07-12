@@ -3,6 +3,10 @@ import type {
   LineageNode,
   MetricValue,
   Mr20Package,
+  SafetyClassificationResult,
+  SafetyEventCreated,
+  SafetyEventRecord,
+  SafetyEventSuperseded,
 } from "../api/types";
 
 /** Values as the API serves them: `value` is a decimal STRING, never a number. */
@@ -450,4 +454,204 @@ export const mr20Package: Mr20Package = {
       },
     },
   },
+};
+/**
+ * Safety & Security fixtures (handoff 0010), typed against
+ * services/api routers/safety.py's response models exactly.
+ * property_damage_usd is a decimal STRING with trailing zeros on purpose:
+ * the UI must render it verbatim, never parse it. Classifications are what
+ * the deterministic sscls_v0 classifier returns — fixtures here are display
+ * material, never a classification the UI computed.
+ */
+
+/** GET /safety/events record: a bus collision that met the injury threshold. */
+export const safetyMajorEvent: SafetyEventRecord = {
+  event_id: "ev-major-1",
+  occurred_at: "2026-07-02T14:30:00Z",
+  mode: "bus",
+  type_of_service: "DO",
+  event_category: "collision",
+  narrative:
+    "A bus collided with a car at Elm St and 5th Ave; two passengers were taken to the hospital by ambulance.",
+  location: "Elm St & 5th Ave",
+  fatalities: 0,
+  injuries: 2,
+  property_damage_usd: "18000.00",
+  serious_injury: false,
+  substantial_damage: false,
+  towed: true,
+  evacuation_life_safety: false,
+  assault_on_worker: false,
+  involves_transit_vehicle: true,
+  involves_second_rail_vehicle: false,
+  grade_crossing: false,
+  runaway_train: false,
+  evacuation_to_rail_row: false,
+  entered_by: "maria.ops",
+  entered_at: "2026-07-02T18:00:00Z",
+  superseded_by: null,
+  classification: "major",
+  thresholds_met: ["injury_immediate_transport"],
+  classifier_version: "sscls_v0 0.1.1",
+  classified_at: "2026-07-02T18:00:01Z",
+};
+
+/** A non-major assault on a worker (no injury — still S&S-50 scope).
+ *  Structural rule (migration 0017 CHECK): 'major' ⇔ thresholds_met
+ *  non-empty, so a non-major record carries an empty thresholds_met. */
+export const safetyNonMajorEvent: SafetyEventRecord = {
+  event_id: "ev-nonmajor-1",
+  occurred_at: "2026-06-14T09:10:00Z",
+  mode: "bus",
+  type_of_service: "DO",
+  event_category: "assault",
+  narrative:
+    "A passenger spat on the bus operator at the Downtown Transit Center. The operator was not injured.",
+  location: "Downtown Transit Center",
+  fatalities: 0,
+  injuries: 0,
+  property_damage_usd: null,
+  serious_injury: false,
+  substantial_damage: false,
+  towed: false,
+  evacuation_life_safety: false,
+  assault_on_worker: true,
+  involves_transit_vehicle: true,
+  involves_second_rail_vehicle: false,
+  grade_crossing: false,
+  runaway_train: false,
+  evacuation_to_rail_row: false,
+  entered_by: "maria.ops",
+  entered_at: "2026-06-14T12:00:00Z",
+  superseded_by: null,
+  classification: "non_major",
+  thresholds_met: [],
+  classifier_version: "sscls_v0 0.1.1",
+  classified_at: "2026-06-14T12:00:01Z",
+};
+
+export const safetyNotReportableEvent: SafetyEventRecord = {
+  event_id: "ev-notrep-1",
+  occurred_at: "2026-06-20T16:45:00Z",
+  mode: "bus",
+  type_of_service: "DO",
+  event_category: "other",
+  narrative:
+    "A bus mirror clipped a parked car's mirror while pulling into a stop. No one was hurt and both vehicles stayed in service.",
+  location: "Main St stop 14",
+  fatalities: 0,
+  injuries: 0,
+  property_damage_usd: "350.00",
+  serious_injury: false,
+  substantial_damage: false,
+  towed: false,
+  evacuation_life_safety: false,
+  assault_on_worker: false,
+  involves_transit_vehicle: true,
+  involves_second_rail_vehicle: false,
+  grade_crossing: false,
+  runaway_train: false,
+  evacuation_to_rail_row: false,
+  entered_by: "sam.data",
+  entered_at: "2026-06-20T17:30:00Z",
+  superseded_by: null,
+  classification: "not_reportable",
+  thresholds_met: [],
+  classifier_version: "sscls_v0 0.1.1",
+  classified_at: "2026-06-20T17:30:01Z",
+};
+
+/** The rich verdict POST /safety/events returns for safetyMajorEvent. */
+export const safetyMajorResult: SafetyClassificationResult = {
+  classification: "major",
+  thresholds_met: ["injury_immediate_transport"],
+  explanations: [
+    {
+      threshold: "injury_immediate_transport",
+      plain_language:
+        "2 person(s) were taken directly from the scene for medical care.",
+      citation:
+        "Exhibit 5, p. 16 — 'Immediate transport away from the scene for medical attention for one or more persons.' (services/calc/REGULATORY_TRACKER.md, verified 2026-07-12)",
+    },
+  ],
+  non_major_basis: [],
+  effective_category: "collision",
+  is_rail_mode: false,
+  summary:
+    "This event meets 1 major-event threshold(s) and is ONE reportable major event (an event meeting one or more thresholds is one report — p. 14): an S&S-40 Major Event Report is due no later than 30 days after the date of the event (Exhibit 2, p. 4).",
+  classifier_version: "sscls_v0 0.1.1",
+};
+
+export const safetyMajorCreated: SafetyEventCreated = {
+  event_id: safetyMajorEvent.event_id,
+  entered_at: safetyMajorEvent.entered_at,
+  result: safetyMajorResult,
+  audit_event_id: 41,
+};
+
+/** The verdict for a non-major assault: S&S-50 scope via non_major_basis. */
+export const safetyAssaultCreated: SafetyEventCreated = {
+  event_id: safetyNonMajorEvent.event_id,
+  entered_at: safetyNonMajorEvent.entered_at,
+  result: {
+    classification: "non_major",
+    thresholds_met: [],
+    explanations: [],
+    non_major_basis: [
+      {
+        threshold: "non_major_assault_on_worker",
+        plain_language:
+          "A transit worker was assaulted; no injury is required for this to belong on the S&S-50.",
+        citation:
+          "p. 3 — 'Assaults on a transit worker do not require an injury to be reportable on the S&S-50.' (services/calc/REGULATORY_TRACKER.md, verified 2026-07-12)",
+      },
+    ],
+    effective_category: "assault",
+    is_rail_mode: false,
+    summary:
+      "This event meets no major-event threshold but belongs on the S&S-50 Non-Major Monthly Summary for its month, mode, and type of service (p. 3).",
+    classifier_version: "sscls_v0 0.1.1",
+  },
+  audit_event_id: 42,
+};
+
+/**
+ * A correction pair: the ORIGINAL record (superseded, never deleted) and
+ * the correcting record it points at, plus the supersede response. The UI
+ * must keep the original visible — struck and linked — because hiding it
+ * would break the audit story.
+ */
+export const safetyCorrectionEvent: SafetyEventRecord = {
+  ...safetyMajorEvent,
+  event_id: "ev-correction-1",
+  injuries: 1,
+  narrative:
+    "Correction: one passenger was taken to the hospital by ambulance; the second declined care at the scene.",
+  entered_at: "2026-07-03T09:00:00Z",
+  superseded_by: null,
+  classified_at: "2026-07-03T09:00:01Z",
+};
+
+export const safetySupersededEvent: SafetyEventRecord = {
+  ...safetyMajorEvent,
+  superseded_by: safetyCorrectionEvent.event_id,
+};
+
+export const safetySupersededResponse: SafetyEventSuperseded = {
+  original_event_id: safetyMajorEvent.event_id,
+  replacement_event_id: safetyCorrectionEvent.event_id,
+  entered_at: safetyCorrectionEvent.entered_at,
+  result: {
+    ...safetyMajorResult,
+    explanations: [
+      {
+        threshold: "injury_immediate_transport",
+        plain_language:
+          "1 person(s) were taken directly from the scene for medical care.",
+        citation:
+          "Exhibit 5, p. 16 — 'Immediate transport away from the scene for medical attention for one or more persons.' (services/calc/REGULATORY_TRACKER.md, verified 2026-07-12)",
+      },
+    ],
+  },
+  audit_event_id: 43,
 };

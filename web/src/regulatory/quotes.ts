@@ -32,3 +32,19 @@ export function quotesForCalc(calcName: string): RegulatoryQuote[] | null {
   const quotes = quotesByCalc[calcName];
   return quotes && quotes.length > 0 ? quotes : null;
 }
+
+/**
+ * The single verified quote for one calc whose text contains `snippet`
+ * (used to place a SPECIFIC rule next to the UI element it governs, e.g.
+ * the S&S-40 30-day rule beside its deadline). Returns null when no quote
+ * matches — a LOUD condition for callers (state the absence; never render
+ * an unverified paraphrase in its place), and a test-suite failure for
+ * every snippet the UI relies on (src/test/quotes.test.ts).
+ */
+export function quoteContaining(
+  calcName: string,
+  snippet: string,
+): RegulatoryQuote | null {
+  const quotes = quotesByCalc[calcName] ?? [];
+  return quotes.find((q) => q.quote.includes(snippet)) ?? null;
+}

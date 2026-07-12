@@ -878,6 +878,235 @@
           }
         }
       }
+    },
+    "/safety/events": {
+      "post": {
+        "tags": [
+          "safety"
+        ],
+        "summary": "Create Event",
+        "description": "Enter one safety event; the classifier runs synchronously and the\nentry, its classification, and the audit record commit together.",
+        "operationId": "create_event_safety_events_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SafetyEventCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SafetyEventCreated"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "safety"
+        ],
+        "summary": "List Events",
+        "operationId": "list_events_safety_events_get",
+        "parameters": [
+          {
+            "name": "classification",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Classification"
+            }
+          },
+          {
+            "name": "month",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Month"
+            }
+          },
+          {
+            "name": "mode",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Mode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SafetyEventRecord"
+                  },
+                  "title": "Response List Events Safety Events Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/safety/events/{event_id}/supersede": {
+      "post": {
+        "tags": [
+          "safety"
+        ],
+        "summary": "Supersede Event",
+        "description": "Append-only correction: enter the CORRECTED event in full; the\noriginal stays untouched except for its superseded_by link.",
+        "operationId": "supersede_event_safety_events__event_id__supersede_post",
+        "parameters": [
+          {
+            "name": "event_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Event Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SupersedeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SafetyEventSuperseded"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/safety/deadlines": {
+      "get": {
+        "tags": [
+          "safety"
+        ],
+        "summary": "Get Deadlines",
+        "operationId": "get_deadlines_safety_deadlines_get",
+        "parameters": [
+          {
+            "name": "month",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Month for the S&S-50 deadline rows (YYYY-MM). Defaults to the current UTC month. S&S-40 deadlines are month-independent (every open major event is listed).",
+              "title": "Month"
+            },
+            "description": "Month for the S&S-50 deadline rows (YYYY-MM). Defaults to the current UTC month. S&S-40 deadlines are month-independent (every open major event is listed)."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeadlinesResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -989,6 +1218,63 @@
           "audit_event_id"
         ],
         "title": "CertificationResponse"
+      },
+      "ClassificationResult": {
+        "properties": {
+          "classification": {
+            "type": "string",
+            "title": "Classification"
+          },
+          "thresholds_met": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Thresholds Met"
+          },
+          "explanations": {
+            "items": {
+              "$ref": "#/components/schemas/ThresholdExplanation"
+            },
+            "type": "array",
+            "title": "Explanations"
+          },
+          "non_major_basis": {
+            "items": {
+              "$ref": "#/components/schemas/ThresholdExplanation"
+            },
+            "type": "array",
+            "title": "Non Major Basis"
+          },
+          "effective_category": {
+            "type": "string",
+            "title": "Effective Category"
+          },
+          "is_rail_mode": {
+            "type": "boolean",
+            "title": "Is Rail Mode"
+          },
+          "summary": {
+            "type": "string",
+            "title": "Summary"
+          },
+          "classifier_version": {
+            "type": "string",
+            "title": "Classifier Version"
+          }
+        },
+        "type": "object",
+        "required": [
+          "classification",
+          "thresholds_met",
+          "explanations",
+          "non_major_basis",
+          "effective_category",
+          "is_rail_mode",
+          "summary",
+          "classifier_version"
+        ],
+        "title": "ClassificationResult"
       },
       "CreateKeyRequest": {
         "properties": {
@@ -1114,6 +1400,50 @@
           "secret"
         ],
         "title": "CreateSubscriptionRequest"
+      },
+      "DeadlinesResponse": {
+        "properties": {
+          "month": {
+            "type": "string",
+            "title": "Month"
+          },
+          "ss40": {
+            "items": {
+              "$ref": "#/components/schemas/Ss40Deadline"
+            },
+            "type": "array",
+            "title": "Ss40"
+          },
+          "ss40_citation": {
+            "type": "string",
+            "title": "Ss40 Citation"
+          },
+          "ss40_note": {
+            "type": "string",
+            "title": "Ss40 Note"
+          },
+          "ss50": {
+            "items": {
+              "$ref": "#/components/schemas/Ss50Deadline"
+            },
+            "type": "array",
+            "title": "Ss50"
+          },
+          "ss50_citation": {
+            "type": "string",
+            "title": "Ss50 Citation"
+          }
+        },
+        "type": "object",
+        "required": [
+          "month",
+          "ss40",
+          "ss40_citation",
+          "ss40_note",
+          "ss50",
+          "ss50_citation"
+        ],
+        "title": "DeadlinesResponse"
       },
       "DqIssue": {
         "properties": {
@@ -1709,6 +2039,416 @@
         ],
         "title": "RevokeSubscriptionResponse"
       },
+      "SafetyEventCreate": {
+        "properties": {
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Occurred At",
+            "description": "When the event happened (include the time zone)."
+          },
+          "mode": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Mode",
+            "description": "The ONE mode this event is reported in. If more than one mode was involved, apply the Predominant Use Rule (p. 15): rail wins over non-rail; otherwise pick the mode carrying more passengers."
+          },
+          "type_of_service": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Type Of Service",
+            "description": "Type of service (e.g. DO for directly operated, PT for purchased transportation)."
+          },
+          "event_category": {
+            "type": "string",
+            "title": "Event Category"
+          },
+          "narrative": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Narrative",
+            "description": "What happened, in your own words."
+          },
+          "location": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Location"
+          },
+          "fatalities": {
+            "type": "integer",
+            "title": "Fatalities",
+            "description": "How many people died (confirmed within 30 days; suicides are included \u2014 Exhibit 5, p. 16). Do NOT count deaths from illness, overdose, or natural causes (p. 20); DO count a death of undetermined cause in a rail right-of-way that may be the result of collision or electrocution (p. 20).",
+            "default": 0
+          },
+          "injuries": {
+            "type": "integer",
+            "title": "Injuries",
+            "description": "How many people were taken directly from the scene for medical care (Exhibit 5, p. 16 \u2014 immediate transport, not later self-referral). Do NOT count transport solely for illness, natural causes, exposure, intoxication, overdose, or an unrelated mental-health evaluation, or declarations of self-harm with no evident injury (p. 22); DO count an injury the event caused, e.g. a passenger's heart attack caused by a collision (p. 22).",
+            "default": 0
+          },
+          "property_damage_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Property Damage Usd",
+            "description": "Estimated property damage in dollars. Sum the damage to ALL vehicles and property involved or affected \u2014 transit and non-transit \u2014 plus the cost of clearing wreckage (p. 25; e.g. a $15,000 car plus $12,000 bus damage is reported as $27,000, Example 7A). Leave blank if not yet assessed \u2014 Headway never treats unknown damage as $0."
+          },
+          "serious_injury": {
+            "type": "boolean",
+            "title": "Serious Injury",
+            "description": "Rail only: did anyone suffer a serious injury (p. 21) \u2014 hospitalization for more than 48 hours within 7 days; a fracture of any bone (except simple fractures of fingers, toes, or nose); severe hemorrhages, or nerve, muscle, or tendon damage; an internal organ; or 2nd/3rd-degree burns or burns over 5% of the body surface? Answer yes even if the person was NOT transported from the scene \u2014 serious injuries 'may or may not have been transported' (p. 21).",
+            "default": false
+          },
+          "substantial_damage": {
+            "type": "boolean",
+            "title": "Substantial Damage",
+            "description": "Rail: did the damage disrupt operations AND require towing, rescue (e.g. a rescue train), on-site maintenance, or immediate removal before safe operation (p. 25)? Do NOT count cracked windows; dents, bends, or small punctures; broken lights or mirrors; or removal under the vehicle's own power for minor repair, testing, or recorder download (p. 25). For cyber events: did the intrusion disrupt operations (Scenario G, p. 19)?",
+            "default": false
+          },
+          "towed": {
+            "type": "boolean",
+            "title": "Towed",
+            "description": "Was any vehicle (transit or not) towed away from the scene? For a non-rail collision involving a transit revenue vehicle this alone makes the event reportable (p. 17); for a rail collision, a tow-away IS substantial damage (Example 7C, p. 27).",
+            "default": false
+          },
+          "evacuation_life_safety": {
+            "type": "boolean",
+            "title": "Evacuation Life Safety",
+            "description": "Were people evacuated from a transit facility or vehicle for life-safety reasons (p. 17)?",
+            "default": false
+          },
+          "assault_on_worker": {
+            "type": "boolean",
+            "title": "Assault On Worker",
+            "description": "Was a transit worker assaulted? An injury is NOT required for this to be reportable on the S&S-50 (p. 3).",
+            "default": false
+          },
+          "involves_transit_vehicle": {
+            "type": "boolean",
+            "title": "Involves Transit Vehicle",
+            "default": false
+          },
+          "involves_second_rail_vehicle": {
+            "type": "boolean",
+            "title": "Involves Second Rail Vehicle",
+            "default": false
+          },
+          "grade_crossing": {
+            "type": "boolean",
+            "title": "Grade Crossing",
+            "description": "Rail: did the collision occur at a rail grade crossing or intersection (p. 17)?",
+            "default": false
+          },
+          "runaway_train": {
+            "type": "boolean",
+            "title": "Runaway Train",
+            "description": "Rail: did a revenue vehicle move uncommanded, uncontrolled, or unmanned \u2014 operator incapacitated, sleeping, or absent, or an electrical, mechanical, or software failure \u2014 on the mainline, in a yard, or in a shop (p. 17)?",
+            "default": false
+          },
+          "evacuation_to_rail_row": {
+            "type": "boolean",
+            "title": "Evacuation To Rail Row",
+            "description": "Rail: did people evacuate to the controlled rail right-of-way (transit-directed or self-evacuation)? Evacuation to a platform does not count unless it was for life safety (p. 17).",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "occurred_at",
+          "mode",
+          "event_category",
+          "narrative"
+        ],
+        "title": "SafetyEventCreate",
+        "description": "One safety event as entered by agency staff. Field descriptions are\nplain language \u2014 the entry form asks questions, not jargon."
+      },
+      "SafetyEventCreated": {
+        "properties": {
+          "event_id": {
+            "type": "string",
+            "title": "Event Id"
+          },
+          "entered_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Entered At"
+          },
+          "result": {
+            "$ref": "#/components/schemas/ClassificationResult"
+          },
+          "audit_event_id": {
+            "type": "integer",
+            "title": "Audit Event Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "event_id",
+          "entered_at",
+          "result",
+          "audit_event_id"
+        ],
+        "title": "SafetyEventCreated"
+      },
+      "SafetyEventRecord": {
+        "properties": {
+          "event_id": {
+            "type": "string",
+            "title": "Event Id"
+          },
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Occurred At"
+          },
+          "mode": {
+            "type": "string",
+            "title": "Mode"
+          },
+          "type_of_service": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Type Of Service"
+          },
+          "event_category": {
+            "type": "string",
+            "title": "Event Category"
+          },
+          "narrative": {
+            "type": "string",
+            "title": "Narrative"
+          },
+          "location": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Location"
+          },
+          "fatalities": {
+            "type": "integer",
+            "title": "Fatalities"
+          },
+          "injuries": {
+            "type": "integer",
+            "title": "Injuries"
+          },
+          "property_damage_usd": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Property Damage Usd"
+          },
+          "serious_injury": {
+            "type": "boolean",
+            "title": "Serious Injury"
+          },
+          "substantial_damage": {
+            "type": "boolean",
+            "title": "Substantial Damage"
+          },
+          "towed": {
+            "type": "boolean",
+            "title": "Towed"
+          },
+          "evacuation_life_safety": {
+            "type": "boolean",
+            "title": "Evacuation Life Safety"
+          },
+          "assault_on_worker": {
+            "type": "boolean",
+            "title": "Assault On Worker"
+          },
+          "involves_transit_vehicle": {
+            "type": "boolean",
+            "title": "Involves Transit Vehicle"
+          },
+          "involves_second_rail_vehicle": {
+            "type": "boolean",
+            "title": "Involves Second Rail Vehicle"
+          },
+          "grade_crossing": {
+            "type": "boolean",
+            "title": "Grade Crossing"
+          },
+          "runaway_train": {
+            "type": "boolean",
+            "title": "Runaway Train"
+          },
+          "evacuation_to_rail_row": {
+            "type": "boolean",
+            "title": "Evacuation To Rail Row"
+          },
+          "entered_by": {
+            "type": "string",
+            "title": "Entered By"
+          },
+          "entered_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Entered At"
+          },
+          "superseded_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Superseded By"
+          },
+          "classification": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Classification"
+          },
+          "thresholds_met": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thresholds Met"
+          },
+          "classifier_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Classifier Version"
+          },
+          "classified_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Classified At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "event_id",
+          "occurred_at",
+          "mode",
+          "type_of_service",
+          "event_category",
+          "narrative",
+          "location",
+          "fatalities",
+          "injuries",
+          "property_damage_usd",
+          "serious_injury",
+          "substantial_damage",
+          "towed",
+          "evacuation_life_safety",
+          "assault_on_worker",
+          "involves_transit_vehicle",
+          "involves_second_rail_vehicle",
+          "grade_crossing",
+          "runaway_train",
+          "evacuation_to_rail_row",
+          "entered_by",
+          "entered_at",
+          "superseded_by",
+          "classification",
+          "thresholds_met",
+          "classifier_version",
+          "classified_at"
+        ],
+        "title": "SafetyEventRecord"
+      },
+      "SafetyEventSuperseded": {
+        "properties": {
+          "original_event_id": {
+            "type": "string",
+            "title": "Original Event Id"
+          },
+          "replacement_event_id": {
+            "type": "string",
+            "title": "Replacement Event Id"
+          },
+          "entered_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Entered At"
+          },
+          "result": {
+            "$ref": "#/components/schemas/ClassificationResult"
+          },
+          "audit_event_id": {
+            "type": "integer",
+            "title": "Audit Event Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "original_event_id",
+          "replacement_event_id",
+          "entered_at",
+          "result",
+          "audit_event_id"
+        ],
+        "title": "SafetyEventSuperseded"
+      },
       "Setting": {
         "properties": {
           "setting_key": {
@@ -1747,6 +2487,75 @@
           "updated_at"
         ],
         "title": "Setting"
+      },
+      "Ss40Deadline": {
+        "properties": {
+          "event_id": {
+            "type": "string",
+            "title": "Event Id"
+          },
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Occurred At"
+          },
+          "mode": {
+            "type": "string",
+            "title": "Mode"
+          },
+          "event_category": {
+            "type": "string",
+            "title": "Event Category"
+          },
+          "due_date": {
+            "type": "string",
+            "format": "date",
+            "title": "Due Date"
+          }
+        },
+        "type": "object",
+        "required": [
+          "event_id",
+          "occurred_at",
+          "mode",
+          "event_category",
+          "due_date"
+        ],
+        "title": "Ss40Deadline"
+      },
+      "Ss50Deadline": {
+        "properties": {
+          "month": {
+            "type": "string",
+            "title": "Month"
+          },
+          "mode": {
+            "type": "string",
+            "title": "Mode"
+          },
+          "due_date": {
+            "type": "string",
+            "format": "date",
+            "title": "Due Date"
+          },
+          "non_major_event_count": {
+            "type": "integer",
+            "title": "Non Major Event Count"
+          },
+          "zero_event": {
+            "type": "boolean",
+            "title": "Zero Event"
+          }
+        },
+        "type": "object",
+        "required": [
+          "month",
+          "mode",
+          "due_date",
+          "non_major_event_count",
+          "zero_event"
+        ],
+        "title": "Ss50Deadline"
       },
       "SubscriptionResponse": {
         "properties": {
@@ -1798,6 +2607,179 @@
         ],
         "title": "SubscriptionResponse",
         "description": "Subscription shape served back \u2014 deliberately secret-free."
+      },
+      "SupersedeRequest": {
+        "properties": {
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Occurred At",
+            "description": "When the event happened (include the time zone)."
+          },
+          "mode": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Mode",
+            "description": "The ONE mode this event is reported in. If more than one mode was involved, apply the Predominant Use Rule (p. 15): rail wins over non-rail; otherwise pick the mode carrying more passengers."
+          },
+          "type_of_service": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Type Of Service",
+            "description": "Type of service (e.g. DO for directly operated, PT for purchased transportation)."
+          },
+          "event_category": {
+            "type": "string",
+            "title": "Event Category"
+          },
+          "narrative": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Narrative",
+            "description": "What happened, in your own words."
+          },
+          "location": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Location"
+          },
+          "fatalities": {
+            "type": "integer",
+            "title": "Fatalities",
+            "description": "How many people died (confirmed within 30 days; suicides are included \u2014 Exhibit 5, p. 16). Do NOT count deaths from illness, overdose, or natural causes (p. 20); DO count a death of undetermined cause in a rail right-of-way that may be the result of collision or electrocution (p. 20).",
+            "default": 0
+          },
+          "injuries": {
+            "type": "integer",
+            "title": "Injuries",
+            "description": "How many people were taken directly from the scene for medical care (Exhibit 5, p. 16 \u2014 immediate transport, not later self-referral). Do NOT count transport solely for illness, natural causes, exposure, intoxication, overdose, or an unrelated mental-health evaluation, or declarations of self-harm with no evident injury (p. 22); DO count an injury the event caused, e.g. a passenger's heart attack caused by a collision (p. 22).",
+            "default": 0
+          },
+          "property_damage_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Property Damage Usd",
+            "description": "Estimated property damage in dollars. Sum the damage to ALL vehicles and property involved or affected \u2014 transit and non-transit \u2014 plus the cost of clearing wreckage (p. 25; e.g. a $15,000 car plus $12,000 bus damage is reported as $27,000, Example 7A). Leave blank if not yet assessed \u2014 Headway never treats unknown damage as $0."
+          },
+          "serious_injury": {
+            "type": "boolean",
+            "title": "Serious Injury",
+            "description": "Rail only: did anyone suffer a serious injury (p. 21) \u2014 hospitalization for more than 48 hours within 7 days; a fracture of any bone (except simple fractures of fingers, toes, or nose); severe hemorrhages, or nerve, muscle, or tendon damage; an internal organ; or 2nd/3rd-degree burns or burns over 5% of the body surface? Answer yes even if the person was NOT transported from the scene \u2014 serious injuries 'may or may not have been transported' (p. 21).",
+            "default": false
+          },
+          "substantial_damage": {
+            "type": "boolean",
+            "title": "Substantial Damage",
+            "description": "Rail: did the damage disrupt operations AND require towing, rescue (e.g. a rescue train), on-site maintenance, or immediate removal before safe operation (p. 25)? Do NOT count cracked windows; dents, bends, or small punctures; broken lights or mirrors; or removal under the vehicle's own power for minor repair, testing, or recorder download (p. 25). For cyber events: did the intrusion disrupt operations (Scenario G, p. 19)?",
+            "default": false
+          },
+          "towed": {
+            "type": "boolean",
+            "title": "Towed",
+            "description": "Was any vehicle (transit or not) towed away from the scene? For a non-rail collision involving a transit revenue vehicle this alone makes the event reportable (p. 17); for a rail collision, a tow-away IS substantial damage (Example 7C, p. 27).",
+            "default": false
+          },
+          "evacuation_life_safety": {
+            "type": "boolean",
+            "title": "Evacuation Life Safety",
+            "description": "Were people evacuated from a transit facility or vehicle for life-safety reasons (p. 17)?",
+            "default": false
+          },
+          "assault_on_worker": {
+            "type": "boolean",
+            "title": "Assault On Worker",
+            "description": "Was a transit worker assaulted? An injury is NOT required for this to be reportable on the S&S-50 (p. 3).",
+            "default": false
+          },
+          "involves_transit_vehicle": {
+            "type": "boolean",
+            "title": "Involves Transit Vehicle",
+            "default": false
+          },
+          "involves_second_rail_vehicle": {
+            "type": "boolean",
+            "title": "Involves Second Rail Vehicle",
+            "default": false
+          },
+          "grade_crossing": {
+            "type": "boolean",
+            "title": "Grade Crossing",
+            "description": "Rail: did the collision occur at a rail grade crossing or intersection (p. 17)?",
+            "default": false
+          },
+          "runaway_train": {
+            "type": "boolean",
+            "title": "Runaway Train",
+            "description": "Rail: did a revenue vehicle move uncommanded, uncontrolled, or unmanned \u2014 operator incapacitated, sleeping, or absent, or an electrical, mechanical, or software failure \u2014 on the mainline, in a yard, or in a shop (p. 17)?",
+            "default": false
+          },
+          "evacuation_to_rail_row": {
+            "type": "boolean",
+            "title": "Evacuation To Rail Row",
+            "description": "Rail: did people evacuate to the controlled rail right-of-way (transit-directed or self-evacuation)? Evacuation to a platform does not count unless it was for life safety (p. 17).",
+            "default": false
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Reason",
+            "description": "Why the original entry is being corrected (kept in the audit log \u2014 the original event itself is never edited)."
+          }
+        },
+        "type": "object",
+        "required": [
+          "occurred_at",
+          "mode",
+          "event_category",
+          "narrative",
+          "reason"
+        ],
+        "title": "SupersedeRequest"
+      },
+      "ThresholdExplanation": {
+        "properties": {
+          "threshold": {
+            "type": "string",
+            "title": "Threshold"
+          },
+          "plain_language": {
+            "type": "string",
+            "title": "Plain Language"
+          },
+          "citation": {
+            "type": "string",
+            "title": "Citation"
+          }
+        },
+        "type": "object",
+        "required": [
+          "threshold",
+          "plain_language",
+          "citation"
+        ],
+        "title": "ThresholdExplanation"
       },
       "UpdateSettingRequest": {
         "properties": {

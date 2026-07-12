@@ -269,6 +269,24 @@ class RecordingCursor:
                 # mr20's latest-per-(metric, scope) SELECT (handoff 0009);
                 # the fake serves pre-deduplicated canned rows.
                 self._pending_all = list(conn.metric_value_rows)
+            elif "FROM safety.events" in sql:
+                # ss50's month SELECT and ss40's single-event SELECT
+                # (handoff 0010); the fake serves pre-joined latest-
+                # classification rows.
+                if "WHERE e.event_id = %s" in sql:
+                    rows = [
+                        r
+                        for r in conn.safety_single_event_rows
+                        if str(r[0]) == str(params[0])
+                    ]
+                    self._pending_all = rows
+                    self._pending_one = rows[0] if rows else None
+                else:
+                    self._pending_all = list(conn.safety_event_rows)
+            elif "SELECT DISTINCT r.mode" in sql:
+                # ss50's operated-modes SELECT (the handoff-0009 mode
+                # derivation over canonical.vehicle_positions).
+                self._pending_all = list(conn.operated_mode_rows)
             else:
                 self._pending_all = list(conn.position_rows)
         elif "INSERT INTO dq.issues" in sql:
@@ -302,11 +320,19 @@ class RecordingConnection:
         settings_rows: list[tuple] | None = None,
         settings_table_missing: bool = False,
         metric_value_rows: list[tuple] | None = None,
+        safety_event_rows: list[tuple] | None = None,
+        safety_single_event_rows: list[tuple] | None = None,
+        operated_mode_rows: list[tuple] | None = None,
     ):
         self.position_rows = position_rows or []
         self.passenger_event_rows = passenger_event_rows or []
         self.operated_trip_rows = operated_trip_rows or []
         self.metric_value_rows = metric_value_rows or []
+        # Safety & Security (handoff 0010): ss50's pre-joined month rows,
+        # ss40's single-event rows, and the operated-mode derivation rows.
+        self.safety_event_rows = safety_event_rows or []
+        self.safety_single_event_rows = safety_single_event_rows or []
+        self.operated_mode_rows = operated_mode_rows or []
         # app.settings (migration 0014): by default the fake serves the
         # seeded rows; settings_table_missing=True models a pre-0014
         # database (the SELECT raises the 42P01 duck-typed error).

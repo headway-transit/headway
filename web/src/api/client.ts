@@ -25,6 +25,12 @@ import type {
   PublicMetricValue,
   ResolveRequest,
   ResolveResponse,
+  SafetyDeadlines,
+  SafetyEventCreated,
+  SafetyEventRecord,
+  SafetyEventRequest,
+  SafetyEventSuperseded,
+  SafetySupersedeRequest,
   Setting,
   UpdateSettingResponse,
 } from "./types";
@@ -229,6 +235,70 @@ export function resolveDqIssue(
     `/dq/issues/${encodeURIComponent(issueId)}/resolve`,
     body,
   );
+}
+
+// ---- safety & security (handoff 0010) ----
+
+/**
+ * POST /safety/events (data_steward+ — enforced server-side; audited). The
+ * API runs the deterministic classifier synchronously and returns the
+ * verdict with thresholds met and plain-language explanations. The UI
+ * displays that verdict verbatim — it never classifies an event.
+ */
+export function createSafetyEvent(
+  body: SafetyEventRequest,
+): Promise<SafetyEventCreated> {
+  return request<SafetyEventCreated>("POST", "/safety/events", body);
+}
+
+export interface SafetyEventFilters {
+  classification?: string;
+  /** YYYY-MM */
+  month?: string;
+  mode?: string;
+}
+
+export function listSafetyEvents(
+  filters: SafetyEventFilters = {},
+): Promise<SafetyEventRecord[]> {
+  const params = new URLSearchParams();
+  if (filters.classification) params.set("classification", filters.classification);
+  if (filters.month) params.set("month", filters.month);
+  if (filters.mode) params.set("mode", filters.mode);
+  const qs = params.toString();
+  return request<SafetyEventRecord[]>(
+    "GET",
+    `/safety/events${qs ? `?${qs}` : ""}`,
+  );
+}
+
+/**
+ * POST /safety/events/{id}/supersede (data_steward+; audited). Corrections
+ * are APPEND-ONLY: the API records a NEW event (classified like any other)
+ * and links the original to it via superseded_by — the original is never
+ * edited or deleted. The body carries the corrected answers PLUS a required
+ * reason (kept in the audit log).
+ */
+export function supersedeSafetyEvent(
+  eventId: string,
+  body: SafetySupersedeRequest,
+): Promise<SafetyEventSuperseded> {
+  return request<SafetyEventSuperseded>(
+    "POST",
+    `/safety/events/${encodeURIComponent(eventId)}/supersede`,
+    body,
+  );
+}
+
+/**
+ * GET /safety/deadlines — due dates computed BY THE API: per open major
+ * event an S&S-40 (occurred_at + 30 days, Exhibit 2), and per mode for the
+ * given month (default: the current UTC month) an S&S-50 (due end of the
+ * following month, Exhibit 3) INCLUDING zero-event rows.
+ */
+export function getSafetyDeadlines(month?: string): Promise<SafetyDeadlines> {
+  const qs = month ? `?${new URLSearchParams({ month })}` : "";
+  return request<SafetyDeadlines>("GET", `/safety/deadlines${qs}`);
 }
 
 // ---- branding + settings (handoff 0008, pillar C) ----

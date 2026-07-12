@@ -285,3 +285,105 @@ def test_immutability_triggers_present():
     assert re.search(r"BEFORE UPDATE OR DELETE ON raw\.records", sql)
     assert re.search(r"BEFORE UPDATE OR DELETE ON audit\.events", sql)
     assert sql.count("RAISE EXCEPTION") >= 2
+
+
+def test_safety_events_append_only_with_supersede_link():
+    # Handoff 0010 / migration 0017: Safety & Security events. Corrections
+    # are append-only — a corrected event points at its replacement via
+    # superseded_by; originals are never deleted (structural trigger, not
+    # policy prose). Counts have sane bounds; damage stays nullable (a
+    # missing figure is never coalesced to $0).
+    sql = all_sql()
+    assert re.search(r"CREATE TABLE\s+safety\.events\b", sql), (
+        "safety.events not created by any migration"
+    )
+    sql_0017 = (MIGRATIONS_DIR / "0017_safety_events.sql").read_text(
+        encoding="utf-8"
+    )
+    assert re.search(r"CREATE SCHEMA IF NOT EXISTS safety", sql_0017)
+    assert re.search(r"occurred_at\s+TIMESTAMPTZ NOT NULL", sql_0017)
+    assert re.search(r"mode\s+TEXT NOT NULL", sql_0017)
+    assert re.search(r"narrative\s+TEXT NOT NULL", sql_0017)
+    # The manual's event vocabulary, CHECK-constrained.
+    for category in (
+        "collision", "derailment", "fire", "evacuation", "security",
+        "assault", "cyber", "other",
+    ):
+        assert f"'{category}'" in sql_0017, (
+            f"event_category CHECK must include {category!r}"
+        )
+    assert re.search(r"CHECK \(fatalities >= 0\)", sql_0017)
+    assert re.search(r"CHECK \(injuries >= 0\)", sql_0017)
+    # Damage nullable NUMERIC (never float, never defaulted to 0).
+    assert re.search(
+        r"property_damage_usd\s+NUMERIC CHECK \(property_damage_usd >= 0\)",
+        sql_0017,
+    ), "property_damage_usd must be nullable NUMERIC with a >= 0 CHECK"
+    assert re.search(
+        r"superseded_by\s+UUID REFERENCES safety\.events", sql_0017
+    ), "superseded_by must reference safety.events (append-only correction)"
+    assert re.search(r"BEFORE UPDATE OR DELETE ON safety\.events", sql_0017), (
+        "safety.events needs the append-only trigger"
+    )
+    assert re.search(r"superseded_by <> event_id", sql_0017), (
+        "an event must never supersede itself"
+    )
+
+
+def test_safety_event_classifications_append_only_classifier_written():
+    # Handoff 0010 / migration 0017: classifications are written ONLY by the
+    # deterministic classifier (sscls_v0) and are append-only history —
+    # 'major' exactly when >= 1 threshold met (one report per event, p. 14).
+    sql_0017 = (MIGRATIONS_DIR / "0017_safety_events.sql").read_text(
+        encoding="utf-8"
+    )
+    assert re.search(r"CREATE TABLE\s+safety\.event_classifications\b", sql_0017)
+    assert re.search(
+        r"classification\s+TEXT NOT NULL CHECK \(classification IN\s*"
+        r"\('major', 'non_major', 'not_reportable'\)\)",
+        sql_0017,
+    )
+    assert re.search(r"thresholds_met\s+TEXT\[\] NOT NULL", sql_0017)
+    assert re.search(r"classifier_version\s+TEXT NOT NULL", sql_0017)
+    assert re.search(
+        r"\(classification = 'major'\) = \(cardinality\(thresholds_met\) > 0\)",
+        sql_0017,
+    ), "major must hold exactly when at least one threshold was met"
+    assert re.search(
+        r"BEFORE UPDATE OR DELETE ON safety\.event_classifications", sql_0017
+    ), "safety.event_classifications needs the append-only trigger"
+    assert "written ONLY by the deterministic classifier" in sql_0017, (
+        "0017 must document the only-writer rule for classifications"
+    )
+
+
+def test_safety_events_runaway_and_row_evacuation_fields():
+    # Handoff 0010 correction round / migration 0018: the p. 17 runaway-
+    # train and evacuation-to-controlled-ROW rules (tracker S&S addendum)
+    # need capture fields. Booleans, NOT NULL DEFAULT false (explicit
+    # yes/no questions at entry; honest backfill), and the migration must
+    # note that the 0017 to_jsonb append-only trigger covers new columns
+    # automatically.
+    sql_0018 = (
+        MIGRATIONS_DIR / "0018_safety_runaway_evacuation.sql"
+    ).read_text(encoding="utf-8")
+    assert re.search(
+        r"ADD COLUMN\s+runaway_train\s+BOOLEAN NOT NULL DEFAULT false",
+        sql_0018,
+    ), "safety.events.runaway_train must be BOOLEAN NOT NULL DEFAULT false"
+    assert re.search(
+        r"ADD COLUMN\s+evacuation_to_rail_row\s+BOOLEAN NOT NULL DEFAULT false",
+        sql_0018,
+    ), (
+        "safety.events.evacuation_to_rail_row must be BOOLEAN NOT NULL "
+        "DEFAULT false"
+    )
+    assert "uncommanded, uncontrolled, or unmanned" in sql_0018, (
+        "0018 must carry the p. 17 runaway-train quote basis"
+    )
+    assert "controlled rail right-of-way" in sql_0018, (
+        "0018 must carry the p. 17 rail-evacuation quote basis"
+    )
+    assert "append-only trigger" in sql_0018, (
+        "0018 must note the 0017 trigger covers the new columns"
+    )

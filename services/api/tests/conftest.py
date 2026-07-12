@@ -69,6 +69,11 @@ class FakeConn:
         self.api_keys: dict[str, dict] = {}
         self.webhook_subscriptions: dict[str, dict] = {}
         self.settings: dict[str, dict] = {}
+        # Safety & Security (handoff 0010 / migration 0017).
+        self.safety_events: dict[str, dict] = {}
+        self.safety_classifications: list[dict] = []
+        self.operated_modes: list[str] = []
+        self._next_classification_id = 1
         self._next_event_id = 1
         self.executed: list[tuple[str, tuple]] = []
         self.tx_log: list[str] = []
@@ -86,6 +91,9 @@ class FakeConn:
                 self.api_keys,
                 self.webhook_subscriptions,
                 self.settings,
+                self.safety_events,
+                self.safety_classifications,
+                self._next_classification_id,
                 self._next_event_id,
             )
         )
@@ -101,6 +109,9 @@ class FakeConn:
                 self.api_keys,
                 self.webhook_subscriptions,
                 self.settings,
+                self.safety_events,
+                self.safety_classifications,
+                self._next_classification_id,
                 self._next_event_id,
             ) = snapshot
             self.tx_log.append("rollback")
@@ -401,7 +412,133 @@ class FakeConn:
             ]
             return FakeCursor(rows)
 
+        # -- Safety & Security (handoff 0010 / migration 0017) ---------------
+        if q.startswith("INSERT INTO safety.events"):
+            (occurred_at, mode, type_of_service, event_category, narrative,
+             location, fatalities, injuries, property_damage_usd,
+             serious_injury, substantial_damage, towed,
+             evacuation_life_safety, assault_on_worker,
+             involves_transit_vehicle, involves_second_rail_vehicle,
+             grade_crossing, runaway_train, evacuation_to_rail_row,
+             entered_by) = params
+            event = {
+                "event_id": str(uuid.uuid4()),
+                "occurred_at": occurred_at,
+                "mode": mode,
+                "type_of_service": type_of_service,
+                "event_category": event_category,
+                "narrative": narrative,
+                "location": location,
+                "fatalities": fatalities,
+                "injuries": injuries,
+                "property_damage_usd": property_damage_usd,
+                "serious_injury": serious_injury,
+                "substantial_damage": substantial_damage,
+                "towed": towed,
+                "evacuation_life_safety": evacuation_life_safety,
+                "assault_on_worker": assault_on_worker,
+                "involves_transit_vehicle": involves_transit_vehicle,
+                "involves_second_rail_vehicle": involves_second_rail_vehicle,
+                "grade_crossing": grade_crossing,
+                "runaway_train": runaway_train,
+                "evacuation_to_rail_row": evacuation_to_rail_row,
+                "entered_by": entered_by,
+                "entered_at": dt.datetime.now(UTC),
+                "superseded_by": None,
+            }
+            self.safety_events[event["event_id"]] = event
+            return FakeCursor([(event["event_id"], event["entered_at"])])
+
+        if q.startswith("INSERT INTO safety.event_classifications"):
+            event_id, classification, thresholds_met, classifier_version = params
+            row = {
+                "classification_id": self._next_classification_id,
+                "event_id": str(event_id),
+                "classification": classification,
+                "thresholds_met": list(thresholds_met),
+                "classifier_version": classifier_version,
+                "classified_at": dt.datetime.now(UTC),
+            }
+            self._next_classification_id += 1
+            self.safety_classifications.append(row)
+            return FakeCursor([(row["classification_id"], row["classified_at"])])
+
+        if "FROM safety.events" in q and ") AS latest" in q:
+            rows = self._latest_safety_rows()
+            i = 0
+            if "occurred_at >= %s AND occurred_at < %s" in q:
+                rows = [
+                    r for r in rows
+                    if params[i] <= r["occurred_at"] < params[i + 1]
+                ]
+                i += 2
+            if "mode = %s" in q:
+                rows = [r for r in rows if r["mode"] == params[i]]
+                i += 1
+            if "classification = %s" in q:
+                rows = [r for r in rows if r["classification"] == params[i]]
+                i += 1
+            if "superseded_by IS NULL" in q:
+                rows = [r for r in rows if r["superseded_by"] is None]
+            rows.sort(key=lambda r: (r["occurred_at"], r["event_id"]))
+            columns = (
+                "event_id", "occurred_at", "mode", "type_of_service",
+                "event_category", "narrative", "location", "fatalities",
+                "injuries", "property_damage_usd", "serious_injury",
+                "substantial_damage", "towed", "evacuation_life_safety",
+                "assault_on_worker", "involves_transit_vehicle",
+                "involves_second_rail_vehicle", "grade_crossing",
+                "runaway_train", "evacuation_to_rail_row",
+                "entered_by", "entered_at", "superseded_by",
+                "classification", "thresholds_met", "classifier_version",
+                "classified_at",
+            )
+            return FakeCursor([tuple(r[c] for c in columns) for r in rows])
+
+        if q.startswith("SELECT superseded_by FROM safety.events"):
+            event = self.safety_events.get(str(params[0]))
+            return FakeCursor([(event["superseded_by"],)] if event else [])
+
+        if q.startswith("UPDATE safety.events SET superseded_by"):
+            replacement_id, event_id = params
+            event = self.safety_events.get(str(event_id))
+            if event is None or event["superseded_by"] is not None:
+                return FakeCursor([])
+            event["superseded_by"] = str(replacement_id)
+            return FakeCursor([(event["event_id"],)])
+
+        if q.startswith("SELECT DISTINCT r.mode"):
+            # The handoff-0009 operated-mode derivation over
+            # canonical.vehicle_positions (headway_calc.ss50).
+            return FakeCursor([(m,) for m in self.operated_modes])
+
         raise AssertionError(f"FakeConn has no handler for SQL: {q!r}")
+
+    def _latest_safety_rows(self) -> list[dict]:
+        """Each event merged with its LATEST classification (classified_at,
+        classification_id ordering) — the DISTINCT ON the app's SQL does."""
+        rows = []
+        for event in self.safety_events.values():
+            latest = None
+            for c in self.safety_classifications:
+                if c["event_id"] != event["event_id"]:
+                    continue
+                if latest is None or (
+                    (c["classified_at"], c["classification_id"])
+                    > (latest["classified_at"], latest["classification_id"])
+                ):
+                    latest = c
+            merged = dict(event)
+            merged["classification"] = latest["classification"] if latest else None
+            merged["thresholds_met"] = (
+                list(latest["thresholds_met"]) if latest else None
+            )
+            merged["classifier_version"] = (
+                latest["classifier_version"] if latest else None
+            )
+            merged["classified_at"] = latest["classified_at"] if latest else None
+            rows.append(merged)
+        return rows
 
     def _walk_lineage(self, root_id):
         rows = []
@@ -575,6 +712,52 @@ class FakeConn:
             ),
             updated_by="migration:0015",
         )
+
+    def add_safety_event(self, **overrides):
+        """Seed one safety.events row (handoff 0010 / migration 0017)."""
+        event = {
+            "event_id": str(uuid.uuid4()),
+            "occurred_at": dt.datetime(2026, 6, 10, 12, 0, tzinfo=UTC),
+            "mode": "bus",
+            "type_of_service": "DO",
+            "event_category": "other",
+            "narrative": "Seeded safety event.",
+            "location": None,
+            "fatalities": 0,
+            "injuries": 0,
+            "property_damage_usd": None,
+            "serious_injury": False,
+            "substantial_damage": False,
+            "towed": False,
+            "evacuation_life_safety": False,
+            "assault_on_worker": False,
+            "involves_transit_vehicle": False,
+            "involves_second_rail_vehicle": False,
+            "grade_crossing": False,
+            "runaway_train": False,
+            "evacuation_to_rail_row": False,
+            "entered_by": "stella",
+            "entered_at": dt.datetime(2026, 6, 10, 13, 0, tzinfo=UTC),
+            "superseded_by": None,
+        }
+        event.update(overrides)
+        self.safety_events[event["event_id"]] = event
+        return event
+
+    def add_safety_classification(self, event_id, classification="non_major",
+                                  thresholds_met=(), classified_at=None,
+                                  classifier_version="sscls_v0 0.1.1"):
+        row = {
+            "classification_id": self._next_classification_id,
+            "event_id": str(event_id),
+            "classification": classification,
+            "thresholds_met": list(thresholds_met),
+            "classifier_version": classifier_version,
+            "classified_at": classified_at or dt.datetime.now(UTC),
+        }
+        self._next_classification_id += 1
+        self.safety_classifications.append(row)
+        return row
 
     def add_edge(self, output_kind, output_id, transform_name, transform_version,
                  input_kind, input_id):

@@ -106,6 +106,9 @@ export function Layout() {
                   <NavLink to="/reports/monthly">{copy.nav.reports}</NavLink>
                 </li>
                 <li>
+                  <NavLink to="/safety">{copy.nav.safety}</NavLink>
+                </li>
+                <li>
                   <NavLink to="/dq">{copy.nav.dq}</NavLink>
                 </li>
                 {/* Shown only to the certifying official — UX, not security:

@@ -241,6 +241,56 @@ MR-20") requires UPT, VRH, VRM and VOMS **per mode**. The pieces:
   (flag-derived + missing-cells + the fixed D1–D6 list). The package is the
   artifact the web report view can later consume verbatim.
 
+## Safety & Security — sscls_v0 classifier + ss50 generator (handoff 0010)
+
+S&S events are NOT derivable from telemetry: the source is validated manual
+entry (`POST /safety/events`, migration 0017: `safety.events` append-only —
+corrections supersede via `superseded_by`, never edit or delete). Two calc
+pieces, both governed by the tracker's "Verified — Safety & Security
+reporting (verified 2026-07-12)" section — the only permitted source of the
+regulatory facts:
+
+- **`headway_calc.sscls` — sscls_v0 0.1.1** (0.1.0 retained runnable as
+  `classify_event_v0_1_0`; its single-injury Other-Safety-Event bug is
+  pinned by test), the pure deterministic events→classification per
+  Exhibit 5 (p. 16) and the pp. 17–22 rules AS QUOTED (tracker section +
+  its two addenda). Rail vs non-rail thresholds keyed on the
+  agency-supplied mode; $25,000 damage as exact Decimal (summed across all
+  involved property + wreckage clearing, p. 25 — an entry hint); injury =
+  immediate transport, but Other Safety Events (effective categories
+  'evacuation'/'other' — NOT collisions/fires/security/hazmat/acts-of-God/
+  derailments, p. 22) need TWO or more injured persons and a single-injury
+  Other event is explicitly S&S-50; rail collisions meet the injury
+  threshold at ONE injury (Example 4C); rail serious injury per the
+  verbatim p. 21 criteria — automatically reportable, transport NOT
+  required; rail substantial damage per the verbatim p. 25 criteria, with
+  a rail-collision tow-away counting mechanically (Example 7C); non-rail
+  collision tow-away threshold (revenue vehicle + any vehicle towed,
+  p. 17); rail-to-rail collision auto-reportable (Example 4B); rail
+  collision at a grade crossing (p. 17); rail vehicle-contact assault
+  needs no injury (p. 17) while non-rail assault-with-contact is evaluated
+  as a collision per Scenario E; runaway train and evacuation-to-
+  controlled-ROW (rail; migration-0018 fields, p. 17 verbatim);
+  evacuation for life safety (any mode); derailments incl. yard and
+  non-revenue; cyber + substantial damage per Scenario G. ≥ 1 threshold
+  met = ONE report (p. 14) — structurally pinned by the migration-0017
+  CHECK ('major' ⇔ thresholds_met non-empty). No threshold → S&S-50
+  non-major scope (p. 3 + p. 22) → else not_reportable. NULL damage is
+  "not assessed", never $0. It is the SOLE writer of
+  `safety.event_classifications` (`record_classification`). Goldens: ALL
+  EIGHT Example 4 scenarios (A–H) plus Examples 6C/6E/6F/7C, hand-worked
+  from the verbatim tracker solutions. Known gap (tracker row, owner NTD):
+  hazmat/act-of-God events have no category and arrive as 'other'.
+- **`headway_calc.ss50`** — `python -m headway_calc.ss50 --month YYYY-MM`
+  emits the NOT-REPORTABLE S&S-50 preview: per-mode/per-TOS non-major
+  counts with per-cell provenance (event_ids), EXPLICIT ZERO ROWS for every
+  operated mode ("even if no event occurs" — operated modes derived exactly
+  like the handoff-0009 per-mode path), superseded/unclassified/major
+  events excluded and listed, CR/AR nuance FLAGGED not applied.
+  `--ss40-event EVENT_ID` emits the S&S-40 detail export (every met
+  threshold's supporting fields; due = occurred_at + 30 days, Exhibit 2,
+  p. 4).
+
 ## Trip-level excision — 0.4.0 (default for VRH)
 
 Per handoff 0004, `compute_vrh` (CALC_VERSION `0.4.0`) refines the exclusion
@@ -456,6 +506,25 @@ position-derived haversine (trip-distance authority deferred to slice 2 per
 handoff 0001).
 
 ## Verification status
+
+### What ran (2026-07-12, handoff 0010 — Safety & Security, incl. the addendum correction round)
+
+```
+$ cd services/calc && python3 -m pytest tests/ -q
+294 passed in 12.12s
+```
+
+(245 pre-0010 tests unchanged and green, plus 49 new: sscls unit + ALL
+EIGHT Example-4 goldens + Examples 6C/6E/6F/7C + the flag-space invariant
+enumeration over BOTH classifier versions + the retained-0.1.0 bug pin;
+ss50 unit + package + ss40-export + CLI + the classifier→generator
+flow-through for single-injury Other Safety Events and zero-injury worker
+assaults.) Live: migrations 0017 and 0018 applied and psql-inspected,
+append-only proven by attack; realistic events POSTed through the running
+API landed with their sscls_v0 classifications (verified from a separate
+psql connection); `python -m headway_calc.ss50 --month 2026-07` and
+`--ss40-event` ran against the live database — full evidence in handoff
+0010, "Outputs — backend evidence".
 
 ### What ran (2026-07-11, Python 3.12.3, hypothesis 6.156.4)
 

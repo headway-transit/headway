@@ -26,6 +26,7 @@ from .routers import (
     metrics,
     public,
     reports,
+    safety,
     settings as settings_router,
 )
 
@@ -137,4 +138,5 @@ def create_app(
     app.include_router(reports.router)
     app.include_router(public.router)
     app.include_router(branding.router)
+    app.include_router(safety.router)
     return app

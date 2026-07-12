@@ -27,6 +27,7 @@ export const copy = {
     dashboard: "Dashboard",
     metrics: "Metrics",
     reports: "Monthly ridership",
+    safety: "Safety & security",
     dq: "Data quality",
     certify: "Certify",
     branding: "Branding",
@@ -676,5 +677,290 @@ export const copy = {
       `Logo uploaded (${bytes} bytes). It now appears in the header.`,
     logoAlt: (displayName: string) => `${displayName} logo`,
     chooseFileFirst: "Choose an SVG or PNG file first, then upload it.",
+  },
+
+  /**
+   * The Safety & Security module (/safety — handoff 0010, design point 5).
+   * Questions are plain language ("Was anyone taken directly from the scene
+   * for medical care?", never "injury threshold"); the federal rule itself
+   * is ALWAYS the verbatim tracker quote (src/regulatory/quotes.json,
+   * sscls_v0) with its page citation — hints below only point at the rule
+   * (manual + page), they never restate a regulatory definition from memory.
+   * The classifier's verdict and explanation are the API's, shown verbatim:
+   * this page never decides how an event classifies.
+   */
+  safety: {
+    heading: "Safety & security",
+    /**
+     * Headway's canonical mode vocabulary (the transform's GTFS
+     * route_type→mode map, services/transform gtfs_static.py — the SAME
+     * vocabulary the sscls_v0 classifier's rail test uses). Plain labels;
+     * an unknown code falls back to the raw code, honestly.
+     */
+    modeLabels: {
+      bus: "Bus",
+      trolleybus: "Trolleybus",
+      tram: "Tram, streetcar, or light rail",
+      subway: "Subway or metro",
+      rail: "Rail (commuter or intercity)",
+      ferry: "Ferry",
+      cable_tram: "Cable tram",
+      aerial_lift: "Aerial lift (gondola or cable car)",
+      funicular: "Funicular",
+      monorail: "Monorail",
+    } as Record<string, string>,
+    intro:
+      "Record safety and security events here, in plain language. Headway's deterministic classifier decides how each event classifies under the federal thresholds — never this page — and the deadlines panel tracks the reports each event puts on the calendar.",
+    /** Honest scope (handoff 0010, design point 6): stated on every visit. */
+    alphaBanner:
+      "Alpha preview — not certified for submission. Headway records and classifies events but does not e-file anything: the NTD portal's filing format has not been verified. Commuter Rail and Alaska Railroad reporting nuances beyond the manual's Exhibit 1 are flagged in output, never silently applied. File your official reports with the FTA as you do today.",
+
+    deadlines: {
+      heading: "Reporting deadlines",
+      intro:
+        "Due dates computed by the API from the recorded events and the manual's timing rules. The days-remaining wording is this page's calendar arithmetic on those served dates.",
+      loading: "Loading deadlines…",
+      ss40Heading: "S&S-40 major event reports",
+      ss40Intro:
+        "One report per major event. The manual's timing rule, word for word:",
+      ss40None:
+        "No S&S-40 report is currently due. An S&S-40 appears here for every recorded major event.",
+      ss40Item: (eventLabel: string, dueDate: string) =>
+        `S&S-40 for ${eventLabel} — due ${dueDate}`,
+      ss50Heading: "S&S-50 monthly summaries",
+      ss50Intro:
+        "One summary per mode and type of service, every month — a month with no events still owes its summary. The manual's rule, word for word:",
+      ss50None:
+        "No S&S-50 summary is currently listed. Monthly summaries appear here as reporting months close.",
+      ss50MonthLine: (monthName: string, dueDate: string) =>
+        `S&S-50 for ${monthName} — due ${dueDate}`,
+      ss50ZeroModes: (count: string) =>
+        `includes ${count} mode${count === "1" ? "" : "s"} with zero events`,
+      ss50ModeCount: (count: string) =>
+        `${count} non-major event${count === "1" ? "" : "s"}`,
+      ss50ModeZero: "0 events — the summary is still due",
+      /** Urgency wording: text + icon + color, never color alone. */
+      dueToday: "Due today",
+      dueIn: (days: string) =>
+        `Due in ${days} day${days === "1" ? "" : "s"}`,
+      overdueBy: (days: string) =>
+        `Overdue by ${days} day${days === "1" ? "" : "s"}`,
+      /** The quote lookup failing is stated, never papered over. */
+      ruleMissing:
+        "The verified manual quote for this timing rule is not on file. Regenerate the quotes (npm run extract:quotes) — the rule must ship with the deadline.",
+    },
+
+    form: {
+      heading: "Record an event",
+      intro:
+        "Answer what you know, in plain words. Recording an event creates Headway's permanent record and classifies it immediately — nothing is filed with the FTA from here.",
+      notAllowed:
+        "Only a data steward or above can record or correct safety events. You can still read every recorded event, its classification, and the deadlines on this page.",
+      correctionHeading: (eventLabel: string) => `Correct: ${eventLabel}`,
+      correctionIntro:
+        "A correction never edits or deletes the original record. Headway records a new event with your corrected answers and links the two, so the audit trail keeps both.",
+      occurredAt: "When did the event happen?",
+      mode: "Which mode of service was involved?",
+      modeUnselected: "Choose a mode",
+      modeHint:
+        "If more than one mode was involved, report the event in one mode per the manual's Predominant Use Rule (2026 S&S Policy Manual, p. 15): a rail mode wins over a non-rail mode; otherwise pick the mode that carried more passengers.",
+      typeOfService: "Who operates this service?",
+      typeOfServiceOptions: {
+        "": "Not stated",
+        DO: "The agency itself (directly operated)",
+        PT: "A contractor (purchased transportation)",
+      } as Record<string, string>,
+      category: "What kind of event was it?",
+      categoryUnselected: "Choose a category",
+      /** Manual vocabulary (handoff 0010 schema enum), plain labels. */
+      categoryLabels: {
+        collision: "Collision",
+        derailment: "Derailment",
+        fire: "Fire",
+        evacuation: "Evacuation",
+        security: "Security event",
+        assault: "Assault",
+        cyber: "Cyber security event",
+        other: "Something else",
+      } as Record<string, string>,
+      cyberHint:
+        "Unauthorized access that disrupts operations can be a Cyber Security Major Event (2026 S&S Policy Manual, Scenario G, p. 19).",
+      narrative: "Describe what happened",
+      narrativeHint:
+        "In your own words. The narrative is part of the permanent record.",
+      location: "Where did it happen? (optional)",
+      fatalities: "How many people died?",
+      fatalitiesHint:
+        "Count deaths confirmed within 30 days of the event, including suicides (Exhibit 5, p. 16). Do not count deaths from illness, overdose, or natural causes; a death of undetermined cause in a rail right-of-way that may be from collision or electrocution does count (p. 20). Enter 0 if no one died.",
+      injuries:
+        "Was anyone taken directly from the scene for medical care? How many people?",
+      injuriesHint:
+        "Count each person transported away from the scene for medical attention — by ambulance, transit or private vehicle, or stretcher — whether or not they appeared injured (p. 21). Do not count transport solely for illness, natural causes, exposure, intoxication, overdose, or an unrelated mental-health evaluation, or care sought later (p. 22). Enter 0 if no one was.",
+      propertyDamage: "Estimated property damage, in dollars (optional)",
+      propertyDamageHint:
+        "Your best estimate as a plain amount, like 30000 or 30000.50. Sum the damage to ALL vehicles and property involved or affected — transit and non-transit — plus the cost of clearing wreckage (p. 25). Leave blank if not yet assessed: unknown damage is never treated as $0.",
+      towed: "Was a vehicle towed away from the scene?",
+      towedHint:
+        "Any vehicle, transit or not. For a non-rail collision involving a transit revenue vehicle, a tow-away alone makes the event reportable; for a rail collision it indicates substantial damage (p. 17, p. 27).",
+      evacuationLifeSafety: "Did people evacuate for life-safety reasons?",
+      assaultOnWorker: "Was a transit worker assaulted?",
+      assaultOnWorkerHint:
+        "Answer yes even if no one was hurt — the manual's rule for assaults on transit workers is quoted on the classification (S&S-50 scope, p. 3).",
+      involvesTransitVehicle: "Did the event involve a transit vehicle?",
+      involvesTransitVehicleHint:
+        "Answer yes whether or not the vehicle was in service at the time (p. 18).",
+      /** Rail-only questions: disclosed only when the picked mode is rail. */
+      railHeading: "Rail-only questions",
+      railIntro:
+        "These apply because the mode you picked is a rail mode. They come from the rail rows of Exhibit 5 (p. 16) and the rail rules on p. 17 of the 2026 S&S Policy Manual.",
+      seriousInjury:
+        "Did anyone have a serious injury under the rail criteria?",
+      seriousInjuryHint:
+        "The rail criteria (p. 21): hospitalization over 48 hours within 7 days; a broken bone (except simple fractures of fingers, toes, or the nose); severe bleeding or nerve, muscle, or tendon damage; internal organ injury; or serious burns. Answer yes even if the person was not transported from the scene — the verbatim rule is quoted on the classification.",
+      substantialDamage: "Was a rail vehicle substantially damaged?",
+      substantialDamageHint:
+        "Substantial damage (p. 25) disrupts operations AND affects the vehicle enough that towing, rescue, on-site maintenance, or immediate removal is required. Do not count cracked windows; dents, bends, or small punctures; broken lights or mirrors; or a vehicle leaving under its own power for minor repair.",
+      involvesSecondRailVehicle: "Was a second rail vehicle involved?",
+      involvesSecondRailVehicleHint:
+        "A collision between two rail vehicles is automatically reportable (p. 17).",
+      gradeCrossing: "Did it happen at a grade crossing?",
+      runawayTrain: "Did a rail vehicle move on its own (a runaway)?",
+      runawayTrainHint:
+        "Uncommanded, uncontrolled, or unmanned movement of a revenue rail vehicle — an incapacitated, sleeping, or absent operator, or an electrical, mechanical, or software failure — on the mainline, in a yard, or in a shop (p. 17).",
+      evacuationToRailRow:
+        "Did people evacuate onto the rail right-of-way?",
+      evacuationToRailRowHint:
+        "Evacuation to the controlled rail right-of-way counts, whether transit-directed or self-directed. Evacuation to a platform does not count unless it was for life safety (p. 17).",
+      /** The supersede body's required audit reason. */
+      reason: "Why is this entry being corrected?",
+      reasonHint:
+        "Kept permanently in the audit log next to both records. The original entry is never edited — this explains why the new one replaces it.",
+      submit: "Record this event",
+      submitCorrection: "Record the correction",
+      cancelCorrection: "Cancel the correction",
+      /** Client-side validation mirrors the API contract; the API's own
+          refusals are still shown verbatim when they arrive. */
+      validationHeading:
+        "The event was not recorded. Fix the following and try again:",
+      occurredAtRequired: "Enter when the event happened.",
+      modeRequired: "Pick which mode of service was involved.",
+      categoryRequired: "Pick what kind of event it was.",
+      narrativeRequired: "Describe what happened — the narrative is required.",
+      reasonRequired:
+        "Say why this entry is being corrected — the reason is the permanent audit record.",
+      countInvalid: (question: string) =>
+        `“${question}” needs a whole number, 0 or more.`,
+      damageInvalid:
+        "Property damage must be a plain dollar amount, like 30000 or 30000.50 — or left blank.",
+      recorded: (classificationLabel: string) =>
+        `The event is recorded. The classifier's verdict: ${classificationLabel}. The full receipt is below.`,
+      correctionRecorded: (classificationLabel: string) =>
+        `The correction is recorded and the original is marked as corrected — both stay in the record. The new verdict: ${classificationLabel}.`,
+    },
+
+    classification: {
+      /** Verdict labels; an unknown value falls back to the raw code. */
+      labels: {
+        major: "Major event",
+        non_major: "Non-major event",
+        not_reportable: "Not reportable",
+      } as Record<string, string>,
+      receiptLabel: (eventLabel: string) =>
+        `Classification receipt for ${eventLabel}`,
+      /** `classifier` is the API's combined name+version string
+       *  ("sscls_v0 0.1.0"), displayed VERBATIM — never split or parsed. */
+      decidedBy: (classifier: string) =>
+        `Decided by classifier ${classifier} — deterministic, versioned calculation code. Neither this page nor an AI classifies events.`,
+      /** A record with no classification on file is a LOUD condition. */
+      missing:
+        "No classification is on file for this event. That is a gap, not a verdict — do not treat the event as not reportable.",
+      explanationHeading: "The classifier's explanation",
+      thresholdsHeading: "Federal thresholds this event meets",
+      thresholdsNone:
+        "The classifier reported no federal major-event threshold met by this event.",
+      nonMajorBasisHeading: "Why this belongs on the S&S-50 monthly summary",
+      /**
+       * Plain-language labels for the classifier's thresholds_met tokens
+       * (threshold_id values in services/calc/headway_calc/sscls.py).
+       * Unknown tokens are shown raw and loudly — never hidden.
+       */
+      thresholdLabels: {
+        fatality: "A death",
+        injury_immediate_transport:
+          "Someone was taken directly from the scene for medical care",
+        property_damage_25k:
+          "Property damage at or over the federal threshold",
+        injury_two_or_more:
+          "Two or more people were taken directly from the scene for medical care",
+        rail_serious_injury: "A serious injury under the rail criteria",
+        rail_substantial_damage: "Substantial damage to a rail vehicle",
+        rail_to_rail_collision: "A collision between rail vehicles",
+        rail_collision_grade_crossing:
+          "A rail collision at a grade crossing or intersection",
+        rail_collision_vehicle_contact_assault:
+          "An assault or homicide involving contact with a rail transit vehicle",
+        collision_towaway:
+          "A collision with a transit revenue vehicle where a vehicle was towed away",
+        derailment: "A derailment",
+        runaway_train: "A runaway train",
+        evacuation_life_safety: "An evacuation for life safety",
+        rail_evacuation_to_row: "An evacuation onto the rail right-of-way",
+        cyber_substantial_damage:
+          "A cyber security event that disrupted operations",
+      } as Record<string, string>,
+      thresholdUnknown: (token: string) =>
+        `The classifier reported a threshold this version of Headway does not label yet (“${token}”). It is shown raw so nothing is hidden.`,
+      quoteMissing: (token: string) =>
+        `No verified manual quote is mapped to “${token}” yet. The threshold stands — the missing rule text is a gap in this page's mapping, stated rather than papered over.`,
+      oneReportNote:
+        "An event that meets one or more thresholds is one reportable event — thresholds never multiply reports (2026 S&S Policy Manual, p. 14).",
+      /** Classifier notes that are not thresholds (e.g. Scenario E's
+       *  assault-with-vehicle-contact-is-a-collision rule). */
+      notesHeading: "The classifier also noted",
+    },
+
+    events: {
+      heading: "Recorded events",
+      loading: "Loading events…",
+      empty:
+        "No events recorded yet. Events appear here as they are recorded — and they stay here permanently: corrections add a new record instead of changing an old one.",
+      /** "Collision on 2026-07-02 (Bus)" — heading + accessible names. */
+      eventLabel: (category: string, date: string, mode: string) =>
+        `${category} on ${date} (${mode})`,
+      occurredLabel: "Happened",
+      modeLabel: "Mode",
+      typeOfServiceLabel: "Operated by",
+      locationLabel: "Location",
+      fatalitiesLabel: "Deaths",
+      injuriesLabel: "People taken directly from the scene for medical care",
+      damageLabel: "Estimated property damage",
+      damageValue: (amount: string) => `$${amount}`,
+      circumstancesLabel: "Circumstances",
+      /** Yes-answers listed as short phrases; unanswered = not listed. */
+      circumstances: {
+        towed: "a vehicle was towed from the scene",
+        evacuation_life_safety: "people evacuated for life safety",
+        assault_on_worker: "a transit worker was assaulted",
+        involves_transit_vehicle: "a transit vehicle was involved",
+        involves_second_rail_vehicle: "a second rail vehicle was involved",
+        grade_crossing: "it happened at a grade crossing",
+        serious_injury: "someone had a serious injury under the rail criteria",
+        substantial_damage: "a rail vehicle was substantially damaged",
+        runaway_train: "a rail vehicle moved on its own (runaway)",
+        evacuation_to_rail_row:
+          "people evacuated onto the rail right-of-way",
+      } as Record<string, string>,
+      enteredLine: (by: string, at: string) => `Recorded by ${by} at ${at}`,
+      receiptToggle: (eventLabel: string) =>
+        `Why this classification — ${eventLabel}`,
+      correctButton: (eventLabel: string) => `Correct this event: ${eventLabel}`,
+      /** The audit story: the original stays visible, struck and linked. */
+      supersededTag: "Corrected — see the replacement",
+      supersededNote:
+        "This record was corrected. It stays visible so the audit trail is complete; the replacement record is the one that counts.",
+      supersededLink: (eventLabel: string) =>
+        `Go to the correction of ${eventLabel}`,
+      supersededBy: (id: string) => `Corrected by event ${id}`,
+    },
   },
 } as const;

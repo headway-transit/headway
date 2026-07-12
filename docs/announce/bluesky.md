@@ -1,7 +1,7 @@
 # Bluesky launch content — Headway
 
 ## Profile
-- Handle suggestion: `@headway-transit.bsky.social` (custom domain later: `@headway.dev`-style once one exists)
+- Handle: `@headway-transit.bsky.social` — **created 2026-07-12**. Upgrade path: a domain handle (e.g. `@headway.bekus.co`) via DNS TXT record `_atproto.<domain>` → `did=did:plc:<account DID>` in Bluesky Settings → Change Handle; followers and posts survive handle changes.
 - Display name: Headway
 - Bio (≤256): Open-source transit data platform where every number can prove itself. Deterministic NTD reporting, full lineage to raw records, the FTA rule quoted inside every figure. AI assists — never computes a reported number. Apache-2.0.
 - Avatar: the 🚌 mark / favicon from web/public (export as PNG); banner: the Receipt screenshot (docs/images/receipt.png).

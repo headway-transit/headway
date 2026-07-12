@@ -40,13 +40,20 @@ npm run extract:quotes  # regenerate src/regulatory/quotes.json from the tracker
 ### Regulatory quotes (`src/regulatory/quotes.json`)
 
 "The FTA rule inside the number" (handoff 0007, pillar 1):
-`scripts/extract-quotes.mjs` copies the VERBATIM FTA NTD Policy Manual quotes
-from `services/calc/REGULATORY_TRACKER.md`'s "Verified definitions" sections
-into a static, versioned JSON keyed by `calc_name`. Quotes are never
-paraphrased or generated; the script fails loudly (non-zero exit) if any calc
-in the tracker table lacks quotes, and `src/test/quotes.test.ts` fails the
-suite if any calc named in the fixtures lacks quotes. Regenerate after the
-NTD/Compliance Engineer updates the tracker; never hand-edit the JSON.
+`scripts/extract-quotes.mjs` copies the VERBATIM FTA manual quotes from
+`services/calc/REGULATORY_TRACKER.md`'s "Verified definitions" sections —
+plus the "Verified — Safety & Security reporting" section (→ `sscls_v0`,
+handoff 0010) and the "Verified — Monthly Ridership form MR-20" section
+(→ `voms_v0`) — into a static, versioned JSON keyed by `calc_name`. Quotes
+are never paraphrased or generated; the only in-quote cleanup is unwrapping
+the tracker's own `**` markdown emphasis, and text after a bullet's `NOTE:`
+(tracker meta-commentary ABOUT the manual's wording) is never quoted. The
+script fails loudly (non-zero exit) if any calc in the tracker table lacks
+quotes, and `src/test/quotes.test.ts` fails the suite if any calc named in
+the fixtures — or any quote snippet the `/safety` receipts and deadline
+citations depend on (`src/regulatory/safetyRules.ts`) — lacks quotes.
+Regenerate after the NTD/Compliance Engineer updates the tracker; never
+hand-edit the JSON.
 
 ### API base URL
 
@@ -76,6 +83,7 @@ entirely. Any 401 clears the session and returns you to `/login`.
 | `/metrics` | Computed values table: metric, unit, period, value (verbatim string), calculation name+version, certification status. Calc versions below 1.0.0 carry a "Pre-verification" tag and a plain-language banner (they are marked PRE-VERIFICATION in `services/calc/REGULATORY_TRACKER.md` — not certifiable figures yet). EVERY figure's "Details" opens its **Receipt** (`src/components/Receipt.tsx`): story line, coverage meter + exclusions, the verbatim FTA rule + citation, flags, and the walk to raw records. Read-only: the certify flow moved to `/certify`; certifying officials see a plain note linking there. |
 | `/metrics/:id/lineage` | "How this number was made": the provenance tree from `GET /metrics/values/{id}/lineage`. Default is the **lineage graph** (`src/components/LineageGraph.tsx`) — a hand-rolled accessible SVG flow (figure → processing steps → raw records; raw tier collapsed to a count node, expanding 20 at a time; arrow keys move within/between tiers, Enter toggles). A "Text view" toggle is always visible and renders the FULL nested-list tree (every node, complete record ids) — the graph is progressive enhancement, never the only path. |
 | `/reports/monthly` | Monthly ridership preview: VRM/VRH/UPT for a picked month, verbatim, with certification status, coverage summary, per-row Receipt, provenance links, simulated-data banner, and CSV export of the exact served strings. |
+| `/safety` | The **Safety & Security module** (handoff 0010, design point 5; `src/views/SafetyView.tsx`), typed against `services/api` routers/safety.py exactly. Three rooms: a **deadlines panel** (`GET /safety/deadlines`) with API-computed due dates — S&S-40 per open major event, S&S-50 per operated mode **including zero-event rows** — each rule shown as the verbatim tracker quote + page citation, urgency as text + icon + color (never color alone; the only client date math is days-until-the-served-date); a plain-language **entry form** (`POST /safety/events`, data_steward+; "Was anyone taken directly from the scene for medical care?", never "injury threshold") with rail-only questions disclosed only for the classifier's own rail-mode set, client-side validation mirroring the contract, and the returned verdict rendered as a **classification receipt** (the sscls_v0 classifier's summary and per-threshold sentences verbatim, plus the verified manual quote per token via the extract-quotes pattern; unknown tokens and unmapped quotes stated loudly, never hidden); and the **events list** with classification chips (major/non-major/not reportable), per-event receipts, and the append-only **correction flow** (`POST /safety/events/{id}/supersede`, required audit reason) — the original stays visible, struck and linked to its replacement, never hidden. Honest-scope banner on every visit: alpha, no NTD e-filing. The page never classifies an event; `property_damage_usd` is a decimal string end to end. |
 | `/dq` | Data-quality queue: severity as text + icon + color (never color alone), status/owner/description, blocking issues prominent with their consequence stated. Resolve action (required resolution note) appears for data stewards and above. |
 | `/certify` | The **certification cockpit** (handoff 0007's deferred pillar): one screen showing exactly what a signature covers. Nav entry and controls appear only for the certifying official (UX only — the API enforces the role). Anatomy, in order: month/year period picker → every figure of the period as a full Receipt with a labeled consent checkbox ("Certify …") → a blockers panel counting open blocking DQ issues (reason mirrors the API's 409 wording; certify disabled while any exist; link to `/dq`) → an unmissable warning + separate acknowledge checkbox whenever any selected figure is simulated or pre-verification (acknowledgement clears on any selection change) → the attestation dialog. |
 

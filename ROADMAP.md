@@ -136,7 +136,7 @@ The full ranked analysis with sources: [`docs/research/feature-gap-report-2026-0
 - **PMT + FTA Sampling Manual support** — the largest missing NTD number (report #1).
 - **APC certification/benchmarking workbook** — manual-vs-APC variance, discard rates, statistician sign-off; natural extension of the certification cockpit (report #2).
 - **GTFS feed NTD-compliance validation** — RY2025/26 makes the feed a CEO-certified artifact; embed the MobilityData canonical validator (report #4).
-- **Safety & Security module incl. new cybersecurity event reporting** (report #3).
+- ~~**Safety & Security module incl. new cybersecurity event reporting** (report #3)~~ — **shipped 2026-07-12 (v0, handoff 0010)**: manual event entry with validation, `sscls_v0` threshold classifier (Exhibit 5, golden-tested against the manual's own Examples 4/6/7, incl. the Scenario G cyber event), S&S-50 monthly generator, S&S-40/50 deadline tracking, `/safety` UI. v1 remainders live in handoff 0010's Open Questions (full S&S-40 form field walk, submission tracking, hazmat/act-of-God vocabulary, CAD connector).
 - **Divergence closers the ecosystem is building toward**: TIDES v2 consists table → D2; Cal-ITP TODS connector → D3/D6; GTFS-Flex + DR revenue-time calc → D5 (reports #9, #5, #10).
 - **Ops analytics from data already held** (OTP, headway adherence — trip updates are ingested but unused today) (report #8).
 - Distroless runtime bases for the Python images (api/transform/ai) — removes the won't-fix Debian CVE surface entirely; ingestion already proves the pattern (source: docs/supply-chain.md scan policy)

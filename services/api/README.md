@@ -31,6 +31,10 @@ preserved end to end; floating point never touches a figure).
 | GET | `/webhooks` | `certifying_official` | Lists subscriptions (secret-free). |
 | DELETE | `/webhooks/{id}` | `certifying_official` | Removes a subscription (soft revoke). Audited. |
 | GET | `/public/metrics/certified` | **none — public open data** | ONLY figures a certifying official already attested (`certification_status='certified'`); values as strings, `detail` verbatim (simulated flags shown, figures never hidden); no PII; rate-limited per client IP. |
+| POST | `/safety/events` | `data_steward` or above | Enter one Safety & Security event (handoff 0010; migration 0017). Plain-language validation; runs the deterministic classifier (`headway_calc.sscls`, sscls_v0) SYNCHRONOUSLY and returns classification + thresholds_met + a plain-language explanation with the tracker citation per threshold. Event, classification, and audit record commit in ONE transaction. |
+| GET | `/safety/events` | any signed-in role | Events with each one's LATEST classification; filters: `classification` (major/non_major/not_reportable), `month` (YYYY-MM, UTC half-open on `occurred_at`), `mode`. `property_damage_usd` is a string (exact NUMERIC). |
+| POST | `/safety/events/{id}/supersede` | `data_steward` or above | Append-only correction: the full corrected event is entered as a NEW row (classified like any entry), and the original gets its one permitted update — the `superseded_by` link (migration 0017 trigger enforces this). Requires a `reason` (audited). 404 unknown; 409 if already corrected. |
+| GET | `/safety/deadlines` | any signed-in role | Computed due dates, quote-cited: S&S-40 per open (unsuperseded) major event — `occurred_at` + 30 days (Exhibit 2, p. 4); S&S-50 per mode for the month (`?month=YYYY-MM`, default current UTC month) — due end of the following month (Exhibit 3), INCLUDING zero-event rows for every operated mode (derived like the handoff-0009 per-mode calc path). |
 | POST | `/branding/logo` | `certifying_official` | Upload the agency logo (multipart): SVG or PNG only (415 otherwise), ≤ 512 KiB (413 above), stored to the object store at `branding/logo`, content type recorded in `app.settings.brand_logo_meta`. Audited. |
 | GET | `/branding/logo` | **none — public** | The agency logo bytes with the stored content type, `Cache-Control: public, max-age=300`, `nosniff` (+ script-blocking CSP for SVG). Plain-language 404 while no logo is uploaded. Rate-limited per client IP. |
 | GET | `/branding` | **none — public** | `{display_name, primary, accent, has_logo}` for the app shell — colors already passed the contrast guardrail at write time. Rate-limited per client IP. |
@@ -350,7 +354,26 @@ python3 -m pytest tests/ -q
 
 ## Verification status
 
-- `pytest tests/ -q`: **96 passed** (2026-07-11, Python 3.12, this repo) —
+- `pytest tests/ -q`: **154 passed** (2026-07-12, Python 3.12, this repo) —
+  the pre-0010 suite unchanged plus 18 Safety & Security tests (handoff
+  0010 + the addendum correction round): role denials, synchronous
+  classification (sscls_v0 0.1.1) with citation-bearing explanations,
+  audit-in-transaction, plain-language 422s, list filters
+  (classification/month/mode) with exact-string NUMERIC, supersede
+  happy/404/409 with rollback asserted, the deadlines rules (S&S-40 +30
+  days; S&S-50 end of following month incl. zero-event operated modes,
+  NULL-mode 'unknown' bucketing, superseded majors excluded), the
+  migration-0018 runaway_train field flowing to a rail-only threshold, and
+  the p. 22 fix (single-injury Other Safety Event → non-major with the
+  Non-Major-Summary citation; two injuries → major). LIVE (2026-07-12):
+  migrations 0017 and 0018 applied to the compose TimescaleDB and
+  inspected via a separate psql connection (append-only proven by attack);
+  realistic events POSTed through the running API returned 201 AND the
+  event + classification + audit rows were confirmed from a separate psql
+  connection (the autocommit-phantom-write check); supersede, filters, and
+  deadlines exercised live — evidence in handoff 0010, "Outputs — backend
+  evidence".
+- Earlier record — `pytest tests/ -q`: **96 passed** (2026-07-11, Python 3.12, this repo) —
   covers login/token lifecycle, password-hash round trip, expired/invalid
   token 401s, role denials (viewer cannot certify), certification happy path
   (cert row + status update + audit event in one transaction), blocking-DQ

@@ -72,3 +72,11 @@ export function canResolveDqIssues(session: Session | null): boolean {
 export function canCertify(session: Session | null): boolean {
   return session !== null && session.role === "certifying_official";
 }
+
+/**
+ * Mirrors the API (handoff 0010): recording or correcting a safety event
+ * requires data_steward or above.
+ */
+export function canEnterSafetyEvents(session: Session | null): boolean {
+  return session !== null && ROLE_RANK[session.role] >= ROLE_RANK.data_steward;
+}

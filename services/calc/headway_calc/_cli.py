@@ -242,3 +242,78 @@ def mr20_main(argv: list[str] | None = None) -> int:
 
     print(json.dumps(package, indent=2))
     return 0
+
+
+def _parse_ss50_args(argv: list[str] | None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        prog="python -m headway_calc.ss50",
+        description=(
+            "Assemble the NOT-REPORTABLE S&S-50 Non-Major Monthly Summary "
+            "preview for one calendar month from safety.events + the latest "
+            "sscls_v0 classification per event, and print it as JSON: "
+            "per-mode/per-TOS non-major counts (injury-threshold events, "
+            "non-major fires, assaults on transit workers including "
+            "no-injury assaults) with per-cell provenance (event_ids), plus "
+            "EXPLICIT ZERO ROWS for operated modes with no events (the "
+            "manual's 'even if no event occurs' rule). With --ss40-event, "
+            "print the S&S-40 detail export for one event instead (every "
+            "met threshold's supporting fields; due date = occurred_at + "
+            "30 days)."
+        ),
+    )
+    parser.add_argument(
+        "--month",
+        help=(
+            "Calendar month YYYY-MM, e.g. 2026-06 (period "
+            "[2026-06-01, 2026-07-01), UTC, on occurred_at). Required "
+            "unless --ss40-event is given."
+        ),
+    )
+    parser.add_argument(
+        "--ss40-event",
+        metavar="EVENT_ID",
+        help=(
+            "Print the S&S-40 detail export for this safety.events id "
+            "instead of the monthly S&S-50 package."
+        ),
+    )
+    args = parser.parse_args(argv)
+    if bool(args.month) == bool(args.ss40_event):
+        parser.error(
+            "give exactly one of --month YYYY-MM (S&S-50 package) or "
+            "--ss40-event EVENT_ID (S&S-40 detail export)"
+        )
+    return args
+
+
+def ss50_main(argv: list[str] | None = None) -> int:
+    """Process boundary for ``python -m headway_calc.ss50``."""
+    import json
+
+    from headway_calc.ss50 import build_ss40_export, build_ss50_package
+
+    args = _parse_ss50_args(argv)
+
+    database_url = os.environ.get("HEADWAY_DATABASE_URL")
+    if not database_url:
+        raise SystemExit(
+            "HEADWAY_DATABASE_URL is not set. Refusing to guess a connection "
+            "string — set it to the agency database URL and re-run."
+        )
+
+    try:
+        import psycopg
+    except ImportError as exc:  # pragma: no cover — driver-less environments
+        raise SystemExit(
+            "The psycopg driver is required for a live run but is not "
+            "installed. Install it with: pip install 'headway-calc[persist]'"
+        ) from exc
+
+    with psycopg.connect(database_url) as conn:
+        if args.ss40_event:
+            package = build_ss40_export(conn, args.ss40_event)
+        else:
+            package = build_ss50_package(conn, args.month)
+
+    print(json.dumps(package, indent=2))
+    return 0

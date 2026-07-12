@@ -19,6 +19,7 @@ import { LoginView } from "./views/LoginView";
 import { MetricsView } from "./views/MetricsView";
 import { MonthlyReportView } from "./views/MonthlyReportView";
 import { PublicDataView } from "./views/PublicDataView";
+import { SafetyView } from "./views/SafetyView";
 
 function RequireAuth() {
   const session = useSession();
@@ -63,6 +64,10 @@ export function AppRoutes() {
           <Route path="/metrics" element={<MetricsView />} />
           <Route path="/metrics/:id/lineage" element={<LineageView />} />
           <Route path="/reports/monthly" element={<MonthlyReportView />} />
+          {/* Safety & Security (handoff 0010): any signed-in role reads;
+              recording/correcting is data_steward+ (UX only — the API
+              enforces the role on every safety write). */}
+          <Route path="/safety" element={<SafetyView />} />
           <Route path="/dq" element={<DqView />} />
           {/* Role-gated in the UI (nav link + in-page notice); the API
               enforces certifying_official on POST /certifications. */}

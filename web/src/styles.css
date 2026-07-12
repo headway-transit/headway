@@ -1238,3 +1238,203 @@ ul.detail-panel li {
   background: var(--color-info-bg);
   color: var(--color-info-text);
 }
+
+/* ---- Safety & Security (/safety — handoff 0010) ----
+   Every color here is an EXISTING AA-verified token pair
+   (scripts/check-contrast.mjs): classification chips and deadline urgency
+   reuse the danger/warning/info pairs, and both always ride with text + a
+   distinct icon shape — never color alone. No new pairs to add. */
+
+.safety-panel {
+  padding: var(--space-3);
+  margin: var(--space-3) 0;
+}
+.safety-panel > h2 {
+  margin-top: 0;
+}
+
+/* Classification chips: major / non-major / not reportable. */
+.chip.classification.major {
+  background: var(--color-danger-bg);
+  color: var(--color-danger-text);
+}
+.chip.classification.non_major {
+  background: var(--color-warning-bg);
+  color: var(--color-warning-text);
+}
+.chip.classification.not_reportable {
+  background: var(--color-info-bg);
+  color: var(--color-info-text);
+}
+
+/* Deadline lists and urgency badges. */
+.deadline-list {
+  list-style: none;
+  padding: 0;
+  display: grid;
+  gap: var(--space-2);
+}
+.deadline-item {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+.deadline-urgency {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-1);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.deadline-urgency svg {
+  flex: none;
+}
+.deadline-urgency.overdue {
+  background: var(--color-danger-bg);
+  color: var(--color-danger-text);
+}
+.deadline-urgency.due-soon {
+  background: var(--color-warning-bg);
+  color: var(--color-warning-text);
+}
+.deadline-urgency.upcoming {
+  background: var(--color-info-bg);
+  color: var(--color-info-text);
+}
+.deadline-modes {
+  margin: var(--space-1) 0 0;
+  padding-left: 1.2rem;
+}
+
+/* Entry form. */
+.safety-form .field-hint,
+.rail-fields .field-hint,
+.safety-panel .field-hint {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  margin: 0 0 var(--space-2);
+  max-width: 36rem;
+}
+.safety-form select {
+  display: block;
+  font: inherit;
+  color: var(--color-text);
+  background: var(--color-bg);
+  border: 1px solid var(--color-input-border);
+  border-radius: var(--radius-1);
+  padding: var(--space-2);
+  margin-bottom: var(--space-3);
+  max-width: 28rem;
+}
+.safety-form input[type="datetime-local"] {
+  display: block;
+  font: inherit;
+  color: var(--color-text);
+  background: var(--color-bg);
+  border: 1px solid var(--color-input-border);
+  border-radius: var(--radius-1);
+  padding: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+.safety-form .count-input {
+  max-width: 12rem;
+}
+/* Inline checkbox + label pair (same exemption as .certify-checkbox). */
+.safety-checkbox {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-2);
+}
+.safety-checkbox label {
+  display: inline;
+  margin: 0;
+  font-weight: 600;
+}
+/* Rail-only questions: disclosed as a bordered group so the boundary of
+   "because you picked rail" is visible, not just implied. */
+.rail-fields {
+  border: 1px solid var(--color-border);
+  border-left: 4px solid var(--color-accent);
+  border-radius: var(--radius-1);
+  padding: var(--space-3);
+  margin: var(--space-3) 0;
+}
+.rail-fields legend {
+  font-weight: 700;
+  padding: 0 var(--space-1);
+}
+
+/* Events list. */
+.event-list {
+  list-style: none;
+  padding: 0;
+  display: grid;
+  gap: var(--space-3);
+}
+.safety-event {
+  padding: var(--space-3);
+}
+.safety-event h3 {
+  margin-top: 0;
+}
+.safety-event dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: var(--space-1) var(--space-3);
+  margin: var(--space-2) 0;
+}
+.safety-event dt {
+  font-weight: 600;
+}
+.safety-event dd {
+  margin: 0;
+}
+.safety-entered {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+/* A corrected original: struck heading + tag + note — dimmed but ALWAYS
+   readable (muted-on-bg is an AA-verified pair); never hidden. */
+.safety-event.superseded {
+  border-left: 6px solid var(--color-border);
+}
+.safety-event.superseded .safety-narrative,
+.safety-event.superseded dd,
+.safety-event.superseded dt {
+  color: var(--color-text-muted);
+}
+.superseded-note {
+  font-weight: 600;
+}
+.correction-form {
+  margin-top: var(--space-3);
+  padding: var(--space-3);
+  background: var(--color-surface);
+  border-radius: var(--radius-1);
+}
+.correction-form h4 {
+  margin-top: 0;
+}
+.threshold-list {
+  padding-left: 1.2rem;
+  display: grid;
+  gap: var(--space-2);
+}
+.threshold-quote-missing {
+  color: var(--color-text-muted);
+}
+.threshold-explanation {
+  margin: var(--space-1) 0;
+}
+.threshold-explanation cite {
+  display: block;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+.threshold-one-report {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
