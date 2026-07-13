@@ -14,7 +14,10 @@ prepares the numbers you report to the National Transit Database (NTD).
   is what we test on; other mainstream distributions work too.
 - **At least 4 GB of memory and 20 GB of free disk space.** More disk is
   better — your transit data grows over time. The installer checks both
-  and warns you if the machine is small.
+  and warns you if the machine is small. Sizing a VM properly for a real
+  evaluation or pilot? See the measured recommendations in
+  [`docs/sizing.md`](../docs/sizing.md) — short version: 4 CPUs, 16 GB of
+  memory, and 100 GB of disk make a comfortable pilot.
 - **An internet connection.** The first install downloads about 2 GB of
   software.
 - **Administrator ("sudo") access** on that computer, in case a fix-up

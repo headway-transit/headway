@@ -38,7 +38,7 @@ On a fresh Linux box, run the guided installer:
 ./install/install.sh
 ```
 
-It checks the machine, generates strong secrets, brings the stack up, applies migrations, and creates your first administrator — explaining every step and every failure in plain language (`--check` for a no-changes dry run; [full guide](install/README.md)). Prefer by hand? [`deploy/compose/`](deploy/compose/): copy `.env.example`, set three passwords, `docker compose up -d`.
+It checks the machine, generates strong secrets, brings the stack up, applies migrations, and creates your first administrator — explaining every step and every failure in plain language (`--check` for a no-changes dry run; [full guide](install/README.md)). Sizing a box or VM first? [`docs/sizing.md`](docs/sizing.md) has measured numbers, not vendor optimism. Prefer by hand? [`deploy/compose/`](deploy/compose/): copy `.env.example`, set three passwords, `docker compose up -d`.
 
 Then **connect your data** — GTFS feeds, passenger counts, or exports from your existing databases: [`docs/connecting-your-data.md`](docs/connecting-your-data.md). Point it at any agency's public GTFS/GTFS-RT feeds and watch real figures assemble with full provenance in minutes.
 
