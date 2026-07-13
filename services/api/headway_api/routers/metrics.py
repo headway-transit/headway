@@ -50,6 +50,13 @@ class MetricValue(BaseModel):
     # ``{}`` for detail-less rows (the column default). Additive field —
     # documented in handoff 0001's wave-8 response section.
     detail: dict[str, Any] = {}
+    # THE HONESTY BOUNDARY (handoff 0014 / migration 0024): 'ntd' for
+    # regulatory-pipeline figures, 'ops' for OPERATIONS metrics (otp,
+    # headway_adherence). The UI MUST render category='ops' figures visibly
+    # distinct — "Operations metric — not an NTD reported figure" — and the
+    # certifiable surfaces (certification, MR-20/S&S, the public certified
+    # endpoint) structurally exclude them.
+    category: str
 
 
 class LineageNode(BaseModel):
@@ -72,7 +79,7 @@ LineageNode.model_rebuild()
 _SELECT_VALUES = (
     "SELECT metric_value_id, metric, unit, period_start, period_end, scope, "
     "value, calc_name, calc_version, computed_at, certification_status, "
-    "detail "
+    "detail, category "
     "FROM computed.metric_values"
 )
 
@@ -93,10 +100,13 @@ def query_metric_values(
     metric: Optional[str],
     period_start: Optional[dt.date],
     period_end: Optional[dt.date],
+    category: Optional[str] = None,
 ) -> list[MetricValue]:
     """The one query behind every metric-values read (human, machine): same
     filters, same shape, value as a Decimal-exact string, detail verbatim.
-    Shared so the machine endpoint can never drift from the human one."""
+    Shared so the machine endpoint can never drift from the human one.
+    ``category`` filters on the migration-0024 honesty boundary ('ntd' |
+    'ops'); every returned row carries its category either way."""
     clauses: list[str] = []
     params: list[object] = []
     if metric is not None:
@@ -108,6 +118,9 @@ def query_metric_values(
     if period_end is not None:
         clauses.append("period_end <= %s")
         params.append(period_end)
+    if category is not None:
+        clauses.append("category = %s")
+        params.append(category)
     sql = _SELECT_VALUES
     if clauses:
         sql += " WHERE " + " AND ".join(clauses)
@@ -127,6 +140,7 @@ def query_metric_values(
             computed_at=r[9],
             certification_status=r[10],
             detail=_detail_as_dict(r[11]),
+            category=r[12],
         )
         for r in rows
     ]
@@ -137,10 +151,21 @@ def list_metric_values(
     metric: Optional[str] = Query(default=None, description="e.g. 'vrm' or 'vrh'"),
     period_start: Optional[dt.date] = Query(default=None),
     period_end: Optional[dt.date] = Query(default=None),
+    category: Optional[str] = Query(
+        default=None,
+        pattern="^(ntd|ops)$",
+        description=(
+            "Filter on the honesty boundary (migration 0024): 'ntd' for "
+            "regulatory-pipeline figures, 'ops' for operations metrics "
+            "(on-time performance, headway adherence — never certifiable, "
+            "never NTD-reported). Every row carries its category either "
+            "way, so the UI can badge operations figures."
+        ),
+    ),
     identity: Identity = Depends(require_authenticated),
     db=Depends(get_db),
 ) -> list[MetricValue]:
-    return query_metric_values(db, metric, period_start, period_end)
+    return query_metric_values(db, metric, period_start, period_end, category)
 
 
 # Recursive CTE: walk lineage.edges downward from the metric value until the

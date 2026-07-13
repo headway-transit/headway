@@ -44,6 +44,15 @@ export function isSimulated(detail: Detail | undefined): boolean {
   );
 }
 
+/**
+ * The honesty boundary (handoff 0014): true for an operations metric —
+ * badged everywhere, never certifiable, industry-based receipt. A row
+ * without the field predates migration 0024 and is an NTD-era figure.
+ */
+export function isOps(value: MetricValue): boolean {
+  return value.category === "ops";
+}
+
 /** Detail keys that hold a ratio string, displayed as a percentage. */
 const PERCENT_KEYS = new Set([
   "clean_position_share",
@@ -71,6 +80,27 @@ const KNOWN_KEY_ORDER = [
   "layover_max_seconds",
   "missing_trip_threshold",
   "imbalance_threshold",
+  // ---- ops detail vocabulary (handoff 0014): otp_v0 ----
+  "on_time_count",
+  "early_count",
+  "late_count",
+  "passages_considered",
+  "passages_unscheduled",
+  "deviation_mean_seconds",
+  "deviation_median_seconds",
+  "early_tolerance_seconds",
+  "late_tolerance_seconds",
+  "agency_timezone",
+  // ---- ops detail vocabulary: headway_adherence_v0 (cvh) ----
+  "pairs_counted",
+  "stops_covered",
+  "routes_covered",
+  "pairs_excluded_inverted",
+  "pairs_excluded_over_cap",
+  "pairs_excluded_unscheduled",
+  "mean_scheduled_headway_seconds",
+  "stddev_deviation_seconds",
+  "max_scheduled_headway_seconds",
 ];
 
 /**
@@ -93,6 +123,110 @@ export function coverageSummary(detail: Detail | undefined): string | null {
     );
   }
   return null;
+}
+
+/**
+ * The refusal accounting from a figure's detail.derivation (handoff 0014,
+ * design point 3 — the cadence evidence behind every ops figure): one
+ * plain-language line per refusal reason, counts verbatim, NEVER hidden.
+ * Empty when the detail carries no derivation block.
+ */
+export function refusalLines(detail: Detail | undefined): string[] {
+  const derivation = detail?.derivation;
+  if (
+    typeof derivation !== "object" ||
+    derivation === null ||
+    Array.isArray(derivation)
+  ) {
+    return [];
+  }
+  const d = derivation as Record<string, unknown>;
+  const s = detailValueToString;
+  const lines: string[] = [];
+  if ("refused_not_reached" in d) {
+    lines.push(
+      copy.detail.derivation.refusedNotReached(
+        s(d.refused_not_reached),
+        s(d.stop_radius_meters),
+      ),
+    );
+  }
+  if ("refused_endpoint_unbounded" in d) {
+    lines.push(
+      copy.detail.derivation.refusedEndpoint(s(d.refused_endpoint_unbounded)),
+    );
+  }
+  if ("refused_cadence_gap" in d) {
+    lines.push(
+      copy.detail.derivation.refusedCadenceGap(
+        s(d.refused_cadence_gap),
+        s(d.max_passage_gap_seconds),
+      ),
+    );
+  }
+  return lines;
+}
+
+/**
+ * The full plain-language account of detail.derivation: the versioned
+ * Headway-owned method, the input counts, and the refusal lines. Keys the
+ * templates consume are tracked so detailLines never double-renders them;
+ * anything else inside the derivation block falls through raw-but-tidy.
+ */
+export function derivationLines(detail: Detail | undefined): string[] {
+  const derivation = detail?.derivation;
+  if (
+    typeof derivation !== "object" ||
+    derivation === null ||
+    Array.isArray(derivation)
+  ) {
+    return [];
+  }
+  const d = derivation as Record<string, unknown>;
+  const s = detailValueToString;
+  const consumed = new Set([
+    "derivation_name",
+    "derivation_version",
+    "positions_considered",
+    "positions_deduplicated",
+    "occurrences",
+    "occurrences_skipped_few_positions",
+    "min_occurrence_positions",
+    "trips_observed",
+    "trips_without_schedule",
+    "passages_derived",
+    "stops_considered",
+    "refused_not_reached",
+    "refused_endpoint_unbounded",
+    "refused_cadence_gap",
+    "stop_radius_meters",
+    "max_passage_gap_seconds",
+  ]);
+  const lines: string[] = [
+    copy.detail.derivation.method(s(d.derivation_name), s(d.derivation_version)),
+    copy.detail.derivation.positions(
+      s(d.positions_considered),
+      s(d.positions_deduplicated),
+    ),
+    copy.detail.derivation.occurrences(
+      s(d.occurrences),
+      s(d.occurrences_skipped_few_positions),
+      s(d.min_occurrence_positions),
+    ),
+    copy.detail.derivation.trips(
+      s(d.trips_observed),
+      s(d.trips_without_schedule),
+    ),
+    copy.detail.derivation.derived(s(d.passages_derived), s(d.stops_considered)),
+    ...refusalLines(detail),
+  ];
+  // Derivation keys this catalog does not know yet: raw-but-tidy, never
+  // dropped (forward-compatible with future derivation versions).
+  for (const key of Object.keys(d).sort()) {
+    if (consumed.has(key)) continue;
+    lines.push(`${key.replace(/_/g, " ")}: ${s(d[key])}`);
+  }
+  return lines;
 }
 
 /** All detail entries as plain-language sentences, in display order. */
@@ -148,6 +282,14 @@ export function detailLines(detail: Detail): string[] {
       .join(", ");
     lines.push(copy.detail.sourceMix(parts));
     consumed.add("source_mix");
+  }
+
+  // The passage-derivation accounting (ops figures, handoff 0014): the
+  // versioned method, its inputs, and every refusal count — the cadence
+  // evidence rides inside the figure and is always spelled out.
+  if ("derivation" in detail) {
+    lines.push(...derivationLines(detail));
+    consumed.add("derivation");
   }
 
   // Anything left is a detail key this UI does not know yet: shown

@@ -30,14 +30,18 @@ import { copy } from "../copy";
 import {
   coverageSummary,
   detailLines,
+  isOps,
   isPreVerification,
   isSimulated,
 } from "../detail";
 import type { Detail } from "../detail";
 import { detailValueToString, ratioToPercentString } from "../format";
 import { drCallouts, parseDrScope } from "../regulatory/drRules";
+import { opsQuotesForCalc } from "../regulatory/opsQuotes";
+import type { OpsOwnedDefinition } from "../regulatory/opsQuotes";
 import { quoteContaining, quotesForCalc } from "../regulatory/quotes";
 import { DrScopeBadge } from "./DrScopeBadge";
+import { OpsBadge } from "./OpsBadge";
 import { QuoteFigure } from "./QuoteFigure";
 import { SimulatedBadge } from "./SimulatedBadge";
 
@@ -102,6 +106,43 @@ function CoverageMeter({ percent, meterValue, label }: CoverageMeterProps) {
   );
 }
 
+/**
+ * One explicitly Headway-owned operational definition (handoff 0014): OUR
+ * versioned formula, visually distinct from the verified quote figures — a
+ * labeled chip + a dashed rule instead of the quote's solid accent rule —
+ * so a reader can never mistake it for a federal or industry rule.
+ */
+function OwnedDefinitionFigure({ definition }: { definition: OpsOwnedDefinition }) {
+  return (
+    <div className="ops-owned">
+      <p className="ops-owned-head">
+        <span className="tag ops-owned-label">
+          {copy.ops.receipt.ownedLabel}
+        </span>{" "}
+        <span className="ops-owned-name">
+          {copy.ops.receipt.ownedName(definition.name, definition.version)}
+        </span>
+      </p>
+      <p>{definition.summary}</p>
+      {definition.formula !== null && (
+        /* role/tabIndex: a horizontally scrollable region must be
+           keyboard-reachable and named (axe: scrollable-region-focusable) */
+        <pre
+          className="ops-formula"
+          role="region"
+          aria-label={copy.ops.receipt.formulaLabel(definition.name)}
+          tabIndex={0}
+        >
+          {definition.formula}
+        </pre>
+      )}
+      <p className="ops-owned-reference">
+        {copy.ops.receipt.ownedReference(definition.reference)}
+      </p>
+    </div>
+  );
+}
+
 export interface ReceiptProps {
   value: MetricValue;
 }
@@ -128,8 +169,14 @@ export function Receipt({ value }: ReceiptProps) {
   // coverage sentence already shown beside the meter.
   const lines = detailLines(detail).filter((line) => line !== exclusions);
 
+  // The honesty boundary (handoff 0014): an ops figure is badged in its
+  // story line and its rule section cites the INDUSTRY basis + the
+  // Headway-owned definitions — never an FTA manual.
+  const ops = isOps(value);
+
   // (c) the verified FTA quotes for this calc. null is a LOUD condition.
-  const quotes = quotesForCalc(value.calc_name);
+  const quotes = ops ? null : quotesForCalc(value.calc_name);
+  const opsBasis = ops ? opsQuotesForCalc(value.calc_name) : null;
 
   // The DR affordance (handoff 0013, design point 5): a mode/TOS badge on
   // every `mode:DR`/`mode:DR:tos:*` figure, plus a callout quoting each
@@ -158,6 +205,14 @@ export function Receipt({ value }: ReceiptProps) {
           <>
             {" "}
             <DrScopeBadge scope={value.scope} />
+          </>
+        )}
+        {/* The ops badge (handoff 0014): on the receipt itself, right
+            beside the figure — an ops number is never mistakable. */}
+        {ops && (
+          <>
+            {" "}
+            <OpsBadge />
           </>
         )}
       </p>
@@ -191,9 +246,41 @@ export function Receipt({ value }: ReceiptProps) {
         )}
       </div>
 
-      {/* (c) the FTA rule inside the number: verbatim quotes + citations.
-          DR rule callouts come first — the rules the TOS makes govern this
-          figure, each led in with plain language and quoted verbatim. */}
+      {/* (c) the rule inside the number. For an OPS figure (handoff 0014):
+          the INDUSTRY basis — verbatim TCQSM quotes with page citations —
+          followed by the explicitly Headway-owned definitions, visually
+          distinct and labeled, so OUR formulas never read as anyone's
+          rules. For an NTD figure: the verbatim FTA quotes, unchanged. */}
+      {ops ? (
+        <div className="receipt-rule">
+          <h2>{copy.ops.receipt.basisHeading}</h2>
+          {opsBasis ? (
+            <>
+              <p>{copy.ops.receipt.verifiedIntro(value.calc_name)}</p>
+              {opsBasis.verified.map((q) => (
+                <QuoteFigure
+                  quote={q}
+                  missingMessage={copy.ops.receipt.basisMissing(value.calc_name)}
+                  key={`${q.citation}:${q.quote}`}
+                />
+              ))}
+              <h2>{copy.ops.receipt.ownedHeading}</h2>
+              <p>{copy.ops.receipt.ownedIntro}</p>
+              {opsBasis.headway_owned.map((definition) => (
+                <OwnedDefinitionFigure
+                  definition={definition}
+                  key={`${definition.name}:${definition.version}`}
+                />
+              ))}
+            </>
+          ) : (
+            // FAIL LOUDLY: an ops calc with no basis on file is stated.
+            <p className="alert">
+              {copy.ops.receipt.basisMissing(value.calc_name)}
+            </p>
+          )}
+        </div>
+      ) : (
       <div className="receipt-rule">
         <h2>{copy.receipt.ruleHeading}</h2>
         {callouts.map((callout) => {
@@ -225,6 +312,7 @@ export function Receipt({ value }: ReceiptProps) {
           <p className="alert">{copy.receipt.ruleMissing(value.calc_name)}</p>
         )}
       </div>
+      )}
 
       {/* (d) flags, each with its meaning. No flags is stated explicitly. */}
       <div className="receipt-flags">

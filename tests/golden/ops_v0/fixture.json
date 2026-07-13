@@ -1,0 +1,47 @@
+{
+  "description": "Golden fixture for derive_stop_passages 0.1.0 + otp_v0 0.1.0 + headway_adherence_v0 0.1.0 (handoff 0014). SYNTHETIC operations data, hand-worked in BASIS.md — never an FTA or TCQSM certified figure; regression anchor only. Service date 2026-07-09, agency timezone America/New_York (EDT, UTC-4): the GTFS anchor 'noon minus 12 h' is 2026-07-09T00:00-04:00 = 2026-07-09T04:00:00Z.",
+  "agency_timezones": ["America/New_York"],
+  "schedule": [
+    {"trip_id": "T1", "stop_id": "S1", "stop_sequence": 1, "latitude": 42.35, "longitude": -71.06, "arrival_seconds": 28800, "departure_seconds": 28800, "route_id": "R1", "direction_id": 0},
+    {"trip_id": "T1", "stop_id": "S2", "stop_sequence": 2, "latitude": 42.36, "longitude": -71.06, "arrival_seconds": 29400, "departure_seconds": 29400, "route_id": "R1", "direction_id": 0},
+    {"trip_id": "T1", "stop_id": "S3", "stop_sequence": 3, "latitude": 42.37, "longitude": -71.06, "arrival_seconds": 30000, "departure_seconds": 30000, "route_id": "R1", "direction_id": 0},
+    {"trip_id": "T1", "stop_id": "S4-nocoords", "stop_sequence": 4, "latitude": null, "longitude": null, "arrival_seconds": 30300, "departure_seconds": 30300, "route_id": "R1", "direction_id": 0},
+    {"trip_id": "T2", "stop_id": "S1", "stop_sequence": 1, "latitude": 42.35, "longitude": -71.06, "arrival_seconds": 29700, "departure_seconds": 29700, "route_id": "R1", "direction_id": 0},
+    {"trip_id": "T2", "stop_id": "S2", "stop_sequence": 2, "latitude": 42.36, "longitude": -71.06, "arrival_seconds": 30300, "departure_seconds": 30300, "route_id": "R1", "direction_id": 0},
+    {"trip_id": "T2", "stop_id": "S3", "stop_sequence": 3, "latitude": 42.37, "longitude": -71.06, "arrival_seconds": 30900, "departure_seconds": 30900, "route_id": "R1", "direction_id": 0}
+  ],
+  "cases": {
+    "clean_two_trips": {
+      "positions": [
+        {"time": "2026-07-09T11:59:00Z", "vehicle_id": "bus-1", "trip_id": "T1", "latitude": 42.3482, "longitude": -71.06, "source_record_id": "rec-t1-01"},
+        {"time": "2026-07-09T12:00:00Z", "vehicle_id": "bus-1", "trip_id": "T1", "latitude": 42.35, "longitude": -71.06, "source_record_id": "rec-t1-02"},
+        {"time": "2026-07-09T12:01:00Z", "vehicle_id": "bus-1", "trip_id": "T1", "latitude": 42.3518, "longitude": -71.06, "source_record_id": "rec-t1-03"},
+        {"time": "2026-07-09T12:01:00Z", "vehicle_id": "bus-1", "trip_id": "T1", "latitude": 42.352, "longitude": -71.06, "source_record_id": "rec-t1-03b-duplicate-timestamp"},
+        {"time": "2026-07-09T12:11:00Z", "vehicle_id": "bus-1", "trip_id": "T1", "latitude": 42.3582, "longitude": -71.06, "source_record_id": "rec-t1-04"},
+        {"time": "2026-07-09T12:12:00Z", "vehicle_id": "bus-1", "trip_id": "T1", "latitude": 42.36, "longitude": -71.06, "source_record_id": "rec-t1-05"},
+        {"time": "2026-07-09T12:13:00Z", "vehicle_id": "bus-1", "trip_id": "T1", "latitude": 42.3618, "longitude": -71.06, "source_record_id": "rec-t1-06"},
+        {"time": "2026-07-09T12:27:00Z", "vehicle_id": "bus-1", "trip_id": "T1", "latitude": 42.3682, "longitude": -71.06, "source_record_id": "rec-t1-07"},
+        {"time": "2026-07-09T12:28:00Z", "vehicle_id": "bus-1", "trip_id": "T1", "latitude": 42.37, "longitude": -71.06, "source_record_id": "rec-t1-08"},
+        {"time": "2026-07-09T12:29:00Z", "vehicle_id": "bus-1", "trip_id": "T1", "latitude": 42.3718, "longitude": -71.06, "source_record_id": "rec-t1-09"},
+        {"time": "2026-07-09T12:13:00Z", "vehicle_id": "bus-2", "trip_id": "T2", "latitude": 42.3482, "longitude": -71.06, "source_record_id": "rec-t2-01"},
+        {"time": "2026-07-09T12:14:00Z", "vehicle_id": "bus-2", "trip_id": "T2", "latitude": 42.35, "longitude": -71.06, "source_record_id": "rec-t2-02"},
+        {"time": "2026-07-09T12:15:00Z", "vehicle_id": "bus-2", "trip_id": "T2", "latitude": 42.3518, "longitude": -71.06, "source_record_id": "rec-t2-03"},
+        {"time": "2026-07-09T12:30:00Z", "vehicle_id": "bus-2", "trip_id": "T2", "latitude": 42.3582, "longitude": -71.06, "source_record_id": "rec-t2-04"},
+        {"time": "2026-07-09T12:31:00Z", "vehicle_id": "bus-2", "trip_id": "T2", "latitude": 42.36, "longitude": -71.06, "source_record_id": "rec-t2-05"},
+        {"time": "2026-07-09T12:32:00Z", "vehicle_id": "bus-2", "trip_id": "T2", "latitude": 42.3618, "longitude": -71.06, "source_record_id": "rec-t2-06"},
+        {"time": "2026-07-09T12:49:00Z", "vehicle_id": "bus-2", "trip_id": "T2", "latitude": 42.3682, "longitude": -71.06, "source_record_id": "rec-t2-07"},
+        {"time": "2026-07-09T12:50:00Z", "vehicle_id": "bus-2", "trip_id": "T2", "latitude": 42.37, "longitude": -71.06, "source_record_id": "rec-t2-08"},
+        {"time": "2026-07-09T12:51:00Z", "vehicle_id": "bus-2", "trip_id": "T2", "latitude": 42.3718, "longitude": -71.06, "source_record_id": "rec-t2-09"},
+        {"time": "2026-07-09T12:00:00Z", "vehicle_id": "bus-9", "trip_id": null, "latitude": 42.35, "longitude": -71.06, "source_record_id": "rec-unassigned"}
+      ]
+    },
+    "refusals": {
+      "positions": [
+        {"time": "2026-07-09T12:00:00Z", "vehicle_id": "bus-1", "trip_id": "T1", "latitude": 42.35, "longitude": -71.06, "source_record_id": "rec-r-01"},
+        {"time": "2026-07-09T12:01:00Z", "vehicle_id": "bus-1", "trip_id": "T1", "latitude": 42.3518, "longitude": -71.06, "source_record_id": "rec-r-02"},
+        {"time": "2026-07-09T12:12:00Z", "vehicle_id": "bus-1", "trip_id": "T1", "latitude": 42.36, "longitude": -71.06, "source_record_id": "rec-r-03"},
+        {"time": "2026-07-09T12:13:00Z", "vehicle_id": "bus-1", "trip_id": "T1", "latitude": 42.3618, "longitude": -71.06, "source_record_id": "rec-r-04"}
+      ]
+    }
+  }
+}

@@ -23,7 +23,13 @@ import json
 import logging
 from typing import Callable, Optional, Protocol
 
-from . import dr_trips, gtfs_rt_positions, gtfs_static, tides_passenger_events
+from . import (
+    dr_trips,
+    gtfs_rt_positions,
+    gtfs_static,
+    tides_passenger_events,
+    trip_updates,
+)
 from .envelope import Envelope, EnvelopeValidationError, parse_envelope
 from .model import SEVERITY_BLOCKING, SEVERITY_WARNING, DQFinding
 from .writer import DbWriter
@@ -31,6 +37,7 @@ from .writer import DbWriter
 logger = logging.getLogger(__name__)
 
 TOPIC_GTFS_RT_VEHICLE_POSITIONS = "raw.gtfs_rt.vehicle_positions"
+TOPIC_GTFS_RT_TRIP_UPDATES = "raw.gtfs_rt.trip_updates"
 TOPIC_GTFS_STATIC_FEED = "raw.gtfs_static.feed"
 TOPIC_TIDES_PASSENGER_EVENTS = "raw.tides.passenger_events"
 TOPIC_DR_TRIPS = "raw.dr.trips"
@@ -129,6 +136,13 @@ def _handle_vehicle_positions(writer: DbWriter, envelope: Envelope) -> None:
     writer.insert_dq_issues(findings)
 
 
+def _handle_trip_updates(writer: DbWriter, envelope: Envelope) -> None:
+    rows, edges, findings = trip_updates.normalize(envelope)
+    writer.insert_trip_updates(rows)
+    writer.insert_lineage_edges(edges)
+    writer.insert_dq_issues(findings)
+
+
 def _handle_gtfs_static(
     writer: DbWriter,
     envelope: Envelope,
@@ -157,13 +171,14 @@ def _handle_gtfs_static(
     else:
         zip_bytes = envelope.decode_payload()
 
-    routes, trips, stops, stop_times, edges, findings = gtfs_static.normalize(
-        zip_bytes, envelope.record_id
+    routes, trips, stops, stop_times, agencies, edges, findings = (
+        gtfs_static.normalize(zip_bytes, envelope.record_id)
     )
     writer.upsert_routes(routes)
     writer.upsert_trips(trips)
     writer.upsert_stops(stops)
     writer.upsert_stop_times(stop_times)
+    writer.upsert_agencies(agencies)
     writer.insert_lineage_edges(edges)
     writer.insert_dq_issues(findings)
 
@@ -264,6 +279,8 @@ def process_message(
 
     if topic == TOPIC_GTFS_RT_VEHICLE_POSITIONS:
         _handle_vehicle_positions(writer, envelope)
+    elif topic == TOPIC_GTFS_RT_TRIP_UPDATES:
+        _handle_trip_updates(writer, envelope)
     elif topic == TOPIC_GTFS_STATIC_FEED:
         _handle_gtfs_static(writer, envelope, object_fetcher)
     elif topic == TOPIC_TIDES_PASSENGER_EVENTS:

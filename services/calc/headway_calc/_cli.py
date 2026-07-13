@@ -123,6 +123,42 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--ops",
+        action="store_true",
+        help=(
+            "Run the OPERATIONS calcs INSTEAD of the NTD calcs: otp_v0 + "
+            "headway_adherence_v0 over the period (handoff 0014), persisted "
+            "with category='ops' — structurally uncertifiable (migration "
+            "0024) and excluded from MR-20/S&S and the public certified "
+            "endpoint. Operations and NTD figures never share a run. "
+            "Definitions and formula basis: services/calc/"
+            "OPS_DEFINITIONS.md."
+        ),
+    )
+    parser.add_argument(
+        "--otp-early-tolerance-seconds",
+        type=int,
+        default=None,
+        help=(
+            "(--ops only) Override how many seconds EARLY a passage may be "
+            "and still count on time (default: the otp_early_tolerance_"
+            "seconds app.settings knob, else the library default 60 — the "
+            "TCQSM 3rd Edition window quoted in OPS_DEFINITIONS.md). The "
+            "value used is recorded in the report."
+        ),
+    )
+    parser.add_argument(
+        "--otp-late-tolerance-seconds",
+        type=int,
+        default=None,
+        help=(
+            "(--ops only) Override how many seconds LATE a passage may be "
+            "and still count on time (default: the otp_late_tolerance_"
+            "seconds app.settings knob, else the library default 300). The "
+            "value used is recorded in the report."
+        ),
+    )
+    parser.add_argument(
         "--ignore-settings",
         action="store_true",
         help=(
@@ -161,18 +197,30 @@ def main(argv: list[str] | None = None) -> int:
         ) from exc
 
     with psycopg.connect(database_url) as conn:
-        report = run_period(
-            conn,
-            period_start=args.period_start,
-            period_end=args.period_end,
-            gap_threshold_seconds=args.gap_threshold_seconds,
-            coverage_threshold=args.coverage_threshold,
-            layover_max_seconds=args.layover_max_seconds,
-            missing_trip_threshold=args.missing_trip_threshold,
-            imbalance_threshold=args.imbalance_threshold,
-            read_settings=not args.ignore_settings,
-            per_mode=args.per_mode,
-        )
+        if args.ops:
+            from headway_calc.runner import run_ops_period
+
+            report = run_ops_period(
+                conn,
+                period_start=args.period_start,
+                period_end=args.period_end,
+                otp_early_tolerance_seconds=args.otp_early_tolerance_seconds,
+                otp_late_tolerance_seconds=args.otp_late_tolerance_seconds,
+                read_settings=not args.ignore_settings,
+            )
+        else:
+            report = run_period(
+                conn,
+                period_start=args.period_start,
+                period_end=args.period_end,
+                gap_threshold_seconds=args.gap_threshold_seconds,
+                coverage_threshold=args.coverage_threshold,
+                layover_max_seconds=args.layover_max_seconds,
+                missing_trip_threshold=args.missing_trip_threshold,
+                imbalance_threshold=args.imbalance_threshold,
+                read_settings=not args.ignore_settings,
+                per_mode=args.per_mode,
+            )
 
     print(report.to_json())
     return 0

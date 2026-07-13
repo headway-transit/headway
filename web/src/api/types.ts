@@ -60,6 +60,16 @@ export interface MetricValue {
    * numbers. Optional so the UI tolerates an API that predates the field.
    */
   detail?: Record<string, unknown>;
+  /**
+   * The honesty boundary (handoff 0014, migration 0024): "ntd" for
+   * regulatory figures, "ops" for operations metrics — which are NEVER
+   * certifiable (a certified ops row is unrepresentable in the database),
+   * never in the MR-20 package, and never in the public certified feed. The
+   * UI badges every "ops" figure "Operations metric — not an NTD reported
+   * figure". Optional so the UI tolerates an API that predates the field
+   * (rows without it are NTD-era figures).
+   */
+  category?: string;
 }
 
 // ---- /metrics/values/{id}/lineage ----

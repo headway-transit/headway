@@ -19,7 +19,13 @@ import pytest
 
 from decimal import Decimal
 
-from headway_calc.types import DrTrip, PassengerEvent, StopTime, VehiclePosition
+from headway_calc.types import (
+    DrTrip,
+    OpsScheduledStop,
+    PassengerEvent,
+    StopTime,
+    VehiclePosition,
+)
 
 # services/calc/tests/conftest.py -> repo root is parents[3]
 GOLDEN_DIR = Path(__file__).resolve().parents[3] / "tests" / "golden" / "vrm_vrh_v0"
@@ -32,6 +38,7 @@ DR_GOLDEN_DIR = Path(__file__).resolve().parents[3] / "tests" / "golden" / "dr_v
 SAMPLING_GOLDEN_DIR = (
     Path(__file__).resolve().parents[3] / "tests" / "golden" / "sampling_v0"
 )
+OPS_GOLDEN_DIR = Path(__file__).resolve().parents[3] / "tests" / "golden" / "ops_v0"
 
 
 def load_positions(raw: dict) -> list[VehiclePosition]:
@@ -86,6 +93,39 @@ def load_stop_times(raw_case: dict) -> list[StopTime]:
             shape_dist_traveled=st["shape_dist_traveled"],
         )
         for st in raw_case["stop_times"]
+    ]
+
+
+def load_ops_case_positions(raw: dict, case: str) -> list[VehiclePosition]:
+    """Map one ops_v0 golden case's position rows onto VehiclePosition."""
+    return [
+        VehiclePosition(
+            time=datetime.fromisoformat(p["time"]),
+            vehicle_id=p["vehicle_id"],
+            trip_id=p["trip_id"],
+            latitude=p["latitude"],
+            longitude=p["longitude"],
+            source_record_id=p["source_record_id"],
+        )
+        for p in raw["cases"][case]["positions"]
+    ]
+
+
+def load_ops_schedule_rows(raw: dict) -> list[OpsScheduledStop]:
+    """Map the ops_v0 golden fixture's schedule rows onto OpsScheduledStop."""
+    return [
+        OpsScheduledStop(
+            trip_id=s["trip_id"],
+            stop_id=s["stop_id"],
+            stop_sequence=s["stop_sequence"],
+            latitude=s["latitude"],
+            longitude=s["longitude"],
+            arrival_seconds=s["arrival_seconds"],
+            departure_seconds=s["departure_seconds"],
+            route_id=s["route_id"],
+            direction_id=s["direction_id"],
+        )
+        for s in raw["schedule"]
     ]
 
 
@@ -231,6 +271,19 @@ def upt_golden_expected() -> dict:
     """Expectations for upt_v0 CALC_VERSION 0.1.0 over the UPT fixture —
     see tests/golden/upt_v0/BASIS.md."""
     return json.loads((UPT_GOLDEN_DIR / "expected.json").read_text())
+
+
+@pytest.fixture(scope="session")
+def ops_golden_fixture() -> dict:
+    """Ops fixture (handoff 0014): two clean trips + a refusals case —
+    see tests/golden/ops_v0/BASIS.md."""
+    return json.loads((OPS_GOLDEN_DIR / "fixture.json").read_text())
+
+
+@pytest.fixture(scope="session")
+def ops_golden_expected() -> dict:
+    """Hand-worked ops expectations — tests/golden/ops_v0/BASIS.md."""
+    return json.loads((OPS_GOLDEN_DIR / "expected.json").read_text())
 
 
 @pytest.fixture(scope="session")
@@ -393,6 +446,9 @@ SEEDED_SETTINGS_ROWS: list[tuple] = [
     ("gap_threshold_seconds", "300", "integer"),
     ("layover_max_seconds", "1800", "integer"),
     ("missing_trip_threshold", "0.02", "decimal"),
+    # The two OPERATIONS knobs (migration 0024, handoff 0014).
+    ("otp_early_tolerance_seconds", "60", "integer"),
+    ("otp_late_tolerance_seconds", "300", "integer"),
 ]
 
 
@@ -423,10 +479,25 @@ class RecordingCursor:
                     raise FakeUndefinedTable(
                         'relation "app.settings" does not exist'
                     )
-                self._pending_all = list(conn.settings_rows)
+                # Honor the SELECT's setting_key IN (...) filter, like the
+                # real database — the NTD and ops loaders each read only
+                # their own knob set (migration 0024).
+                if params:
+                    self._pending_all = [
+                        r for r in conn.settings_rows if r[0] in params
+                    ]
+                else:
+                    self._pending_all = list(conn.settings_rows)
             elif "canonical.dr_trips" in sql:
                 # The DR reader SELECT (handoff 0013, migration 0021).
                 self._pending_all = list(conn.dr_trip_rows)
+            elif "canonical.agencies" in sql:
+                # The ops timezone SELECT (handoff 0014, migration 0026).
+                self._pending_all = list(conn.agency_timezone_rows)
+            elif "st.arrival_seconds" in sql:
+                # The ops schedule SELECT (handoff 0014) — names
+                # canonical.stop_times too, so this branch must come FIRST.
+                self._pending_all = list(conn.ops_schedule_rows)
             elif "canonical.stop_times" in sql:
                 # pmt_v0's geometry SELECT (handoff 0011) — its subquery
                 # also names canonical.passenger_events, so this branch must
@@ -496,8 +567,13 @@ class RecordingConnection:
         operated_mode_rows: list[tuple] | None = None,
         stop_time_rows: list[tuple] | None = None,
         dr_trip_rows: list[tuple] | None = None,
+        ops_schedule_rows: list[tuple] | None = None,
+        agency_timezone_rows: list[tuple] | None = None,
     ):
         self.position_rows = position_rows or []
+        # The ops slice (handoff 0014): schedule + agency timezone reads.
+        self.ops_schedule_rows = ops_schedule_rows or []
+        self.agency_timezone_rows = agency_timezone_rows or []
         self.passenger_event_rows = passenger_event_rows or []
         self.operated_trip_rows = operated_trip_rows or []
         # pmt_v0's geometry rows (handoff 0011, migration 0019).

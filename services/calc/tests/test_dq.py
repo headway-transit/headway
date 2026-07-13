@@ -49,11 +49,12 @@ def test_route_inserts_one_row_per_issue_with_handoff_columns():
     for (sql, params), issue in zip(conn.executed, _issues()):
         assert "INSERT INTO dq.issues" in sql
         assert (
-            "(issue_type, severity, status, title, description, source_record_ids)"
+            "(issue_type, severity, status, title, description, source_record_ids, category)"
             in sql
         )
         assert "RETURNING issue_id" in sql
-        issue_type, severity, status, title, description, record_ids = params
+        issue_type, severity, status, title, description, record_ids, category = params
+        assert category == "ntd"  # the default: NTD call sites unchanged (migration 0024)
         assert issue_type == issue.issue_type
         assert severity == "blocking"
         assert status == "open"
@@ -136,7 +137,8 @@ def test_route_findings_carries_each_findings_own_severity():
 
     for (sql, params), finding in zip(conn.executed, _mixed_findings()):
         assert "INSERT INTO dq.issues" in sql
-        issue_type, severity, status, title, description, record_ids = params
+        issue_type, severity, status, title, description, record_ids, category = params
+        assert category == "ntd"  # the default: NTD call sites unchanged (migration 0024)
         assert issue_type == finding.issue_type
         assert severity == finding.severity
         assert status == "open"

@@ -25,10 +25,17 @@ from headway_calc.types import SEVERITY_BLOCKING, Finding
 #: owner, resolved_at, resolution take their schema defaults.
 _INSERT_ISSUE_SQL = (
     "INSERT INTO dq.issues "
-    "(issue_type, severity, status, title, description, source_record_ids) "
-    "VALUES (%s, %s, %s, %s, %s, %s) "
+    "(issue_type, severity, status, title, description, source_record_ids, category) "
+    "VALUES (%s, %s, %s, %s, %s, %s, %s) "
     "RETURNING issue_id"
 )
+
+#: dq.issues.category vocabulary (migration 0024). 'ntd' (the default —
+#: every pre-0024 writer) gates certification; 'ops' findings are real,
+#: owned findings that must NEVER freeze federal certification (the
+#: honesty boundary in the other direction).
+CATEGORY_NTD = "ntd"
+CATEGORY_OPS = "ops"
 
 _STATUS = "open"
 
@@ -61,6 +68,7 @@ def route_findings(
     period_start: date,
     period_end: date,
     scope: str | None = None,
+    category: str = CATEGORY_NTD,
 ) -> list[str]:
     """Insert one dq.issues row per Finding; return the new issue ids.
 
@@ -76,6 +84,13 @@ def route_findings(
     the finding belongs to, so a mode-scoped finding is distinguishable from
     the fleet-wide ('agency') run's finding over the same records. Default
     None keeps the routed description byte-identical to pre-0009 runs.
+
+    ``category`` (handoff 0014 / migration 0024): 'ntd' (default — every
+    NTD-pipeline finding, gates certification) or 'ops' (operations-metric
+    findings, e.g. an otp_v0 cadence refusal — owned and workflowed like
+    any finding, but structurally excluded from the certification
+    blocking-issue gate: an ops shortfall must never freeze a federal
+    attestation). The ops runner passes 'ops'; no NTD call site changes.
 
     Returns the inserted issue_ids (as text) in input order. Raises on any
     insert failure — never swallows. Does not commit.
@@ -100,6 +115,7 @@ def route_findings(
                 finding.title,
                 description,
                 list(finding.source_record_ids),
+                category,
             ),
         )
         row = cur.fetchone()

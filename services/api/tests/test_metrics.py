@@ -274,3 +274,43 @@ def test_lineage_rate_limit_429_with_retry_after_on_machine_path(
     assert "rate limit" in r.json()["detail"]
     # It is the same per-key bucket the other machine endpoints spend from.
     assert client.get("/machine/metrics", headers=headers).status_code == 429
+
+
+def test_every_row_carries_its_category_and_ops_is_filterable(client, fake_db):
+    """Handoff 0014: ops metrics are served WITH an explicit category so
+    the UI can badge them ("Operations metric — not an NTD reported
+    figure"); ?category= slices on the boundary."""
+    fake_db.add_metric_value(metric="vrm")
+    ops = fake_db.add_metric_value(
+        metric="otp",
+        unit="percent",
+        calc_name="otp_v0",
+        calc_version="0.1.0",
+        category="ops",
+        value=Decimal("87.50"),
+        detail={"on_time_count": 7, "early_tolerance_seconds": 60},
+    )
+    r = client.get("/metrics/values", headers=auth_header(fake_db, "vera"))
+    assert r.status_code == 200
+    by_metric = {row["metric"]: row for row in r.json()}
+    assert by_metric["vrm"]["category"] == "ntd"
+    assert by_metric["otp"]["category"] == "ops"
+    assert by_metric["otp"]["value"] == "87.50"
+
+    r_ops = client.get(
+        "/metrics/values?category=ops", headers=auth_header(fake_db, "vera")
+    )
+    assert [row["metric_value_id"] for row in r_ops.json()] == [
+        ops["metric_value_id"]
+    ]
+    r_ntd = client.get(
+        "/metrics/values?category=ntd", headers=auth_header(fake_db, "vera")
+    )
+    assert [row["metric"] for row in r_ntd.json()] == ["vrm"]
+
+
+def test_category_filter_validates_vocabulary(client, fake_db):
+    r = client.get(
+        "/metrics/values?category=secret", headers=auth_header(fake_db, "vera")
+    )
+    assert r.status_code == 422

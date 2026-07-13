@@ -357,3 +357,108 @@ def test_lineage_endpoint_returns_seeded_provenance_tree(
     values = {v["metric_value_id"]: v for v in resp.json()}
     assert values[mv_id]["value"] == "87.25"
     assert values[mv_id]["unit"] == "hours"
+
+
+# ---------------------------------------------------------------------------
+# THE HONESTY BOUNDARY (handoff 0014 / migration 0024), against the REAL
+# database: a persisted OPERATIONS figure cannot reach any certifiable
+# path — the CHECK makes the certified-ops state unrepresentable, the
+# certify route refuses it, and the public certified endpoint's hard
+# WHERE excludes the category.
+# ---------------------------------------------------------------------------
+
+
+def seed_ops_metric_value(observer, *, value="87.50") -> str:
+    row = observer.execute(
+        "INSERT INTO computed.metric_values "
+        "(metric, unit, period_start, period_end, value, calc_name, "
+        "calc_version, category) "
+        "VALUES ('otp', 'percent', '2026-07-01', '2026-08-01', %s, "
+        "'otp_v0', '0.1.0', 'ops') RETURNING metric_value_id",
+        (value,),
+    ).fetchone()
+    return str(row[0])
+
+
+def test_ops_figure_structurally_excluded_from_certifiable_paths(
+    api_client, observer, seed_user
+):
+    ops_id = seed_ops_metric_value(observer)
+    ntd_id = seed_metric_value(observer, metric="vrm", value="111.5")
+
+    # (a) The database itself refuses the certified-ops state — INSERT and
+    # UPDATE both violate metric_values_ops_never_certified.
+    with pytest.raises(Exception) as excinfo:
+        observer.execute(
+            "INSERT INTO computed.metric_values "
+            "(metric, unit, period_start, period_end, value, calc_name, "
+            "calc_version, category, certification_status) "
+            "VALUES ('otp', 'percent', '2026-07-01', '2026-08-01', '1', "
+            "'otp_v0', '0.1.0', 'ops', 'certified')"
+        )
+    assert "metric_values_ops_never_certified" in str(excinfo.value)
+    with pytest.raises(Exception) as excinfo:
+        observer.execute(
+            "UPDATE computed.metric_values SET certification_status = "
+            "'certified' WHERE metric_value_id = %s",
+            (ops_id,),
+        )
+    assert "metric_values_ops_never_certified" in str(excinfo.value)
+
+    # (b) The certify route refuses the ops id in plain language, before
+    # any write.
+    seed_user("cora.ops", "certifier-pass-1", "certifying_official")
+    headers = login(api_client, "cora.ops", "certifier-pass-1")
+    resp = api_client.post(
+        "/certifications",
+        json={
+            "metric_value_ids": [ops_id],
+            "attestation": "Attempting to certify an operations metric.",
+        },
+        headers=headers,
+    )
+    assert resp.status_code == 409, resp.text
+    assert "operations metrics" in resp.json()["detail"]
+    assert (
+        count(
+            observer,
+            "SELECT count(*) FROM cert.certifications "
+            "WHERE %s = ANY(metric_value_ids)",
+            (ops_id,),
+        )
+        == 0
+    )
+
+    # (c) An open blocking OPS finding never gates NTD certification; the
+    # certified NTD figure is served publicly, the ops figure never is.
+    observer.execute(
+        "INSERT INTO dq.issues (issue_type, severity, title, description, "
+        "category) VALUES ('no_observed_passages', 'blocking', "
+        "'OTP refused', 'integration-test ops refusal', 'ops')"
+    )
+    resp = api_client.post(
+        "/certifications",
+        json={
+            "metric_value_ids": [ntd_id],
+            "attestation": "January figures are correct.",
+        },
+        headers=headers,
+    )
+    assert resp.status_code == 201, resp.text
+
+    resp = api_client.get("/public/metrics/certified")
+    assert resp.status_code == 200
+    served = {row["metric_value_id"] for row in resp.json()}
+    assert ntd_id in served
+    assert ops_id not in served
+    assert all(row["category"] == "ntd" for row in resp.json())
+
+    # (d) The ops figure IS served on the authenticated metrics surface,
+    # explicitly categorized so the UI can badge it.
+    resp = api_client.get(
+        "/metrics/values", params={"category": "ops"}, headers=headers
+    )
+    assert resp.status_code == 200
+    ops_rows = {row["metric_value_id"]: row for row in resp.json()}
+    assert ops_rows[ops_id]["category"] == "ops"
+    assert ops_rows[ops_id]["value"] == "87.50"

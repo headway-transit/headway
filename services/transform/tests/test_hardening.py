@@ -184,6 +184,7 @@ def build_zip(files: dict[str, str]) -> bytes:
 
 
 GTFS_FILES = {
+    "agency.txt": "agency_id,agency_name,agency_timezone\nA1,Example Transit,America/New_York\n",
     "routes.txt": "route_id,route_short_name,route_long_name,route_type\nR1,5,Fifth,3\n",
     "trips.txt": "trip_id,route_id,service_id,direction_id\nT1,R1,WKDY,0\nT2,R1,WKDY,1\n",
     "stops.txt": "stop_id,stop_name,stop_lat,stop_lon,location_type\nS1,First,42.35,-71.06,0\n",
@@ -199,7 +200,7 @@ def test_gtfs_nul_cell_quarantines_row_not_file() -> None:
         "T\x00bad,R1,WKDY,0\n"
         "T2,R1,WKDY,1\n"
     )
-    _r, trips, _s, _st, _e, findings = gtfs_static.normalize(
+    _r, trips, _s, _st, _agencies, _e, findings = gtfs_static.normalize(
         build_zip(files), RECORD_ID
     )
     assert [t.trip_id for t in trips] == ["T1", "T2"]
@@ -216,7 +217,7 @@ def test_gtfs_oversized_field_quarantines_row_not_file() -> None:
         f"R2,5,{OVERSIZED},3\n"
         "R3,6,Sixth,3\n"
     )
-    routes, _t, _s, _st, _e, findings = gtfs_static.normalize(
+    routes, _t, _s, _st, _agencies, _e, findings = gtfs_static.normalize(
         build_zip(files), RECORD_ID
     )
     assert [r.route_id for r in routes] == ["R1", "R3"]
@@ -226,7 +227,7 @@ def test_gtfs_oversized_field_quarantines_row_not_file() -> None:
 def test_gtfs_member_over_decompression_budget_aborts_with_named_limit() -> None:
     # Small limits injected for test speed; the real defaults are generous.
     zip_bytes = build_zip(GTFS_FILES)
-    routes, trips, stops, stop_times, edges, findings = gtfs_static.normalize(
+    routes, trips, stops, stop_times, _agencies, edges, findings = gtfs_static.normalize(
         zip_bytes, RECORD_ID, max_member_bytes=16
     )
     assert routes == [] and trips == [] and stops == [] and stop_times == []
@@ -240,7 +241,7 @@ def test_gtfs_member_over_decompression_budget_aborts_with_named_limit() -> None
 
 def test_gtfs_total_decompression_budget_enforced_across_members() -> None:
     zip_bytes = build_zip(GTFS_FILES)
-    _r, _t, _s, _st, _e, findings = gtfs_static.normalize(
+    _r, _t, _s, _st, _agencies, _e, findings = gtfs_static.normalize(
         zip_bytes, RECORD_ID, max_total_bytes=100
     )
     [finding] = findings

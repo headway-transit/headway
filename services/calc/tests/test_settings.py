@@ -128,8 +128,56 @@ def test_all_knob_rows_missing_names_every_key():
     with pytest.raises(MissingSettingError) as excinfo:
         load_policy_settings(RecordingConnection(settings_rows=[]))
     message = str(excinfo.value)
-    for key, _, _ in SEEDED_SETTINGS_ROWS:
+    # The NTD loader names exactly ITS knob set — the ops knobs (migration
+    # 0024) are a separate loader by design and never gate an NTD run.
+    from headway_calc.settings import POLICY_SETTING_TYPES
+
+    for key in POLICY_SETTING_TYPES:
         assert key in message
+    assert "otp_early_tolerance_seconds" not in message
+
+
+def test_ops_loader_reads_only_ops_knobs():
+    from headway_calc.settings import load_ops_policy_settings
+
+    settings = load_ops_policy_settings(RecordingConnection())
+    assert settings is not None
+    assert settings.otp_early_tolerance_seconds == 60
+    assert settings.otp_late_tolerance_seconds == 300
+
+
+def test_ops_loader_missing_knob_refuses_never_guesses():
+    from headway_calc.settings import load_ops_policy_settings
+
+    # A table holding only the NTD knobs (a post-0014, pre-0024 database
+    # where migrations were half-applied) must refuse the ops run.
+    ntd_only = [r for r in SEEDED_SETTINGS_ROWS if not r[0].startswith("otp_")]
+    with pytest.raises(MissingSettingError) as excinfo:
+        load_ops_policy_settings(RecordingConnection(settings_rows=ntd_only))
+    assert "otp_early_tolerance_seconds" in str(excinfo.value)
+    assert "migration 0024" in str(excinfo.value)
+
+
+def test_ops_loader_tolerates_missing_table_with_warning(caplog):
+    from headway_calc.settings import load_ops_policy_settings
+
+    with caplog.at_level(logging.WARNING, logger="headway_calc.settings"):
+        result = load_ops_policy_settings(
+            RecordingConnection(settings_table_missing=True)
+        )
+    assert result is None
+    assert any("CODE DEFAULTS" in r.message for r in caplog.records)
+
+
+def test_ops_loader_unparseable_value_refuses():
+    from headway_calc.settings import load_ops_policy_settings
+
+    rows = [
+        ("otp_early_tolerance_seconds", "sixty", "integer"),
+        ("otp_late_tolerance_seconds", "300", "integer"),
+    ]
+    with pytest.raises(InvalidSettingValueError):
+        load_ops_policy_settings(RecordingConnection(settings_rows=rows))
 
 
 @pytest.mark.parametrize("bad_value", ["not-a-number", "", "NaN", "Infinity"])

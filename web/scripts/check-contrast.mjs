@@ -84,6 +84,15 @@ const PAIRS = [
   // is a non-text mark against the receipt's page background.
   ["DR callout border on receipt background (non-text, 3:1)", "#1d4e89", "#ffffff", 3.0],
 
+  // Handoff 0014 (Operations metrics): the ops badge + Headway-owned label
+  // reuse the info text/background pair (text checked above); their 2px
+  // border and the ops-owned DASHED rule are non-text marks on the card /
+  // receipt background, and the formula block is body text on the raised
+  // surface with its border as a non-text mark.
+  ["ops badge border / ops-owned dashed rule on card background (non-text, 3:1)", "#1d4e89", "#ffffff", 3.0],
+  ["ops badge icon on info background (non-text, 3:1)", "#1d4e89", "#e7f0fa", 3.0],
+  ["ops formula text on raised surface", "#1f2328", "#f6f8fa", 4.5],
+
   // ---- DARK theme (handoff 0008 pillar A) ----
   // Card/content surface #161b22, page plane #0d1117. Brand color overrides
   // are NOT applied to dark text/controls (server guardrail covers light
@@ -109,6 +118,9 @@ const PAIRS = [
   ["dark: chart status warning fill on dark chart surface (non-text, 3:1)", "#d4a72c", "#161b22", 3.0],
   ["dark: chart status info fill on dark chart surface (non-text, 3:1)", "#6cb6ff", "#161b22", 3.0],
   ["dark: DR callout border on receipt background (non-text, 3:1)", "#a8c7f0", "#161b22", 3.0],
+  ["dark: ops badge border / ops-owned dashed rule on card background (non-text, 3:1)", "#a8c7f0", "#161b22", 3.0],
+  ["dark: ops badge icon on info background (non-text, 3:1)", "#a8c7f0", "#172439", 3.0],
+  ["dark: ops formula text on raised surface (page plane)", "#e6edf3", "#0d1117", 4.5],
 ];
 
 let failed = false;

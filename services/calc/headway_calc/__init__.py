@@ -30,6 +30,18 @@ UNCHANGED calc versions over per-mode input subsets (input selection, not a
 semantics change — REGULATORY_TRACKER.md, "Mode scoping");
 build_mr20_package assembles the NOT-REPORTABLE MR-20 preview package.
 
+OPERATIONS metrics (handoff 0014 — category 'ops', THE HONESTY BOUNDARY):
+compute_otp is CALC_VERSION 0.1.0 (on-time performance over derived stop
+passages; configurable window, TCQSM-cited defaults) and
+compute_headway_adherence is CALC_VERSION 0.1.0 (cvh — coefficient of
+variation of headway deviations), both in headway_calc.ops over
+derive_stop_passages 0.1.0 (headway_calc.passages). They persist ONLY with
+computed.metric_values.category='ops' (stamped by headway_calc.persist from
+the calc registry), can never be certified (migration 0024 CHECK), never
+enter MR-20/S&S or /public/metrics/certified, and their definitions live in
+OPS_DEFINITIONS.md — never in REGULATORY_TRACKER.md, because they are not
+regulatory figures.
+
 NOTE: headway_calc.sampling (NTD Sampling Manual plan support, handoff 0012)
 and headway_calc.sscls (the S&S major-event classifier, handoff 0010) stay
 MODULE-SCOPED on purpose — they never write computed.metric_values (sampling
@@ -62,10 +74,19 @@ from headway_calc.mode import (
     compute_vrm_by_mode,
     unknown_mode_finding,
 )
+from headway_calc.ops import (
+    compute_headway_adherence,
+    compute_headway_adherence_by_route,
+    compute_otp,
+    compute_otp_by_route,
+)
+from headway_calc.passages import derive_stop_passages
 from headway_calc.pmt import compute_pmt
 from headway_calc.reader import (
+    load_agency_timezones,
     load_dr_trips,
     load_operated_trip_ids,
+    load_ops_schedule,
     load_passenger_events,
     load_trip_geometries,
     load_vehicle_positions,
@@ -76,8 +97,12 @@ from headway_calc.types import (
     CoverageDetail,
     DrTrip,
     Finding,
+    HeadwayAdherenceDetail,
+    OpsScheduledStop,
+    OtpDetail,
     PassengerEvent,
     PmtDetail,
+    StopPassage,
     StopTime,
     UptDetail,
     VehiclePosition,
@@ -108,13 +133,22 @@ __all__ = [
     "CoverageDetail",
     "DrTrip",
     "Finding",
+    "HeadwayAdherenceDetail",
+    "OpsScheduledStop",
+    "OtpDetail",
     "PassengerEvent",
     "PmtDetail",
+    "StopPassage",
     "StopTime",
     "UptDetail",
     "VehiclePosition",
     "VomsDetail",
     "compute_dr_pmt",
+    "compute_headway_adherence",
+    "compute_headway_adherence_by_route",
+    "compute_otp",
+    "compute_otp_by_route",
+    "derive_stop_passages",
     "compute_dr_pmt_by_tos",
     "compute_dr_upt",
     "compute_dr_upt_by_tos",
@@ -140,8 +174,10 @@ __all__ = [
     "compute_vrh_v0_1",
     "compute_vrh_v0_2",
     "compute_vrh_v0_3",
+    "load_agency_timezones",
     "load_dr_trips",
     "load_operated_trip_ids",
+    "load_ops_schedule",
     "load_passenger_events",
     "load_trip_geometries",
     "load_vehicle_positions",

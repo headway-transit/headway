@@ -1583,6 +1583,80 @@ ul.detail-panel li {
   margin: var(--space-2) 0;
 }
 
+/* ---- Operations metrics (handoff 0014) ----
+   The honesty boundary made visible. Every color here is an EXISTING
+   AA-verified token pair (scripts/check-contrast.mjs): the ops badge and
+   the Headway-owned label reuse the info text/background pair with a 2px
+   border (the .tag.estimate precedent — bordered so it never reads as a
+   plain status chip), and both always ride with their full text — never
+   color alone. The ops-owned figure uses a DASHED info rule where the
+   verified-quote figure uses a SOLID accent rule: Headway's own definitions
+   are shape-distinct from quoted rules, not just color-distinct. */
+
+/* The badge: "Operations metric — not an NTD reported figure". Long text
+   by design — it must wrap rather than truncate. */
+.tag.ops {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--space-1);
+  background: var(--color-info-bg);
+  color: var(--color-info-text);
+  border: 2px solid var(--color-info-text);
+  white-space: normal;
+}
+.tag.ops svg {
+  flex: none;
+  align-self: center;
+}
+
+.chart-card-badge {
+  margin: var(--space-1) 0;
+}
+
+/* The card's headline figure (the API's string verbatim). */
+.ops-stat {
+  font-weight: 700;
+  font-size: var(--text-lg);
+  margin: var(--space-2) 0 var(--space-1);
+}
+.ops-refusals {
+  padding-left: 1.2rem;
+  margin: var(--space-1) 0 var(--space-2);
+}
+
+/* A Headway-owned definition on an ops receipt: labeled chip + dashed rule
+   (vs the verified quote's solid accent rule) + the formula verbatim. */
+.ops-owned {
+  margin: var(--space-2) 0 var(--space-3);
+  padding-left: var(--space-3);
+  border-left: 4px dashed var(--color-info-text);
+}
+.ops-owned-head {
+  margin: 0 0 var(--space-1);
+}
+.tag.ops-owned-label {
+  background: var(--color-info-bg);
+  color: var(--color-info-text);
+  border: 2px solid var(--color-info-text);
+}
+.ops-owned-name {
+  font-weight: 700;
+  font-family: ui-monospace, monospace;
+  font-size: 0.95em;
+}
+.ops-formula {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-1);
+  padding: var(--space-2) var(--space-3);
+  overflow-x: auto;
+  font-size: var(--text-sm);
+}
+.ops-owned-reference {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
 /* ---- print: the drawn-sample worksheet (handoff 0012, design point 3).
    Printing the page keeps each plan's worksheet (heading, seed, verbatim
    §63.03 rules, the units table) and drops the app chrome, forms, and

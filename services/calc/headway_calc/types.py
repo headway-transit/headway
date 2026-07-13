@@ -274,6 +274,190 @@ class DrTrip:
 
 
 @dataclass(frozen=True)
+class OpsScheduledStop:
+    """One scheduled stop of a trip, joined with its stop's coordinates and
+    the trip's route/direction (read contract: canonical.stop_times LEFT
+    JOIN canonical.stops LEFT JOIN canonical.trips — handoff 0014, the ops
+    analytics schedule input).
+
+    ``latitude``/``longitude`` None when the stop is unknown or carries no
+    coordinates — the passage derivation then skips the stop LOUDLY (counted
+    in its stats), never guesses a point. ``arrival_seconds``/
+    ``departure_seconds`` are GTFS times as integer seconds after "noon
+    minus 12 h" of the service day (migration 0019 convention), None when
+    the feed omits them (non-timepoint rows) — a schedule time is never
+    interpolated. ``route_id``/``direction_id`` None when the trip is
+    unknown to canonical.trips (e.g. RT-only ADDED trips).
+    """
+
+    trip_id: str
+    stop_id: str
+    stop_sequence: int
+    latitude: float | None
+    longitude: float | None
+    arrival_seconds: int | None
+    departure_seconds: int | None
+    route_id: str | None
+    direction_id: int | None
+
+    def __post_init__(self) -> None:
+        if self.latitude is not None and not (-90.0 <= self.latitude <= 90.0):
+            raise ValueError(
+                f"latitude {self.latitude!r} out of range [-90, 90] "
+                f"(trip_id={self.trip_id!r}, stop_id={self.stop_id!r})"
+            )
+        if self.longitude is not None and not (
+            -180.0 <= self.longitude <= 180.0
+        ):
+            raise ValueError(
+                f"longitude {self.longitude!r} out of range [-180, 180] "
+                f"(trip_id={self.trip_id!r}, stop_id={self.stop_id!r})"
+            )
+
+
+@dataclass(frozen=True)
+class StopPassage:
+    """One OBSERVED stop passage, derived deterministically from
+    canonical.vehicle_positions × the trip's scheduled stops
+    (headway_calc.passages, derivation derive_stop_passages — handoff 0014).
+
+    An OPERATIONS observation, never an NTD input. ``observed_time`` is the
+    event time of the closest-approach position; its measurement
+    uncertainty is bounded by ``bounding_gap_seconds`` (the larger of the
+    inter-position gaps around the closest approach — the derivation
+    REFUSES a passage where that gap exceeds its documented tolerance, so
+    every emitted passage carries supportable cadence). Scheduled seconds
+    are carried through from OpsScheduledStop (None preserved).
+    ``source_record_id`` is the raw record of the closest-approach position
+    (lineage, ADR-0007).
+    """
+
+    trip_id: str
+    vehicle_id: str
+    route_id: str | None
+    direction_id: int | None
+    stop_id: str
+    stop_sequence: int
+    observed_time: datetime
+    scheduled_arrival_seconds: int | None
+    scheduled_departure_seconds: int | None
+    bounding_gap_seconds: float
+    distance_m: float
+    source_record_id: str
+
+    def __post_init__(self) -> None:
+        if (
+            self.observed_time.tzinfo is None
+            or self.observed_time.utcoffset() is None
+        ):
+            raise ValueError(
+                f"StopPassage.observed_time must be timezone-aware UTC; got "
+                f"naive datetime {self.observed_time!r} "
+                f"(trip_id={self.trip_id!r}, stop_id={self.stop_id!r})"
+            )
+
+
+@dataclass(frozen=True)
+class OtpDetail:
+    """Detail of one otp_v0 run (handoff 0014 — an OPERATIONS metric,
+    category 'ops', never certifiable), persisted verbatim into
+    computed.metric_values.detail (JSONB, migration 0010).
+
+    - ``passages_considered`` — derived passages with a usable scheduled
+      time; ``passages_unscheduled`` — derived passages skipped because the
+      schedule row carries neither arrival nor departure seconds (never
+      interpolated).
+    - ``on_time_count`` / ``early_count`` / ``late_count`` — the window
+      classification per OPS_DEFINITIONS.md: on time iff
+      -early_tolerance_seconds <= deviation <= late_tolerance_seconds.
+    - ``deviation_mean_seconds`` / ``deviation_median_seconds`` — summary
+      of the signed deviations (strings — Decimal-safe).
+    - ``early_tolerance_seconds`` / ``late_tolerance_seconds`` — the run's
+      explicit window inputs, carried for provenance exactly like
+      coverage_threshold.
+    - ``agency_timezone`` — the feed-declared zone the schedule was
+      anchored with (canonical.agencies, migration 0026).
+    - ``derivation`` — the passage derivation's identity and refusal
+      accounting (name, version, tolerances, per-reason refusal counts):
+      the cadence evidence behind every figure.
+    """
+
+    passages_considered: int
+    passages_unscheduled: int
+    on_time_count: int
+    early_count: int
+    late_count: int
+    deviation_mean_seconds: Decimal
+    deviation_median_seconds: Decimal
+    early_tolerance_seconds: int
+    late_tolerance_seconds: int
+    agency_timezone: str
+    derivation: dict
+
+    def to_dict(self) -> dict:
+        return {
+            "passages_considered": self.passages_considered,
+            "passages_unscheduled": self.passages_unscheduled,
+            "on_time_count": self.on_time_count,
+            "early_count": self.early_count,
+            "late_count": self.late_count,
+            "deviation_mean_seconds": str(self.deviation_mean_seconds),
+            "deviation_median_seconds": str(self.deviation_median_seconds),
+            "early_tolerance_seconds": self.early_tolerance_seconds,
+            "late_tolerance_seconds": self.late_tolerance_seconds,
+            "agency_timezone": self.agency_timezone,
+            "derivation": dict(self.derivation),
+        }
+
+
+@dataclass(frozen=True)
+class HeadwayAdherenceDetail:
+    """Detail of one headway_adherence_v0 run (handoff 0014 — an OPERATIONS
+    metric, category 'ops', never certifiable), persisted verbatim into
+    computed.metric_values.detail (JSONB).
+
+    The v0 figure is the coefficient of variation of headway deviations,
+    cvh = (population standard deviation of (observed − scheduled headway))
+    / (mean scheduled headway), over consecutive OBSERVED passage pairs at
+    the same (route, direction, stop) — the math is shown in
+    OPS_DEFINITIONS.md. Pair exclusions are counted, never silent:
+
+    - ``pairs_excluded_unscheduled`` — a pair member has no scheduled time;
+    - ``pairs_excluded_inverted`` — non-positive scheduled or observed
+      headway (overtaking / duplicate passages);
+    - ``pairs_excluded_over_cap`` — scheduled headway over
+      ``max_scheduled_headway_seconds`` (a service gap, not a headway).
+    """
+
+    pairs_counted: int
+    pairs_excluded_unscheduled: int
+    pairs_excluded_inverted: int
+    pairs_excluded_over_cap: int
+    stops_covered: int
+    routes_covered: int
+    mean_scheduled_headway_seconds: Decimal
+    stddev_deviation_seconds: Decimal
+    max_scheduled_headway_seconds: int
+    derivation: dict
+
+    def to_dict(self) -> dict:
+        return {
+            "pairs_counted": self.pairs_counted,
+            "pairs_excluded_unscheduled": self.pairs_excluded_unscheduled,
+            "pairs_excluded_inverted": self.pairs_excluded_inverted,
+            "pairs_excluded_over_cap": self.pairs_excluded_over_cap,
+            "stops_covered": self.stops_covered,
+            "routes_covered": self.routes_covered,
+            "mean_scheduled_headway_seconds": str(
+                self.mean_scheduled_headway_seconds
+            ),
+            "stddev_deviation_seconds": str(self.stddev_deviation_seconds),
+            "max_scheduled_headway_seconds": self.max_scheduled_headway_seconds,
+            "derivation": dict(self.derivation),
+        }
+
+
+@dataclass(frozen=True)
 class Finding:
     """A data-quality finding raised by a calculation.
 
@@ -823,6 +1007,8 @@ class CalcResult:
         | DrUptDetail
         | DrVomsDetail
         | DrPmtDetail
+        | OtpDetail
+        | HeadwayAdherenceDetail
         | None
     ) = None
 

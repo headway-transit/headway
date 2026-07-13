@@ -173,6 +173,10 @@ _SELECT_LATEST_SQL = (
     "FROM computed.metric_values "
     "WHERE period_start = %s AND period_end = %s "
     "AND metric IN ('upt', 'vrh', 'vrm', 'voms') "
+    # The migration-0024 honesty boundary, hard-clause form: an OPERATIONS
+    # figure (category 'ops') must never enter an NTD preview package, even
+    # if a future ops metric were to reuse an MR-20 metric name.
+    "AND category = 'ntd' "
     "ORDER BY metric, scope, computed_at DESC, metric_value_id DESC"
 )
 

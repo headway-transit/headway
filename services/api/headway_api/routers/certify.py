@@ -43,13 +43,19 @@ class CertificationResponse(BaseModel):
     audit_event_id: int
 
 
+# category = 'ntd' (migration 0024): only NTD-pipeline findings gate
+# certification. An OPERATIONS finding (e.g. an otp_v0 cadence refusal) is
+# owned and workflowed like any finding, but it is not a gap in any figure
+# a certifying official attests to — ops must never freeze a federal
+# attestation.
 _COUNT_OPEN_BLOCKING = (
     "SELECT count(*) FROM dq.issues "
-    "WHERE severity = 'blocking' AND status <> 'resolved'"
+    "WHERE severity = 'blocking' AND status <> 'resolved' "
+    "AND category = 'ntd'"
 )
 
 _SELECT_TARGETS = (
-    "SELECT metric_value_id, certification_status "
+    "SELECT metric_value_id, certification_status, category "
     "FROM computed.metric_values WHERE metric_value_id = ANY(%s)"
 )
 
@@ -58,9 +64,13 @@ _INSERT_CERTIFICATION = (
     "VALUES (%s, %s, %s) RETURNING certification_id, certified_at"
 )
 
+# AND category = 'ntd': defense in depth on top of the explicit ops
+# refusal below and the database's metric_values_ops_never_certified CHECK
+# (migration 0024) — no code path can flip an OPERATIONS figure to
+# certified.
 _MARK_CERTIFIED = (
     "UPDATE computed.metric_values SET certification_status = 'certified' "
-    "WHERE metric_value_id = ANY(%s)"
+    "WHERE metric_value_id = ANY(%s) AND category = 'ntd'"
 )
 
 
@@ -91,6 +101,7 @@ def certify(
             )
         rows = db.execute(_SELECT_TARGETS, (ids,)).fetchall()
         found = {str(r[0]): r[1] for r in rows}
+        categories = {str(r[0]): r[2] for r in rows}
         missing = [i for i in ids if i not in found]
         if missing:
             raise HTTPException(
@@ -99,6 +110,20 @@ def certify(
                     "Certification refused: some of the figures you selected "
                     "do not exist. Please refresh and try again. Unknown "
                     "ids: " + ", ".join(missing)
+                ),
+            )
+        ops_targets = [i for i in ids if categories[i] != "ntd"]
+        if ops_targets:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Certification refused: some of the figures you selected "
+                    "are operations metrics (for example on-time performance "
+                    "or headway adherence), not NTD reported figures. "
+                    "Operations metrics can never be certified or submitted "
+                    "— certifying one would present an internal service "
+                    "measure as a federal figure. Operations metric ids: "
+                    + ", ".join(ops_targets)
                 ),
             )
         already = [i for i in ids if found[i] == "certified"]

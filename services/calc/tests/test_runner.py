@@ -293,7 +293,8 @@ def test_gapped_period_below_default_coverage_blocks_and_routes_findings(gapped_
     for (sql, params), calc_name in zip(
         dq_inserts, ("vrm_v0", "vrm_v0", "vrh_v0", "vrh_v0", "vrh_v0", "vrh_v0")
     ):
-        issue_type, severity, status, title, description, record_ids = params
+        issue_type, severity, status, title, description, record_ids, category = params
+        assert category == "ntd"
         assert status == "open"
         expected_version = "0.2.0" if calc_name == "vrm_v0" else "0.4.0"
         assert calc_name in description and expected_version in description

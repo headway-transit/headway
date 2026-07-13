@@ -277,3 +277,82 @@ def test_finding_without_source_records_never_deduped(fake_connection) -> None:
     DbWriter(fake_connection).insert_dq_issues([finding])
     [(_, params)] = fake_connection.executed
     assert params[-1] is None
+
+
+def test_upsert_agencies_sql(fake_connection) -> None:
+    from headway_transform.gtfs_static import CanonicalAgency
+
+    DbWriter(fake_connection).upsert_agencies(
+        [CanonicalAgency(agency_id="A1", name="Example Transit", timezone="America/New_York")]
+    )
+    [(sql, params)] = fake_connection.executed
+    assert "INSERT INTO canonical.agencies" in sql
+    assert "ON CONFLICT (agency_id) DO UPDATE" in sql
+    assert params == ("A1", "Example Transit", "America/New_York")
+
+
+def test_insert_trip_updates_conflict_do_nothing_on_natural_key(
+    fake_connection,
+) -> None:
+    from headway_transform.trip_updates import CanonicalTripUpdate
+
+    row = CanonicalTripUpdate(
+        feed_timestamp=TIME,
+        trip_id="T1",
+        route_id="R1",
+        vehicle_id="bus-1",
+        stop_id="S1",
+        stop_sequence=5,
+        predicted_arrival=TIME,
+        arrival_delay_seconds=90,
+        arrival_uncertainty_seconds=30,
+        predicted_departure=None,
+        departure_delay_seconds=None,
+        departure_uncertainty_seconds=None,
+        trip_schedule_relationship="SCHEDULED",
+        stop_schedule_relationship="SCHEDULED",
+        source_record_id="cd" * 32,
+    )
+    DbWriter(fake_connection).insert_trip_updates([row])
+
+    [(sql, params)] = fake_connection.executed
+    assert "INSERT INTO canonical.trip_updates" in sql
+    # Migration 0025 natural key, COALESCEd exactly like the unique index —
+    # replays (at-least-once delivery) write nothing new.
+    assert (
+        "ON CONFLICT (trip_id, feed_timestamp, source_record_id,\n"
+        "             COALESCE(stop_sequence, -1), COALESCE(stop_id, '')) DO NOTHING"
+    ) in sql
+    assert params == (
+        TIME, "T1", "R1", "bus-1", "S1", 5, TIME, 90, 30, None, None, None,
+        "SCHEDULED", "SCHEDULED", "cd" * 32,
+    )
+
+
+def test_insert_trip_update_trip_level_row_binds_nulls(fake_connection) -> None:
+    from headway_transform.trip_updates import CanonicalTripUpdate
+
+    row = CanonicalTripUpdate(
+        feed_timestamp=TIME,
+        trip_id="T-gone",
+        route_id=None,
+        vehicle_id=None,
+        stop_id=None,
+        stop_sequence=None,
+        predicted_arrival=None,
+        arrival_delay_seconds=None,
+        arrival_uncertainty_seconds=None,
+        predicted_departure=None,
+        departure_delay_seconds=None,
+        departure_uncertainty_seconds=None,
+        trip_schedule_relationship="CANCELED",
+        stop_schedule_relationship=None,
+        source_record_id="cd" * 32,
+    )
+    DbWriter(fake_connection).insert_trip_updates([row])
+
+    [(_sql, params)] = fake_connection.executed
+    assert params == (
+        TIME, "T-gone", None, None, None, None, None, None, None, None,
+        None, None, "CANCELED", None, "cd" * 32,
+    )

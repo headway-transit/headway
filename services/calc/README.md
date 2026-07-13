@@ -137,6 +137,33 @@ are `Decimal`, never float.
   for vrm/vrh/upt) and `tests/golden/mr20/` (canned metric rows → the exact
   package JSON), each with its own hand-worked `BASIS.md`.
 
+## OPERATIONS metrics — otp_v0 + headway_adherence_v0 0.1.0 (handoff 0014)
+
+**Not NTD figures — THE HONESTY BOUNDARY.** `headway_calc/passages.py`
+(derive_stop_passages 0.1.0: observed stop passages from
+canonical.vehicle_positions × the observed trips' scheduled stops —
+closest-approach measurement with data-derived cadence/geometry
+tolerances; every unsupportable passage is REFUSED and counted, never
+guessed) feeds `headway_calc/ops.py`: `compute_otp` (percent of passages
+inside the configurable −60 s…+300 s window; TCQSM-cited defaults, per-
+agency `otp_*_tolerance_seconds` knobs, feed-declared agency timezone from
+canonical.agencies or a blocking refusal) and `compute_headway_adherence`
+(cvh — population stdev of headway deviations / mean scheduled headway
+over consecutive observed pairs), each with `*_by_route` scoping under
+minimum sample sizes. Run via `python -m headway_calc.runner --ops` —
+NEVER inside an NTD run. Results persist with
+`computed.metric_values.category='ops'` (stamped from the calc registry in
+`persist.py`), are structurally uncertifiable (migration 0024 CHECK), and
+are hard-excluded from MR-20 (`mr20.py` WHERE) and the public certified
+endpoint; their findings route with `dq.issues.category='ops'` and never
+gate certification. Definitions, verified TCQSM quotes, the measured MBTA
+cadence distribution behind the tolerances, and every Headway-owned
+formula: **`OPS_DEFINITIONS.md`** (this directory) — the ops analogue of
+REGULATORY_TRACKER.md; deliberately NO new tracker rows. Goldens:
+`tests/golden/ops_v0/` (hand-worked `BASIS.md`: clean two-trip world →
+OTP 50.00 %, cvh 0.2200; a refusals case exercising every refusal reason
+→ honest blocking refusals).
+
 ## Unlinked Passenger Trips — upt_v0 0.1.0
 
 Per handoff 0005, `compute_upt(events, operated_trip_ids, *,
@@ -615,6 +642,34 @@ position-derived haversine (trip-distance authority deferred to slice 2 per
 handoff 0001).
 
 ## Verification status
+
+### What ran (2026-07-13, handoff 0014 — OPERATIONS analytics v0)
+
+```
+$ cd services/calc && python3 -m pytest tests/ -q
+496 passed
+```
+
+(was 442 after the 2026-07-13 hardening pass). New: tests/test_passages.py
+(12 — derivation semantics incl. occurrence splitting across service days,
+duplicate-timestamp collapse, endpoint/cadence/radius refusals each
+counted, determinism under permutation), tests/test_ops.py (20 — timezone
+refusals, inclusive window boundaries, past-midnight service-day
+resolution, unscheduled passages never interpolated, per-route minimum
+samples, headway pair exclusions), tests/test_golden_ops.py (6 — the
+hand-worked tests/golden/ops_v0 BASIS: OTP 50.00 %, cvh 0.2200, plus the
+all-refusals case blocking honestly), tests/test_properties_ops.py (4
+Hypothesis properties — derivation accounting identity + permutation
+determinism, OTP exact-share/partition, cvh ≥ 0 and = 0 iff exact),
+tests/test_runner_ops.py (6 — category='ops' stamped on every persisted
+row and routed finding, two-transaction ordering, tolerance provenance,
+CLI --ops), ops-knob loader coverage in tests/test_settings.py, and the
+boundary pins in tests/test_persist.py (category from the registry, never
+the caller) + mr20's hard category='ntd' clause. LIVE run evidence (real
+MBTA OTP + headway adherence, certifiable-path exclusion by attack):
+handoff 0014, "Outputs — backend evidence". Definitions:
+OPS_DEFINITIONS.md (no new REGULATORY_TRACKER rows — ops metrics are not
+regulatory figures).
 
 ### What ran (2026-07-12, handoff 0012 — NTD sampling support)
 

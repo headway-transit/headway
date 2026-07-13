@@ -73,7 +73,7 @@ def test_persist_writes_metric_value_and_lineage_edges():
     mv_sql, mv_params = executed[0]
     assert "INSERT INTO computed.metric_values" in mv_sql
     assert (
-        "(metric, unit, period_start, period_end, scope, value, calc_name, calc_version, detail)"
+        "(metric, unit, period_start, period_end, scope, value, calc_name, calc_version, detail, category)"
         in mv_sql
     )
     # detail is bound as text and cast in SQL — driver-independent JSONB write.
@@ -89,6 +89,7 @@ def test_persist_writes_metric_value_and_lineage_edges():
         "vrm_v0",
         "0.1.0",
         "{}",  # detail-less (0.1.0) result writes the column default
+        "ntd",  # category derived from the calc registry (migration 0024)
     )
     # value passes through as Decimal, never float
     assert isinstance(mv_params[5], Decimal)
@@ -266,3 +267,42 @@ def test_persist_refuses_unknown_calc_name():
     with pytest.raises(ValueError, match="Unknown calc_name"):
         persist_result(conn, unknown, date(2026, 1, 1), date(2026, 1, 31))
     assert conn._cursor.executed == []
+
+
+def test_persist_stamps_ops_category_from_registry_never_caller():
+    """The honesty boundary (handoff 0014 / migration 0024): an ops calc's
+    figure persists with category='ops' — derived from the calc registry
+    inside persist_result, with no caller-supplied way to mislabel it."""
+    from headway_calc.persist import category_for_calc
+
+    assert category_for_calc("otp_v0") == "ops"
+    assert category_for_calc("headway_adherence_v0") == "ops"
+    for ntd_calc in (
+        "vrm_v0", "vrh_v0", "upt_v0", "voms_v0", "pmt_v0",
+        "dr_vrm_v0", "dr_vrh_v0", "dr_upt_v0", "dr_voms_v0", "dr_pmt_v0",
+    ):
+        assert category_for_calc(ntd_calc) == "ntd"
+
+    conn = FakeConnection()
+    result = CalcResult(
+        value=Decimal("97.50"),
+        unit="percent",
+        calc_name="otp_v0",
+        calc_version="0.1.0",
+        input_record_ids=("rec-1",),
+        blocking_issues=(),
+    )
+    persist_result(conn, result, date(2026, 7, 9), date(2026, 7, 10))
+    mv_sql, mv_params = conn._cursor.executed[0]
+    assert "category" in mv_sql
+    assert mv_params[0] == "otp"
+    assert mv_params[-1] == "ops"
+
+
+def test_mr20_select_hard_excludes_ops_category():
+    """The MR-20 package's one read is WHERE-claused to category='ntd'
+    (handoff 0014, design point 1) — a persisted ops figure cannot enter a
+    certifiable package even before the database CHECK is considered."""
+    from headway_calc.mr20 import _SELECT_LATEST_SQL
+
+    assert "category = 'ntd'" in _SELECT_LATEST_SQL

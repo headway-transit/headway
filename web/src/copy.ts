@@ -92,6 +92,10 @@ export const copy = {
     upt: "Unlinked Passenger Trips (UPT)",
     voms: "Vehicles Operated in Maximum Service (VOMS)",
     pmt: "Passenger Miles Traveled (PMT)",
+    /** Ops metrics (handoff 0014): labels mirror services/calc/
+     *  OPS_DEFINITIONS.md — industry-based, never NTD concepts. */
+    otp: "On-time performance (OTP)",
+    headway_adherence: "Headway adherence (cvh)",
   } as Record<string, string>,
 
   /**
@@ -104,6 +108,8 @@ export const copy = {
     unlinked_passenger_trips: "unlinked passenger trips",
     vehicles: "vehicles",
     passenger_miles: "passenger miles",
+    percent: "percent",
+    ratio: "(a ratio)",
   } as Record<string, string>,
 
   metrics: {
@@ -384,7 +390,70 @@ export const copy = {
         `Federal rules allow adjusting for missing trips when ${p}% or fewer are missing.`,
       imbalance_threshold: (p: string) =>
         `Boarding and alighting counts are flagged for review when they differ by more than ${p}%.`,
+      /** ---- ops detail vocabulary (handoff 0014): otp_v0 ---- */
+      on_time_count: (n: string) =>
+        `Observed passages on time (inside the configured window): ${n}.`,
+      early_count: (n: string) =>
+        `Observed passages earlier than the early tolerance: ${n}.`,
+      late_count: (n: string) =>
+        `Observed passages later than the late tolerance: ${n}.`,
+      passages_considered: (n: string) =>
+        `Observed passages with a usable scheduled time: ${n}.`,
+      passages_unscheduled: (n: string) =>
+        `Passages whose schedule row carries no time (counted, never interpolated): ${n}.`,
+      deviation_mean_seconds: (n: string) =>
+        `Average deviation from schedule: ${n} seconds (positive means later than scheduled).`,
+      deviation_median_seconds: (n: string) =>
+        `Median deviation from schedule: ${n} seconds.`,
+      early_tolerance_seconds: (n: string) =>
+        `Early tolerance: a passage up to ${n} seconds early counts as on time (a per-agency setting with recorded provenance).`,
+      late_tolerance_seconds: (n: string) =>
+        `Late tolerance: a passage up to ${n} seconds late counts as on time (a per-agency setting with recorded provenance).`,
+      agency_timezone: (v: string) =>
+        `Schedule times are anchored to the feed-declared agency timezone: ${v}.`,
+      /** ---- ops detail vocabulary: headway_adherence_v0 (cvh) ---- */
+      pairs_counted: (n: string) =>
+        `Consecutive observed headway pairs measured: ${n}.`,
+      stops_covered: (n: string) =>
+        `Stops covered by at least one measured pair: ${n}.`,
+      routes_covered: (n: string) => `Routes covered: ${n}.`,
+      pairs_excluded_unscheduled: (n: string) =>
+        `Pairs left out because one member has no scheduled time (counted, never silent): ${n}.`,
+      pairs_excluded_inverted: (n: string) =>
+        `Pairs left out for a non-positive headway (overtaking or a duplicate passage): ${n}.`,
+      pairs_excluded_over_cap: (n: string) =>
+        `Pairs left out because the scheduled headway exceeds the cap — a service gap, not a headway: ${n}.`,
+      mean_scheduled_headway_seconds: (n: string) =>
+        `Average scheduled headway across measured pairs: ${n} seconds.`,
+      stddev_deviation_seconds: (n: string) =>
+        `Spread of headway deviations (population standard deviation): ${n} seconds.`,
+      max_scheduled_headway_seconds: (n: string) =>
+        `Scheduled-headway cap for a usable pair: ${n} seconds.`,
     } as Record<string, (value: string) => string>,
+    /**
+     * The passage-derivation accounting every ops figure carries
+     * (detail.derivation — the cadence evidence behind the number, handoff
+     * 0014 design point 3). Refusals are the loud part: every count the
+     * derivation refused is shown, never hidden. All numbers verbatim.
+     */
+    derivation: {
+      method: (name: string, version: string) =>
+        `Observed stop passages were derived by ${name} ${version} — a Headway-owned, versioned derivation (services/calc/OPS_DEFINITIONS.md).`,
+      positions: (considered: string, deduplicated: string) =>
+        `Vehicle position reports considered: ${considered} (${deduplicated} repeated reports collapsed).`,
+      occurrences: (n: string, skipped: string, min: string) =>
+        `Vehicle-trip runs observed: ${n} (${skipped} skipped with fewer than ${min} position reports).`,
+      trips: (observed: string, unscheduled: string) =>
+        `Trips observed: ${observed}; ${unscheduled} had no matching schedule (counted, never guessed).`,
+      derived: (derived: string, considered: string) =>
+        `Passages derived: ${derived} of ${considered} scheduled stop events considered.`,
+      refusedNotReached: (n: string, radius: string) =>
+        `${n} passages refused: the vehicle was never observed within ${radius} meters of the stop.`,
+      refusedEndpoint: (n: string) =>
+        `${n} passages refused: the closest approach was at the edge of the observed window, so the true passage may lie outside it.`,
+      refusedCadenceGap: (n: string, gap: string) =>
+        `${n} passages refused: cadence too sparse — position reports around the stop were more than ${gap} seconds apart.`,
+    },
   },
 
   /**
@@ -416,6 +485,78 @@ export const copy = {
     anomalyNote:
       "The calculation flagged something unusual about this figure. Review the details above before trusting it.",
     walkLink: "Walk this number to its raw records",
+  },
+
+  /**
+   * Operations metrics (handoff 0014): the honesty boundary in the UI.
+   * Every `category === "ops"` figure carries the badge, its receipt cites
+   * an INDUSTRY basis (verbatim TCQSM quotes) plus explicitly Headway-owned
+   * definitions — never an FTA manual — and nothing here is certifiable.
+   */
+  ops: {
+    /** The badge, verbatim per the handoff — everywhere an ops figure shows. */
+    badge: "Operations metric — not an NTD reported figure",
+    badgeTooltip:
+      "This number measures how the service ran. It is not a federal reporting figure: it can never be certified, never enters an NTD report or package, and its receipt cites an industry basis, not an FTA manual.",
+    receipt: {
+      basisHeading: "The industry basis inside this number",
+      verifiedIntro: (calcName: string) =>
+        `The industry definitions verified for the ${calcName} calculation, quoted word for word from the published manual cited below:`,
+      basisMissing: (calcName: string) =>
+        `No verified industry quote is on file for the ${calcName} calculation. Regenerate the quotes (npm run extract:quotes) — an operations figure must not ship without its basis.`,
+      ownedHeading: "Headway's own definitions in this number",
+      ownedIntro:
+        "These are Headway's own operational definitions — versioned formulas we publish and stand behind. They are not federal rules and not industry quotes:",
+      ownedLabel: "Headway-owned definition",
+      ownedName: (name: string, version: string) => `${name} ${version}`,
+      formulaLabel: (name: string) => `Formula for ${name}`,
+      ownedReference: (path: string) =>
+        `The full method, and the measured basis for every tolerance, is recorded in ${path}.`,
+    },
+    dashboard: {
+      heading: "Operations metrics",
+      intro:
+        "How the service actually ran, measured from vehicle positions against the schedule. These are operations figures with an industry basis — never NTD reported figures: they cannot be certified and never enter a report package or the public certified feed.",
+      agencyScope: "All routes (agency-wide)",
+      routeScope: (routeId: string) => `Route ${routeId}`,
+      /** The refusal accounting is shown on the card, never hidden. */
+      refusalsHeading: "Refused by the derivation (counted per reason)",
+      columns: {
+        scope: "Route",
+        value: "Value",
+        provenance: "Provenance",
+      },
+      empty:
+        "No operations metrics have been computed yet. They appear here after an ops run (they are computed separately from NTD figures).",
+      otp: {
+        heading: "On-time performance (OTP) by route",
+        description:
+          "The percent of observed stop passages inside the configured on-time window, exactly as the otp_v0 calculation computed it. The chart tracks the agency-wide figure over time; the table lists every route-level figure.",
+        agencyStat: (value: string) =>
+          `${value}% of observed passages were on time, agency-wide.`,
+        breakdown: (onTime: string, early: string, late: string) =>
+          `On time ${onTime} · early ${early} · late ${late} observed passages.`,
+        windowLine: (early: string, late: string) =>
+          `The window: up to ${early} seconds early to ${late} seconds late counts as on time (per-agency settings; the TCQSM basis is quoted in the figure's receipt).`,
+        tableCaption:
+          "Route-level on-time performance, exactly as computed. Values are percents.",
+        empty: "No on-time performance figures have been computed yet.",
+      },
+      cvh: {
+        heading: "Headway adherence (cvh) by route",
+        description:
+          "The coefficient of variation of headway deviations, exactly as the headway_adherence_v0 calculation computed it: the spread of observed-minus-scheduled headways divided by the average scheduled headway. Lower is steadier. Headway serves the number, never a grade — the formula and its industry basis are in the figure's receipt.",
+        agencyStat: (value: string) =>
+          `Agency-wide headway adherence (cvh): ${value}.`,
+        formulaReference:
+          "cvh = population standard deviation of (observed − scheduled headway) ÷ mean scheduled headway — the full definition is in services/calc/OPS_DEFINITIONS.md.",
+        exclusions: (inverted: string, overCap: string, unscheduled: string) =>
+          `Pairs left out and counted: ${inverted} non-positive (overtaking or duplicates) · ${overCap} over the scheduled-headway cap · ${unscheduled} without a scheduled time.`,
+        tableCaption:
+          "Route-level headway adherence (cvh), exactly as computed. Lower is steadier.",
+        empty: "No headway adherence figures have been computed yet.",
+      },
+    },
   },
 
   simulated: {

@@ -249,6 +249,66 @@
       "citation": "Scheduled service — 2026 NTD Full Reporting Policy Manual, p. 139"
     }
   ],
+  "ops:headway_adherence_v0": {
+    "verified": [
+      {
+        "quote": "The bunching effect can be measured in terms of headway adherence—the regularity of transit vehicle arrivals with respect to the scheduled headway. It is calculated as the coefficient of variation of headways cvh: the standard deviation of headways (representing the range of actual headways), divided by the average (mean) headway.",
+        "citation": "Transit Capacity and Quality of Service Manual, Third Edition (TCRP Report 165, Transportation Research Board), p. 5-30 (subscript formatting flattened by text extraction: \"cvh\" is c_v_h in print)."
+      },
+      {
+        "quote": "Headway adherence is calculated as the coefficient of variation of headway deviations (the standard deviation divided by the mean scheduled headway) […]",
+        "citation": "Transit Capacity and Quality of Service Manual, Third Edition (TCRP Report 165, Transportation Research Board), Calculation Example 3 (\"Headway Deviation\"), p. 5-92."
+      },
+      {
+        "quote": "If the dataset included all of the trips for the study time period—for example, when all buses are AVL-equipped and their data are included in the dataset—then the population standard deviation would be used.",
+        "citation": "Transit Capacity and Quality of Service Manual, Third Edition (TCRP Report 165, Transportation Research Board), Calculation Example 3 (\"Headway Deviation\"), p. 5-92."
+      }
+    ],
+    "headway_owned": [
+      {
+        "name": "headway_adherence_v0",
+        "version": "0.1.0",
+        "summary": "Formula (the TCQSM Example-3 formulation, verified above; the pairing rule is Headway-owned):",
+        "formula": "scheduled_headway_i = s_{i+1} − s_i        (scheduled seconds; departure\n                                            preferred, arrival fallback)\nobserved_headway_i  = t_{i+1} − t_i        (observed passage instants)\ndeviation_i         = observed_headway_i − scheduled_headway_i\n\ncvh = pstdev({deviation_i}) / mean({scheduled_headway_i})",
+        "reference": "services/calc/OPS_DEFINITIONS.md"
+      },
+      {
+        "name": "derive_stop_passages",
+        "version": "0.1.0",
+        "summary": "Owner: Headway. No external source defines this derivation. It turns `canonical.vehicle_positions` × the observed trips' scheduled stops (`canonical.stop_times` × `canonical.stops` × `canonical.trips`) into observed stop passages. Deterministic; versioned; changing any tolerance mints a new version. Implementation: `headway_calc/passages.py`.",
+        "formula": null,
+        "reference": "services/calc/OPS_DEFINITIONS.md"
+      }
+    ]
+  },
+  "ops:otp_v0": {
+    "verified": [
+      {
+        "quote": "this edition of the TCQSM defines 'on-time' as a departure from a timepoint as 1 min early to 5 min late or an arrival at the route terminal up to 5 min late.",
+        "citation": "Transit Capacity and Quality of Service Manual, Third Edition (TCRP Report 165, Transportation Research Board), Chapter 5 \"Quality of Service Methods\", p. 5-29 (margin note: \"TCQSM definition of 'on-time.'\")."
+      },
+      {
+        "quote": "on-time performance is the percent of schedule deviations (actual departure minus scheduled departure) that fall within a defined range (e.g., 1 min early to 5 min late)",
+        "citation": "Transit Capacity and Quality of Service Manual, Third Edition (TCRP Report 165, Transportation Research Board), p. 5-28 (the reliability-measures overview)."
+      }
+    ],
+    "headway_owned": [
+      {
+        "name": "otp_v0",
+        "version": "0.1.0",
+        "summary": "Formula (window verified above; everything else Headway-owned):",
+        "formula": "deviation_i = observed_passage_i − scheduled_time_i          (seconds)\non_time_i   = (−E ≤ deviation_i ≤ L)                          E, L ≥ 0\nOTP         = 100 × |{i : on_time_i}| / N                     N = usable passages",
+        "reference": "services/calc/OPS_DEFINITIONS.md"
+      },
+      {
+        "name": "derive_stop_passages",
+        "version": "0.1.0",
+        "summary": "Owner: Headway. No external source defines this derivation. It turns `canonical.vehicle_positions` × the observed trips' scheduled stops (`canonical.stop_times` × `canonical.stops` × `canonical.trips`) into observed stop passages. Deterministic; versioned; changing any tolerance mints a new version. Implementation: `headway_calc/passages.py`.",
+        "formula": null,
+        "reference": "services/calc/OPS_DEFINITIONS.md"
+      }
+    ]
+  },
   "pmt_v0": [
     {
       "quote": "Passenger Miles Traveled (PMT) is the sum of the distances each passenger traveled during the year.",

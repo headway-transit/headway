@@ -162,6 +162,13 @@ export interface MetricValueFilters {
   metric?: string;
   period_start?: string;
   period_end?: string;
+  /**
+   * "ntd" | "ops" (handoff 0014): the server-side honesty-boundary filter.
+   * The certify cockpit passes "ntd" so operations metrics — which the API
+   * and the database refuse to certify — never even appear beside a
+   * signature checkbox.
+   */
+  category?: string;
 }
 
 export function listMetricValues(
@@ -171,6 +178,7 @@ export function listMetricValues(
   if (filters.metric) params.set("metric", filters.metric);
   if (filters.period_start) params.set("period_start", filters.period_start);
   if (filters.period_end) params.set("period_end", filters.period_end);
+  if (filters.category) params.set("category", filters.category);
   const qs = params.toString();
   return request<MetricValue[]>(
     "GET",

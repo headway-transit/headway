@@ -40,8 +40,17 @@ import {
   VOMS_ATYPICAL_QUOTE_SNIPPET,
 } from "../regulatory/drRules";
 
+// FTA entries only: the "ops:" keys carry a different shape (verified +
+// headway_owned bundles) and are pinned by src/test/opsQuotes.test.ts.
 const quotesByCalc: Record<string, { quote: string; citation: string }[]> =
-  quotes;
+  Object.fromEntries(
+    Object.entries(quotes as Record<string, unknown>).filter(
+      ([key, value]) => !key.startsWith("ops:") && Array.isArray(value),
+    ),
+  ) as Record<string, { quote: string; citation: string }[]>;
+
+/** The ops calcs whose basis lives under the "ops:" namespace instead. */
+const OPS_FIXTURE_CALCS = new Set(["otp_v0", "headway_adherence_v0"]);
 
 const trackerPath = join(
   dirname(fileURLToPath(import.meta.url)),
@@ -72,18 +81,23 @@ function fixtureCalcNames(): string[] {
 describe("regulatory quotes (src/regulatory/quotes.json)", () => {
   it("has at least one verified quote for EVERY calc_name in the web fixtures — no silent absence", () => {
     const names = fixtureCalcNames();
-    // Guard the guard: the fixtures must actually name the position calcs
-    // AND the four DR calcs the fixtures carry (handoff 0013).
+    // Guard the guard: the fixtures must actually name the position calcs,
+    // the four DR calcs (handoff 0013), and the two ops calcs (handoff
+    // 0014 — whose basis is pinned under the "ops:" namespace by
+    // src/test/opsQuotes.test.ts, not here).
     expect(names).toEqual([
       "dr_pmt_v0",
       "dr_voms_v0",
       "dr_vrh_v0",
       "dr_vrm_v0",
+      "headway_adherence_v0",
+      "otp_v0",
       "upt_v0",
       "vrh_v0",
       "vrm_v0",
     ]);
     for (const name of names) {
+      if (OPS_FIXTURE_CALCS.has(name)) continue; // ops namespace, see above
       const entry = quotesByCalc[name];
       expect(
         entry,

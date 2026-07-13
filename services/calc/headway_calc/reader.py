@@ -41,7 +41,13 @@ from __future__ import annotations
 
 from datetime import date, datetime, timezone
 
-from headway_calc.types import DrTrip, PassengerEvent, StopTime, VehiclePosition
+from headway_calc.types import (
+    DrTrip,
+    OpsScheduledStop,
+    PassengerEvent,
+    StopTime,
+    VehiclePosition,
+)
 
 #: Column names and order per handoff 0001 (canonical.vehicle_positions) plus
 #: canonical.trips.block_id (handoff 0003, migration 0011) and
@@ -119,6 +125,33 @@ _SELECT_DR_TRIPS_SQL = (
     "FROM canonical.dr_trips "
     "WHERE pickup_timestamp >= %s AND pickup_timestamp < %s "
     "ORDER BY pickup_timestamp, dr_trip_id, source_record_id"
+)
+
+
+#: Ops schedule (handoff 0014): the scheduled stops — WITH times and the
+#: trip's route/direction — of every trip observed operating in
+#: canonical.vehicle_positions over the period. Input to the observed-
+#: passage derivation (headway_calc.passages) and the ops calcs
+#: (headway_calc.ops). LEFT JOINs: unknown stops/trips yield NULLs the
+#: derivation counts loudly, never guesses. Deterministic ORDER BY
+#: (trip_id, stop_sequence — the PK — then stop_id).
+_SELECT_OPS_SCHEDULE_SQL = (
+    "SELECT st.trip_id, st.stop_id, st.stop_sequence, "
+    "s.latitude, s.longitude, st.arrival_seconds, st.departure_seconds, "
+    "t.route_id, t.direction_id "
+    "FROM canonical.stop_times AS st "
+    "LEFT JOIN canonical.stops AS s ON s.stop_id = st.stop_id "
+    "LEFT JOIN canonical.trips AS t ON t.trip_id = st.trip_id "
+    "WHERE st.trip_id IN ("
+    "SELECT DISTINCT trip_id FROM canonical.vehicle_positions "
+    "WHERE trip_id IS NOT NULL AND time >= %s AND time < %s) "
+    "ORDER BY st.trip_id, st.stop_sequence, st.stop_id"
+)
+
+#: The DISTINCT feed-declared agency timezones (canonical.agencies,
+#: migration 0026) — otp_v0's schedule anchor. Deterministic ORDER BY.
+_SELECT_AGENCY_TIMEZONES_SQL = (
+    "SELECT DISTINCT timezone FROM canonical.agencies ORDER BY timezone"
 )
 
 
@@ -306,6 +339,54 @@ def load_dr_trips(
         )
         for row in cur.fetchall()
     ]
+
+
+def load_ops_schedule(
+    conn,
+    period_start: date,
+    period_end: date,
+) -> list[OpsScheduledStop]:
+    """Load the scheduled stops (with times, coordinates and route/
+    direction) of every trip observed operating in the half-open period
+    [start, end) — the ops passage derivation's schedule input (handoff
+    0014).
+
+    One OpsScheduledStop per canonical.stop_times row of an observed trip;
+    NULLs pass through as None (LEFT JOINs — a coordinate, schedule time,
+    or trip linkage is never guessed). Deterministic order (trip_id,
+    stop_sequence, stop_id). Refuses (ValueError) an empty or inverted
+    period.
+    """
+    _refuse_bad_period(period_start, period_end)
+    cur = conn.cursor()
+    cur.execute(
+        _SELECT_OPS_SCHEDULE_SQL,
+        (_utc_midnight(period_start), _utc_midnight(period_end)),
+    )
+    return [
+        OpsScheduledStop(
+            trip_id=row[0],
+            stop_id=row[1],
+            stop_sequence=row[2],
+            latitude=row[3],
+            longitude=row[4],
+            arrival_seconds=row[5],
+            departure_seconds=row[6],
+            route_id=row[7],
+            direction_id=row[8],
+        )
+        for row in cur.fetchall()
+    ]
+
+
+def load_agency_timezones(conn) -> list[str]:
+    """The DISTINCT feed-declared agency timezones (canonical.agencies,
+    migration 0026), in deterministic order — otp_v0 refuses when this is
+    empty or holds more than one distinct zone (a schedule anchor is never
+    guessed)."""
+    cur = conn.cursor()
+    cur.execute(_SELECT_AGENCY_TIMEZONES_SQL, ())
+    return [row[0] for row in cur.fetchall()]
 
 
 def load_operated_trip_ids(

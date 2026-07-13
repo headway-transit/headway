@@ -570,3 +570,72 @@ def test_dr_trips_hypertable_nulls_preserved_and_structural_checks():
     assert re.search(
         r"source_record_id\s+TEXT NOT NULL REFERENCES raw\.records", sql_0021
     ), "canonical.dr_trips.source_record_id must reference raw.records"
+
+
+def test_ops_category_boundary_structural():
+    # Handoff 0014 / migration 0024: the OPERATIONS/NTD honesty boundary.
+    sql_0024 = (MIGRATIONS_DIR / "0024_ops_metric_category.sql").read_text(
+        encoding="utf-8"
+    )
+    # category on computed.metric_values: NOT NULL, defaulted 'ntd', closed
+    # vocabulary.
+    assert re.search(
+        r"ALTER TABLE computed\.metric_values\s+ADD COLUMN category TEXT "
+        r"NOT NULL DEFAULT 'ntd'",
+        sql_0024,
+    )
+    assert re.search(r"CHECK \(category IN \('ntd', 'ops'\)\)", sql_0024)
+    # THE structural guarantee: a certified ops figure is unrepresentable.
+    assert "metric_values_ops_never_certified" in sql_0024
+    assert re.search(
+        r"CHECK \(NOT \(category = 'ops' AND certification_status = "
+        r"'certified'\)\)",
+        sql_0024,
+    )
+    # dq.issues.category: ops findings never gate certification.
+    assert re.search(
+        r"ALTER TABLE dq\.issues\s+ADD COLUMN category TEXT NOT NULL "
+        r"DEFAULT 'ntd'",
+        sql_0024,
+    )
+    # The two ops knobs seeded, integer-typed, ops-labeled.
+    for knob in ("otp_early_tolerance_seconds", "otp_late_tolerance_seconds"):
+        assert f"('{knob}'" in sql_0024, f"{knob} must be seeded"
+    assert "OPERATIONS metric knob" in sql_0024
+    assert "OPS_DEFINITIONS.md" in sql_0024
+
+
+def test_trip_updates_hypertable_natural_key_and_prediction_labeling():
+    # Handoff 0014 / migration 0025: canonical.trip_updates — predictions,
+    # labeled as predictions, replay-idempotent.
+    sql_0025 = (MIGRATIONS_DIR / "0025_trip_updates.sql").read_text(
+        encoding="utf-8"
+    )
+    assert re.search(r"CREATE TABLE\s+canonical\.trip_updates\b", sql_0025)
+    assert "create_hypertable('canonical.trip_updates', 'feed_timestamp')" in sql_0025
+    # Predicted times are named as predictions and stay NULLABLE (a time is
+    # never derived from delay + schedule in the normalizer).
+    for column in ("predicted_arrival", "predicted_departure"):
+        assert re.search(rf"{column}\s+TIMESTAMPTZ,", sql_0025), (
+            f"{column} must be a nullable TIMESTAMPTZ"
+        )
+    assert "PREDICTIONS, NOT OBSERVATIONS" in sql_0025
+    # Replay natural key COALESCEs the nullable stop identity (plain unique
+    # indexes treat NULLs as distinct — replays would duplicate).
+    assert "trip_updates_natural_key_uq" in sql_0025
+    assert "COALESCE(stop_sequence, -1)" in sql_0025
+    assert "COALESCE(stop_id, '')" in sql_0025
+    assert re.search(
+        r"source_record_id\s+TEXT NOT NULL REFERENCES raw\.records", sql_0025
+    )
+
+
+def test_agencies_feed_declared_timezone():
+    # Handoff 0014 / migration 0026: canonical.agencies — the feed-declared
+    # timezone otp_v0 anchors schedule times with (never guessed).
+    sql_0026 = (MIGRATIONS_DIR / "0026_agencies.sql").read_text(
+        encoding="utf-8"
+    )
+    assert re.search(r"CREATE TABLE\s+canonical\.agencies\b", sql_0026)
+    assert re.search(r"timezone\s+TEXT NOT NULL", sql_0026)
+    assert re.search(r"agency_id TEXT PRIMARY KEY", sql_0026)

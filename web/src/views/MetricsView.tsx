@@ -4,10 +4,11 @@ import { ApiError, listMetricValues } from "../api/client";
 import type { MetricValue } from "../api/types";
 import { canCertify, useSession } from "../auth/session";
 import { DrScopeBadge } from "../components/DrScopeBadge";
+import { OpsBadge } from "../components/OpsBadge";
 import { Receipt } from "../components/Receipt";
 import { SimulatedBadge } from "../components/SimulatedBadge";
 import { copy } from "../copy";
-import { isPreVerification, isSimulated } from "../detail";
+import { isOps, isPreVerification, isSimulated } from "../detail";
 import { parseDrScope } from "../regulatory/drRules";
 
 function metricLabel(code: string): string {
@@ -125,6 +126,14 @@ export function MetricsView() {
                           <>
                             {" "}
                             <DrScopeBadge scope={v.scope} />
+                          </>
+                        )}
+                        {/* The ops badge (handoff 0014): an operations
+                            metric never looks like an NTD figure. */}
+                        {isOps(v) && (
+                          <>
+                            {" "}
+                            <OpsBadge />
                           </>
                         )}
                         {isSimulated(v.detail) && (

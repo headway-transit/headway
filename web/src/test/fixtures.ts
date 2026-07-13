@@ -223,6 +223,115 @@ export const drPmtModeValue: MetricValue = {
 };
 
 /**
+ * Operations metrics (handoff 0014): category='ops' rows exactly as the
+ * live API serves them (real MBTA figures from the 2026-07-13 ops run —
+ * agency OTP 54.10 %, agency cvh 0.3010; detail shapes verbatim from
+ * GET /metrics/values?category=ops including the full derive_stop_passages
+ * accounting with its three refusal reasons). Never certifiable: the
+ * database CHECK makes a certified ops row unrepresentable.
+ */
+
+/** The shared derivation accounting every ops figure carries. */
+export const opsDerivationDetail = {
+  occurrences: 29697,
+  trips_observed: 26635,
+  derivation_name: "derive_stop_passages",
+  passages_derived: 535756,
+  stops_considered: 692465,
+  derivation_version: "0.1.0",
+  stop_radius_meters: 100.0,
+  refused_cadence_gap: 3880,
+  refused_not_reached: 131384,
+  positions_considered: 2268231,
+  positions_deduplicated: 276757,
+  trips_without_schedule: 4260,
+  max_passage_gap_seconds: 120.0,
+  min_occurrence_positions: 3,
+  occurrence_split_seconds: 10800.0,
+  stops_missing_coordinates: 0,
+  refused_endpoint_unbounded: 21445,
+  occurrences_skipped_few_positions: 1600,
+};
+
+export const opsOtpAgencyValue: MetricValue = {
+  metric_value_id: "mv-ops-otp-agency",
+  metric: "otp",
+  unit: "percent",
+  period_start: "2026-07-01",
+  period_end: "2026-08-01",
+  scope: "agency",
+  value: "54.10",
+  calc_name: "otp_v0",
+  calc_version: "0.1.0",
+  computed_at: "2026-07-13T16:16:42Z",
+  certification_status: "uncertified",
+  category: "ops",
+  detail: {
+    derivation: opsDerivationDetail,
+    late_count: 151267,
+    early_count: 94663,
+    on_time_count: 289826,
+    agency_timezone: "America/New_York",
+    passages_considered: 535756,
+    passages_unscheduled: 0,
+    deviation_mean_seconds: "179.66",
+    late_tolerance_seconds: 300,
+    early_tolerance_seconds: 60,
+    deviation_median_seconds: "143.00",
+  },
+};
+
+/** A route-level OTP row (route:1 = 44.16 in the live run). */
+export const opsOtpRouteValue: MetricValue = {
+  ...opsOtpAgencyValue,
+  metric_value_id: "mv-ops-otp-route-1",
+  scope: "route:1",
+  value: "44.16",
+};
+
+export const opsCvhAgencyValue: MetricValue = {
+  metric_value_id: "mv-ops-cvh-agency",
+  metric: "headway_adherence",
+  unit: "ratio",
+  period_start: "2026-07-01",
+  period_end: "2026-08-01",
+  scope: "agency",
+  value: "0.3010",
+  calc_name: "headway_adherence_v0",
+  calc_version: "0.1.0",
+  computed_at: "2026-07-13T16:16:42Z",
+  certification_status: "uncertified",
+  category: "ops",
+  detail: {
+    derivation: opsDerivationDetail,
+    pairs_counted: 494457,
+    stops_covered: 7146,
+    routes_covered: 172,
+    pairs_excluded_inverted: 20143,
+    pairs_excluded_over_cap: 10020,
+    stddev_deviation_seconds: "524.52",
+    pairs_excluded_unscheduled: 0,
+    max_scheduled_headway_seconds: 7200,
+    mean_scheduled_headway_seconds: "1742.47",
+  },
+};
+
+/** A route-level cvh row (route:66 = 0.4476 in the live run). */
+export const opsCvhRouteValue: MetricValue = {
+  ...opsCvhAgencyValue,
+  metric_value_id: "mv-ops-cvh-route-66",
+  scope: "route:66",
+  value: "0.4476",
+};
+
+export const opsValues: MetricValue[] = [
+  opsOtpAgencyValue,
+  opsOtpRouteValue,
+  opsCvhAgencyValue,
+  opsCvhRouteValue,
+];
+
+/**
  * Provenance tree shaped per LineageNode: transform_name/version describe the
  * transform that PRODUCED the node; raw.records rows are leaves.
  */

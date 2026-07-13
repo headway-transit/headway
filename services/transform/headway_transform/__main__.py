@@ -41,6 +41,7 @@ from typing import Optional
 
 from .consumer import (
     TOPIC_DR_TRIPS,
+    TOPIC_GTFS_RT_TRIP_UPDATES,
     TOPIC_GTFS_RT_VEHICLE_POSITIONS,
     TOPIC_GTFS_STATIC_FEED,
     TOPIC_TIDES_PASSENGER_EVENTS,
@@ -55,6 +56,7 @@ logger = logging.getLogger("headway_transform")
 
 TOPICS = [
     TOPIC_GTFS_RT_VEHICLE_POSITIONS,
+    TOPIC_GTFS_RT_TRIP_UPDATES,
     TOPIC_GTFS_STATIC_FEED,
     TOPIC_TIDES_PASSENGER_EVENTS,
     TOPIC_DR_TRIPS,

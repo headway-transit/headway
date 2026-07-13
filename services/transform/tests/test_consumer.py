@@ -257,3 +257,32 @@ def test_writer_failure_rolls_back_and_quarantines_then_continues() -> None:
     assert len(dq) == 2
     assert all(params[0] == "transform_failure" for _sql, params in dq)
     assert all(params[1] == "blocking" for _sql, params in dq)
+
+
+def build_tu_payload() -> bytes:
+    feed = gtfs_realtime_pb2.FeedMessage()
+    feed.header.gtfs_realtime_version = "2.0"
+    feed.header.timestamp = 1_760_000_000
+    entity = feed.entity.add()
+    entity.id = "e1"
+    entity.trip_update.trip.trip_id = "T1"
+    stu = entity.trip_update.stop_time_update.add()
+    stu.stop_id = "S1"
+    stu.stop_sequence = 3
+    stu.arrival.time = 1_760_000_600
+    return feed.SerializeToString()
+
+
+def test_trip_updates_topic_routed_to_canonical_trip_updates() -> None:
+    fake = FakeConnection()
+    source = FakeMessageSource(
+        [("raw.gtfs_rt.trip_updates", b"key", envelope_json(build_tu_payload()))]
+    )
+    processed = run_loop(source, DbWriter(fake))
+
+    assert processed == 1
+    assert len(fake.sql_for("raw.records")) == 1
+    assert len(fake.sql_for("canonical.trip_updates")) == 1
+    assert len(fake.sql_for("lineage.edges")) == 1
+    assert fake.sql_for("dq.issues") == []
+    assert fake.commits == 1

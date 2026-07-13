@@ -43,9 +43,10 @@ import {
 import type { ChartSeries, SeriesPoint } from "../components/charts/TimeSeriesChart";
 import { SeverityStackedBar } from "../components/charts/SeverityStackedBar";
 import type { StackedBar } from "../components/charts/SeverityStackedBar";
+import { OpsBadge } from "../components/OpsBadge";
 import { SimulatedBadge } from "../components/SimulatedBadge";
 import { copy } from "../copy";
-import { isSimulated } from "../detail";
+import { isOps, isSimulated, refusalLines } from "../detail";
 import { detailValueToString, ratioToPercentString } from "../format";
 
 function metricLabel(code: string): string {
@@ -215,6 +216,140 @@ function ChartFilterRow({
   );
 }
 
+/**
+ * Plain-language scope label for an ops row ("route:66" → "Route 66"); an
+ * unknown scope shape falls back to the raw scope, honestly.
+ */
+function opsScopeLabel(scope: string): string {
+  if (scope === "agency") return copy.ops.dashboard.agencyScope;
+  if (scope.startsWith("route:")) {
+    return copy.ops.dashboard.routeScope(scope.slice("route:".length));
+  }
+  return scope;
+}
+
+/**
+ * One operations-metric card (handoff 0014, design point 5): the badge, the
+ * latest agency-wide figure VERBATIM with its plain-language context, the
+ * agency figure over time (existing chart component, validated palette),
+ * the derivation's refusal accounting — shown, never hidden — and a table
+ * of every route-level figure with its provenance link.
+ */
+function OpsMetricCard({
+  values,
+  heading,
+  description,
+  emptyText,
+  tableCaption,
+  statLines,
+  seriesColor,
+  unit,
+  yMax,
+  valueSuffix,
+}: {
+  /** Every ops row of ONE metric in the selected date slice, period-sorted. */
+  values: MetricValue[];
+  heading: string;
+  description: string;
+  emptyText: string;
+  tableCaption: string;
+  /** Plain-language context lines for the latest agency figure (counts and
+   *  thresholds drawn from its detail — every number verbatim). */
+  statLines: (latest: MetricValue) => string[];
+  /** A validated --series-* token — color follows the entity, never rank. */
+  seriesColor: string;
+  unit: string;
+  yMax?: number;
+  /** "%" for percent figures — a display label around the verbatim string. */
+  valueSuffix?: string;
+}) {
+  const agencyRows = values.filter((v) => v.scope === "agency");
+  const latest =
+    agencyRows.length > 0 ? agencyRows[agencyRows.length - 1] : null;
+  // The latest period's route-level rows, route-id order (stable, and no
+  // figure is ever parsed to rank it).
+  const routeRows = latest
+    ? values
+        .filter(
+          (v) =>
+            v.scope.startsWith("route:") &&
+            v.period_start === latest.period_start &&
+            v.period_end === latest.period_end,
+        )
+        .sort((a, b) => (a.scope < b.scope ? -1 : 1))
+    : [];
+  const refusals = latest ? refusalLines(latest.detail) : [];
+  const series: ChartSeries[] = [
+    {
+      id: "agency",
+      label: copy.ops.dashboard.agencyScope,
+      color: seriesColor,
+      points: seriesPoints(agencyRows).map((p) => ({
+        ...p,
+        display: `${p.display}${valueSuffix ?? ""}`,
+      })),
+    },
+  ];
+
+  return (
+    <ChartCard
+      heading={heading}
+      description={description}
+      badge={<OpsBadge />}
+      hint={copy.dashboard.chartReaderHint}
+      table={{
+        caption: tableCaption,
+        columns: [
+          copy.ops.dashboard.columns.scope,
+          copy.ops.dashboard.columns.value,
+          copy.dashboard.columns.provenance,
+        ],
+        rows: [...(latest ? [latest] : []), ...routeRows].map((v) => [
+          opsScopeLabel(v.scope),
+          <span className="figure" key="v">
+            {`${v.value}${valueSuffix ?? ""}`}
+          </span>,
+          <ExplainLink value={v} key="p" />,
+        ]),
+      }}
+    >
+      {!latest ? (
+        <p>{emptyText}</p>
+      ) : (
+        <>
+          {/* The figure verbatim, in plain language, with its provenance. */}
+          {statLines(latest).map((line, i) => (
+            <p className={i === 0 ? "ops-stat" : "chart-desc"} key={line}>
+              {line}
+            </p>
+          ))}
+          <p>
+            <ExplainLink value={latest} />
+          </p>
+          <TimeSeriesChart
+            series={series}
+            ariaLabel={heading}
+            unit={unit}
+            yMax={yMax}
+          />
+          {/* The refusal accounting (design point 3): the cadence evidence
+              behind the figure is stated on the card, never hidden. */}
+          {refusals.length > 0 && (
+            <>
+              <h3>{copy.ops.dashboard.refusalsHeading}</h3>
+              <ul className="ops-refusals">
+                {refusals.map((line) => (
+                  <li key={line}>{line}</li>
+                ))}
+              </ul>
+            </>
+          )}
+        </>
+      )}
+    </ChartCard>
+  );
+}
+
 function StatTile({ values, metric }: { values: MetricValue[]; metric: string }) {
   const latest = latestCertified(values, metric);
   if (!latest) {
@@ -283,6 +418,7 @@ export function DashboardView() {
     all
       .filter(
         (v) =>
+          !isOps(v) &&
           v.metric === metric &&
           overlapsRange(v.period_start, v.period_end, fromDate, toDate),
       )
@@ -291,6 +427,21 @@ export function DashboardView() {
   const uptValues = byMetric("upt");
   const vrmValues = byMetric("vrm");
   const vrhValues = byMetric("vrh");
+
+  // ---- Operations metrics (handoff 0014): the ops slice of the same
+  //      fetch, split on the CATEGORY field (the honesty boundary), same
+  //      date-range slice as every chart below the filter row. ----
+  const opsByMetric = (metric: string) =>
+    all
+      .filter(
+        (v) =>
+          isOps(v) &&
+          v.metric === metric &&
+          overlapsRange(v.period_start, v.period_end, fromDate, toDate),
+      )
+      .sort((a, b) => (a.period_start < b.period_start ? -1 : 1));
+  const otpValues = opsByMetric("otp");
+  const cvhValues = opsByMetric("headway_adherence");
 
   // ---- UPT: one series, slot 1 (the title names it; no legend box) ----
   const uptSeries: ChartSeries[] = [
@@ -662,6 +813,86 @@ export function DashboardView() {
                 </p>
               </ChartCard>
             </div>
+
+            {/* ---- Operations metrics (handoff 0014, design point 5):
+                 route-level OTP + headway adherence. Every card carries the
+                 ops badge; refusal accounting is shown, never hidden; and
+                 nothing in this section can be certified — the boundary is
+                 structural (category='ops'). ---- */}
+            <section aria-label={copy.ops.dashboard.heading}>
+              <h2>{copy.ops.dashboard.heading}</h2>
+              <p className="chart-desc">{copy.ops.dashboard.intro}</p>
+              {otpValues.length === 0 && cvhValues.length === 0 ? (
+                <p>{copy.ops.dashboard.empty}</p>
+              ) : (
+                <div className="dashboard-grid">
+                  <OpsMetricCard
+                    values={otpValues}
+                    heading={copy.ops.dashboard.otp.heading}
+                    description={copy.ops.dashboard.otp.description}
+                    emptyText={copy.ops.dashboard.otp.empty}
+                    tableCaption={copy.ops.dashboard.otp.tableCaption}
+                    seriesColor="var(--series-1)"
+                    unit="%"
+                    yMax={100}
+                    valueSuffix="%"
+                    statLines={(latest) => {
+                      const d = latest.detail ?? {};
+                      const lines = [
+                        copy.ops.dashboard.otp.agencyStat(latest.value),
+                      ];
+                      if ("on_time_count" in d) {
+                        lines.push(
+                          copy.ops.dashboard.otp.breakdown(
+                            detailValueToString(d.on_time_count),
+                            detailValueToString(d.early_count),
+                            detailValueToString(d.late_count),
+                          ),
+                        );
+                      }
+                      if ("early_tolerance_seconds" in d) {
+                        lines.push(
+                          copy.ops.dashboard.otp.windowLine(
+                            detailValueToString(d.early_tolerance_seconds),
+                            detailValueToString(d.late_tolerance_seconds),
+                          ),
+                        );
+                      }
+                      return lines;
+                    }}
+                  />
+                  <OpsMetricCard
+                    values={cvhValues}
+                    heading={copy.ops.dashboard.cvh.heading}
+                    description={copy.ops.dashboard.cvh.description}
+                    emptyText={copy.ops.dashboard.cvh.empty}
+                    tableCaption={copy.ops.dashboard.cvh.tableCaption}
+                    seriesColor="var(--series-2)"
+                    unit={unitLabel("ratio")}
+                    statLines={(latest) => {
+                      const d = latest.detail ?? {};
+                      const lines = [
+                        copy.ops.dashboard.cvh.agencyStat(latest.value),
+                        // No interpretation bands: OPS_DEFINITIONS.md defines
+                        // none ("Headway serves the number, never a grade"),
+                        // so the raw value ships with its formula reference.
+                        copy.ops.dashboard.cvh.formulaReference,
+                      ];
+                      if ("pairs_excluded_inverted" in d) {
+                        lines.push(
+                          copy.ops.dashboard.cvh.exclusions(
+                            detailValueToString(d.pairs_excluded_inverted),
+                            detailValueToString(d.pairs_excluded_over_cap),
+                            detailValueToString(d.pairs_excluded_unscheduled),
+                          ),
+                        );
+                      }
+                      return lines;
+                    }}
+                  />
+                </div>
+              )}
+            </section>
             </>
           )}
         </>

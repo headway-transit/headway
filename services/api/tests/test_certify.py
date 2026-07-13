@@ -148,3 +148,68 @@ def test_audit_helper_refuses_anonymous_events(fake_db):
             subject_id=None,
             detail={},
         )
+
+
+def test_certify_refuses_ops_figures_with_plain_language_409(client, fake_db):
+    """The honesty boundary (handoff 0014 / migration 0024): an OPERATIONS
+    figure can never be certified — refused explicitly, before any write,
+    with nothing left behind."""
+    ntd = fake_db.add_metric_value(metric="vrm")
+    ops = fake_db.add_metric_value(
+        metric="otp", unit="percent", calc_name="otp_v0", category="ops"
+    )
+    r = client.post(
+        "/certifications",
+        json={
+            "metric_value_ids": [ntd["metric_value_id"], ops["metric_value_id"]],
+            "attestation": "Attempting to certify an operations metric.",
+        },
+        headers=auth_header(fake_db, "cora"),
+    )
+    assert r.status_code == 409
+    detail = r.json()["detail"]
+    assert "operations metrics" in detail
+    assert "never be certified" in detail
+    assert ops["metric_value_id"] in detail
+    # Nothing changed for ANY selected figure; no cert row, no audit row.
+    assert ntd["certification_status"] == "uncertified"
+    assert ops["certification_status"] == "uncertified"
+    assert fake_db.certifications == []
+    assert [e for e in fake_db.audit_events if e["action"] == "certify"] == []
+
+
+def test_open_blocking_ops_finding_never_gates_ntd_certification(client, fake_db):
+    """dq.issues.category (migration 0024): an unresolved blocking
+    OPERATIONS finding (e.g. an otp_v0 cadence refusal) must not freeze
+    federal certification — only category='ntd' blocking issues gate."""
+    mv = fake_db.add_metric_value()
+    fake_db.add_dq_issue(
+        severity="blocking",
+        status="open",
+        category="ops",
+        issue_type="no_observed_passages",
+        title="OTP refused for July — cadence cannot support any passage",
+    )
+    r = client.post(
+        "/certifications",
+        json={
+            "metric_value_ids": [mv["metric_value_id"]],
+            "attestation": "June figures verified.",
+        },
+        headers=auth_header(fake_db, "cora"),
+    )
+    assert r.status_code == 201
+    assert mv["certification_status"] == "certified"
+
+    # And an NTD blocking issue still refuses — the gate itself is intact.
+    mv2 = fake_db.add_metric_value(metric="vrh", unit="hours")
+    fake_db.add_dq_issue(severity="blocking", status="open", category="ntd")
+    r2 = client.post(
+        "/certifications",
+        json={
+            "metric_value_ids": [mv2["metric_value_id"]],
+            "attestation": "July figures verified.",
+        },
+        headers=auth_header(fake_db, "cora"),
+    )
+    assert r2.status_code == 409

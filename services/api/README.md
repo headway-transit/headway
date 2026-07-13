@@ -14,7 +14,7 @@ preserved end to end; floating point never touches a figure).
 | Method | Path | Role required | What it does |
 | --- | --- | --- | --- |
 | POST | `/auth/login` | none (credentials) | Local-account login; returns a short-lived HS256 session token. Success/failure is audit-logged. |
-| GET | `/metrics/values` | any signed-in role | Computed values from `computed.metric_values`; filter by `metric`, `period_start`, `period_end`. `value` is a string. |
+| GET | `/metrics/values` | any signed-in role | Computed values from `computed.metric_values`; filter by `metric`, `period_start`, `period_end`, `category` (`ntd`\|`ops`, migration 0024). `value` is a string. Every row carries its `category` — the UI badges `ops` rows "Operations metric — not an NTD reported figure". |
 | GET | `/metrics/values/{id}/lineage` | any signed-in role, **or** machine key scope `read:metrics` | "Explain this number": recursive traversal of `lineage.edges` (recursive CTE) from the figure down to `raw.records`, returned as a tree `{kind, id, transform_name, transform_version, inputs: [...]}`. A figure with no lineage is a loud 500, never an empty 200. Machine path rate-limited per key + audited (actor `key:<prefix>`); every auth failure is one generic 401 that never reveals which credential type was expected. |
 | POST | `/certifications` | `certifying_official` only | Inserts `cert.certifications`, marks the figures `certified`, and writes the `audit.events` row — all in ONE transaction. Refuses with 409 while any blocking DQ issue is unresolved. |
 | GET | `/dq/issues` | any signed-in role | Data-quality issues; filter by `status`. Rows include `resolution_minutes` (migration 0016) — null when the effort was not recorded. |
@@ -31,7 +31,7 @@ preserved end to end; floating point never touches a figure).
 | POST | `/webhooks` | `certifying_official` | Subscribe a URL to `certification.created` and/or `dq.issue.resolved`. The HMAC secret is accepted here and never returned by anything. Audited. |
 | GET | `/webhooks` | `certifying_official` | Lists subscriptions (secret-free). |
 | DELETE | `/webhooks/{id}` | `certifying_official` | Removes a subscription (soft revoke). Audited. |
-| GET | `/public/metrics/certified` | **none — public open data** | ONLY figures a certifying official already attested (`certification_status='certified'`); values as strings, `detail` verbatim (simulated flags shown, figures never hidden); no PII; rate-limited per client IP. |
+| GET | `/public/metrics/certified` | **none — public open data** | ONLY figures a certifying official already attested (`certification_status='certified'`) AND `category='ntd'` (migration 0024 — an operations figure is structurally uncertifiable and hard-excluded here besides); values as strings, `detail` verbatim (simulated flags shown, figures never hidden); no PII; rate-limited per client IP. |
 | POST | `/safety/events` | `data_steward` or above | Enter one Safety & Security event (handoff 0010; migration 0017). Plain-language validation; runs the deterministic classifier (`headway_calc.sscls`, sscls_v0) SYNCHRONOUSLY and returns classification + thresholds_met + a plain-language explanation with the tracker citation per threshold. Event, classification, and audit record commit in ONE transaction. |
 | GET | `/safety/events` | any signed-in role | Events with each one's LATEST classification; filters: `classification` (major/non_major/not_reportable), `month` (YYYY-MM, UTC half-open on `occurred_at`), `mode`. `property_damage_usd` is a string (exact NUMERIC). |
 | POST | `/safety/events/{id}/supersede` | `data_steward` or above | Append-only correction: the full corrected event is entered as a NEW row (classified like any entry), and the original gets its one permitted update — the `superseded_by` link (migration 0017 trigger enforces this). Requires a `reason` (audited). 404 unknown; 409 if already corrected. |
@@ -364,6 +364,19 @@ python3 -m pytest tests/ -q
 
 ## Verification status
 
+- `pytest tests/ -q`: **202 passed** (2026-07-13, ops analytics wave,
+  handoff 0014) — the 196 below plus 6 new: the public certified endpoint
+  excludes a category='ops' row even in the (database-impossible)
+  certified state and serves `category` on every row; certifying an ops
+  figure is a plain-language 409 leaving nothing behind; an open blocking
+  OPS finding never gates NTD certification while an NTD one still does;
+  `/metrics/values` serves `category` on every row, filters
+  `?category=ntd|ops`, and 422s unknown categories.
+  `tests/integration`: **6 passed** against a REAL throwaway TimescaleDB
+  (migrations 0001–0026 applied) — including the boundary by attack:
+  INSERT/UPDATE of a certified ops row refused by
+  `metric_values_ops_never_certified`. openapi.json regenerated (31
+  paths; MetricValue/PublicMetricValue carry `category`).
 - `pytest tests/ -q`: **196 passed** (2026-07-13, Python 3.12, this repo) —
   the hardening-pass Batch C increment
   (docs/reviews/2026-07-13-hardening-pass.md): the pre-existing 188 tests

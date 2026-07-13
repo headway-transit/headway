@@ -21,8 +21,24 @@ code cannot drift from the checked-in contract without failing loudly).
   for undecodable payloads / malformed entities. Event-time policy: entity
   timestamp, else header timestamp (noted as an info DQ finding), else the
   entity is a DQ finding — a time is never guessed.
-- `headway_transform/gtfs_static.py` — `normalize_gtfs_static` v0.3.1
-  (0.3.1: decompression budget + per-row parse quarantine, 2026-07-13):
+- `headway_transform/trip_updates.py` — `normalize_gtfs_rt_trip_updates`
+  v0.1.0 (handoff 0014, migration 0025): base64 GTFS-Realtime FeedMessage →
+  `CanonicalTripUpdate` rows — one per (TripUpdate, StopTimeUpdate), plus a
+  trip-level row for updates with no stop events (e.g. CANCELED) — + one
+  lineage edge per row. PREDICTIONS ARE PREDICTIONS: every time column is
+  `predicted_*`, anchored to the frame's header timestamp
+  (`feed_timestamp`); a frame without a header timestamp is quarantined
+  whole (a prediction's made-at time is never guessed), a delay-only
+  StopTimeEvent keeps its delay with a NULL predicted time (never derived
+  from delay + schedule here), and in-frame duplicate trip/stop keys are
+  kept-first + warned (the writer's ON CONFLICT would otherwise absorb
+  them silently).
+- `headway_transform/gtfs_static.py` — `normalize_gtfs_static` v0.4.0
+  (0.4.0: parses `agency.txt` → `CanonicalAgency`/`canonical.agencies`,
+  handoff 0014/migration 0026 — the feed-declared `agency_timezone` that
+  anchors otp_v0's schedule comparison; a row without a usable timezone is
+  quarantined, never guessed. 0.3.1: decompression budget + per-row parse
+  quarantine, 2026-07-13):
   GTFS zip `routes.txt`/`trips.txt` → `CanonicalRoute`/`CanonicalTrip` +
   edges. `route_type` → mode map cited to gtfs.org; unmapped values → mode
   `'unknown'` + DQ finding, never a guess. v0.2.0 (handoff 0003) parses
@@ -113,6 +129,24 @@ cd services/transform && python3 -m pytest tests/ -q
 
 ## Verification status
 
+- **2026-07-13 (ops analytics wave, handoff 0014 — trip_updates +
+  agencies):** `python3 -m pytest tests/ -q` → **102 passed** (was 83).
+  New: `tests/test_trip_updates.py` (12 tests — stop-time events with one
+  edge per row; delay-only events never derive a time; CANCELED →
+  trip-level row; SKIPPED recorded; missing header timestamp quarantines
+  the frame whole; no-trip-id/no-stop-identity quarantines; in-frame
+  duplicate kept-first + warned; undecodable/malformed paths; replay
+  dedupe keys), agency.txt coverage in `tests/test_gtfs_static.py`
+  (normalize now returns agencies; missing agency.txt blocking; missing
+  timezone quarantined; omitted agency_id stored '' with the name as the
+  lineage output_id), writer SQL tests for `canonical.trip_updates`
+  (natural-key ON CONFLICT exactly matching migration 0025) and
+  `canonical.agencies`, and consumer routing for
+  `raw.gtfs_rt.trip_updates`. LIVE: real MBTA trip_updates ingested and
+  replayed into canonical.trip_updates, canonical.agencies populated from
+  the live MBTA static feed, and a two-frame double-delivery demonstrated
+  writing zero new rows — counts and psql evidence in handoff 0014,
+  "Outputs — backend evidence".
 - **2026-07-13 (hardening pass, Batch B — intake robustness + replay
   idempotency):** `python3 -m pytest tests/ -q` → **83 passed in 0.23s**
   (was 66 before this batch; Python 3.12.3, venv `/home/daniel/venv`).

@@ -1,0 +1,111 @@
+{
+  "derivation": {
+    "derivation_name": "derive_stop_passages",
+    "derivation_version": "0.1.0",
+    "clean_two_trips": {
+      "stats": {
+        "derivation_name": "derive_stop_passages",
+        "derivation_version": "0.1.0",
+        "max_passage_gap_seconds": 120.0,
+        "stop_radius_meters": 100.0,
+        "occurrence_split_seconds": 10800.0,
+        "min_occurrence_positions": 3,
+        "positions_considered": 19,
+        "positions_deduplicated": 1,
+        "occurrences": 2,
+        "occurrences_skipped_few_positions": 0,
+        "trips_observed": 2,
+        "trips_without_schedule": 0,
+        "stops_considered": 7,
+        "stops_missing_coordinates": 1,
+        "passages_derived": 6,
+        "refused_not_reached": 0,
+        "refused_endpoint_unbounded": 0,
+        "refused_cadence_gap": 0
+      },
+      "passages": [
+        {"trip_id": "T1", "stop_id": "S1", "observed_time": "2026-07-09T12:00:00+00:00", "source_record_id": "rec-t1-02", "bounding_gap_seconds": 60.0},
+        {"trip_id": "T1", "stop_id": "S2", "observed_time": "2026-07-09T12:12:00+00:00", "source_record_id": "rec-t1-05", "bounding_gap_seconds": 60.0},
+        {"trip_id": "T1", "stop_id": "S3", "observed_time": "2026-07-09T12:28:00+00:00", "source_record_id": "rec-t1-08", "bounding_gap_seconds": 60.0},
+        {"trip_id": "T2", "stop_id": "S1", "observed_time": "2026-07-09T12:14:00+00:00", "source_record_id": "rec-t2-02", "bounding_gap_seconds": 60.0},
+        {"trip_id": "T2", "stop_id": "S2", "observed_time": "2026-07-09T12:31:00+00:00", "source_record_id": "rec-t2-05", "bounding_gap_seconds": 60.0},
+        {"trip_id": "T2", "stop_id": "S3", "observed_time": "2026-07-09T12:50:00+00:00", "source_record_id": "rec-t2-08", "bounding_gap_seconds": 60.0}
+      ]
+    },
+    "refusals": {
+      "stats": {
+        "derivation_name": "derive_stop_passages",
+        "derivation_version": "0.1.0",
+        "max_passage_gap_seconds": 120.0,
+        "stop_radius_meters": 100.0,
+        "occurrence_split_seconds": 10800.0,
+        "min_occurrence_positions": 3,
+        "positions_considered": 4,
+        "positions_deduplicated": 0,
+        "occurrences": 1,
+        "occurrences_skipped_few_positions": 0,
+        "trips_observed": 1,
+        "trips_without_schedule": 0,
+        "stops_considered": 4,
+        "stops_missing_coordinates": 1,
+        "passages_derived": 0,
+        "refused_not_reached": 1,
+        "refused_endpoint_unbounded": 1,
+        "refused_cadence_gap": 1
+      }
+    }
+  },
+  "otp_v0_0_1": {
+    "calc_name": "otp_v0",
+    "calc_version": "0.1.0",
+    "unit": "percent",
+    "clean_two_trips": {
+      "value": "50.00",
+      "detail": {
+        "passages_considered": 6,
+        "passages_unscheduled": 0,
+        "on_time_count": 3,
+        "early_count": 0,
+        "late_count": 3,
+        "deviation_mean_seconds": "300.00",
+        "deviation_median_seconds": "240.00",
+        "early_tolerance_seconds": 60,
+        "late_tolerance_seconds": 300,
+        "agency_timezone": "America/New_York"
+      },
+      "input_record_ids": [
+        "rec-t1-02", "rec-t1-05", "rec-t1-08",
+        "rec-t2-02", "rec-t2-05", "rec-t2-08"
+      ]
+    },
+    "refusals": {
+      "blocking_issue_type": "no_observed_passages"
+    }
+  },
+  "headway_adherence_v0_0_1": {
+    "calc_name": "headway_adherence_v0",
+    "calc_version": "0.1.0",
+    "unit": "ratio",
+    "clean_two_trips": {
+      "value": "0.2200",
+      "detail": {
+        "pairs_counted": 3,
+        "pairs_excluded_unscheduled": 0,
+        "pairs_excluded_inverted": 0,
+        "pairs_excluded_over_cap": 0,
+        "stops_covered": 3,
+        "routes_covered": 1,
+        "mean_scheduled_headway_seconds": "900.00",
+        "stddev_deviation_seconds": "197.99",
+        "max_scheduled_headway_seconds": 7200
+      },
+      "input_record_ids": [
+        "rec-t1-02", "rec-t1-05", "rec-t1-08",
+        "rec-t2-02", "rec-t2-05", "rec-t2-08"
+      ]
+    },
+    "refusals": {
+      "blocking_issue_type": "no_headway_pairs"
+    }
+  }
+}

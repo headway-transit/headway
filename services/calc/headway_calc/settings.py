@@ -59,6 +59,22 @@ _SELECT_POLICY_SETTINGS_SQL = (
     "ORDER BY setting_key"
 )
 
+#: The two OPERATIONS policy knobs (migration 0024 — the configurable
+#: otp_v0 on-time window; basis quoted in services/calc/OPS_DEFINITIONS.md).
+#: Deliberately a SEPARATE knob set with its own loader: an NTD run must
+#: never refuse (or change) because of an ops knob, and vice versa — the
+#: migration-0024 honesty boundary applied to configuration.
+OPS_POLICY_SETTING_TYPES: dict[str, str] = {
+    "otp_early_tolerance_seconds": "integer",
+    "otp_late_tolerance_seconds": "integer",
+}
+
+_SELECT_OPS_POLICY_SETTINGS_SQL = (
+    "SELECT setting_key, setting_value, value_type FROM app.settings "
+    "WHERE setting_key IN (%s, %s) "
+    "ORDER BY setting_key"
+)
+
 
 class SettingsError(Exception):
     """A policy setting cannot be trusted — the run must refuse, never guess."""
@@ -70,6 +86,15 @@ class MissingSettingError(SettingsError):
 
 class InvalidSettingValueError(SettingsError):
     """A policy setting row exists but its value/value_type is unusable."""
+
+
+@dataclass(frozen=True)
+class OpsPolicySettings:
+    """The two OPERATIONS knobs (migration 0024) as read from app.settings
+    — immutable. Integers per their seeded value_type."""
+
+    otp_early_tolerance_seconds: int
+    otp_late_tolerance_seconds: int
 
 
 @dataclass(frozen=True)
@@ -103,15 +128,21 @@ def _is_undefined_table(exc: BaseException) -> bool:
     return type(exc).__name__ == "UndefinedTable"
 
 
-def _parse(key: str, raw_value: str, value_type: str) -> Decimal | int:
+def _parse(
+    key: str,
+    raw_value: str,
+    value_type: str,
+    expected_type: str | None = None,
+) -> Decimal | int:
     """Parse one row's TEXT value per its value_type — loud, typed failure."""
-    expected_type = POLICY_SETTING_TYPES[key]
+    if expected_type is None:
+        expected_type = POLICY_SETTING_TYPES[key]
     if value_type != expected_type:
         raise InvalidSettingValueError(
             f"app.settings row {key!r} declares value_type {value_type!r} but "
             f"this policy knob is seeded as {expected_type!r} (migration "
-            f"0014). Refusing to run on a policy value of the wrong type — "
-            f"fix the row; the runner never guesses a threshold."
+            f"0014/0024). Refusing to run on a policy value of the wrong "
+            f"type — fix the row; the runner never guesses a threshold."
         )
     if value_type == "decimal":
         try:
@@ -190,4 +221,58 @@ def load_policy_settings(conn) -> PolicySettings | None:
         gap_threshold_seconds=parsed["gap_threshold_seconds"],
         layover_max_seconds=parsed["layover_max_seconds"],
         missing_trip_threshold=parsed["missing_trip_threshold"],
+    )
+
+
+def load_ops_policy_settings(conn) -> OpsPolicySettings | None:
+    """Read the two OPERATIONS knobs (migration 0024) from app.settings.
+
+    Same contract as load_policy_settings, scoped to the ops knob set: a
+    missing table returns None (WARNING — code defaults govern); a table
+    that exists but is missing a knob row or holds an unparseable value
+    raises MissingSettingError / InvalidSettingValueError — the ops run
+    refuses rather than guess an agency's stated on-time window. NTD runs
+    never read these knobs (the migration-0024 boundary applied to
+    configuration).
+    """
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            _SELECT_OPS_POLICY_SETTINGS_SQL,
+            tuple(sorted(OPS_POLICY_SETTING_TYPES)),
+        )
+        rows = cur.fetchall()
+    except Exception as exc:
+        if not _is_undefined_table(exc):
+            raise
+        conn.rollback()
+        logger.warning(
+            "app.settings does not exist (pre-migration-0014 database): "
+            "this ops run is governed by the calc library's CODE DEFAULTS "
+            "for any tolerance not given explicitly. Apply migrations 0014 "
+            "and 0024 to give the agency an audited settings surface."
+        )
+        return None
+
+    by_key = {row[0]: row for row in rows}
+    missing = sorted(OPS_POLICY_SETTING_TYPES.keys() - by_key.keys())
+    if missing:
+        raise MissingSettingError(
+            f"app.settings exists but is missing the ops policy knob(s) "
+            f"{', '.join(missing)}. These rows are seeded by migration 0024 "
+            f"and are never optional once the table exists — the ops runner "
+            f"refuses rather than silently substituting code defaults for "
+            f"an agency's audited policy. Apply migration 0024 (or restore "
+            f"the rows) and re-run."
+        )
+
+    parsed = {
+        key: _parse(
+            key, str(row[1]), row[2], OPS_POLICY_SETTING_TYPES[key]
+        )
+        for key, row in by_key.items()
+    }
+    return OpsPolicySettings(
+        otp_early_tolerance_seconds=parsed["otp_early_tolerance_seconds"],
+        otp_late_tolerance_seconds=parsed["otp_late_tolerance_seconds"],
     )

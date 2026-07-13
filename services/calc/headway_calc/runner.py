@@ -90,7 +90,7 @@ from headway_calc.reader import (
     load_vehicle_positions,
 )
 from headway_calc.settings import load_policy_settings
-from headway_calc.types import CalcResult
+from headway_calc.types import CalcResult, Finding
 from headway_calc.upt import IMBALANCE_THRESHOLD, MISSING_TRIP_THRESHOLD, compute_upt
 from headway_calc.voms import compute_voms
 from headway_calc.vrh import compute_vrh
@@ -633,6 +633,328 @@ def run_period(
         run_info_ids=run_info_ids,
         stop_times_loaded=len(trip_geometries),
         dr_trips_loaded=len(dr_trips),
+    )
+
+
+@dataclass(frozen=True)
+class OpsRunReport:
+    """Immutable report of one run_ops_period execution (handoff 0014).
+
+    The OPERATIONS sibling of RunReport: otp_v0 + headway_adherence_v0
+    outcomes only, every persisted row category='ops' (migration 0024 —
+    structurally uncertifiable, excluded from every certifiable read
+    path). ``derivation`` is the passage derivation's identity + refusal
+    accounting (the cadence evidence); ``tolerance_sources`` mirrors
+    RunReport.threshold_sources ("explicit" | "settings" | "default").
+    ``routes_below_min_sample`` names route buckets observed too thinly
+    for a per-route figure (also routed as one info finding).
+    """
+
+    period_start: date
+    period_end: date
+    otp_early_tolerance_seconds: int
+    otp_late_tolerance_seconds: int
+    tolerance_sources: dict[str, str]
+    positions_loaded: int
+    schedule_rows_loaded: int
+    agency_timezones: tuple[str, ...]
+    passages_derived: int
+    derivation: dict
+    routes_below_min_sample: dict[str, int]
+    outcomes: tuple[MetricOutcome, ...]
+    run_info_ids: tuple[str, ...] = ()
+
+    @property
+    def persisted_count(self) -> int:
+        return sum(1 for o in self.outcomes if o.persisted)
+
+    @property
+    def blocked_count(self) -> int:
+        return sum(1 for o in self.outcomes if not o.persisted)
+
+    def to_dict(self) -> dict:
+        return {
+            "category": "ops",
+            "period_start": self.period_start.isoformat(),
+            "period_end": self.period_end.isoformat(),
+            "period_convention": "half-open [period_start, period_end), UTC",
+            "otp_early_tolerance_seconds": self.otp_early_tolerance_seconds,
+            "otp_late_tolerance_seconds": self.otp_late_tolerance_seconds,
+            "tolerance_sources": dict(self.tolerance_sources),
+            "positions_loaded": self.positions_loaded,
+            "schedule_rows_loaded": self.schedule_rows_loaded,
+            "agency_timezones": list(self.agency_timezones),
+            "passages_derived": self.passages_derived,
+            "derivation": dict(self.derivation),
+            "routes_below_min_sample": dict(self.routes_below_min_sample),
+            "run_info_ids": list(self.run_info_ids),
+            "persisted_count": self.persisted_count,
+            "blocked_count": self.blocked_count,
+            "metrics": [o.to_dict() for o in self.outcomes],
+        }
+
+    def to_json(self) -> str:
+        return json.dumps(self.to_dict(), indent=2)
+
+
+def run_ops_period(
+    conn,
+    period_start: date,
+    period_end: date,
+    otp_early_tolerance_seconds: int | None = None,
+    otp_late_tolerance_seconds: int | None = None,
+    read_settings: bool = True,
+) -> OpsRunReport:
+    """Run the OPERATIONS calcs — otp_v0 and headway_adherence_v0 — over
+    one half-open period (handoff 0014; ``python -m headway_calc.runner
+    --ops``).
+
+    A deliberately SEPARATE entry point from run_period: operations
+    analytics never share a run (or a transaction phase) with NTD figures,
+    so no code path can interleave the categories — the migration-0024
+    boundary applied to orchestration. The two-transaction fail-loudly-
+    first design is the same as run_period's.
+
+    Pipeline: load canonical.vehicle_positions + the observed trips'
+    schedules (stop_times × stops × trips) + the feed-declared agency
+    timezones; derive observed stop passages (headway_calc.passages —
+    deterministic, versioned, cadence-refusing); compute otp_v0 and
+    headway_adherence_v0 fleet-wide ('agency' scope) and per route
+    ('route:<route_id>', minimum sample sizes in headway_calc.ops); route
+    EVERY finding to dq.issues with category='ops' (never gating
+    certification), including one run-level 'ops_passage_derivation_summary'
+    info finding carrying the derivation's refusal accounting and one
+    'ops_routes_below_min_sample' info finding when any route was observed
+    too thinly for a per-route figure; persist non-blocked results —
+    headway_calc.persist stamps category='ops' from the calc registry, and
+    the migration-0024 CHECK makes a certified ops row unrepresentable.
+
+    OTP window precedence per tolerance (recorded in tolerance_sources):
+    explicit argument > app.settings row (migration-0024 knobs, audited) >
+    code default (headway_calc.ops — the TCQSM-cited 60/300 s window,
+    OPS_DEFINITIONS.md). A broken settings table refuses
+    (headway_calc.settings.SettingsError), never guesses.
+    """
+    from headway_calc.ops import (
+        HEADWAY_CALC_NAME,
+        OTP_CALC_NAME,
+        OTP_EARLY_TOLERANCE_SECONDS,
+        OTP_LATE_TOLERANCE_SECONDS,
+        compute_headway_adherence,
+        compute_headway_adherence_by_route,
+        compute_otp,
+        compute_otp_by_route,
+        routes_below_min_sample,
+        scope_for_route,
+    )
+    from headway_calc.passages import (
+        DERIVATION_NAME,
+        DERIVATION_VERSION,
+        derive_stop_passages,
+    )
+    from headway_calc.reader import load_agency_timezones, load_ops_schedule
+    from headway_calc.settings import load_ops_policy_settings
+
+    ops_settings = load_ops_policy_settings(conn) if read_settings else None
+    sources: dict[str, str] = {}
+    if otp_early_tolerance_seconds is not None:
+        early = int(otp_early_tolerance_seconds)
+        sources["otp_early_tolerance_seconds"] = "explicit"
+    elif ops_settings is not None:
+        early = ops_settings.otp_early_tolerance_seconds
+        sources["otp_early_tolerance_seconds"] = "settings"
+    else:
+        early = OTP_EARLY_TOLERANCE_SECONDS
+        sources["otp_early_tolerance_seconds"] = "default"
+    if otp_late_tolerance_seconds is not None:
+        late = int(otp_late_tolerance_seconds)
+        sources["otp_late_tolerance_seconds"] = "explicit"
+    elif ops_settings is not None:
+        late = ops_settings.otp_late_tolerance_seconds
+        sources["otp_late_tolerance_seconds"] = "settings"
+    else:
+        late = OTP_LATE_TOLERANCE_SECONDS
+        sources["otp_late_tolerance_seconds"] = "default"
+
+    positions = load_vehicle_positions(conn, period_start, period_end)
+    schedule = load_ops_schedule(conn, period_start, period_end)
+    timezones = tuple(load_agency_timezones(conn))
+
+    passages, stats = derive_stop_passages(positions, schedule)
+    thin_routes = routes_below_min_sample(passages)
+
+    scoped_results: list[tuple[str, CalcResult]] = [
+        (SCOPE_AGENCY, compute_otp(passages, stats, timezones, early, late)),
+        (SCOPE_AGENCY, compute_headway_adherence(passages, stats)),
+    ]
+    for route, result in compute_otp_by_route(
+        passages, stats, timezones, early, late
+    ).items():
+        scoped_results.append((scope_for_route(route), result))
+    for route, result in compute_headway_adherence_by_route(
+        passages, stats
+    ).items():
+        scoped_results.append((scope_for_route(route), result))
+
+    # Run-level findings: the derivation's refusal accounting is the
+    # cadence evidence behind every figure (and every refusal) — always
+    # routed, category 'ops'.
+    run_findings = [
+        Finding(
+            issue_type="ops_passage_derivation_summary",
+            title="Observed stop-passage derivation summary (operations)",
+            description=(
+                f"{DERIVATION_NAME} {DERIVATION_VERSION} over "
+                f"[{period_start.isoformat()}, {period_end.isoformat()}): "
+                + json.dumps(stats.to_dict(), sort_keys=True)
+                + ". Every scheduled stop considered is accounted for: "
+                "derived, or refused under a named cadence/geometry reason "
+                "(tolerances above; basis in services/calc/"
+                "OPS_DEFINITIONS.md). OPERATIONS finding — never gates "
+                "certification."
+            ),
+            severity="info",
+        )
+    ]
+    if thin_routes:
+        run_findings.append(
+            Finding(
+                issue_type="ops_routes_below_min_sample",
+                title=(
+                    "Routes observed too thinly for a per-route ops figure"
+                ),
+                description=(
+                    f"{len(thin_routes)} route bucket(s) had observed "
+                    "passages but fewer than the per-route minimum sample "
+                    "(headway_calc.ops MIN_PASSAGES_PER_ROUTE): "
+                    + json.dumps(thin_routes, sort_keys=True)
+                    + ". No per-route row was persisted for them — a thin "
+                    "figure is withheld loudly, never served silently. "
+                    "OPERATIONS finding — never gates certification."
+                ),
+                severity="info",
+            )
+        )
+
+    # Transaction 1 — fail-loudly-first (same design as run_period): every
+    # finding committed before any value, all category='ops'.
+    info_ids_by_key: dict[tuple[str, str], tuple[str, ...]] = {}
+    warning_ids_by_key: dict[tuple[str, str], tuple[str, ...]] = {}
+    blocking_ids_by_key: dict[tuple[str, str], tuple[str, ...]] = {}
+    routed_any = False
+    for scope, result in scoped_results:
+        findings = (
+            list(result.infos) + list(result.warnings) + list(result.blocking_issues)
+        )
+        if findings:
+            issue_ids = route_findings(
+                conn,
+                findings,
+                result.calc_name,
+                result.calc_version,
+                period_start,
+                period_end,
+                scope=None if scope == SCOPE_AGENCY else scope,
+                category="ops",
+            )
+            routed_any = True
+            key = (result.calc_name, scope)
+            n_infos = len(result.infos)
+            n_warnings = len(result.warnings)
+            info_ids_by_key[key] = tuple(issue_ids[:n_infos])
+            warning_ids_by_key[key] = tuple(
+                issue_ids[n_infos : n_infos + n_warnings]
+            )
+            blocking_ids_by_key[key] = tuple(issue_ids[n_infos + n_warnings :])
+    run_info_ids = tuple(
+        route_findings(
+            conn,
+            run_findings,
+            DERIVATION_NAME,
+            DERIVATION_VERSION,
+            period_start,
+            period_end,
+            category="ops",
+        )
+    )
+    conn.commit()
+
+    # Transaction 2 — values for non-blocked results only (persist stamps
+    # category='ops' from the calc registry; the migration-0024 CHECK
+    # makes a certified ops row unrepresentable).
+    outcomes: list[MetricOutcome] = []
+    persisted_any = False
+    try:
+        for scope, result in scoped_results:
+            detail = None if result.detail is None else result.detail.to_dict()
+            key = (result.calc_name, scope)
+            info_ids = info_ids_by_key.get(key, ())
+            warning_ids = warning_ids_by_key.get(key, ())
+            blocking_ids = blocking_ids_by_key.get(key, ())
+            if result.blocking_issues:
+                outcomes.append(
+                    MetricOutcome(
+                        calc_name=result.calc_name,
+                        calc_version=result.calc_version,
+                        metric=_METRIC_BY_CALC_NAME[result.calc_name],
+                        unit=result.unit,
+                        value=None,
+                        metric_value_id=None,
+                        routed_blocking_ids=blocking_ids,
+                        routed_warning_ids=warning_ids,
+                        routed_info_ids=info_ids,
+                        detail=detail,
+                        scope=scope,
+                    )
+                )
+            else:
+                metric_value_id = persist_result(
+                    conn, result, period_start, period_end, scope=scope
+                )
+                persisted_any = True
+                outcomes.append(
+                    MetricOutcome(
+                        calc_name=result.calc_name,
+                        calc_version=result.calc_version,
+                        metric=_METRIC_BY_CALC_NAME[result.calc_name],
+                        unit=result.unit,
+                        value=str(result.value),
+                        metric_value_id=metric_value_id,
+                        routed_blocking_ids=(),
+                        routed_warning_ids=warning_ids,
+                        routed_info_ids=info_ids,
+                        detail=detail,
+                        scope=scope,
+                    )
+                )
+        if persisted_any:
+            conn.commit()
+    except BaseException:
+        conn.rollback()
+        raise
+
+    # Deterministic sanity: exactly the two ops calcs ran (plus their
+    # route scopes) — the registry names them, nothing else joins an ops
+    # run.
+    assert {r.calc_name for _s, r in scoped_results} <= {
+        OTP_CALC_NAME,
+        HEADWAY_CALC_NAME,
+    }
+
+    return OpsRunReport(
+        period_start=period_start,
+        period_end=period_end,
+        otp_early_tolerance_seconds=early,
+        otp_late_tolerance_seconds=late,
+        tolerance_sources=sources,
+        positions_loaded=len(positions),
+        schedule_rows_loaded=len(schedule),
+        agency_timezones=timezones,
+        passages_derived=len(passages),
+        derivation=stats.to_dict(),
+        routes_below_min_sample=thin_routes,
+        outcomes=tuple(outcomes),
+        run_info_ids=run_info_ids,
     )
 
 

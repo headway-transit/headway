@@ -43,14 +43,33 @@ _METRIC_BY_CALC_NAME = {
     "dr_upt_v0": "upt",
     "dr_voms_v0": "voms",
     "dr_pmt_v0": "pmt",
+    # OPERATIONS metrics (handoff 0014) — category 'ops' below.
+    "otp_v0": "otp",
+    "headway_adherence_v0": "headway_adherence",
 }
+
+#: computed.metric_values.category per calc (migration 0024 — the
+#: OPERATIONS/NTD honesty boundary). Derived HERE from the calc registry,
+#: never taken from a caller argument, so an ops calc cannot be persisted
+#: mislabeled as an NTD figure (and vice versa). The database enforces the
+#: consequence: a category='ops' row can never be certified
+#: (metric_values_ops_never_certified CHECK).
+_OPS_CALC_NAMES = frozenset({"otp_v0", "headway_adherence_v0"})
+
+CATEGORY_NTD = "ntd"
+CATEGORY_OPS = "ops"
+
+
+def category_for_calc(calc_name: str) -> str:
+    """The computed.metric_values.category a calc's figures persist under."""
+    return CATEGORY_OPS if calc_name in _OPS_CALC_NAMES else CATEGORY_NTD
 
 #: detail is bound as text and cast to JSONB in SQL (%s::jsonb) so the write
 #: works identically across DB-API drivers without a JSON adapter.
 _INSERT_METRIC_VALUE_SQL = (
     "INSERT INTO computed.metric_values "
-    "(metric, unit, period_start, period_end, scope, value, calc_name, calc_version, detail) "
-    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb) "
+    "(metric, unit, period_start, period_end, scope, value, calc_name, calc_version, detail, category) "
+    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s) "
     "RETURNING metric_value_id"
 )
 
@@ -124,6 +143,7 @@ def persist_result(
             result.calc_name,
             result.calc_version,
             detail_json,
+            category_for_calc(result.calc_name),
         ),
     )
     metric_value_id = str(cur.fetchone()[0])

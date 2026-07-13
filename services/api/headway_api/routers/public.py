@@ -48,13 +48,22 @@ class PublicMetricValue(BaseModel):
     computed_at: dt.datetime
     certification_status: str  # always 'certified' here
     detail: dict[str, Any] = {}  # served verbatim, simulated flags included
+    # Always 'ntd' here: OPERATIONS figures (category 'ops', handoff 0014 /
+    # migration 0024) are structurally uncertifiable AND hard-excluded by
+    # this router's WHERE clause — they can never be published as certified
+    # open data. Served so the payload states its own category.
+    category: str = "ntd"
 
 
 _SELECT_CERTIFIED = (
     "SELECT metric_value_id, metric, unit, period_start, period_end, scope, "
     "value, calc_name, calc_version, computed_at, certification_status, "
-    "detail FROM computed.metric_values "
+    "detail, category FROM computed.metric_values "
     "WHERE certification_status = 'certified' "
+    # The migration-0024 honesty boundary, hard-clause form: an OPERATIONS
+    # figure must never surface here even if the ops-never-certified CHECK
+    # were somehow bypassed — defense in depth, both layers tested.
+    "AND category = 'ntd' "
     "ORDER BY period_start, metric"
 )
 
@@ -81,6 +90,7 @@ def list_certified_values(request: Request) -> list[PublicMetricValue]:
             computed_at=r[9],
             certification_status=r[10],
             detail=_detail_as_dict(r[11]),
+            category=r[12],
         )
         for r in rows
     ]

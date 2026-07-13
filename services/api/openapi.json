@@ -106,6 +106,25 @@
               ],
               "title": "Period End"
             }
+          },
+          {
+            "name": "category",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^(ntd|ops)$"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter on the honesty boundary (migration 0024): 'ntd' for regulatory-pipeline figures, 'ops' for operations metrics (on-time performance, headway adherence \u2014 never certifiable, never NTD-reported). Every row carries its category either way, so the UI can badge operations figures.",
+              "title": "Category"
+            },
+            "description": "Filter on the honesty boundary (migration 0024): 'ntd' for regulatory-pipeline figures, 'ops' for operations metrics (on-time performance, headway adherence \u2014 never certifiable, never NTD-reported). Every row carries its category either way, so the UI can badge operations figures."
           }
         ],
         "responses": {
@@ -491,6 +510,25 @@
               ],
               "title": "Period End"
             }
+          },
+          {
+            "name": "category",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^(ntd|ops)$"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter on the honesty boundary (migration 0024): 'ntd' regulatory-pipeline figures or 'ops' operations metrics (never certifiable, never NTD-reported).",
+              "title": "Category"
+            },
+            "description": "Filter on the honesty boundary (migration 0024): 'ntd' regulatory-pipeline figures or 'ops' operations metrics (never certifiable, never NTD-reported)."
           }
         ],
         "responses": {
@@ -3085,6 +3123,10 @@
             "type": "object",
             "title": "Detail",
             "default": {}
+          },
+          "category": {
+            "type": "string",
+            "title": "Category"
           }
         },
         "type": "object",
@@ -3099,7 +3141,8 @@
           "calc_name",
           "calc_version",
           "computed_at",
-          "certification_status"
+          "certification_status",
+          "category"
         ],
         "title": "MetricValue"
       },
@@ -3453,6 +3496,11 @@
             "type": "object",
             "title": "Detail",
             "default": {}
+          },
+          "category": {
+            "type": "string",
+            "title": "Category",
+            "default": "ntd"
           }
         },
         "type": "object",

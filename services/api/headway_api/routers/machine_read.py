@@ -49,6 +49,15 @@ def machine_list_metric_values(
     metric: Optional[str] = Query(default=None, description="e.g. 'vrm' or 'vrh'"),
     period_start: Optional[dt.date] = Query(default=None),
     period_end: Optional[dt.date] = Query(default=None),
+    category: Optional[str] = Query(
+        default=None,
+        pattern="^(ntd|ops)$",
+        description=(
+            "Filter on the honesty boundary (migration 0024): 'ntd' "
+            "regulatory-pipeline figures or 'ops' operations metrics "
+            "(never certifiable, never NTD-reported)."
+        ),
+    ),
     identity: MachineIdentity = Depends(require_machine_scope(SCOPE_READ_METRICS)),
     db=Depends(get_db),
 ) -> list[MetricValue]:
@@ -61,7 +70,7 @@ def machine_list_metric_values(
     # documented on machine_auth.RateLimiter).
     enforce_rate_limit(request.app.state.machine_rate_limiter, identity.key_prefix)
 
-    rows = query_metric_values(db, metric, period_start, period_end)
+    rows = query_metric_values(db, metric, period_start, period_end, category)
 
     # Successful key use is audited at endpoint level, actor key:<prefix>
     # (design point 4) — filters and row count only, never the figures.
@@ -78,6 +87,7 @@ def machine_list_metric_values(
                     "metric": metric,
                     "period_start": period_start.isoformat() if period_start else None,
                     "period_end": period_end.isoformat() if period_end else None,
+                    "category": category,
                 },
                 "rows": len(rows),
             },

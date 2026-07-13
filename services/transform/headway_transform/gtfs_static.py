@@ -1,11 +1,23 @@
-"""Minimal GTFS static loader: routes.txt + trips.txt + stops.txt +
-stop_times.txt -> canonical.routes/trips/stops/stop_times.
+"""Minimal GTFS static loader: agency.txt + routes.txt + trips.txt +
+stops.txt + stop_times.txt -> canonical.agencies/routes/trips/stops/
+stop_times.
 
-Parses a GTFS static zip (stdlib zipfile + csv) into CanonicalRoute,
-CanonicalTrip, CanonicalStop and CanonicalStopTime dataclasses per handoffs
-0001 and 0011, with one LineageEdge per row back to the static feed's
-content-addressed record_id, and a DQFinding for every row or file that
-could not be normalized — never a silent skip.
+Parses a GTFS static zip (stdlib zipfile + csv) into CanonicalAgency,
+CanonicalRoute, CanonicalTrip, CanonicalStop and CanonicalStopTime
+dataclasses per handoffs 0001, 0011 and 0014, with one LineageEdge per row
+back to the static feed's content-addressed record_id, and a DQFinding for
+every row or file that could not be normalized — never a silent skip.
+
+Agency rules (handoff 0014 — otp_v0's schedule anchor):
+
+- ``agency_timezone`` is REQUIRED by the GTFS Schedule Reference
+  (agency.txt, gtfs.org, verified 2026-07-13) and is the reason
+  canonical.agencies exists (migration 0026): GTFS schedule times are local
+  to the agency, and otp_v0 refuses rather than guess a timezone. A row
+  without a usable timezone is quarantined (warning), never stored with a
+  guessed zone.
+- ``agency_id`` is optional for single-agency feeds: an omitted value is
+  stored as '' (the feed's own representation — an id is never fabricated).
 
 Stop geometry rules (handoff 0011, binding — PMT per-segment distances):
 
@@ -43,7 +55,11 @@ TRANSFORM_NAME = "normalize_gtfs_static"
 # version so lineage edges distinguish rows normalized with stop support.
 # 0.3.1: decompression-size budget (zip-bomb guard) + per-row parse
 # quarantine (2026-07-13 hardening pass).
-TRANSFORM_VERSION = "0.3.1"
+# 0.4.0: parses agency.txt -> canonical.agencies (handoff 0014, migration
+# 0026 — the feed-declared timezone otp_v0 anchors schedule times with).
+# New version so lineage edges distinguish rows normalized with agency
+# support.
+TRANSFORM_VERSION = "0.4.0"
 
 # Decompressed-size budget (2026-07-13 hardening pass): a zip member's
 # compressed size says nothing about its decompressed size — a crafted
@@ -79,6 +95,7 @@ class _Budget:
         self.total_used = 0
 
 INPUT_KIND = "raw.records"
+AGENCIES_OUTPUT_KIND = "canonical.agencies"
 ROUTES_OUTPUT_KIND = "canonical.routes"
 TRIPS_OUTPUT_KIND = "canonical.trips"
 STOPS_OUTPUT_KIND = "canonical.stops"
@@ -104,6 +121,20 @@ ROUTE_TYPE_TO_MODE: dict[int, str] = {
 }
 
 MODE_UNKNOWN = "unknown"
+
+
+@dataclass(frozen=True)
+class CanonicalAgency:
+    """One canonical.agencies row (handoff 0014 / migration 0026).
+
+    ``agency_id`` is '' when the (single-agency) feed omits it — the feed's
+    own representation, never a fabricated id. ``timezone`` is the verbatim
+    agency_timezone (IANA name) — the schedule anchor otp_v0 exists on.
+    """
+
+    agency_id: str  # TEXT PRIMARY KEY ('' when the feed omits agency_id)
+    name: str  # TEXT NOT NULL
+    timezone: str  # TEXT NOT NULL
 
 
 @dataclass(frozen=True)
@@ -212,23 +243,25 @@ def normalize(
     list[CanonicalTrip],
     list[CanonicalStop],
     list[CanonicalStopTime],
+    list[CanonicalAgency],
     list[LineageEdge],
     list[DQFinding],
 ]:
-    """Normalize a GTFS static zip's routes.txt, trips.txt, stops.txt and
-    stop_times.txt.
+    """Normalize a GTFS static zip's agency.txt, routes.txt, trips.txt,
+    stops.txt and stop_times.txt.
 
-    Returns (routes, trips, stops, stop_times, lineage_edges, dq_findings).
-    Every emitted row has exactly one lineage edge (input = the feed's
-    record_id); every file or row that cannot be normalized is a DQFinding.
-    A feed whose members exceed the decompression budget (zip-bomb guard)
-    is ABORTED: zero rows, one blocking transform_failure finding naming
-    the limit.
+    Returns (routes, trips, stops, stop_times, agencies, lineage_edges,
+    dq_findings). Every emitted row has exactly one lineage edge (input =
+    the feed's record_id); every file or row that cannot be normalized is a
+    DQFinding. A feed whose members exceed the decompression budget
+    (zip-bomb guard) is ABORTED: zero rows, one blocking transform_failure
+    finding naming the limit.
     """
     routes: list[CanonicalRoute] = []
     trips: list[CanonicalTrip] = []
     stops: list[CanonicalStop] = []
     stop_times: list[CanonicalStopTime] = []
+    agencies: list[CanonicalAgency] = []
     edges: list[LineageEdge] = []
     findings: list[DQFinding] = []
 
@@ -247,13 +280,13 @@ def normalize(
                 source_record_ids=[record_id],
             )
         )
-        return routes, trips, stops, stop_times, edges, findings
+        return routes, trips, stops, stop_times, agencies, edges, findings
 
     budget = _Budget(max_member_bytes, max_total_bytes)
     try:
         _normalize_members(
             zf, record_id, budget,
-            routes, trips, stops, stop_times, edges, findings,
+            routes, trips, stops, stop_times, agencies, edges, findings,
         )
     except DecompressionBudgetExceeded as exc:
         findings.append(
@@ -271,8 +304,8 @@ def normalize(
                 source_record_ids=[record_id],
             )
         )
-        return [], [], [], [], [], findings
-    return routes, trips, stops, stop_times, edges, findings
+        return [], [], [], [], [], [], findings
+    return routes, trips, stops, stop_times, agencies, edges, findings
 
 
 def _normalize_members(
@@ -283,6 +316,7 @@ def _normalize_members(
     trips: list[CanonicalTrip],
     stops: list[CanonicalStop],
     stop_times: list[CanonicalStopTime],
+    agencies: list[CanonicalAgency],
     edges: list[LineageEdge],
     findings: list[DQFinding],
 ) -> None:
@@ -319,6 +353,68 @@ def _normalize_members(
                 ),
                 source_record_ids=[record_id],
             )
+
+        # --- agency.txt (handoff 0014 — otp_v0's schedule anchor) ---------
+        if "agency.txt" not in names:
+            findings.append(
+                DQFinding(
+                    issue_type="malformed_entity",
+                    severity=SEVERITY_BLOCKING,
+                    title="GTFS static feed is missing agency.txt",
+                    description=(
+                        f"Record {record_id}: agency.txt (required by the "
+                        "GTFS Schedule spec, gtfs.org) is absent; no "
+                        "agencies normalized — the agency timezone cannot "
+                        "be derived from this feed, so otp_v0 will refuse "
+                        "rather than guess a schedule anchor."
+                    ),
+                    source_record_ids=[record_id],
+                )
+            )
+        else:
+            for index, row, parse_error in iter_rows(_read_csv(zf, "agency.txt", budget)):
+                defects = (
+                    [f"CSV parse error: {parse_error}"]
+                    if parse_error is not None
+                    else field_problems(row)
+                )
+                if defects:
+                    findings.append(_row_defect("agency.txt", index, defects))
+                    continue
+                name = (row.get("agency_name") or "").strip()
+                tz = (row.get("agency_timezone") or "").strip()
+                if not name or not tz:
+                    missing_fields = [
+                        f
+                        for f, v in (("agency_name", name), ("agency_timezone", tz))
+                        if not v
+                    ]
+                    findings.append(
+                        DQFinding(
+                            issue_type="malformed_entity",
+                            severity=SEVERITY_WARNING,
+                            title="agency.txt row is missing required fields",
+                            description=(
+                                f"Record {record_id}, agency.txt row {index}: "
+                                f"missing {', '.join(missing_fields)} (both "
+                                "required by the GTFS Schedule spec, "
+                                "gtfs.org). Row quarantined, not dropped "
+                                "silently — a timezone is never guessed."
+                            ),
+                            source_record_ids=[record_id],
+                        )
+                    )
+                    continue
+
+                # agency_id optional for single-agency feeds: '' preserved
+                # as the feed's own representation (migration 0026).
+                agency = CanonicalAgency(
+                    agency_id=(row.get("agency_id") or "").strip(),
+                    name=name,
+                    timezone=tz,
+                )
+                agencies.append(agency)
+                edges.append(_edge(AGENCIES_OUTPUT_KIND, agency.agency_id or name))
 
         # --- routes.txt -------------------------------------------------
         if "routes.txt" not in names:

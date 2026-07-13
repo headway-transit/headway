@@ -91,8 +91,13 @@ export function CertifyView() {
     try {
       // The figures for the picked month AND the DQ issue list, together:
       // the blockers panel is as load-bearing as the figures themselves.
+      // category=ntd (handoff 0014): the cockpit is the certifiable room —
+      // operations metrics are structurally uncertifiable (the API refuses
+      // them at 409 and the database CHECK makes a certified ops row
+      // unrepresentable), so the server's own filter keeps them from ever
+      // appearing beside a signature checkbox.
       const [nextValues, nextIssues] = await Promise.all([
-        listMetricValues(monthPeriod(year, month)),
+        listMetricValues({ ...monthPeriod(year, month), category: "ntd" }),
         listDqIssues(),
       ]);
       setValues(nextValues);

@@ -21,7 +21,17 @@ export interface RegulatoryQuote {
   citation: string;
 }
 
-const quotesByCalc: Record<string, RegulatoryQuote[]> = quotesJson;
+/**
+ * FTA entries only: the "ops:"-namespaced keys (operations metrics, handoff
+ * 0014 — TCQSM quotes + Headway-owned definitions, a different shape read by
+ * src/regulatory/opsQuotes.ts) are filtered OUT here so an ops basis can
+ * never be served as an FTA rule, nor the reverse.
+ */
+const quotesByCalc: Record<string, RegulatoryQuote[]> = Object.fromEntries(
+  Object.entries(quotesJson as Record<string, unknown>).filter(
+    ([key, value]) => !key.startsWith("ops:") && Array.isArray(value),
+  ),
+) as Record<string, RegulatoryQuote[]>;
 
 /**
  * The verified quotes for one calc_name, or null when none are on file.

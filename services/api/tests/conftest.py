@@ -148,6 +148,9 @@ class FakeConn:
             if "WHERE certification_status = 'certified'" in q:
                 # The public open-data query: certified figures only, no params.
                 rows = [r for r in rows if r["certification_status"] == "certified"]
+            if "AND category = 'ntd'" in q:
+                # The migration-0024 hard clause on certifiable read paths.
+                rows = [r for r in rows if r["category"] == "ntd"]
             i = 0
             if "metric = %s" in q:
                 rows = [r for r in rows if r["metric"] == params[i]]
@@ -158,6 +161,9 @@ class FakeConn:
             if "period_end <= %s" in q:
                 rows = [r for r in rows if r["period_end"] <= params[i]]
                 i += 1
+            if "category = %s" in q:
+                rows = [r for r in rows if r["category"] == params[i]]
+                i += 1
             rows.sort(key=lambda r: (r["period_start"], r["metric"]))
             return FakeCursor(
                 [
@@ -166,7 +172,7 @@ class FakeConn:
                         r["period_start"], r["period_end"], r["scope"],
                         r["value"], r["calc_name"], r["calc_version"],
                         r["computed_at"], r["certification_status"],
-                        r["detail"],
+                        r["detail"], r["category"],
                     )
                     for r in rows
                 ]
@@ -182,7 +188,7 @@ class FakeConn:
         if "SELECT metric_value_id, certification_status" in q and "ANY(" in q:
             wanted = [str(i) for i in params[0]]
             rows = [
-                (mv["metric_value_id"], mv["certification_status"])
+                (mv["metric_value_id"], mv["certification_status"], mv["category"])
                 for i, mv in self.metric_values.items()
                 if i in wanted
             ]
@@ -192,7 +198,13 @@ class FakeConn:
             n = sum(
                 1
                 for i in self.dq_issues.values()
-                if i["severity"] == "blocking" and i["status"] != "resolved"
+                if i["severity"] == "blocking"
+                and i["status"] != "resolved"
+                # migration 0024: only NTD findings gate certification.
+                and (
+                    "AND category = 'ntd'" not in q
+                    or i["category"] == "ntd"
+                )
             )
             return FakeCursor([(n,)])
 
@@ -213,6 +225,14 @@ class FakeConn:
             n = 0
             for i in wanted:
                 if i in self.metric_values:
+                    if (
+                        "AND category = 'ntd'" in q
+                        and self.metric_values[i]["category"] != "ntd"
+                    ):
+                        # migration 0024: an ops row is never updatable to
+                        # certified (the WHERE skips it; the database CHECK
+                        # would refuse it anyway).
+                        continue
                     self.metric_values[i]["certification_status"] = "certified"
                     n += 1
             return FakeCursor([], rowcount=n)
@@ -759,6 +779,7 @@ class FakeConn:
             "computed_at": dt.datetime(2026, 7, 1, 12, 0, tzinfo=UTC),
             "certification_status": "uncertified",
             "detail": {},  # JSONB column default (migration 0010)
+            "category": "ntd",  # column default (migration 0024)
         }
         mv.update(overrides)
         self.metric_values[mv["metric_value_id"]] = mv
@@ -778,6 +799,7 @@ class FakeConn:
             "resolved_at": None,
             "resolution": None,
             "resolution_minutes": None,  # migration 0016 — null when unmeasured
+            "category": "ntd",  # column default (migration 0024)
         }
         issue.update(overrides)
         self.dq_issues[issue["issue_id"]] = issue

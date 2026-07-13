@@ -7,7 +7,12 @@ matching the handoff-0001 schema exactly:
 - raw.records registry row per envelope (immutable; redelivery of the same
   content-addressed record_id is a no-op via ON CONFLICT DO NOTHING — the
   record already landed, nothing is lost);
-- canonical.routes / canonical.trips upserts (static feeds supersede);
+- canonical.routes / canonical.trips / canonical.agencies upserts (static
+  feeds supersede);
+- canonical.trip_updates inserts (handoff 0014 / migration 0025), ON
+  CONFLICT DO NOTHING on the natural key (trip_id, feed_timestamp,
+  source_record_id, COALESCE(stop_sequence, -1), COALESCE(stop_id, ''))
+  for the same replay reason — predictions land labeled as predictions;
 - canonical.vehicle_positions inserts, ON CONFLICT DO NOTHING on the unique
   key (vehicle_id, time, source_record_id) — at-least-once Kafka delivery
   makes exact replays of the same content-addressed record normal, and an
@@ -41,6 +46,7 @@ from typing import Any, Protocol
 from .envelope import Envelope
 from .gtfs_rt_positions import CanonicalVehiclePosition
 from .gtfs_static import (
+    CanonicalAgency,
     CanonicalRoute,
     CanonicalStop,
     CanonicalStopTime,
@@ -49,6 +55,7 @@ from .gtfs_static import (
 from .dr_trips import CanonicalDrTrip
 from .model import DQFinding, LineageEdge
 from .tides_passenger_events import CanonicalPassengerEvent
+from .trip_updates import CanonicalTripUpdate
 
 
 class Connection(Protocol):
@@ -106,6 +113,27 @@ SET stop_id             = EXCLUDED.stop_id,
     arrival_seconds     = EXCLUDED.arrival_seconds,
     departure_seconds   = EXCLUDED.departure_seconds,
     shape_dist_traveled = EXCLUDED.shape_dist_traveled
+""".strip()
+
+UPSERT_AGENCY_SQL = """
+INSERT INTO canonical.agencies (agency_id, name, timezone)
+VALUES (%s, %s, %s)
+ON CONFLICT (agency_id) DO UPDATE
+SET name     = EXCLUDED.name,
+    timezone = EXCLUDED.timezone
+""".strip()
+
+INSERT_TRIP_UPDATE_SQL = """
+INSERT INTO canonical.trip_updates
+    (feed_timestamp, trip_id, route_id, vehicle_id, stop_id, stop_sequence,
+     predicted_arrival, arrival_delay_seconds, arrival_uncertainty_seconds,
+     predicted_departure, departure_delay_seconds,
+     departure_uncertainty_seconds,
+     trip_schedule_relationship, stop_schedule_relationship,
+     source_record_id)
+VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+ON CONFLICT (trip_id, feed_timestamp, source_record_id,
+             COALESCE(stop_sequence, -1), COALESCE(stop_id, '')) DO NOTHING
 """.strip()
 
 INSERT_VEHICLE_POSITION_SQL = """
@@ -231,6 +259,36 @@ class DbWriter:
                     row.arrival_seconds,
                     row.departure_seconds,
                     row.shape_dist_traveled,
+                ),
+            )
+
+    def upsert_agencies(self, agencies: Iterable[CanonicalAgency]) -> None:
+        for agency in agencies:
+            self._execute(
+                UPSERT_AGENCY_SQL,
+                (agency.agency_id, agency.name, agency.timezone),
+            )
+
+    def insert_trip_updates(self, rows: Iterable[CanonicalTripUpdate]) -> None:
+        for row in rows:
+            self._execute(
+                INSERT_TRIP_UPDATE_SQL,
+                (
+                    row.feed_timestamp,
+                    row.trip_id,
+                    row.route_id,
+                    row.vehicle_id,
+                    row.stop_id,
+                    row.stop_sequence,
+                    row.predicted_arrival,
+                    row.arrival_delay_seconds,
+                    row.arrival_uncertainty_seconds,
+                    row.predicted_departure,
+                    row.departure_delay_seconds,
+                    row.departure_uncertainty_seconds,
+                    row.trip_schedule_relationship,
+                    row.stop_schedule_relationship,
+                    row.source_record_id,
                 ),
             )
 

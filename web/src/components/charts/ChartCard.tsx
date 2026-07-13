@@ -27,6 +27,11 @@ export interface ChartCardProps {
   table: ChartTable;
   /** Shown under the description in chart view (e.g. the keyboard hint). */
   hint?: string;
+  /**
+   * Rendered directly under the heading, above the description — e.g. the
+   * OpsBadge every operations-metric card must carry (handoff 0014).
+   */
+  badge?: ReactNode;
   children: ReactNode;
 }
 
@@ -35,6 +40,7 @@ export function ChartCard({
   description,
   table,
   hint,
+  badge,
   children,
 }: ChartCardProps) {
   const headingId = useId();
@@ -43,6 +49,7 @@ export function ChartCard({
   return (
     <section className="card chart-card" aria-labelledby={headingId}>
       <h2 id={headingId}>{heading}</h2>
+      {badge && <p className="chart-card-badge">{badge}</p>}
       <p className="chart-desc">{description}</p>
       <div
         className="view-toggle"
