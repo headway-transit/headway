@@ -1,4 +1,254 @@
 {
+  "dr_pmt_v0": [
+    {
+      "quote": "a transit mode operating on roadways in response to requests from passengers or their agents to the transit operator, who groups rides together when possible and dispatches a vehicle to provide the rides. Vehicles do not operate over a fixed route or on a fixed schedule unless temporarily satisfying a special transit need. Many transit systems operate DR service to meet the requirements of the ADA.",
+      "citation": "DR mode definition — 2026 NTD Full Reporting Policy Manual, p. 33"
+    },
+    {
+      "quote": "Voucher Programs are not considered public transportation",
+      "citation": "TOS taxonomy — 2026 NTD Full Reporting Policy Manual, pp. 37–39"
+    },
+    {
+      "quote": "provided by a Transportation Network Company … using nondedicated vehicles. The TNC dispatches the service using a mobile application",
+      "citation": "TOS taxonomy — 2026 NTD Full Reporting Policy Manual, pp. 37–39"
+    },
+    {
+      "quote": "For DR service, revenue time includes all travel time from the point of the first passenger pick-up to the last passenger drop-off, as long as the vehicle does not return to the garage or dispatching point or have interruptions in service, such as lunch breaks or vehicle fueling and servicing.",
+      "citation": "DR revenue time — 2026 NTD Full Reporting Policy Manual, p. 129"
+    },
+    {
+      "quote": "agencies must report only the miles and hours when a transit passenger is onboard as revenue service. When a transit passenger is not onboard, the service is not reportable to the NTD.",
+      "citation": "TX revenue rule — 2026 NTD Full Reporting Policy Manual, p. 129"
+    },
+    {
+      "quote": "FTA defines the dispatching point as the location where a driver receives the schedule to provide revenue service.",
+      "citation": "Non-fixed-route deadhead legs — 2026 NTD Full Reporting Policy Manual, p. 130"
+    },
+    {
+      "quote": "Full Reporters do not report deadhead for the Vanpool mode or the TX and Transportation Network Company (TN) TOS.",
+      "citation": "Non-fixed-route deadhead legs — 2026 NTD Full Reporting Policy Manual, p. 130"
+    },
+    {
+      "quote": "Driver travels to pick up a passenger but the passenger is a no-show",
+      "citation": "Exhibit 36 activity table — 2026 NTD Full Reporting Policy Manual, pp. 134–135, verbatim classifications"
+    },
+    {
+      "quote": "The largest number of vehicles in revenue service at any one time during the reporting year (INCLUDES atypical service)",
+      "citation": "DR VOMS — 2026 NTD Full Reporting Policy Manual, Exhibits 38 + 40, pp. 138–139"
+    },
+    {
+      "quote": "as long as they are not employees of the transit agency,",
+      "citation": "DR UPT rules — 2026 NTD Full Reporting Policy Manual, pp. 143–144, quoted in PMT section context"
+    },
+    {
+      "quote": "the agency operating the service must report it",
+      "citation": "Shared-vehicle rule — 2026 NTD Full Reporting Policy Manual, p. 131"
+    },
+    {
+      "quote": "Full Reporters do not report scheduled service for the TX and TN TOS.",
+      "citation": "Scheduled service — 2026 NTD Full Reporting Policy Manual, p. 139"
+    }
+  ],
+  "dr_upt_v0": [
+    {
+      "quote": "a transit mode operating on roadways in response to requests from passengers or their agents to the transit operator, who groups rides together when possible and dispatches a vehicle to provide the rides. Vehicles do not operate over a fixed route or on a fixed schedule unless temporarily satisfying a special transit need. Many transit systems operate DR service to meet the requirements of the ADA.",
+      "citation": "DR mode definition — 2026 NTD Full Reporting Policy Manual, p. 33"
+    },
+    {
+      "quote": "Voucher Programs are not considered public transportation",
+      "citation": "TOS taxonomy — 2026 NTD Full Reporting Policy Manual, pp. 37–39"
+    },
+    {
+      "quote": "provided by a Transportation Network Company … using nondedicated vehicles. The TNC dispatches the service using a mobile application",
+      "citation": "TOS taxonomy — 2026 NTD Full Reporting Policy Manual, pp. 37–39"
+    },
+    {
+      "quote": "For DR service, revenue time includes all travel time from the point of the first passenger pick-up to the last passenger drop-off, as long as the vehicle does not return to the garage or dispatching point or have interruptions in service, such as lunch breaks or vehicle fueling and servicing.",
+      "citation": "DR revenue time — 2026 NTD Full Reporting Policy Manual, p. 129"
+    },
+    {
+      "quote": "agencies must report only the miles and hours when a transit passenger is onboard as revenue service. When a transit passenger is not onboard, the service is not reportable to the NTD.",
+      "citation": "TX revenue rule — 2026 NTD Full Reporting Policy Manual, p. 129"
+    },
+    {
+      "quote": "FTA defines the dispatching point as the location where a driver receives the schedule to provide revenue service.",
+      "citation": "Non-fixed-route deadhead legs — 2026 NTD Full Reporting Policy Manual, p. 130"
+    },
+    {
+      "quote": "Full Reporters do not report deadhead for the Vanpool mode or the TX and Transportation Network Company (TN) TOS.",
+      "citation": "Non-fixed-route deadhead legs — 2026 NTD Full Reporting Policy Manual, p. 130"
+    },
+    {
+      "quote": "Driver travels to pick up a passenger but the passenger is a no-show",
+      "citation": "Exhibit 36 activity table — 2026 NTD Full Reporting Policy Manual, pp. 134–135, verbatim classifications"
+    },
+    {
+      "quote": "The largest number of vehicles in revenue service at any one time during the reporting year (INCLUDES atypical service)",
+      "citation": "DR VOMS — 2026 NTD Full Reporting Policy Manual, Exhibits 38 + 40, pp. 138–139"
+    },
+    {
+      "quote": "as long as they are not employees of the transit agency,",
+      "citation": "DR UPT rules — 2026 NTD Full Reporting Policy Manual, pp. 143–144, quoted in PMT section context"
+    },
+    {
+      "quote": "the agency operating the service must report it",
+      "citation": "Shared-vehicle rule — 2026 NTD Full Reporting Policy Manual, p. 131"
+    },
+    {
+      "quote": "Full Reporters do not report scheduled service for the TX and TN TOS.",
+      "citation": "Scheduled service — 2026 NTD Full Reporting Policy Manual, p. 139"
+    }
+  ],
+  "dr_voms_v0": [
+    {
+      "quote": "a transit mode operating on roadways in response to requests from passengers or their agents to the transit operator, who groups rides together when possible and dispatches a vehicle to provide the rides. Vehicles do not operate over a fixed route or on a fixed schedule unless temporarily satisfying a special transit need. Many transit systems operate DR service to meet the requirements of the ADA.",
+      "citation": "DR mode definition — 2026 NTD Full Reporting Policy Manual, p. 33"
+    },
+    {
+      "quote": "Voucher Programs are not considered public transportation",
+      "citation": "TOS taxonomy — 2026 NTD Full Reporting Policy Manual, pp. 37–39"
+    },
+    {
+      "quote": "provided by a Transportation Network Company … using nondedicated vehicles. The TNC dispatches the service using a mobile application",
+      "citation": "TOS taxonomy — 2026 NTD Full Reporting Policy Manual, pp. 37–39"
+    },
+    {
+      "quote": "For DR service, revenue time includes all travel time from the point of the first passenger pick-up to the last passenger drop-off, as long as the vehicle does not return to the garage or dispatching point or have interruptions in service, such as lunch breaks or vehicle fueling and servicing.",
+      "citation": "DR revenue time — 2026 NTD Full Reporting Policy Manual, p. 129"
+    },
+    {
+      "quote": "agencies must report only the miles and hours when a transit passenger is onboard as revenue service. When a transit passenger is not onboard, the service is not reportable to the NTD.",
+      "citation": "TX revenue rule — 2026 NTD Full Reporting Policy Manual, p. 129"
+    },
+    {
+      "quote": "FTA defines the dispatching point as the location where a driver receives the schedule to provide revenue service.",
+      "citation": "Non-fixed-route deadhead legs — 2026 NTD Full Reporting Policy Manual, p. 130"
+    },
+    {
+      "quote": "Full Reporters do not report deadhead for the Vanpool mode or the TX and Transportation Network Company (TN) TOS.",
+      "citation": "Non-fixed-route deadhead legs — 2026 NTD Full Reporting Policy Manual, p. 130"
+    },
+    {
+      "quote": "Driver travels to pick up a passenger but the passenger is a no-show",
+      "citation": "Exhibit 36 activity table — 2026 NTD Full Reporting Policy Manual, pp. 134–135, verbatim classifications"
+    },
+    {
+      "quote": "The largest number of vehicles in revenue service at any one time during the reporting year (INCLUDES atypical service)",
+      "citation": "DR VOMS — 2026 NTD Full Reporting Policy Manual, Exhibits 38 + 40, pp. 138–139"
+    },
+    {
+      "quote": "as long as they are not employees of the transit agency,",
+      "citation": "DR UPT rules — 2026 NTD Full Reporting Policy Manual, pp. 143–144, quoted in PMT section context"
+    },
+    {
+      "quote": "the agency operating the service must report it",
+      "citation": "Shared-vehicle rule — 2026 NTD Full Reporting Policy Manual, p. 131"
+    },
+    {
+      "quote": "Full Reporters do not report scheduled service for the TX and TN TOS.",
+      "citation": "Scheduled service — 2026 NTD Full Reporting Policy Manual, p. 139"
+    }
+  ],
+  "dr_vrh_v0": [
+    {
+      "quote": "a transit mode operating on roadways in response to requests from passengers or their agents to the transit operator, who groups rides together when possible and dispatches a vehicle to provide the rides. Vehicles do not operate over a fixed route or on a fixed schedule unless temporarily satisfying a special transit need. Many transit systems operate DR service to meet the requirements of the ADA.",
+      "citation": "DR mode definition — 2026 NTD Full Reporting Policy Manual, p. 33"
+    },
+    {
+      "quote": "Voucher Programs are not considered public transportation",
+      "citation": "TOS taxonomy — 2026 NTD Full Reporting Policy Manual, pp. 37–39"
+    },
+    {
+      "quote": "provided by a Transportation Network Company … using nondedicated vehicles. The TNC dispatches the service using a mobile application",
+      "citation": "TOS taxonomy — 2026 NTD Full Reporting Policy Manual, pp. 37–39"
+    },
+    {
+      "quote": "For DR service, revenue time includes all travel time from the point of the first passenger pick-up to the last passenger drop-off, as long as the vehicle does not return to the garage or dispatching point or have interruptions in service, such as lunch breaks or vehicle fueling and servicing.",
+      "citation": "DR revenue time — 2026 NTD Full Reporting Policy Manual, p. 129"
+    },
+    {
+      "quote": "agencies must report only the miles and hours when a transit passenger is onboard as revenue service. When a transit passenger is not onboard, the service is not reportable to the NTD.",
+      "citation": "TX revenue rule — 2026 NTD Full Reporting Policy Manual, p. 129"
+    },
+    {
+      "quote": "FTA defines the dispatching point as the location where a driver receives the schedule to provide revenue service.",
+      "citation": "Non-fixed-route deadhead legs — 2026 NTD Full Reporting Policy Manual, p. 130"
+    },
+    {
+      "quote": "Full Reporters do not report deadhead for the Vanpool mode or the TX and Transportation Network Company (TN) TOS.",
+      "citation": "Non-fixed-route deadhead legs — 2026 NTD Full Reporting Policy Manual, p. 130"
+    },
+    {
+      "quote": "Driver travels to pick up a passenger but the passenger is a no-show",
+      "citation": "Exhibit 36 activity table — 2026 NTD Full Reporting Policy Manual, pp. 134–135, verbatim classifications"
+    },
+    {
+      "quote": "The largest number of vehicles in revenue service at any one time during the reporting year (INCLUDES atypical service)",
+      "citation": "DR VOMS — 2026 NTD Full Reporting Policy Manual, Exhibits 38 + 40, pp. 138–139"
+    },
+    {
+      "quote": "as long as they are not employees of the transit agency,",
+      "citation": "DR UPT rules — 2026 NTD Full Reporting Policy Manual, pp. 143–144, quoted in PMT section context"
+    },
+    {
+      "quote": "the agency operating the service must report it",
+      "citation": "Shared-vehicle rule — 2026 NTD Full Reporting Policy Manual, p. 131"
+    },
+    {
+      "quote": "Full Reporters do not report scheduled service for the TX and TN TOS.",
+      "citation": "Scheduled service — 2026 NTD Full Reporting Policy Manual, p. 139"
+    }
+  ],
+  "dr_vrm_v0": [
+    {
+      "quote": "a transit mode operating on roadways in response to requests from passengers or their agents to the transit operator, who groups rides together when possible and dispatches a vehicle to provide the rides. Vehicles do not operate over a fixed route or on a fixed schedule unless temporarily satisfying a special transit need. Many transit systems operate DR service to meet the requirements of the ADA.",
+      "citation": "DR mode definition — 2026 NTD Full Reporting Policy Manual, p. 33"
+    },
+    {
+      "quote": "Voucher Programs are not considered public transportation",
+      "citation": "TOS taxonomy — 2026 NTD Full Reporting Policy Manual, pp. 37–39"
+    },
+    {
+      "quote": "provided by a Transportation Network Company … using nondedicated vehicles. The TNC dispatches the service using a mobile application",
+      "citation": "TOS taxonomy — 2026 NTD Full Reporting Policy Manual, pp. 37–39"
+    },
+    {
+      "quote": "For DR service, revenue time includes all travel time from the point of the first passenger pick-up to the last passenger drop-off, as long as the vehicle does not return to the garage or dispatching point or have interruptions in service, such as lunch breaks or vehicle fueling and servicing.",
+      "citation": "DR revenue time — 2026 NTD Full Reporting Policy Manual, p. 129"
+    },
+    {
+      "quote": "agencies must report only the miles and hours when a transit passenger is onboard as revenue service. When a transit passenger is not onboard, the service is not reportable to the NTD.",
+      "citation": "TX revenue rule — 2026 NTD Full Reporting Policy Manual, p. 129"
+    },
+    {
+      "quote": "FTA defines the dispatching point as the location where a driver receives the schedule to provide revenue service.",
+      "citation": "Non-fixed-route deadhead legs — 2026 NTD Full Reporting Policy Manual, p. 130"
+    },
+    {
+      "quote": "Full Reporters do not report deadhead for the Vanpool mode or the TX and Transportation Network Company (TN) TOS.",
+      "citation": "Non-fixed-route deadhead legs — 2026 NTD Full Reporting Policy Manual, p. 130"
+    },
+    {
+      "quote": "Driver travels to pick up a passenger but the passenger is a no-show",
+      "citation": "Exhibit 36 activity table — 2026 NTD Full Reporting Policy Manual, pp. 134–135, verbatim classifications"
+    },
+    {
+      "quote": "The largest number of vehicles in revenue service at any one time during the reporting year (INCLUDES atypical service)",
+      "citation": "DR VOMS — 2026 NTD Full Reporting Policy Manual, Exhibits 38 + 40, pp. 138–139"
+    },
+    {
+      "quote": "as long as they are not employees of the transit agency,",
+      "citation": "DR UPT rules — 2026 NTD Full Reporting Policy Manual, pp. 143–144, quoted in PMT section context"
+    },
+    {
+      "quote": "the agency operating the service must report it",
+      "citation": "Shared-vehicle rule — 2026 NTD Full Reporting Policy Manual, p. 131"
+    },
+    {
+      "quote": "Full Reporters do not report scheduled service for the TX and TN TOS.",
+      "citation": "Scheduled service — 2026 NTD Full Reporting Policy Manual, p. 139"
+    }
+  ],
   "pmt_v0": [
     {
       "quote": "Passenger Miles Traveled (PMT) is the sum of the distances each passenger traveled during the year.",

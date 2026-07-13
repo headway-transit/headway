@@ -49,6 +49,21 @@ code cannot drift from the checked-in contract without failing loudly).
   `tides_simulated`) is carried verbatim onto every row — simulated data
   stays permanently distinguishable in provenance (handoff 0005 binding
   rule).
+- `headway_transform/dr_trips.py` — `normalize_dr_trips` v0.1.0 (handoff
+  0013, Demand Response module): `demand_response_trips` CSV (wire
+  contract: `contracts/demand-response-trip.v0.schema.json`) →
+  `CanonicalDrTrip` rows (migration 0021, column-for-column) + one lineage
+  edge per row
+  (`output_id = '<dr_trip_id>|<pickup_timestamp RFC3339>|<record_id>'`).
+  Contradictions are QUARANTINED, never repaired: dropoff before pickup, a
+  decreasing odometer pair, sponsored without a sponsor label (or a stray
+  sponsor label), and a no-show carrying boardings (Exhibit 36 as quoted in
+  the tracker: revenue time yes, boarding no) are all
+  `malformed_dr_trip` findings citing record_id + row number. Missing
+  optional distances stay NULL — an unmeasured distance is a flagged gap
+  downstream, never a fabricated 0. The envelope `source` (`dr` |
+  `dr_simulated` | a vendor label bound to the pushing machine key) is
+  carried verbatim onto every row.
 - `headway_transform/writer.py` — injectable DB-API writer; SQL matches the
   handoff-0001 schema exactly, plus `canonical.trips.block_id` (migration
   0011, handoff 0003) in the trip upsert and `canonical.passenger_events`

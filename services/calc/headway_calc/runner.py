@@ -51,6 +51,18 @@ from decimal import Decimal
 from headway_calc._blocks import LAYOVER_MAX_SECONDS
 from headway_calc._grouping import COVERAGE_THRESHOLD, GAP_THRESHOLD_SECONDS
 from headway_calc.dq import route_findings
+from headway_calc.dr import (
+    compute_dr_pmt,
+    compute_dr_pmt_by_tos,
+    compute_dr_upt,
+    compute_dr_upt_by_tos,
+    compute_dr_voms,
+    compute_dr_voms_by_tos,
+    compute_dr_vrh,
+    compute_dr_vrh_by_tos,
+    compute_dr_vrm,
+    compute_dr_vrm_by_tos,
+)
 from headway_calc.mode import (
     MODE_DIMENSION_NAME,
     MODE_DIMENSION_VERSION,
@@ -65,6 +77,7 @@ from headway_calc.mode import (
 from headway_calc.persist import _METRIC_BY_CALC_NAME, persist_result
 from headway_calc.pmt import compute_pmt
 from headway_calc.reader import (
+    load_dr_trips,
     load_operated_trip_ids,
     load_passenger_events,
     load_trip_geometries,
@@ -80,6 +93,20 @@ from headway_calc.vrm import compute_vrm
 #: The fleet-wide scope value (the computed.metric_values.scope column
 #: default, handoff 0001).
 SCOPE_AGENCY = "agency"
+
+#: Demand Response scopes (handoff 0013): DR figures are inherently
+#: mode-level (they come from dispatch trips, not the GTFS-RT fleet), so
+#: they persist ONLY under the DR mode scope and its per-TOS refinements —
+#: never under 'agency' (the fleet figures remain position/event-derived).
+#: 'DR' is the NTD mode code (the wire contract's vocabulary); the GTFS-
+#: derived mode scopes use the transform's lowercase names ('mode:bus'), so
+#: the namespaces cannot collide.
+SCOPE_MODE_DR = "mode:DR"
+
+
+def scope_for_dr_tos(tos: str) -> str:
+    """The computed.metric_values.scope for one DR type-of-service bucket."""
+    return f"mode:DR:tos:{tos}"
 
 
 @dataclass(frozen=True)
@@ -183,6 +210,9 @@ class RunReport:
     #: pmt_v0's geometry input (handoff 0011); default 0 keeps pre-0011
     #: constructions working.
     stop_times_loaded: int = 0
+    #: canonical.dr_trips rows loaded for the period — the DR calcs' input
+    #: (handoff 0013); default 0 keeps pre-0013 constructions working.
+    dr_trips_loaded: int = 0
 
     @property
     def persisted_count(self) -> int:
@@ -231,6 +261,7 @@ class RunReport:
             "passenger_events_loaded": self.passenger_events_loaded,
             "operated_trips_loaded": self.operated_trips_loaded,
             "stop_times_loaded": self.stop_times_loaded,
+            "dr_trips_loaded": self.dr_trips_loaded,
             "per_mode": self.per_mode,
             "run_info_ids": list(self.run_info_ids),
             "persisted_count": self.persisted_count,
@@ -389,6 +420,7 @@ def run_period(
     passenger_events = load_passenger_events(conn, period_start, period_end)
     operated_trip_ids = load_operated_trip_ids(conn, period_start, period_end)
     trip_geometries = load_trip_geometries(conn, period_start, period_end)
+    dr_trips = load_dr_trips(conn, period_start, period_end)
     results: tuple[CalcResult, ...] = (
         compute_vrm(positions, threshold, cov_threshold),
         compute_vrh(positions, threshold, cov_threshold, layover_max),
@@ -446,6 +478,36 @@ def run_period(
             for bucket, result in by_mode.items():
                 scoped_results.append((scope_for_mode(bucket), result))
         run_finding = unknown_mode_finding(positions, passenger_events)
+
+    # Demand Response (handoff 0013): DR figures are computed whenever the
+    # period holds canonical.dr_trips rows — they are inherently mode-level
+    # (dispatch-platform data, not the GTFS-RT fleet), so they run on every
+    # path and persist under scope 'mode:DR' plus one scope per type of
+    # service present ('mode:DR:tos:<tos>' — TOS selects the revenue rule,
+    # so the per-TOS rows are the reportable refinement). The DR calcs take
+    # no thresholds: no completeness threshold is quoted for DR (see
+    # headway_calc.dr), so threshold provenance for these rows is the
+    # absence recorded in their tracker rows.
+    if dr_trips:
+        dr_mode_results = (
+            compute_dr_vrm(dr_trips),
+            compute_dr_vrh(dr_trips),
+            compute_dr_upt(dr_trips),
+            compute_dr_voms(dr_trips),
+            compute_dr_pmt(dr_trips),
+        )
+        for result in dr_mode_results:
+            scoped_results.append((SCOPE_MODE_DR, result))
+        dr_by_tos = (
+            compute_dr_vrm_by_tos(dr_trips),
+            compute_dr_vrh_by_tos(dr_trips),
+            compute_dr_upt_by_tos(dr_trips),
+            compute_dr_voms_by_tos(dr_trips),
+            compute_dr_pmt_by_tos(dr_trips),
+        )
+        for by_tos in dr_by_tos:
+            for tos, result in by_tos.items():
+                scoped_results.append((scope_for_dr_tos(tos), result))
 
     # Transaction 1 — fail-loudly-first: route and COMMIT every finding
     # (infos, then warnings, then blocking, each with its own severity;
@@ -564,6 +626,7 @@ def run_period(
         per_mode=per_mode,
         run_info_ids=run_info_ids,
         stop_times_loaded=len(trip_geometries),
+        dr_trips_loaded=len(dr_trips),
     )
 
 

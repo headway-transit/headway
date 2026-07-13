@@ -69,6 +69,14 @@ function calcNamesForHeading(heading) {
   if (heading.startsWith("Verified — NTD Sampling Manual")) {
     return ["sampling_v0"];
   }
+  // The Demand Response section backs all five DR calcs (handoff 0013):
+  // the p. 129 revenue-time + TX onboard-only rules, the p. 130 deadhead /
+  // no-deadhead-TOS rules, the Exhibit 36 no-show row, the Exhibits 38+40
+  // atypical-day-inclusion VOMS rule, and the pp. 143–144 UPT rules — the
+  // quotes the DR-scoped receipts and their TOS callouts show.
+  if (heading.startsWith("Verified — Demand Response / on-demand reporting")) {
+    return ["dr_pmt_v0", "dr_upt_v0", "dr_voms_v0", "dr_vrh_v0", "dr_vrm_v0"];
+  }
   return null;
 }
 
@@ -101,7 +109,8 @@ function isQuoteSection(line) {
     line.startsWith("## Verified — Safety & Security reporting") ||
     line.startsWith("## Verified — Monthly Ridership form MR-20") ||
     line.startsWith("## Verified — Passenger Miles Traveled") ||
-    line.startsWith("## Verified — NTD Sampling Manual")
+    line.startsWith("## Verified — NTD Sampling Manual") ||
+    line.startsWith("## Verified — Demand Response / on-demand reporting")
   );
 }
 const sections = [];
@@ -132,9 +141,14 @@ for (const section of sections) {
     );
   }
 
-  // The manual's name, from the section's "Source: **…**" line.
+  // The manual's name, from the section's "Source: **…**" line. The DR
+  // section's Source line is unbolded in the tracker (the calc role's file —
+  // never edited from web/), so a plain "Source: <manual>, printed pp. …"
+  // line is the deliberate fallback shape; any other shape still fails.
   const bodyText = section.body.join("\n");
-  const sourceMatch = /Source:\s+\*\*([^*]+)\*\*/.exec(bodyText);
+  const sourceMatch =
+    /Source:\s+\*\*([^*]+)\*\*/.exec(bodyText) ??
+    /^Source:\s+(.+?),\s*printed pp\./m.exec(bodyText);
   if (!sourceMatch) {
     fail(`section "${section.heading}" has no "Source: **…**" line`);
   }

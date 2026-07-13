@@ -1,0 +1,184 @@
+{
+  "description": "Expectations for the dr_*_v0 calcs CALC_VERSION 0.1.0 over fixture.json, hand-worked in BASIS.md. Classifications per the tracker's 'Verified — Demand Response / on-demand reporting' quotes. Synthetic, NOT FTA-certified; regression anchor only.",
+  "exhibit36_rows": [
+    {"activity": "idle_at_dispatching_point", "actual": false, "revenue": false, "miles_not_applicable": false},
+    {"activity": "depart_dispatch_to_pick_up_passenger", "actual": true, "revenue": false, "miles_not_applicable": false},
+    {"activity": "wait_for_passenger_at_pickup", "actual": true, "revenue": true, "miles_not_applicable": true},
+    {"activity": "empty_travel_between_dropoff_and_next_pickup", "actual": true, "revenue": true, "miles_not_applicable": false},
+    {"activity": "lunch_travel_or_eating", "actual": false, "revenue": false, "miles_not_applicable": false},
+    {"activity": "return_to_dispatch_empty", "actual": true, "revenue": false, "miles_not_applicable": false},
+    {"activity": "no_show_trip", "actual": true, "revenue": true, "miles_not_applicable": false},
+    {"activity": "fueling", "actual": false, "revenue": false, "miles_not_applicable": false}
+  ],
+  "exhibit36_scenarios": {
+    "idle_at_dispatching_point": {"vrh": "0.50", "vrm": "5.00"},
+    "depart_dispatch_to_pick_up_passenger": {"vrh": "0.50", "vrm": "5.00"},
+    "wait_for_passenger_at_pickup": {"vrh": "0.10", "vrm": "0.00", "upt": "0"},
+    "empty_travel_between_dropoff_and_next_pickup": {"vrh": "0.83", "vrm": "10.00"},
+    "lunch_travel_or_eating": {"vrh": "0.67", "vrm": "8.00"},
+    "return_to_dispatch_empty": {"vrh": "0.67", "vrm": "8.00"},
+    "no_show_trip": {"vrh": "0.58", "vrm": "6.00", "upt": "1"},
+    "fueling": {"vrh": "0.67", "vrm": "8.00"}
+  },
+  "dispatch_day": {
+    "dr_vrh": {
+      "calc_name": "dr_vrh_v0",
+      "calc_version": "0.1.0",
+      "unit": "hours",
+      "value": "4.25",
+      "detail": {
+        "vehicle_days": 3,
+        "vehicle_days_counted": 3,
+        "vehicle_days_excluded": 0,
+        "trips_counted": 12,
+        "no_show_trips": 2,
+        "revenue_spans": 6,
+        "interruption_breaks": {"fuel": 1, "lunch": 1},
+        "tos_mix": {"DO": 8, "TX": 4},
+        "source_mix": {"dr_simulated": 12}
+      },
+      "input_record_ids": [
+        "rec-dr-01", "rec-dr-02", "rec-dr-03", "rec-dr-04", "rec-dr-05",
+        "rec-dr-06", "rec-dr-07", "rec-dr-08", "rec-dr-09", "rec-dr-10",
+        "rec-dr-11", "rec-dr-12"
+      ],
+      "warning_issue_types": [],
+      "info_issue_types": ["simulated_source_data"]
+    },
+    "dr_vrm": {
+      "calc_name": "dr_vrm_v0",
+      "calc_version": "0.1.0",
+      "unit": "miles",
+      "value": "38.50",
+      "detail": {
+        "vehicle_days": 3,
+        "vehicle_days_counted": 3,
+        "vehicle_days_excluded": 0,
+        "trips_counted": 12,
+        "no_show_trips": 2,
+        "revenue_spans": 6,
+        "interruption_breaks": {"fuel": 1, "lunch": 1},
+        "tos_mix": {"DO": 8, "TX": 4},
+        "source_mix": {"dr_simulated": 12},
+        "distance_sources": {"onboard_sum": 2, "span_odometer": 4},
+        "unmeasured_empty_legs": 1,
+        "missing_onboard_distances": 1,
+        "tx_summed_overlap_intervals": 0
+      },
+      "warning_issue_types": ["dr_distance_unmeasured"],
+      "warnings": [
+        {
+          "issue_type": "dr_distance_unmeasured",
+          "source_record_ids": ["rec-dr-07", "rec-dr-08"]
+        }
+      ],
+      "info_issue_types": ["simulated_source_data"]
+    },
+    "dr_upt": {
+      "calc_name": "dr_upt_v0",
+      "calc_version": "0.1.0",
+      "unit": "unlinked_passenger_trips",
+      "value": "14",
+      "detail": {
+        "upt": 14,
+        "riders": 13,
+        "attendants_companions": 1,
+        "ada_related_upt": 3,
+        "sponsored_upt": 3,
+        "sponsored_by_sponsor": {"Medicaid NEMT": 3},
+        "ada_sponsored_conflicts": 1,
+        "no_show_trips": 2,
+        "trips_counted": 12,
+        "tos_mix": {"DO": 8, "TX": 4},
+        "source_mix": {"dr_simulated": 12}
+      },
+      "input_record_ids": [
+        "rec-dr-01", "rec-dr-02", "rec-dr-03", "rec-dr-05", "rec-dr-06",
+        "rec-dr-07", "rec-dr-08", "rec-dr-09", "rec-dr-10", "rec-dr-11"
+      ],
+      "warnings": [
+        {
+          "issue_type": "dr_ada_sponsored_conflict",
+          "source_record_ids": ["rec-dr-06"]
+        }
+      ],
+      "info_issue_types": ["simulated_source_data"]
+    },
+    "dr_voms": {
+      "calc_name": "dr_voms_v0",
+      "calc_version": "0.1.0",
+      "unit": "vehicles",
+      "value": "3",
+      "detail": {
+        "unique_vehicles": 3,
+        "peak_vehicles": 3,
+        "peak_start": "2026-07-14T09:00:00+00:00",
+        "vehicle_days": 3,
+        "includes_atypical_days": true,
+        "tos_mix": {"DO": 8, "TX": 4},
+        "source_mix": {"dr_simulated": 12}
+      },
+      "input_record_ids": [
+        "rec-dr-01", "rec-dr-02", "rec-dr-03", "rec-dr-04",
+        "rec-dr-07", "rec-dr-08", "rec-dr-09", "rec-dr-10"
+      ],
+      "info_issue_types": ["simulated_source_data"]
+    },
+    "dr_pmt": {
+      "calc_name": "dr_pmt_v0",
+      "calc_version": "0.1.0",
+      "unit": "passenger_miles",
+      "value": "62.50",
+      "detail": {
+        "passenger_miles_counted": "62.50",
+        "trips_counted": 9,
+        "trips_excluded_missing_distance": 1,
+        "persons_counted": 13,
+        "no_show_trips": 2,
+        "distance_sources": {"odometer_pair": 7, "onboard_miles": 2},
+        "tos_mix": {"DO": 8, "TX": 4},
+        "source_mix": {"dr_simulated": 12}
+      },
+      "input_record_ids": [
+        "rec-dr-01", "rec-dr-02", "rec-dr-03", "rec-dr-05", "rec-dr-06",
+        "rec-dr-08", "rec-dr-09", "rec-dr-10", "rec-dr-11"
+      ],
+      "warnings": [
+        {
+          "issue_type": "dr_onboard_distance_missing",
+          "source_record_ids": ["rec-dr-07"]
+        }
+      ],
+      "info_issue_types": ["simulated_source_data"]
+    },
+    "by_tos": {
+      "DO": {
+        "dr_vrh": "3.25",
+        "dr_vrm": "26.50",
+        "dr_upt": "10",
+        "dr_voms": "2",
+        "dr_pmt": "42.50"
+      },
+      "TX": {
+        "dr_vrh": "1.00",
+        "dr_vrm": "12.00",
+        "dr_upt": "4",
+        "dr_voms": "1",
+        "dr_pmt": "20.00"
+      }
+    }
+  },
+  "exhibit40_happy_transit": {
+    "value": "4",
+    "detail": {
+      "unique_vehicles": 6,
+      "peak_vehicles": 4,
+      "peak_start": "2026-07-15T09:00:00+00:00",
+      "vehicle_days": 6,
+      "includes_atypical_days": true,
+      "tos_mix": {"DO": 6},
+      "source_mix": {"dr": 6}
+    },
+    "input_record_ids": ["rec-hv-1", "rec-hv-2", "rec-hv-3", "rec-hv-4"]
+  }
+}

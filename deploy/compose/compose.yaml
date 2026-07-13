@@ -206,7 +206,7 @@ services:
   # every `up`, exit 0 when everything already exists.
   # ===========================================================================
 
-  # Creates the four v0 topics from contracts/topics.v0.md via the official
+  # Creates the v0 topics from contracts/topics.v0.md via the official
   # Kafka image's kafka-topics.sh (--if-not-exists). Adding a topic here
   # requires a contracts change first (Platform Architect governance).
   bootstrap-kafka:
@@ -224,7 +224,8 @@ services:
           raw.gtfs_rt.vehicle_positions \
           raw.gtfs_rt.trip_updates \
           raw.gtfs_rt.alerts \
-          raw.tides.passenger_events
+          raw.tides.passenger_events \
+          raw.dr.trips
         do
           /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 \
             --create --if-not-exists --topic "$$topic" \

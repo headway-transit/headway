@@ -17,7 +17,9 @@ from pathlib import Path
 
 import pytest
 
-from headway_calc.types import PassengerEvent, StopTime, VehiclePosition
+from decimal import Decimal
+
+from headway_calc.types import DrTrip, PassengerEvent, StopTime, VehiclePosition
 
 # services/calc/tests/conftest.py -> repo root is parents[3]
 GOLDEN_DIR = Path(__file__).resolve().parents[3] / "tests" / "golden" / "vrm_vrh_v0"
@@ -26,6 +28,7 @@ VOMS_GOLDEN_DIR = Path(__file__).resolve().parents[3] / "tests" / "golden" / "vo
 MODE_GOLDEN_DIR = Path(__file__).resolve().parents[3] / "tests" / "golden" / "mode_scope"
 MR20_GOLDEN_DIR = Path(__file__).resolve().parents[3] / "tests" / "golden" / "mr20"
 PMT_GOLDEN_DIR = Path(__file__).resolve().parents[3] / "tests" / "golden" / "pmt_v0"
+DR_GOLDEN_DIR = Path(__file__).resolve().parents[3] / "tests" / "golden" / "dr_v0"
 
 
 def load_positions(raw: dict) -> list[VehiclePosition]:
@@ -81,6 +84,61 @@ def load_stop_times(raw_case: dict) -> list[StopTime]:
         )
         for st in raw_case["stop_times"]
     ]
+
+
+def load_dr_trips(raw_case: dict) -> list[DrTrip]:
+    """Map one dr_v0 golden case's trip rows onto DrTrip (Decimal distances
+    from strings — NUMERIC discipline, never float)."""
+
+    def _dec(value):
+        return None if value is None else Decimal(value)
+
+    def _ts(value):
+        return None if value is None else datetime.fromisoformat(value)
+
+    return [
+        DrTrip(
+            pickup_timestamp=datetime.fromisoformat(t["pickup_timestamp"]),
+            service_date=date.fromisoformat(t["service_date"]),
+            dr_trip_id=t["dr_trip_id"],
+            vehicle_id=t["vehicle_id"],
+            tos=t["tos"],
+            dropoff_timestamp=datetime.fromisoformat(t["dropoff_timestamp"]),
+            riders=t["riders"],
+            attendants_companions=t["attendants_companions"],
+            ada_related=t["ada_related"],
+            sponsored=t["sponsored"],
+            no_show=t["no_show"],
+            source=t["source"],
+            source_record_id=t["source_record_id"],
+            sponsor=t.get("sponsor"),
+            onboard_miles=_dec(t.get("onboard_miles")),
+            pickup_odometer_miles=_dec(t.get("pickup_odometer_miles")),
+            dropoff_odometer_miles=_dec(t.get("dropoff_odometer_miles")),
+            interruption_after=t.get("interruption_after", "none"),
+            request_timestamp=_ts(t.get("request_timestamp")),
+            dispatch_timestamp=_ts(t.get("dispatch_timestamp")),
+            driver_shift_id=t.get("driver_shift_id"),
+            dispatching_point_id=t.get("dispatching_point_id"),
+        )
+        for t in raw_case["trips"]
+    ]
+
+
+@pytest.fixture(scope="session")
+def dr_golden_fixture() -> dict:
+    """DR fixture for the dr_*_v0 calcs (handoff 0013): a hand-worked full
+    vehicle-day (Exhibit 36 semantics), per-row Exhibit 36 scenarios, and
+    the Exhibit 40 Happy Transit VOMS scenario — see
+    tests/golden/dr_v0/BASIS.md."""
+    return json.loads((DR_GOLDEN_DIR / "fixture.json").read_text())
+
+
+@pytest.fixture(scope="session")
+def dr_golden_expected() -> dict:
+    """Expectations for the dr_*_v0 calcs 0.1.0 over the DR fixture — see
+    tests/golden/dr_v0/BASIS.md."""
+    return json.loads((DR_GOLDEN_DIR / "expected.json").read_text())
 
 
 @pytest.fixture(scope="session")
@@ -275,6 +333,43 @@ def stop_times_to_rows(stop_times: list[StopTime]) -> list[tuple]:
     ]
 
 
+def dr_trips_to_rows(trips: list[DrTrip]) -> list[tuple]:
+    """Render DrTrips as reader result rows (the handoff-0013
+    canonical.dr_trips columns), in the reader's SQL order
+    (pickup_timestamp, dr_trip_id, source_record_id) — the fake stands in
+    for the database, so it honors the ORDER BY."""
+    ordered = sorted(
+        trips, key=lambda t: (t.pickup_timestamp, t.dr_trip_id, t.source_record_id)
+    )
+    return [
+        (
+            t.pickup_timestamp,
+            t.service_date,
+            t.dr_trip_id,
+            t.vehicle_id,
+            t.tos,
+            t.request_timestamp,
+            t.dispatch_timestamp,
+            t.dropoff_timestamp,
+            t.onboard_miles,
+            t.pickup_odometer_miles,
+            t.dropoff_odometer_miles,
+            t.riders,
+            t.attendants_companions,
+            t.ada_related,
+            t.sponsored,
+            t.sponsor,
+            t.no_show,
+            t.interruption_after,
+            t.driver_shift_id,
+            t.dispatching_point_id,
+            t.source,
+            t.source_record_id,
+        )
+        for t in ordered
+    ]
+
+
 #: app.settings rows exactly as seeded by migration 0014, in the reader's
 #: deterministic ORDER BY setting_key — the fake connection serves these by
 #: default so a plain RecordingConnection models a post-0014 database whose
@@ -315,6 +410,9 @@ class RecordingCursor:
                         'relation "app.settings" does not exist'
                     )
                 self._pending_all = list(conn.settings_rows)
+            elif "canonical.dr_trips" in sql:
+                # The DR reader SELECT (handoff 0013, migration 0021).
+                self._pending_all = list(conn.dr_trip_rows)
             elif "canonical.stop_times" in sql:
                 # pmt_v0's geometry SELECT (handoff 0011) — its subquery
                 # also names canonical.passenger_events, so this branch must
@@ -383,12 +481,15 @@ class RecordingConnection:
         safety_single_event_rows: list[tuple] | None = None,
         operated_mode_rows: list[tuple] | None = None,
         stop_time_rows: list[tuple] | None = None,
+        dr_trip_rows: list[tuple] | None = None,
     ):
         self.position_rows = position_rows or []
         self.passenger_event_rows = passenger_event_rows or []
         self.operated_trip_rows = operated_trip_rows or []
         # pmt_v0's geometry rows (handoff 0011, migration 0019).
         self.stop_time_rows = stop_time_rows or []
+        # The DR calcs' trip rows (handoff 0013, migration 0021).
+        self.dr_trip_rows = dr_trip_rows or []
         self.metric_value_rows = metric_value_rows or []
         # Safety & Security (handoff 0010): ss50's pre-joined month rows,
         # ss40's single-event rows, and the operated-mode derivation rows.

@@ -27,6 +27,7 @@ Invariants (Ingestion Engineer guardrails):
 | `connectors/gtfsrt/` | GTFS-Realtime poller (vehicle_positions / trip_updates / alerts → `raw.gtfs_rt.*`, base64 payload) |
 | `connectors/gtfsstatic/` | GTFS static zip fetcher (→ `raw.gtfs_static.feed`, `object_ref` payload; bytes landed at `raw/gtfs_static/<record_id>.zip` via an `ObjectStore` interface: MinIO impl + fake) |
 | `connectors/tides/` | TIDES passenger_events file-drop scanner (one-shot scan of `TIDES_DROP_DIR` for `passenger_events*.csv` → `raw.tides.passenger_events`, `object_ref` payload; bytes landed at `raw/tides/<record_id>.csv`; processed files moved to `processed/`; header sanity check against the required TIDES columns sets `parse_status` only) |
+| `connectors/dr/` | Demand-response trips file-drop scanner (handoff 0013; one-shot scan of `DR_DROP_DIR` for `demand_response_trips*.csv` → `raw.dr.trips`, `object_ref` payload; bytes landed at `raw/dr/<record_id>.csv`; processed files moved to `processed/`; header sanity check against the required `demand_response_trip` v0 columns — `contracts/demand-response-trip.v0.schema.json` — sets `parse_status` only) |
 | `cmd/headway-ingest/` | The service binary: env config, connector startup, SIGINT/SIGTERM clean shutdown, `log/slog` JSON logging |
 
 GTFS / GTFS-Realtime payload *semantics* are defined by the specs at
@@ -52,9 +53,11 @@ provenance permanently distinguishes them (handoff 0005 binding rule).
 | `GTFS_STATIC_URL` | Fetch this GTFS static zip once at startup (optional) |
 | `TIDES_DROP_DIR` | Scan this directory once at startup for TIDES `passenger_events*.csv` drops (optional) |
 | `TIDES_SOURCE` | Envelope `source` for TIDES drops, default `tides`; simulator drops MUST use `tides_simulated` |
+| `DR_DROP_DIR` | Scan this directory once at startup for `demand_response_trips*.csv` drops (optional, handoff 0013) |
+| `DR_SOURCE` | Envelope `source` for DR drops, default `dr`; simulator drops MUST use `dr_simulated` |
 | `POLL_INTERVAL` | Go duration for GTFS-RT polling, default `30s` |
 | `AGENCY_ID` | Optional envelope `agency_id` (multi-feed disambiguation only) |
-| `S3_ENDPOINT` | MinIO/S3 endpoint `host:port` (required with `GTFS_STATIC_URL` or `TIDES_DROP_DIR`) |
+| `S3_ENDPOINT` | MinIO/S3 endpoint `host:port` (required with `GTFS_STATIC_URL`, `TIDES_DROP_DIR` or `DR_DROP_DIR`) |
 | `S3_ACCESS_KEY` / `S3_SECRET_KEY` | Object-store credentials (inject from the secret store; never logged) |
 | `S3_BUCKET` | Raw bucket, default `headway-raw` |
 | `S3_USE_SSL` | `true` for TLS; default `false` (on-prem MinIO) |

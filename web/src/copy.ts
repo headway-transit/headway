@@ -63,6 +63,7 @@ export const copy = {
     vrh: "Vehicle Revenue Hours (VRH)",
     upt: "Unlinked Passenger Trips (UPT)",
     voms: "Vehicles Operated in Maximum Service (VOMS)",
+    pmt: "Passenger Miles Traveled (PMT)",
   } as Record<string, string>,
 
   /**
@@ -74,6 +75,7 @@ export const copy = {
     hours: "hours",
     unlinked_passenger_trips: "unlinked passenger trips",
     vehicles: "vehicles",
+    passenger_miles: "passenger miles",
   } as Record<string, string>,
 
   metrics: {
@@ -394,6 +396,32 @@ export const copy = {
       "This number was computed from simulated test data. It must never be submitted.",
     reportBanner:
       "This report includes at least one figure computed from simulated test data. It must never be submitted.",
+  },
+
+  /**
+   * Demand Response scope surfacing (handoff 0013, design point 5): the one
+   * DR-specific affordance — the mode/TOS badge and the rule callouts on
+   * receipts. These lead-ins are plain-language framing ONLY; the rules
+   * themselves are always the verbatim tracker quotes placed right under
+   * them (src/regulatory/drRules.ts + quotes.json), never a paraphrase
+   * standing alone.
+   */
+  dr: {
+    /** The mode badge on every DR-scoped figure. */
+    modeBadge: "Demand response (DR)",
+    /** The TOS badge when the scope covers the whole mode, not one TOS. */
+    allTosBadge: "All types of service",
+    /** Plain-language lead-ins for each rule callout, by drRules key. */
+    calloutIntro: {
+      txOnboard:
+        "Taxi (TX) service counts only the time and distance with a passenger onboard. Waiting, empty travel between passengers, and no-show visits add nothing to this figure:",
+      noDeadhead:
+        "Travel without passengers to or from the garage or dispatching point (deadhead) is never reported for this type of service:",
+      noShowRevenue:
+        "A no-show still counts in this figure — driving to the pickup is revenue service even when the passenger never boards:",
+      vomsAtypical:
+        "Unlike the fleet-wide vehicle count, the demand response count includes atypical days:",
+    } as Record<string, string>,
   },
 
   report: {

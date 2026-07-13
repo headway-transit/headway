@@ -15,6 +15,9 @@ matching the handoff-0001 schema exactly:
 - canonical.passenger_events inserts (handoff 0005 / migration 0012), ON
   CONFLICT DO NOTHING on the unique key (passenger_event_id,
   event_timestamp, source_record_id) for the same replay reason;
+- canonical.dr_trips inserts (handoff 0013 / migration 0021), ON CONFLICT
+  DO NOTHING on the unique key (dr_trip_id, pickup_timestamp,
+  source_record_id) for the same replay reason;
 - lineage.edges and dq.issues inserts (never conflated, never skipped).
 
 Transaction boundaries belong to the caller (the consumer commits per
@@ -36,6 +39,7 @@ from .gtfs_static import (
     CanonicalStopTime,
     CanonicalTrip,
 )
+from .dr_trips import CanonicalDrTrip
 from .model import DQFinding, LineageEdge
 from .tides_passenger_events import CanonicalPassengerEvent
 
@@ -112,6 +116,21 @@ INSERT INTO canonical.passenger_events
      source, source_record_id)
 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
 ON CONFLICT (passenger_event_id, event_timestamp, source_record_id) DO NOTHING
+""".strip()
+
+INSERT_DR_TRIP_SQL = """
+INSERT INTO canonical.dr_trips
+    (pickup_timestamp, service_date, dr_trip_id, vehicle_id, tos,
+     request_timestamp, dispatch_timestamp, dropoff_timestamp,
+     pickup_lat, pickup_lon, dropoff_lat, dropoff_lon,
+     onboard_miles, distance_source,
+     pickup_odometer_miles, dropoff_odometer_miles,
+     riders, attendants_companions, ada_related, sponsored, sponsor,
+     no_show, interruption_after, driver_shift_id, dispatching_point_id,
+     source, source_record_id)
+VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+ON CONFLICT (dr_trip_id, pickup_timestamp, source_record_id) DO NOTHING
 """.strip()
 
 INSERT_LINEAGE_EDGE_SQL = """
@@ -240,6 +259,41 @@ class DbWriter:
                     row.trip_stop_sequence,
                     row.event_type,
                     row.event_count,
+                    row.source,
+                    row.source_record_id,
+                ),
+            )
+
+    def insert_dr_trips(self, rows: Iterable[CanonicalDrTrip]) -> None:
+        for row in rows:
+            self._execute(
+                INSERT_DR_TRIP_SQL,
+                (
+                    row.pickup_timestamp,
+                    row.service_date,
+                    row.dr_trip_id,
+                    row.vehicle_id,
+                    row.tos,
+                    row.request_timestamp,
+                    row.dispatch_timestamp,
+                    row.dropoff_timestamp,
+                    row.pickup_lat,
+                    row.pickup_lon,
+                    row.dropoff_lat,
+                    row.dropoff_lon,
+                    row.onboard_miles,
+                    row.distance_source,
+                    row.pickup_odometer_miles,
+                    row.dropoff_odometer_miles,
+                    row.riders,
+                    row.attendants_companions,
+                    row.ada_related,
+                    row.sponsored,
+                    row.sponsor,
+                    row.no_show,
+                    row.interruption_after,
+                    row.driver_shift_id,
+                    row.dispatching_point_id,
                     row.source,
                     row.source_record_id,
                 ),

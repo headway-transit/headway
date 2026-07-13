@@ -1,0 +1,274 @@
+{
+  "description": "Golden fixture for the dr_*_v0 calcs 0.1.0 (handoff 0013): (1) a hand-worked three-vehicle dispatch day (DO shared rides, no-show, lunch/fuel breaks, unmeasured distances, ADA/sponsored splits, TX onboard-only accounting); (2) one behavioral scenario per Exhibit 36 row; (3) the Exhibit 40 Happy Transit VOMS scenario (6 unique vehicles, max 4 simultaneous). All classifications per the tracker's 'Verified — Demand Response / on-demand reporting' quotes. See BASIS.md. Synthetic, NOT FTA-certified; regression anchor only.",
+  "dispatch_day": {
+    "trips": [
+      {
+        "dr_trip_id": "drt-A", "service_date": "2026-07-14", "vehicle_id": "van-1", "tos": "DO",
+        "pickup_timestamp": "2026-07-14T08:00:00+00:00", "dropoff_timestamp": "2026-07-14T08:20:00+00:00",
+        "onboard_miles": "4.0", "pickup_odometer_miles": "100.0", "dropoff_odometer_miles": "104.0",
+        "riders": 1, "attendants_companions": 0, "ada_related": true, "sponsored": false, "no_show": false,
+        "interruption_after": "none", "driver_shift_id": "shift-van-1", "dispatching_point_id": "dp-1",
+        "source": "dr_simulated", "source_record_id": "rec-dr-01"
+      },
+      {
+        "dr_trip_id": "drt-B", "service_date": "2026-07-14", "vehicle_id": "van-1", "tos": "DO",
+        "pickup_timestamp": "2026-07-14T08:30:00+00:00", "dropoff_timestamp": "2026-07-14T09:00:00+00:00",
+        "onboard_miles": "6.0", "pickup_odometer_miles": "106.0", "dropoff_odometer_miles": "112.0",
+        "riders": 2, "attendants_companions": 1, "ada_related": false, "sponsored": true, "sponsor": "Medicaid NEMT", "no_show": false,
+        "interruption_after": "none", "driver_shift_id": "shift-van-1", "dispatching_point_id": "dp-1",
+        "source": "dr_simulated", "source_record_id": "rec-dr-02"
+      },
+      {
+        "dr_trip_id": "drt-C", "service_date": "2026-07-14", "vehicle_id": "van-1", "tos": "DO",
+        "pickup_timestamp": "2026-07-14T08:40:00+00:00", "dropoff_timestamp": "2026-07-14T08:55:00+00:00",
+        "onboard_miles": "3.0", "pickup_odometer_miles": "108.0", "dropoff_odometer_miles": "111.0",
+        "riders": 1, "attendants_companions": 0, "ada_related": true, "sponsored": false, "no_show": false,
+        "interruption_after": "none", "driver_shift_id": "shift-van-1", "dispatching_point_id": "dp-1",
+        "source": "dr_simulated", "source_record_id": "rec-dr-03"
+      },
+      {
+        "dr_trip_id": "drt-D", "service_date": "2026-07-14", "vehicle_id": "van-1", "tos": "DO",
+        "pickup_timestamp": "2026-07-14T09:10:00+00:00", "dropoff_timestamp": "2026-07-14T09:15:00+00:00",
+        "onboard_miles": "0", "pickup_odometer_miles": "114.0", "dropoff_odometer_miles": "114.0",
+        "riders": 0, "attendants_companions": 0, "ada_related": false, "sponsored": false, "no_show": true,
+        "interruption_after": "lunch", "driver_shift_id": "shift-van-1", "dispatching_point_id": "dp-1",
+        "source": "dr_simulated", "source_record_id": "rec-dr-04"
+      },
+      {
+        "dr_trip_id": "drt-E", "service_date": "2026-07-14", "vehicle_id": "van-1", "tos": "DO",
+        "pickup_timestamp": "2026-07-14T10:00:00+00:00", "dropoff_timestamp": "2026-07-14T10:30:00+00:00",
+        "onboard_miles": "5.0", "pickup_odometer_miles": "116.0", "dropoff_odometer_miles": "121.0",
+        "riders": 2, "attendants_companions": 0, "ada_related": false, "sponsored": false, "no_show": false,
+        "interruption_after": "fuel", "driver_shift_id": "shift-van-1", "dispatching_point_id": "dp-1",
+        "source": "dr_simulated", "source_record_id": "rec-dr-05"
+      },
+      {
+        "dr_trip_id": "drt-F", "service_date": "2026-07-14", "vehicle_id": "van-1", "tos": "DO",
+        "pickup_timestamp": "2026-07-14T10:45:00+00:00", "dropoff_timestamp": "2026-07-14T11:00:00+00:00",
+        "onboard_miles": "3.0",
+        "riders": 1, "attendants_companions": 0, "ada_related": true, "sponsored": true, "sponsor": "Meals-On-Wheels", "no_show": false,
+        "interruption_after": "dispatch_return", "driver_shift_id": "shift-van-1", "dispatching_point_id": "dp-1",
+        "source": "dr_simulated", "source_record_id": "rec-dr-06"
+      },
+      {
+        "dr_trip_id": "drt-G", "service_date": "2026-07-14", "vehicle_id": "van-2", "tos": "DO",
+        "pickup_timestamp": "2026-07-14T09:00:00+00:00", "dropoff_timestamp": "2026-07-14T09:30:00+00:00",
+        "riders": 1, "attendants_companions": 0, "ada_related": false, "sponsored": false, "no_show": false,
+        "interruption_after": "none", "driver_shift_id": "shift-van-2", "dispatching_point_id": "dp-1",
+        "source": "dr_simulated", "source_record_id": "rec-dr-07"
+      },
+      {
+        "dr_trip_id": "drt-H", "service_date": "2026-07-14", "vehicle_id": "van-2", "tos": "DO",
+        "pickup_timestamp": "2026-07-14T09:45:00+00:00", "dropoff_timestamp": "2026-07-14T10:15:00+00:00",
+        "onboard_miles": "4.5", "distance_source": "gps",
+        "riders": 1, "attendants_companions": 0, "ada_related": false, "sponsored": false, "no_show": false,
+        "interruption_after": "none", "driver_shift_id": "shift-van-2", "dispatching_point_id": "dp-1",
+        "source": "dr_simulated", "source_record_id": "rec-dr-08"
+      },
+      {
+        "dr_trip_id": "drt-I", "service_date": "2026-07-14", "vehicle_id": "van-3", "tos": "TX",
+        "pickup_timestamp": "2026-07-14T09:00:00+00:00", "dropoff_timestamp": "2026-07-14T09:30:00+00:00",
+        "onboard_miles": "6.0", "pickup_odometer_miles": "50.0", "dropoff_odometer_miles": "56.0",
+        "riders": 1, "attendants_companions": 0, "ada_related": false, "sponsored": false, "no_show": false,
+        "interruption_after": "none",
+        "source": "dr_simulated", "source_record_id": "rec-dr-09"
+      },
+      {
+        "dr_trip_id": "drt-J", "service_date": "2026-07-14", "vehicle_id": "van-3", "tos": "TX",
+        "pickup_timestamp": "2026-07-14T09:10:00+00:00", "dropoff_timestamp": "2026-07-14T09:40:00+00:00",
+        "onboard_miles": "6.0", "pickup_odometer_miles": "52.0", "dropoff_odometer_miles": "58.0",
+        "riders": 1, "attendants_companions": 0, "ada_related": false, "sponsored": false, "no_show": false,
+        "interruption_after": "none",
+        "source": "dr_simulated", "source_record_id": "rec-dr-10"
+      },
+      {
+        "dr_trip_id": "drt-K", "service_date": "2026-07-14", "vehicle_id": "van-3", "tos": "TX",
+        "pickup_timestamp": "2026-07-14T10:00:00+00:00", "dropoff_timestamp": "2026-07-14T10:20:00+00:00",
+        "onboard_miles": "4.0", "pickup_odometer_miles": "62.0", "dropoff_odometer_miles": "66.0",
+        "riders": 2, "attendants_companions": 0, "ada_related": false, "sponsored": false, "no_show": false,
+        "interruption_after": "none",
+        "source": "dr_simulated", "source_record_id": "rec-dr-11"
+      },
+      {
+        "dr_trip_id": "drt-L", "service_date": "2026-07-14", "vehicle_id": "van-3", "tos": "TX",
+        "pickup_timestamp": "2026-07-14T10:30:00+00:00", "dropoff_timestamp": "2026-07-14T10:35:00+00:00",
+        "riders": 0, "attendants_companions": 0, "ada_related": false, "sponsored": false, "no_show": true,
+        "interruption_after": "none",
+        "source": "dr_simulated", "source_record_id": "rec-dr-12"
+      }
+    ]
+  },
+  "exhibit36_scenarios": {
+    "idle_at_dispatching_point": {
+      "trips": [
+        {
+          "dr_trip_id": "s1-T", "service_date": "2026-07-14", "vehicle_id": "s1-van", "tos": "DO",
+          "pickup_timestamp": "2026-07-14T10:00:00+00:00", "dropoff_timestamp": "2026-07-14T10:30:00+00:00",
+          "onboard_miles": "5.0", "pickup_odometer_miles": "0", "dropoff_odometer_miles": "5.0",
+          "riders": 1, "attendants_companions": 0, "ada_related": false, "sponsored": false, "no_show": false,
+          "dispatching_point_id": "dp-1", "source": "dr", "source_record_id": "rec-s1-01"
+        }
+      ]
+    },
+    "depart_dispatch_to_pick_up_passenger": {
+      "trips": [
+        {
+          "dr_trip_id": "s2-T", "service_date": "2026-07-14", "vehicle_id": "s2-van", "tos": "DO",
+          "dispatch_timestamp": "2026-07-14T09:40:00+00:00",
+          "pickup_timestamp": "2026-07-14T10:00:00+00:00", "dropoff_timestamp": "2026-07-14T10:30:00+00:00",
+          "onboard_miles": "5.0", "pickup_odometer_miles": "0", "dropoff_odometer_miles": "5.0",
+          "riders": 1, "attendants_companions": 0, "ada_related": false, "sponsored": false, "no_show": false,
+          "dispatching_point_id": "dp-1", "source": "dr", "source_record_id": "rec-s2-01"
+        }
+      ]
+    },
+    "wait_for_passenger_at_pickup": {
+      "trips": [
+        {
+          "dr_trip_id": "s3-N", "service_date": "2026-07-14", "vehicle_id": "s3-van", "tos": "DO",
+          "pickup_timestamp": "2026-07-14T10:00:00+00:00", "dropoff_timestamp": "2026-07-14T10:06:00+00:00",
+          "pickup_odometer_miles": "10.0", "dropoff_odometer_miles": "10.0",
+          "riders": 0, "attendants_companions": 0, "ada_related": false, "sponsored": false, "no_show": true,
+          "source": "dr", "source_record_id": "rec-s3-01"
+        }
+      ]
+    },
+    "empty_travel_between_dropoff_and_next_pickup": {
+      "trips": [
+        {
+          "dr_trip_id": "s4-X", "service_date": "2026-07-14", "vehicle_id": "s4-van", "tos": "DO",
+          "pickup_timestamp": "2026-07-14T10:00:00+00:00", "dropoff_timestamp": "2026-07-14T10:20:00+00:00",
+          "onboard_miles": "4.0", "pickup_odometer_miles": "0", "dropoff_odometer_miles": "4.0",
+          "riders": 1, "attendants_companions": 0, "ada_related": false, "sponsored": false, "no_show": false,
+          "source": "dr", "source_record_id": "rec-s4-01"
+        },
+        {
+          "dr_trip_id": "s4-Y", "service_date": "2026-07-14", "vehicle_id": "s4-van", "tos": "DO",
+          "pickup_timestamp": "2026-07-14T10:30:00+00:00", "dropoff_timestamp": "2026-07-14T10:50:00+00:00",
+          "onboard_miles": "4.0", "pickup_odometer_miles": "6.0", "dropoff_odometer_miles": "10.0",
+          "riders": 1, "attendants_companions": 0, "ada_related": false, "sponsored": false, "no_show": false,
+          "source": "dr", "source_record_id": "rec-s4-02"
+        }
+      ]
+    },
+    "lunch_travel_or_eating": {
+      "trips": [
+        {
+          "dr_trip_id": "s5-X", "service_date": "2026-07-14", "vehicle_id": "s5-van", "tos": "DO",
+          "pickup_timestamp": "2026-07-14T10:00:00+00:00", "dropoff_timestamp": "2026-07-14T10:20:00+00:00",
+          "onboard_miles": "4.0", "pickup_odometer_miles": "0", "dropoff_odometer_miles": "4.0",
+          "riders": 1, "attendants_companions": 0, "ada_related": false, "sponsored": false, "no_show": false,
+          "interruption_after": "lunch", "source": "dr", "source_record_id": "rec-s5-01"
+        },
+        {
+          "dr_trip_id": "s5-Y", "service_date": "2026-07-14", "vehicle_id": "s5-van", "tos": "DO",
+          "pickup_timestamp": "2026-07-14T11:00:00+00:00", "dropoff_timestamp": "2026-07-14T11:20:00+00:00",
+          "onboard_miles": "4.0", "pickup_odometer_miles": "6.0", "dropoff_odometer_miles": "10.0",
+          "riders": 1, "attendants_companions": 0, "ada_related": false, "sponsored": false, "no_show": false,
+          "source": "dr", "source_record_id": "rec-s5-02"
+        }
+      ]
+    },
+    "return_to_dispatch_empty": {
+      "trips": [
+        {
+          "dr_trip_id": "s6-X", "service_date": "2026-07-14", "vehicle_id": "s6-van", "tos": "DO",
+          "pickup_timestamp": "2026-07-14T10:00:00+00:00", "dropoff_timestamp": "2026-07-14T10:20:00+00:00",
+          "onboard_miles": "4.0", "pickup_odometer_miles": "0", "dropoff_odometer_miles": "4.0",
+          "riders": 1, "attendants_companions": 0, "ada_related": false, "sponsored": false, "no_show": false,
+          "interruption_after": "dispatch_return", "dispatching_point_id": "dp-1",
+          "source": "dr", "source_record_id": "rec-s6-01"
+        },
+        {
+          "dr_trip_id": "s6-Y", "service_date": "2026-07-14", "vehicle_id": "s6-van", "tos": "DO",
+          "pickup_timestamp": "2026-07-14T11:00:00+00:00", "dropoff_timestamp": "2026-07-14T11:20:00+00:00",
+          "onboard_miles": "4.0", "pickup_odometer_miles": "6.0", "dropoff_odometer_miles": "10.0",
+          "riders": 1, "attendants_companions": 0, "ada_related": false, "sponsored": false, "no_show": false,
+          "dispatching_point_id": "dp-1", "source": "dr", "source_record_id": "rec-s6-02"
+        }
+      ]
+    },
+    "no_show_trip": {
+      "trips": [
+        {
+          "dr_trip_id": "s7-X", "service_date": "2026-07-14", "vehicle_id": "s7-van", "tos": "DO",
+          "pickup_timestamp": "2026-07-14T10:00:00+00:00", "dropoff_timestamp": "2026-07-14T10:20:00+00:00",
+          "onboard_miles": "4.0", "pickup_odometer_miles": "0", "dropoff_odometer_miles": "4.0",
+          "riders": 1, "attendants_companions": 0, "ada_related": false, "sponsored": false, "no_show": false,
+          "source": "dr", "source_record_id": "rec-s7-01"
+        },
+        {
+          "dr_trip_id": "s7-N", "service_date": "2026-07-14", "vehicle_id": "s7-van", "tos": "DO",
+          "pickup_timestamp": "2026-07-14T10:30:00+00:00", "dropoff_timestamp": "2026-07-14T10:35:00+00:00",
+          "pickup_odometer_miles": "6.0", "dropoff_odometer_miles": "6.0",
+          "riders": 0, "attendants_companions": 0, "ada_related": false, "sponsored": false, "no_show": true,
+          "source": "dr", "source_record_id": "rec-s7-02"
+        }
+      ]
+    },
+    "fueling": {
+      "trips": [
+        {
+          "dr_trip_id": "s8-X", "service_date": "2026-07-14", "vehicle_id": "s8-van", "tos": "DO",
+          "pickup_timestamp": "2026-07-14T10:00:00+00:00", "dropoff_timestamp": "2026-07-14T10:20:00+00:00",
+          "onboard_miles": "4.0", "pickup_odometer_miles": "0", "dropoff_odometer_miles": "4.0",
+          "riders": 1, "attendants_companions": 0, "ada_related": false, "sponsored": false, "no_show": false,
+          "interruption_after": "fuel", "source": "dr", "source_record_id": "rec-s8-01"
+        },
+        {
+          "dr_trip_id": "s8-Y", "service_date": "2026-07-14", "vehicle_id": "s8-van", "tos": "DO",
+          "pickup_timestamp": "2026-07-14T11:00:00+00:00", "dropoff_timestamp": "2026-07-14T11:20:00+00:00",
+          "onboard_miles": "4.0", "pickup_odometer_miles": "6.0", "dropoff_odometer_miles": "10.0",
+          "riders": 1, "attendants_companions": 0, "ada_related": false, "sponsored": false, "no_show": false,
+          "source": "dr", "source_record_id": "rec-s8-02"
+        }
+      ]
+    }
+  },
+  "exhibit40_happy_transit": {
+    "trips": [
+      {
+        "dr_trip_id": "hv-1-t", "service_date": "2026-07-15", "vehicle_id": "hv-1", "tos": "DO",
+        "pickup_timestamp": "2026-07-15T06:00:00+00:00", "dropoff_timestamp": "2026-07-15T10:00:00+00:00",
+        "onboard_miles": "10.0", "riders": 1, "attendants_companions": 0,
+        "ada_related": false, "sponsored": false, "no_show": false,
+        "source": "dr", "source_record_id": "rec-hv-1"
+      },
+      {
+        "dr_trip_id": "hv-2-t", "service_date": "2026-07-15", "vehicle_id": "hv-2", "tos": "DO",
+        "pickup_timestamp": "2026-07-15T06:30:00+00:00", "dropoff_timestamp": "2026-07-15T10:30:00+00:00",
+        "onboard_miles": "10.0", "riders": 1, "attendants_companions": 0,
+        "ada_related": false, "sponsored": false, "no_show": false,
+        "source": "dr", "source_record_id": "rec-hv-2"
+      },
+      {
+        "dr_trip_id": "hv-3-t", "service_date": "2026-07-15", "vehicle_id": "hv-3", "tos": "DO",
+        "pickup_timestamp": "2026-07-15T07:00:00+00:00", "dropoff_timestamp": "2026-07-15T11:00:00+00:00",
+        "onboard_miles": "10.0", "riders": 1, "attendants_companions": 0,
+        "ada_related": false, "sponsored": false, "no_show": false,
+        "source": "dr", "source_record_id": "rec-hv-3"
+      },
+      {
+        "dr_trip_id": "hv-4-t", "service_date": "2026-07-15", "vehicle_id": "hv-4", "tos": "DO",
+        "pickup_timestamp": "2026-07-15T09:00:00+00:00", "dropoff_timestamp": "2026-07-15T13:00:00+00:00",
+        "onboard_miles": "10.0", "riders": 1, "attendants_companions": 0,
+        "ada_related": false, "sponsored": false, "no_show": false,
+        "source": "dr", "source_record_id": "rec-hv-4"
+      },
+      {
+        "dr_trip_id": "hv-5-t", "service_date": "2026-07-15", "vehicle_id": "hv-5", "tos": "DO",
+        "pickup_timestamp": "2026-07-15T11:30:00+00:00", "dropoff_timestamp": "2026-07-15T15:00:00+00:00",
+        "onboard_miles": "10.0", "riders": 1, "attendants_companions": 0,
+        "ada_related": false, "sponsored": false, "no_show": false,
+        "source": "dr", "source_record_id": "rec-hv-5"
+      },
+      {
+        "dr_trip_id": "hv-6-t", "service_date": "2026-07-15", "vehicle_id": "hv-6", "tos": "DO",
+        "pickup_timestamp": "2026-07-15T13:30:00+00:00", "dropoff_timestamp": "2026-07-15T17:00:00+00:00",
+        "onboard_miles": "10.0", "riders": 1, "attendants_companions": 0,
+        "ada_related": false, "sponsored": false, "no_show": false,
+        "source": "dr", "source_record_id": "rec-hv-6"
+      }
+    ]
+  }
+}

@@ -15,13 +15,28 @@ p. 146 missing-trip rule with a REAL FTA 2% threshold); compute_voms is
 CALC_VERSION 0.1.0 (monthly VOMS day-level proxy, handoff 0009).
 compute_vrh_v0_3, compute_vrh_v0_2 and compute_vrm_v0_1/compute_vrh_v0_1 are
 the retained earlier versions, kept runnable so historical submissions
-recompute bit-for-bit. The compute_*_by_mode paths (handoff 0009) run the
+recompute bit-for-bit. The Demand Response calcs (handoff 0013 —
+compute_dr_vrh/vrm/upt/voms/pmt at 0.1.0, headway_calc.dr) run over
+canonical.dr_trips with Exhibit 36 span semantics and TX onboard-only
+accounting, persisting under scope 'mode:DR' (+ 'mode:DR:tos:<tos>') only. The compute_*_by_mode paths (handoff 0009) run the
 UNCHANGED calc versions over per-mode input subsets (input selection, not a
 semantics change — REGULATORY_TRACKER.md, "Mode scoping");
 build_mr20_package assembles the NOT-REPORTABLE MR-20 preview package.
 """
 
 from headway_calc.dq import route_blocking_issues, route_findings
+from headway_calc.dr import (
+    compute_dr_pmt,
+    compute_dr_pmt_by_tos,
+    compute_dr_upt,
+    compute_dr_upt_by_tos,
+    compute_dr_voms,
+    compute_dr_voms_by_tos,
+    compute_dr_vrh,
+    compute_dr_vrh_by_tos,
+    compute_dr_vrm,
+    compute_dr_vrm_by_tos,
+)
 from headway_calc.mode import (
     compute_upt_by_mode,
     compute_voms_by_mode,
@@ -30,6 +45,7 @@ from headway_calc.mode import (
     unknown_mode_finding,
 )
 from headway_calc.reader import (
+    load_dr_trips,
     load_operated_trip_ids,
     load_passenger_events,
     load_vehicle_positions,
@@ -38,6 +54,7 @@ from headway_calc.types import (
     BlockingIssue,
     CalcResult,
     CoverageDetail,
+    DrTrip,
     Finding,
     PassengerEvent,
     UptDetail,
@@ -67,11 +84,22 @@ __all__ = [
     "BlockingIssue",
     "CalcResult",
     "CoverageDetail",
+    "DrTrip",
     "Finding",
     "PassengerEvent",
     "UptDetail",
     "VehiclePosition",
     "VomsDetail",
+    "compute_dr_pmt",
+    "compute_dr_pmt_by_tos",
+    "compute_dr_upt",
+    "compute_dr_upt_by_tos",
+    "compute_dr_voms",
+    "compute_dr_voms_by_tos",
+    "compute_dr_vrh",
+    "compute_dr_vrh_by_tos",
+    "compute_dr_vrm",
+    "compute_dr_vrm_by_tos",
     "compute_upt",
     "compute_upt_by_mode",
     "compute_voms",
@@ -84,6 +112,7 @@ __all__ = [
     "compute_vrh_v0_1",
     "compute_vrh_v0_2",
     "compute_vrh_v0_3",
+    "load_dr_trips",
     "load_operated_trip_ids",
     "load_passenger_events",
     "load_vehicle_positions",

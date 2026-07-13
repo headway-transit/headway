@@ -3,10 +3,12 @@ import { Link } from "react-router-dom";
 import { ApiError, listMetricValues } from "../api/client";
 import type { MetricValue } from "../api/types";
 import { canCertify, useSession } from "../auth/session";
+import { DrScopeBadge } from "../components/DrScopeBadge";
 import { Receipt } from "../components/Receipt";
 import { SimulatedBadge } from "../components/SimulatedBadge";
 import { copy } from "../copy";
 import { isPreVerification, isSimulated } from "../detail";
+import { parseDrScope } from "../regulatory/drRules";
 
 function metricLabel(code: string): string {
   return copy.metricLabels[code] ?? code;
@@ -117,6 +119,14 @@ export function MetricsView() {
                     <tr>
                       <th scope="row">
                         {metricLabel(v.metric)}
+                        {/* The DR mode/TOS badge (handoff 0013): DR-scoped
+                            rows must never look like fleet rows. */}
+                        {parseDrScope(v.scope) && (
+                          <>
+                            {" "}
+                            <DrScopeBadge scope={v.scope} />
+                          </>
+                        )}
                         {isSimulated(v.detail) && (
                           <>
                             {" "}

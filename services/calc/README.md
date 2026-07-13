@@ -252,6 +252,48 @@ Hand-worked goldens: `tests/golden/sampling_v0/BASIS.md`. Persistence/API:
 migration 0020 (`sampling.plans`/`draws`/`measurements`, all append-only by
 trigger) + the `/sampling/*` endpoints in services/api.
 
+## Demand Response — dr_vrh/dr_vrm/dr_upt/dr_voms/dr_pmt 0.1.0 (handoff 0013)
+
+`headway_calc/dr.py` computes the five DR figures over `canonical.dr_trips`
+(migration 0021 — the `demand_response_trip` v0 wire contract normalized;
+one row per booking, from dispatch platforms, not GTFS-RT). Every rule is a
+verbatim quote in `REGULATORY_TRACKER.md`, "Verified — Demand Response /
+on-demand reporting":
+
+- **dr_vrh/dr_vrm** — Exhibit 36 semantics: revenue SPANS first pickup →
+  last dropoff per (vehicle, service_date), BROKEN at interruption markers
+  (lunch/fuel/garage/dispatch returns, p. 129); waiting, empty
+  inter-passenger travel and no-show visits inside a span are revenue BY
+  CONSTRUCTION; TX vehicle-days count merged passenger-onboard windows only
+  (the p. 129 TX rule). Miles prefer the whole-span odometer delta; an
+  unmeasurable leg contributes 0 + a warning (documented undercount, never
+  an interpolated distance); a TX overlap summed without boundary odometers
+  warns as a possible overcount. `EXHIBIT_36` encodes all eight exhibit
+  rows verbatim and every row is golden-pinned (table + one behavioral
+  scenario each — `tests/golden/dr_v0/BASIS.md`).
+- **dr_upt** — riders + NON-employee attendants/companions (pp. 143–144);
+  ADA split in total, NEVER in the sponsored split (a both-flagged trip
+  warns and counts as ADA); sponsored split in total, by sponsor label.
+  Explicit golden: a no-show is revenue time YES and UPT ZERO.
+- **dr_voms** — "largest number of vehicles in revenue service at any one
+  time … (INCLUDES atypical service)": true simultaneity over the revenue
+  intervals, every day counted — the OPPOSITE of voms_v0's non-DR
+  atypical-day divergence (voms_v0 is deliberately not reused). Golden:
+  Exhibit 40's Happy Transit (6 unique, 4 simultaneous → 4).
+- **dr_pmt** — onboard-distance sums × persons per booking (no load-profile
+  path); feeds the EXISTING `pmt` metric persistence.
+
+The DR calcs NEVER block (no completeness threshold is quoted for DR —
+inventing one, or borrowing p. 146 from the 100%-count context, would be a
+regulatory number from the wrong context); every gap is a warning with its
+direction stated. Contradictory vehicle-days (mixed TOS; interruption while
+a passenger onboard) are excluded with warnings. Figures persist under
+scope `mode:DR` plus `mode:DR:tos:<tos>` ONLY — never `agency` — whenever
+the period holds dr_trips rows (`run_period` wiring; TOS partition is
+vehicle-day-granular so per-TOS values decompose the mode figure,
+property-tested). Simulated sources (`source != 'dr'`) always flag
+`simulated_source_data`.
+
 ## Mode dimension, VOMS and the MR-20 package — handoff 0009
 
 MR-20 (2025 NTD Monthly and Weekly Reference Policy Manual pp. 32–33,

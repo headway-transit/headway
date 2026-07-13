@@ -12,9 +12,12 @@
 //	TIDES_DROP_DIR                 scan this directory once for TIDES passenger_events*.csv (optional)
 //	TIDES_SOURCE                   envelope source for TIDES drops, default "tides";
 //	                               simulator drops MUST set "tides_simulated" (handoff 0005)
+//	DR_DROP_DIR                    scan this directory once for demand_response_trips*.csv (optional, handoff 0013)
+//	DR_SOURCE                      envelope source for DR drops, default "dr";
+//	                               simulator drops MUST set "dr_simulated" (handoff 0013)
 //	POLL_INTERVAL                  Go duration, default 30s
 //	AGENCY_ID                      optional envelope agency_id
-//	S3_ENDPOINT                    MinIO/S3 endpoint host:port (required with GTFS_STATIC_URL or TIDES_DROP_DIR)
+//	S3_ENDPOINT                    MinIO/S3 endpoint host:port (required with GTFS_STATIC_URL, TIDES_DROP_DIR or DR_DROP_DIR)
 //	S3_ACCESS_KEY, S3_SECRET_KEY   credentials (from the secret store; never logged)
 //	S3_BUCKET                      target bucket, default headway-raw
 //	S3_USE_SSL                     "true" to use TLS, default false (on-prem MinIO)
@@ -35,6 +38,7 @@ import (
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 
+	"github.com/headway-transit/headway/services/ingestion/connectors/dr"
 	"github.com/headway-transit/headway/services/ingestion/connectors/gtfsrt"
 	"github.com/headway-transit/headway/services/ingestion/connectors/gtfsstatic"
 	"github.com/headway-transit/headway/services/ingestion/connectors/tides"
@@ -164,8 +168,32 @@ func run(log *slog.Logger) error {
 		}()
 	}
 
+	if dropDir := os.Getenv("DR_DROP_DIR"); dropDir != "" {
+		client, bucket, err := minioFromEnv("DR_DROP_DIR")
+		if err != nil {
+			return err
+		}
+		scanner := &dr.Scanner{
+			Dir:      dropDir,
+			Source:   os.Getenv("DR_SOURCE"), // empty → dr.DefaultSource
+			AgencyID: agencyID,
+			Store:    dr.NewMinioStore(client, bucket),
+			Producer: kafka,
+			Log:      log,
+		}
+		started++
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			log.Info("dr drop-dir scan started", "dir", dropDir)
+			if err := scanner.ScanOnce(ctx); err != nil && ctx.Err() == nil {
+				log.Error("dr drop-dir scan failed", "error", err)
+			}
+		}()
+	}
+
 	if started == 0 {
-		return fmt.Errorf("no connectors configured: set GTFS_RT_*_URL, GTFS_STATIC_URL, and/or TIDES_DROP_DIR")
+		return fmt.Errorf("no connectors configured: set GTFS_RT_*_URL, GTFS_STATIC_URL, TIDES_DROP_DIR, and/or DR_DROP_DIR")
 	}
 
 	log.Info("headway-ingest running", "connectors", started)

@@ -35,7 +35,10 @@ import {
 } from "../detail";
 import type { Detail } from "../detail";
 import { detailValueToString, ratioToPercentString } from "../format";
-import { quotesForCalc } from "../regulatory/quotes";
+import { drCallouts, parseDrScope } from "../regulatory/drRules";
+import { quoteContaining, quotesForCalc } from "../regulatory/quotes";
+import type { RegulatoryQuote } from "../regulatory/quotes";
+import { DrScopeBadge } from "./DrScopeBadge";
 import { SimulatedBadge } from "./SimulatedBadge";
 
 function metricLabel(code: string): string {
@@ -103,6 +106,20 @@ export interface ReceiptProps {
   value: MetricValue;
 }
 
+/** One verbatim quote as a blockquote + cite (the fta-quote pattern). */
+function QuoteFigure({ quote }: { quote: RegulatoryQuote }) {
+  return (
+    <figure className="fta-quote">
+      <blockquote>
+        <p>{quote.quote}</p>
+      </blockquote>
+      <figcaption>
+        <cite>{quote.citation}</cite>
+      </figcaption>
+    </figure>
+  );
+}
+
 export function Receipt({ value }: ReceiptProps) {
   const detail: Detail = value.detail ?? {};
   const metric = metricLabel(value.metric);
@@ -128,6 +145,13 @@ export function Receipt({ value }: ReceiptProps) {
   // (c) the verified FTA quotes for this calc. null is a LOUD condition.
   const quotes = quotesForCalc(value.calc_name);
 
+  // The DR affordance (handoff 0013, design point 5): a mode/TOS badge on
+  // every `mode:DR`/`mode:DR:tos:*` figure, plus a callout quoting each
+  // verified rule the TOS makes govern THIS figure's semantics. A callout
+  // whose quote is not on file is a LOUD absence, never silence.
+  const drScope = parseDrScope(value.scope);
+  const callouts = drScope ? drCallouts(value.metric, drScope.tos) : [];
+
   // (d) flags. "anomaly" is forward-compatible: any detail key naming an
   // anomaly raises the flag (no current calc emits one; when one does, it is
   // shown, never hidden — and its raw detail line already renders above).
@@ -140,9 +164,16 @@ export function Receipt({ value }: ReceiptProps) {
 
   return (
     <section className="receipt" aria-label={copy.receipt.label(metric, period)}>
-      {/* (a) the plain-language story: the figure verbatim, in context. */}
+      {/* (a) the plain-language story: the figure verbatim, in context.
+          A DR-scoped figure carries its mode/TOS badge right beside it. */}
       <p className="receipt-story">
         {copy.receipt.story(value.value, unitLabel(value.unit), metric, period)}
+        {drScope && (
+          <>
+            {" "}
+            <DrScopeBadge scope={value.scope} />
+          </>
+        )}
       </p>
 
       {/* (b) coverage meter + exclusions + the rest of the detail. */}
@@ -174,21 +205,32 @@ export function Receipt({ value }: ReceiptProps) {
         )}
       </div>
 
-      {/* (c) the FTA rule inside the number: verbatim quotes + citations. */}
+      {/* (c) the FTA rule inside the number: verbatim quotes + citations.
+          DR rule callouts come first — the rules the TOS makes govern this
+          figure, each led in with plain language and quoted verbatim. */}
       <div className="receipt-rule">
         <h2>{copy.receipt.ruleHeading}</h2>
+        {callouts.map((callout) => {
+          const quote = quoteContaining(value.calc_name, callout.snippet);
+          return (
+            <div className="dr-callout" key={callout.key}>
+              <p>{copy.dr.calloutIntro[callout.key]}</p>
+              {quote ? (
+                <QuoteFigure quote={quote} />
+              ) : (
+                // FAIL LOUDLY: the callout's rule is missing — state it.
+                <p className="alert">
+                  {copy.receipt.ruleMissing(value.calc_name)}
+                </p>
+              )}
+            </div>
+          );
+        })}
         {quotes ? (
           <>
             <p>{copy.receipt.ruleIntro(value.calc_name)}</p>
             {quotes.map((q) => (
-              <figure className="fta-quote" key={`${q.citation}:${q.quote}`}>
-                <blockquote>
-                  <p>{q.quote}</p>
-                </blockquote>
-                <figcaption>
-                  <cite>{q.citation}</cite>
-                </figcaption>
-              </figure>
+              <QuoteFigure quote={q} key={`${q.citation}:${q.quote}`} />
             ))}
           </>
         ) : (

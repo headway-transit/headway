@@ -443,16 +443,17 @@ def test_persist_failure_does_not_roll_back_committed_dq_issues(
         run_period(conn, PERIOD_START, PERIOD_END)
 
     # The dq issues were inserted AND committed before the failing insert:
-    # statements are [5 SELECTs (app.settings, then the 4 reader SELECTs:
-    # positions, passenger events, operated trips, trip geometry), vrm
-    # blocking dq insert, vrh's 2 info dq inserts, failing mv insert]; the
-    # sole commit boundary covers exactly the first eight.
-    for sql, _ in conn.executed[0:5]:
+    # statements are [6 SELECTs (app.settings, then the 5 reader SELECTs:
+    # positions, passenger events, operated trips, trip geometry, DR trips —
+    # handoff 0013), vrm blocking dq insert, vrh's 2 info dq inserts,
+    # failing mv insert]; the sole commit boundary covers exactly the first
+    # nine.
+    for sql, _ in conn.executed[0:6]:
         assert sql.lstrip().startswith("SELECT")
-    for sql, _ in conn.executed[5:8]:
+    for sql, _ in conn.executed[6:9]:
         assert "INSERT INTO dq.issues" in sql
-    assert "INSERT INTO computed.metric_values" in conn.executed[8][0]
-    assert conn.commits == [8]  # committed through the dq inserts, no further
+    assert "INSERT INTO computed.metric_values" in conn.executed[9][0]
+    assert conn.commits == [9]  # committed through the dq inserts, no further
     # The value phase alone was rolled back; the commit record stands.
     assert conn.rollback_count == 1
 

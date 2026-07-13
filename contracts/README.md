@@ -8,6 +8,8 @@ This directory is the **single connector boundary** (ADR-0006): every connector 
 | --- | --- |
 | `raw-record-envelope.v0.schema.json` | The envelope every connector wraps a raw record in before producing to Kafka. |
 | `topics.v0.md` | Topic naming convention and the v0 topic registry. |
+| `demand-response-trip.v0.schema.json` | One demand-response trip (booking) record as exported by a dispatch platform — the payload row format of `raw.dr.trips` files (handoff 0013). |
+| `demand-response-trip.v0.md` | Field semantics, regulatory pointers, and the worked Via-style CSV export mapping example for `demand_response_trip` v0. |
 
 ## Invariants (binding on every connector)
 

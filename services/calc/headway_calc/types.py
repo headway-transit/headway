@@ -166,6 +166,113 @@ class StopTime:
             )
 
 
+#: The demand_response_trip v0 vocabulary (canonical.dr_trips CHECK enums,
+#: migration 0021 / handoff 0013).
+DR_TOS_VALUES = ("DO", "PT", "TX", "TN")
+DR_INTERRUPTIONS = ("none", "lunch", "fuel", "garage_return", "dispatch_return")
+
+
+@dataclass(frozen=True)
+class DrTrip:
+    """One canonical demand-response trip (read contract: canonical.dr_trips,
+    migration 0021, handoff 0013 — the demand_response_trip v0 wire contract
+    normalized).
+
+    One row per BOOKING: a shared ride is several DrTrips on the same
+    vehicle with overlapping [pickup, dropoff] windows. ``pickup_timestamp``
+    / ``dropoff_timestamp`` MUST be timezone-aware event time (for a
+    no-show: arrival at / departure from the pickup point). ``tos`` selects
+    the revenue rule (TX = passenger-onboard only, p. 129 as quoted in the
+    tracker's DR section). Distances are Decimal (NUMERIC end to end) and
+    None when UNMEASURED — never coalesced; the DR calcs flag the gap and
+    never guess. ``source`` is the ingestion envelope source (``"dr"`` real,
+    ``"dr_simulated"`` simulator, or a vendor label bound to the pushing
+    machine key). ``source_record_id`` anchors lineage (ADR-0007).
+
+    Structural contradictions (the migration-0021 CHECKs) raise here so a
+    bad canonical row is surfaced loudly, never coerced — the transform
+    quarantines them before canonical, so a raise means a broken pipeline.
+    """
+
+    pickup_timestamp: datetime
+    service_date: date
+    dr_trip_id: str
+    vehicle_id: str
+    tos: str
+    dropoff_timestamp: datetime
+    riders: int
+    attendants_companions: int
+    ada_related: bool
+    sponsored: bool
+    no_show: bool
+    source: str
+    source_record_id: str
+    sponsor: str | None = None
+    onboard_miles: Decimal | None = None
+    pickup_odometer_miles: Decimal | None = None
+    dropoff_odometer_miles: Decimal | None = None
+    interruption_after: str = "none"
+    request_timestamp: datetime | None = None
+    dispatch_timestamp: datetime | None = None
+    driver_shift_id: str | None = None
+    dispatching_point_id: str | None = None
+
+    def __post_init__(self) -> None:
+        for name, value in (
+            ("pickup_timestamp", self.pickup_timestamp),
+            ("dropoff_timestamp", self.dropoff_timestamp),
+        ):
+            if value.tzinfo is None or value.utcoffset() is None:
+                raise ValueError(
+                    f"DrTrip.{name} must be timezone-aware; got naive datetime "
+                    f"{value!r} (dr_trip_id={self.dr_trip_id!r})"
+                )
+        if self.dropoff_timestamp < self.pickup_timestamp:
+            raise ValueError(
+                f"DrTrip dropoff precedes pickup (dr_trip_id="
+                f"{self.dr_trip_id!r}) — a contradiction the transform "
+                f"quarantines; never repaired here"
+            )
+        if self.tos not in DR_TOS_VALUES:
+            raise ValueError(
+                f"DrTrip.tos must be one of {DR_TOS_VALUES}; got {self.tos!r} "
+                f"(dr_trip_id={self.dr_trip_id!r})"
+            )
+        if self.interruption_after not in DR_INTERRUPTIONS:
+            raise ValueError(
+                f"DrTrip.interruption_after must be one of {DR_INTERRUPTIONS}; "
+                f"got {self.interruption_after!r} (dr_trip_id={self.dr_trip_id!r})"
+            )
+        if self.riders < 0 or self.attendants_companions < 0:
+            raise ValueError(
+                f"DrTrip riders/attendants_companions must be >= 0 "
+                f"(dr_trip_id={self.dr_trip_id!r})"
+            )
+        if self.no_show and (self.riders > 0 or self.attendants_companions > 0):
+            raise ValueError(
+                f"DrTrip no_show carries boardings (dr_trip_id="
+                f"{self.dr_trip_id!r}) — Exhibit 36 (tracker DR section): a "
+                f"no-show is revenue time but never a boarding"
+            )
+        for name, value in (
+            ("onboard_miles", self.onboard_miles),
+            ("pickup_odometer_miles", self.pickup_odometer_miles),
+            ("dropoff_odometer_miles", self.dropoff_odometer_miles),
+        ):
+            if value is not None and value < 0:
+                raise ValueError(
+                    f"DrTrip.{name} must be >= 0 or None; got {value!r} "
+                    f"(dr_trip_id={self.dr_trip_id!r})"
+                )
+
+    @property
+    def persons(self) -> int:
+        """Boardings on this booking: riders + non-employee
+        attendants/companions (pp. 143-144 as quoted in the tracker — the
+        employee rule is applied by the exporter per the wire contract)."""
+        return self.riders + self.attendants_companions
+
+
 @dataclass(frozen=True)
 class Finding:
     """A data-quality finding raised by a calculation.
@@ -473,6 +580,203 @@ class VomsDetail:
 
 
 @dataclass(frozen=True)
+class DrServiceDetail:
+    """Detail of one dr_vrh_v0 run (handoff 0013), persisted verbatim into
+    computed.metric_values.detail (JSONB, migration 0010).
+
+    - ``vehicle_days`` / ``vehicle_days_counted`` / ``vehicle_days_excluded``
+      — (vehicle_id, service_date) groups seen / summed / excluded for a
+      contradiction (mixed TOS, or an interruption marked while a passenger
+      was still onboard) — each exclusion is its own warning finding.
+    - ``trips_counted`` / ``no_show_trips`` — bookings in the counted
+      groups; no-shows are revenue time (Exhibit 36) and appear in both.
+    - ``revenue_spans`` — spans after breaking vehicle-days at interruption
+      markers (p. 129); for TX groups, merged passenger-onboard intervals.
+    - ``interruption_breaks`` — span breaks by marker type.
+    - ``tos_mix`` — counted trips per type of service; ``source_mix`` —
+      trips per envelope source (ALWAYS present: the simulated-data rule).
+    """
+
+    vehicle_days: int
+    vehicle_days_counted: int
+    vehicle_days_excluded: int
+    trips_counted: int
+    no_show_trips: int
+    revenue_spans: int
+    interruption_breaks: dict[str, int]
+    tos_mix: dict[str, int]
+    source_mix: dict[str, int]
+
+    def to_dict(self) -> dict:
+        return {
+            "vehicle_days": self.vehicle_days,
+            "vehicle_days_counted": self.vehicle_days_counted,
+            "vehicle_days_excluded": self.vehicle_days_excluded,
+            "trips_counted": self.trips_counted,
+            "no_show_trips": self.no_show_trips,
+            "revenue_spans": self.revenue_spans,
+            "interruption_breaks": {
+                k: self.interruption_breaks[k]
+                for k in sorted(self.interruption_breaks)
+            },
+            "tos_mix": {k: self.tos_mix[k] for k in sorted(self.tos_mix)},
+            "source_mix": {k: self.source_mix[k] for k in sorted(self.source_mix)},
+        }
+
+
+@dataclass(frozen=True)
+class DrVrmDetail(DrServiceDetail):
+    """Detail of one dr_vrm_v0 run — DrServiceDetail plus the distance
+    accounting (handoff 0013):
+
+    - ``distance_sources`` — revenue spans priced by whole-span odometer
+      delta ('span_odometer') vs summed per-trip onboard distances plus
+      measurable empty legs ('onboard_sum').
+    - ``unmeasured_empty_legs`` — inter-passenger empty-travel legs (revenue
+      per Exhibit 36) with no odometer pair: contributed 0 and were warned —
+      a DOCUMENTED UNDERCOUNT, never an interpolated distance.
+    - ``missing_onboard_distances`` — counted trips with no usable onboard
+      distance (no odometer pair, no onboard_miles): contributed 0, warned.
+    - ``tx_summed_overlap_intervals`` — TX merged onboard intervals holding
+      more than one booking priced by SUMMING per-booking distances (no
+      boundary odometer pair): a possible OVERCOUNT of shared segments,
+      warned (p. 129 counts vehicle miles with a passenger onboard once).
+    """
+
+    distance_sources: dict[str, int]
+    unmeasured_empty_legs: int
+    missing_onboard_distances: int
+    tx_summed_overlap_intervals: int
+
+    def to_dict(self) -> dict:
+        detail = super().to_dict()
+        detail["distance_sources"] = {
+            k: self.distance_sources[k] for k in sorted(self.distance_sources)
+        }
+        detail["unmeasured_empty_legs"] = self.unmeasured_empty_legs
+        detail["missing_onboard_distances"] = self.missing_onboard_distances
+        detail["tx_summed_overlap_intervals"] = self.tx_summed_overlap_intervals
+        return detail
+
+
+@dataclass(frozen=True)
+class DrUptDetail:
+    """Detail of one dr_upt_v0 run (handoff 0013), persisted verbatim into
+    computed.metric_values.detail (JSONB).
+
+    Splits per the manual pp. 143-144 (quoted in the tracker's DR section):
+    ``ada_related_upt`` is included in the total and NEVER in the sponsored
+    split; ``sponsored_upt`` is included in the total;
+    ``sponsored_by_sponsor`` breaks the sponsored split down by the sponsor
+    label. ``ada_sponsored_conflicts`` counts trips flagged BOTH (each is a
+    warning; counted in the ADA split only). ``no_show_trips`` carry revenue
+    time but ZERO boardings — the Exhibit 36 asymmetry.
+    """
+
+    upt: int
+    riders: int
+    attendants_companions: int
+    ada_related_upt: int
+    sponsored_upt: int
+    sponsored_by_sponsor: dict[str, int]
+    ada_sponsored_conflicts: int
+    no_show_trips: int
+    trips_counted: int
+    tos_mix: dict[str, int]
+    source_mix: dict[str, int]
+
+    def to_dict(self) -> dict:
+        return {
+            "upt": self.upt,
+            "riders": self.riders,
+            "attendants_companions": self.attendants_companions,
+            "ada_related_upt": self.ada_related_upt,
+            "sponsored_upt": self.sponsored_upt,
+            "sponsored_by_sponsor": {
+                k: self.sponsored_by_sponsor[k]
+                for k in sorted(self.sponsored_by_sponsor)
+            },
+            "ada_sponsored_conflicts": self.ada_sponsored_conflicts,
+            "no_show_trips": self.no_show_trips,
+            "trips_counted": self.trips_counted,
+            "tos_mix": {k: self.tos_mix[k] for k in sorted(self.tos_mix)},
+            "source_mix": {k: self.source_mix[k] for k in sorted(self.source_mix)},
+        }
+
+
+@dataclass(frozen=True)
+class DrVomsDetail:
+    """Detail of one dr_voms_v0 run (handoff 0013).
+
+    - ``unique_vehicles`` — distinct vehicles with any revenue-service
+      interval in the period; ``peak_vehicles`` — the reported maximum
+      SIMULTANEOUS count (Exhibits 38 + 40: 'at any one time');
+      ``peak_start`` — the first instant the maximum is attained (ISO,
+      deterministic tie-break).
+    - ``includes_atypical_days`` — always True: DR VOMS 'INCLUDES atypical
+      service' (Exhibit 38 as quoted in the tracker) — the OPPOSITE of
+      voms_v0's non-DR atypical-day exclusion divergence.
+    """
+
+    unique_vehicles: int
+    peak_vehicles: int
+    peak_start: str | None
+    vehicle_days: int
+    includes_atypical_days: bool
+    tos_mix: dict[str, int]
+    source_mix: dict[str, int]
+
+    def to_dict(self) -> dict:
+        return {
+            "unique_vehicles": self.unique_vehicles,
+            "peak_vehicles": self.peak_vehicles,
+            "peak_start": self.peak_start,
+            "vehicle_days": self.vehicle_days,
+            "includes_atypical_days": self.includes_atypical_days,
+            "tos_mix": {k: self.tos_mix[k] for k in sorted(self.tos_mix)},
+            "source_mix": {k: self.source_mix[k] for k in sorted(self.source_mix)},
+        }
+
+
+@dataclass(frozen=True)
+class DrPmtDetail:
+    """Detail of one dr_pmt_v0 run (handoff 0013): passenger-onboard
+    distance sums × persons — no load-profile reconstruction (the handoff's
+    'no load-profile path').
+
+    - ``trips_counted`` / ``trips_excluded_missing_distance`` — completed
+      bookings priced / excluded because no onboard distance was measurable
+      (each exclusion warned; a distance is never guessed).
+    - ``persons_counted`` — riders + attendants/companions on priced trips.
+    - ``distance_sources`` — trips priced from an odometer pair vs the
+      exported onboard_miles value.
+    """
+
+    passenger_miles_counted: Decimal
+    trips_counted: int
+    trips_excluded_missing_distance: int
+    persons_counted: int
+    no_show_trips: int
+    distance_sources: dict[str, int]
+    tos_mix: dict[str, int]
+    source_mix: dict[str, int]
+
+    def to_dict(self) -> dict:
+        return {
+            "passenger_miles_counted": str(self.passenger_miles_counted),
+            "trips_counted": self.trips_counted,
+            "trips_excluded_missing_distance": self.trips_excluded_missing_distance,
+            "persons_counted": self.persons_counted,
+            "no_show_trips": self.no_show_trips,
+            "distance_sources": {
+                k: self.distance_sources[k] for k in sorted(self.distance_sources)
+            },
+            "tos_mix": {k: self.tos_mix[k] for k in sorted(self.tos_mix)},
+            "source_mix": {k: self.source_mix[k] for k in sorted(self.source_mix)},
+        }
+
+
+@dataclass(frozen=True)
 class CalcResult:
     """The output of one calculation run.
 
@@ -488,7 +792,8 @@ class CalcResult:
     ``detail`` carries the 0.2.0 coverage detail (a BlockCoverageDetail for
     0.3.0 block-aware VRH; an UptDetail for upt_v0, handoff 0005; a
     VomsDetail for voms_v0, handoff 0009; a PmtDetail for pmt_v0, handoff
-    0011; None for 0.1.0 results).
+    0011; the Dr* details for the DR calcs, handoff 0013; None for 0.1.0
+    results).
     """
 
     value: Decimal | None
@@ -499,7 +804,17 @@ class CalcResult:
     blocking_issues: tuple[Finding, ...]
     warnings: tuple[Finding, ...] = ()
     infos: tuple[Finding, ...] = ()
-    detail: CoverageDetail | UptDetail | VomsDetail | PmtDetail | None = None
+    detail: (
+        CoverageDetail
+        | UptDetail
+        | VomsDetail
+        | PmtDetail
+        | DrServiceDetail
+        | DrUptDetail
+        | DrVomsDetail
+        | DrPmtDetail
+        | None
+    ) = None
 
     def __post_init__(self) -> None:
         if self.blocking_issues and self.value is not None:

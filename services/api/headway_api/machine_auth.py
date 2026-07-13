@@ -39,12 +39,19 @@ KEY_PREFIX = "hwk_"
 # UI, logs, and audit trail without ever exposing usable key material.
 KEY_ID_PREFIX_LEN = 12
 
-# v0 scope registry (handoff 0006, design point 3). A scope not in this tuple
-# cannot be issued, and an endpoint can only require a scope from this tuple —
-# deny-by-default in both directions.
+# v0 scope registry (handoff 0006, design point 3; ingest:dr added by
+# handoff 0013). A scope not in this tuple cannot be issued, and an endpoint
+# can only require a scope from this tuple — deny-by-default in both
+# directions.
 SCOPE_INGEST_TIDES = "ingest:tides"
+SCOPE_INGEST_DR = "ingest:dr"
 SCOPE_READ_METRICS = "read:metrics"
-KNOWN_SCOPES = (SCOPE_INGEST_TIDES, SCOPE_READ_METRICS)
+KNOWN_SCOPES = (SCOPE_INGEST_TIDES, SCOPE_INGEST_DR, SCOPE_READ_METRICS)
+
+#: Scopes that push raw records and therefore REQUIRE a bound source_label
+#: at issuance (the envelope source is always the key's label, never
+#: client-supplied — the handoff-0005 rule, generalized by handoff 0013).
+INGEST_SCOPES = (SCOPE_INGEST_TIDES, SCOPE_INGEST_DR)
 
 
 @dataclass(frozen=True)

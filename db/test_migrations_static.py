@@ -524,3 +524,49 @@ def test_sampling_plans_draws_measurements_append_only():
     assert "p. 150" in sql_0020 and "3 years" in sql_0020, (
         "0020 must carry the documentation-retention basis"
     )
+
+
+def test_dr_trips_hypertable_nulls_preserved_and_structural_checks():
+    # Handoff 0013 / migration 0021: demand-response trips. Hypertable on
+    # pickup_timestamp with the replay-idempotent unique key; NUMERIC (never
+    # float) distances that stay NULLABLE with no default (unmeasured is
+    # unmeasured, never coalesced); the wire contract's structural rules as
+    # CHECKs (TOS enum, dropoff >= pickup, sponsor iff sponsored, no-show has
+    # zero boardings); source column for the simulated-data rule.
+    sql = all_sql()
+    assert "create_hypertable('canonical.dr_trips', 'pickup_timestamp')" in sql
+    assert re.search(
+        r"CREATE UNIQUE INDEX\s+\w+\s+ON canonical\.dr_trips\s*"
+        r"\(dr_trip_id, pickup_timestamp, source_record_id\)",
+        sql,
+    ), "unique index (dr_trip_id, pickup_timestamp, source_record_id) missing"
+    sql_0021 = (MIGRATIONS_DIR / "0021_dr_trips.sql").read_text(encoding="utf-8")
+    assert re.search(
+        r"tos\s+TEXT NOT NULL CHECK \(tos IN \('DO', 'PT', 'TX', 'TN'\)\)",
+        sql_0021,
+    ), "canonical.dr_trips.tos must be CHECK-constrained to DO/PT/TX/TN"
+    # Distances: NUMERIC, nullable, no default — NULL preserved, never 0.
+    assert re.search(r"onboard_miles\s+NUMERIC CHECK", sql_0021)
+    assert not re.search(r"onboard_miles\s+NUMERIC[^,]*(NOT NULL|DEFAULT)", sql_0021), (
+        "onboard_miles must stay nullable with no default (unmeasured is a "
+        "flagged gap, never a fabricated 0)"
+    )
+    assert not re.search(
+        r"(onboard_miles|odometer_miles)\s+(REAL|FLOAT|DOUBLE)", sql_0021
+    ), "distances must be NUMERIC, never float (repo non-negotiable)"
+    # Structural contract rules.
+    assert re.search(r"dropoff_timestamp >= pickup_timestamp", sql_0021)
+    assert re.search(r"NOT no_show OR \(riders = 0 AND attendants_companions = 0\)", sql_0021), (
+        "a no-show must carry zero boardings (revenue time yes, UPT no)"
+    )
+    assert "dr_trips_sponsor_iff_sponsored" in sql_0021
+    assert re.search(
+        r"interruption_after\s+TEXT NOT NULL DEFAULT 'none' CHECK", sql_0021
+    ), "interruption_after must default 'none' with a CHECK enum"
+    assert re.search(r"source\s+TEXT NOT NULL", sql_0021), (
+        "canonical.dr_trips.source must be TEXT NOT NULL (simulated data "
+        "permanently distinguishable)"
+    )
+    assert re.search(
+        r"source_record_id\s+TEXT NOT NULL REFERENCES raw\.records", sql_0021
+    ), "canonical.dr_trips.source_record_id must reference raw.records"

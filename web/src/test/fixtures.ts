@@ -117,6 +117,112 @@ export const simulatedUptValue: MetricValue = {
 };
 
 /**
+ * Demand Response figures (handoff 0013): DR calcs persist under scope
+ * `mode:DR` + `mode:DR:tos:<tos>` only — never `agency`. Detail shapes
+ * mirror the live dr_* rows (services/calc headway_calc/dr.py); every
+ * current DR row is simulator-sourced, so source_mix carries dr_simulated
+ * and the SIMULATED badge must appear via the existing plumbing.
+ */
+export const drVrhModeValue: MetricValue = {
+  metric_value_id: "mv-dr-vrh-mode",
+  metric: "vrh",
+  unit: "hours",
+  period_start: "2026-07-14",
+  period_end: "2026-07-16",
+  scope: "mode:DR",
+  value: "24.63",
+  calc_name: "dr_vrh_v0",
+  calc_version: "0.1.0",
+  computed_at: "2026-07-13T07:48:08Z",
+  certification_status: "uncertified",
+  detail: {
+    tos_mix: { DO: 48, PT: 31, TX: 16 },
+    source_mix: { dr_simulated: 95 },
+    vehicle_days: 12,
+    no_show_trips: 9,
+    revenue_spans: 31,
+    trips_counted: 95,
+    vehicle_days_counted: 12,
+    vehicle_days_excluded: 0,
+  },
+};
+
+/** A TX (taxi) vehicle-hours figure: onboard-only + no-deadhead rules. */
+export const drVrhTxValue: MetricValue = {
+  ...drVrhModeValue,
+  metric_value_id: "mv-dr-vrh-tx",
+  scope: "mode:DR:tos:TX",
+  value: "3.09",
+  detail: {
+    tos_mix: { TX: 16 },
+    source_mix: { dr_simulated: 16 },
+    vehicle_days: 2,
+    no_show_trips: 2,
+    revenue_spans: 9,
+    trips_counted: 16,
+    vehicle_days_counted: 2,
+    vehicle_days_excluded: 0,
+  },
+};
+
+/** A TN vehicle-miles figure: no-deadhead + no-show rules together. */
+export const drVrmTnValue: MetricValue = {
+  ...drVrhModeValue,
+  metric_value_id: "mv-dr-vrm-tn",
+  metric: "vrm",
+  unit: "miles",
+  scope: "mode:DR:tos:TN",
+  value: "42.10",
+  calc_name: "dr_vrm_v0",
+  detail: {
+    tos_mix: { TN: 7 },
+    source_mix: { dr_simulated: 7 },
+    vehicle_days: 1,
+    no_show_trips: 1,
+    revenue_spans: 3,
+    trips_counted: 7,
+  },
+};
+
+/** The DR VOMS figure: atypical days INCLUDED (opposite of fleet VOMS). */
+export const drVomsModeValue: MetricValue = {
+  ...drVrhModeValue,
+  metric_value_id: "mv-dr-voms-mode",
+  metric: "voms",
+  unit: "vehicles",
+  value: "6",
+  calc_name: "dr_voms_v0",
+  detail: {
+    tos_mix: { DO: 48, PT: 31, TX: 16 },
+    source_mix: { dr_simulated: 95 },
+    peak_start: "2026-07-14T13:05:00Z",
+    vehicle_days: 12,
+    peak_vehicles: 6,
+    unique_vehicles: 6,
+    includes_atypical_days: true,
+  },
+};
+
+/** The DR PMT figure — feeds the existing pmt metric under DR scopes. */
+export const drPmtModeValue: MetricValue = {
+  ...drVrhModeValue,
+  metric_value_id: "mv-dr-pmt-mode",
+  metric: "pmt",
+  unit: "passenger_miles",
+  value: "1112.23",
+  calc_name: "dr_pmt_v0",
+  detail: {
+    tos_mix: { DO: 48, PT: 31, TX: 16 },
+    source_mix: { dr_simulated: 95 },
+    no_show_trips: 9,
+    trips_counted: 84,
+    persons_counted: 204,
+    passenger_miles_counted: "1112.23",
+    trips_excluded_missing_distance: 2,
+  },
+};
+
+/**
  * Provenance tree shaped per LineageNode: transform_name/version describe the
  * transform that PRODUCED the node; raw.records rows are leaves.
  */

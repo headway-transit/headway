@@ -32,6 +32,13 @@ import {
   RATIO_OF_TOTALS_QUOTE_SNIPPET,
   SELECTION_QUOTE_SNIPPET,
 } from "../regulatory/samplingRules";
+import {
+  drCallouts,
+  NO_DEADHEAD_QUOTE_SNIPPET,
+  NO_SHOW_REVENUE_QUOTE_SNIPPET,
+  TX_ONBOARD_QUOTE_SNIPPET,
+  VOMS_ATYPICAL_QUOTE_SNIPPET,
+} from "../regulatory/drRules";
 
 const quotesByCalc: Record<string, { quote: string; citation: string }[]> =
   quotes;
@@ -65,8 +72,17 @@ function fixtureCalcNames(): string[] {
 describe("regulatory quotes (src/regulatory/quotes.json)", () => {
   it("has at least one verified quote for EVERY calc_name in the web fixtures — no silent absence", () => {
     const names = fixtureCalcNames();
-    // Guard the guard: the fixtures must actually name the three calcs.
-    expect(names).toEqual(["upt_v0", "vrh_v0", "vrm_v0"]);
+    // Guard the guard: the fixtures must actually name the position calcs
+    // AND the four DR calcs the fixtures carry (handoff 0013).
+    expect(names).toEqual([
+      "dr_pmt_v0",
+      "dr_voms_v0",
+      "dr_vrh_v0",
+      "dr_vrm_v0",
+      "upt_v0",
+      "vrh_v0",
+      "vrm_v0",
+    ]);
     for (const name of names) {
       const entry = quotesByCalc[name];
       expect(
@@ -224,5 +240,85 @@ describe("regulatory quotes (src/regulatory/quotes.json)", () => {
     expect(
       quoteContaining("pmt_v0", PRECISION_FLOOR_QUOTE_SNIPPET),
     ).not.toBeNull();
+  });
+
+  it("ships the Demand Response section's quotes for ALL FIVE dr calcs VERBATIM and resolves EVERY snippet the DR receipts depend on (handoff 0013)", () => {
+    const tracker = readFileSync(trackerPath, "utf8");
+    const drCalcs = [
+      "dr_pmt_v0",
+      "dr_upt_v0",
+      "dr_voms_v0",
+      "dr_vrh_v0",
+      "dr_vrm_v0",
+    ];
+    for (const calc of drCalcs) {
+      expect(
+        quotesByCalc[calc],
+        `${calc} has NO quotes in quotes.json — run npm run extract:quotes; ` +
+          "a DR figure must never ship without its rule",
+      ).toBeDefined();
+      expect(quotesByCalc[calc].length).toBeGreaterThanOrEqual(1);
+    }
+
+    // The TX onboard-only rule — character for character, cited to p. 129
+    // of the manual named on the DR section's (unbolded) Source line.
+    const tx = quoteContaining("dr_vrh_v0", TX_ONBOARD_QUOTE_SNIPPET);
+    expect(tx?.quote).toBe(
+      "agencies must report only the miles and hours when a transit passenger is onboard as revenue service. When a transit passenger is not onboard, the service is not reportable to the NTD.",
+    );
+    expect(tracker).toContain(`"${tx?.quote}"`);
+    expect(tx?.citation).toBe(
+      "TX revenue rule — 2026 NTD Full Reporting Policy Manual, p. 129",
+    );
+
+    // The TX/TN no-deadhead rule, cited to p. 130.
+    const deadhead = quoteContaining("dr_vrm_v0", NO_DEADHEAD_QUOTE_SNIPPET);
+    expect(deadhead?.quote).toBe(
+      "Full Reporters do not report deadhead for the Vanpool mode or the TX and Transportation Network Company (TN) TOS.",
+    );
+    expect(tracker).toContain(`"${deadhead?.quote}"`);
+    expect(deadhead?.citation).toBe(
+      "Non-fixed-route deadhead legs — 2026 NTD Full Reporting Policy Manual, p. 130",
+    );
+
+    // The Exhibit 36 no-show row (revenue yes / boarding no).
+    const noShow = quoteContaining("dr_vrh_v0", NO_SHOW_REVENUE_QUOTE_SNIPPET);
+    expect(noShow?.quote).toBe(
+      "Driver travels to pick up a passenger but the passenger is a no-show",
+    );
+    expect(tracker).toContain(`"${noShow?.quote}"`);
+
+    // The DR VOMS atypical-day INCLUSION (Exhibits 38 + 40).
+    const atypical = quoteContaining(
+      "dr_voms_v0",
+      VOMS_ATYPICAL_QUOTE_SNIPPET,
+    );
+    expect(atypical?.quote).toBe(
+      "The largest number of vehicles in revenue service at any one time during the reporting year (INCLUDES atypical service)",
+    );
+    expect(atypical?.citation).toBe(
+      "DR VOMS — 2026 NTD Full Reporting Policy Manual, Exhibits 38 + 40, pp. 138–139",
+    );
+
+    // Every callout the Receipt can emit resolves for every DR calc and
+    // TOS combination — no silent absence in any DR receipt.
+    const metrics = ["vrh", "vrm", "upt", "voms", "pmt"];
+    const calcByMetric: Record<string, string> = {
+      vrh: "dr_vrh_v0",
+      vrm: "dr_vrm_v0",
+      upt: "dr_upt_v0",
+      voms: "dr_voms_v0",
+      pmt: "dr_pmt_v0",
+    };
+    for (const metric of metrics) {
+      for (const tos of [null, "DO", "PT", "TX", "TN"]) {
+        for (const callout of drCallouts(metric, tos)) {
+          expect(
+            quoteContaining(calcByMetric[metric], callout.snippet),
+            `callout "${callout.key}" (${metric}, tos ${tos}) has no verified quote on file`,
+          ).not.toBeNull();
+        }
+      }
+    }
   });
 });

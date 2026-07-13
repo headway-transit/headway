@@ -41,7 +41,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, timezone
 
-from headway_calc.types import PassengerEvent, StopTime, VehiclePosition
+from headway_calc.types import DrTrip, PassengerEvent, StopTime, VehiclePosition
 
 #: Column names and order per handoff 0001 (canonical.vehicle_positions) plus
 #: canonical.trips.block_id (handoff 0003, migration 0011) and
@@ -101,6 +101,24 @@ _SELECT_TRIP_GEOMETRY_SQL = (
     "WHERE e.trip_id IS NOT NULL "
     "AND e.event_timestamp >= %s AND e.event_timestamp < %s) "
     "ORDER BY st.trip_id, st.stop_sequence, st.stop_id"
+)
+
+
+#: Demand-response trips (handoff 0013, migration 0021): columns per the
+#: canonical.dr_trips contract, deterministic ORDER BY (pickup_timestamp,
+#: dr_trip_id, source_record_id — the same total order headway_calc.dr sorts
+#: by internally). The period bound applies to pickup_timestamp (the
+#: hypertable time dimension).
+_SELECT_DR_TRIPS_SQL = (
+    "SELECT pickup_timestamp, service_date, dr_trip_id, vehicle_id, tos, "
+    "request_timestamp, dispatch_timestamp, dropoff_timestamp, "
+    "onboard_miles, pickup_odometer_miles, dropoff_odometer_miles, "
+    "riders, attendants_companions, ada_related, sponsored, sponsor, "
+    "no_show, interruption_after, driver_shift_id, dispatching_point_id, "
+    "source, source_record_id "
+    "FROM canonical.dr_trips "
+    "WHERE pickup_timestamp >= %s AND pickup_timestamp < %s "
+    "ORDER BY pickup_timestamp, dr_trip_id, source_record_id"
 )
 
 
@@ -233,6 +251,58 @@ def load_trip_geometries(
             latitude=row[3],
             longitude=row[4],
             shape_dist_traveled=row[5],
+        )
+        for row in cur.fetchall()
+    ]
+
+
+def load_dr_trips(
+    conn,
+    period_start: date,
+    period_end: date,
+) -> list[DrTrip]:
+    """Load canonical demand-response trips for the half-open period
+    [start, end) — the DR calcs' input (handoff 0013, migration 0021).
+
+    Bounds are UTC midnights of the given DATEs applied to
+    ``pickup_timestamp`` (the module's half-open convention). Rows arrive in
+    deterministic order (pickup_timestamp, dr_trip_id, source_record_id) and
+    map 1:1 onto DrTrip — Decimal distances pass through as NUMERIC (NULL
+    stays None, never coalesced), and the dataclass's own validation fails
+    loudly on any structural contradiction (a broken pipeline, since the
+    transform quarantines them). Refuses (ValueError) an empty or inverted
+    period.
+    """
+    _refuse_bad_period(period_start, period_end)
+    cur = conn.cursor()
+    cur.execute(
+        _SELECT_DR_TRIPS_SQL,
+        (_utc_midnight(period_start), _utc_midnight(period_end)),
+    )
+    return [
+        DrTrip(
+            pickup_timestamp=row[0],
+            service_date=row[1],
+            dr_trip_id=row[2],
+            vehicle_id=row[3],
+            tos=row[4],
+            request_timestamp=row[5],
+            dispatch_timestamp=row[6],
+            dropoff_timestamp=row[7],
+            onboard_miles=row[8],
+            pickup_odometer_miles=row[9],
+            dropoff_odometer_miles=row[10],
+            riders=row[11],
+            attendants_companions=row[12],
+            ada_related=row[13],
+            sponsored=row[14],
+            sponsor=row[15],
+            no_show=row[16],
+            interruption_after=row[17],
+            driver_shift_id=row[18],
+            dispatching_point_id=row[19],
+            source=row[20],
+            source_record_id=row[21],
         )
         for row in cur.fetchall()
     ]

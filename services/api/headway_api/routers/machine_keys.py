@@ -21,7 +21,7 @@ from ..audit import write_event
 from ..auth import Identity
 from ..authz import require_certifying_official
 from ..db import get_db
-from ..machine_auth import KNOWN_SCOPES, SCOPE_INGEST_TIDES, generate_key
+from ..machine_auth import INGEST_SCOPES, KNOWN_SCOPES, generate_key
 
 router = APIRouter(tags=["machine-keys"])
 
@@ -112,15 +112,17 @@ def issue_key(
                 "refused rather than silently ignored."
             ),
         )
-    if SCOPE_INGEST_TIDES in body.scopes and not (body.source_label or "").strip():
+    if any(s in INGEST_SCOPES for s in body.scopes) and not (
+        body.source_label or ""
+    ).strip():
         raise HTTPException(
             status_code=422,
             detail=(
                 "An ingest key must be bound to a source label (e.g. "
-                "'tides_simulated' for simulator data, or the vendor's own "
-                "label). Every record this key pushes is stamped with that "
-                "source, so simulated and real data stay permanently "
-                "distinguishable."
+                "'tides_simulated' or 'dr_simulated' for simulator data, or "
+                "the vendor's own label). Every record this key pushes is "
+                "stamped with that source, so simulated and real data stay "
+                "permanently distinguishable."
             ),
         )
     new_key = generate_key()

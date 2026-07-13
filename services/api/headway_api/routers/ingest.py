@@ -1,8 +1,11 @@
-"""Authenticated HTTPS ingest: TIDES passenger_events CSV (handoff 0006, pt 5).
+"""Authenticated HTTPS ingest: TIDES passenger_events CSV (handoff 0006,
+pt 5) and demand_response_trips CSV (handoff 0013 — the same pattern over
+the DR wire contract, contracts/demand-response-trip.v0.schema.json).
 
 The API acts as a CONNECTOR here, honoring the wire contract exactly as the
-file-drop connector does (services/ingestion/connectors/tides/tides.go — the
-binding precedent for envelope shape, ordering, and the header sanity check):
+file-drop connectors do (services/ingestion/connectors/tides/tides.go and
+connectors/dr/dr.go — the binding precedents for envelope shape, ordering,
+and the header sanity check):
 
 - the raw bytes are content-addressed (sha256 → record_id, ADR-0007),
 - stored to the object store at ``raw/tides/<record_id>.csv``,
@@ -40,7 +43,7 @@ import hashlib
 import io
 import json
 import os
-from typing import Optional, Protocol
+from typing import Callable, Optional, Protocol
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
@@ -49,6 +52,7 @@ from .. import __version__
 from ..audit import write_event
 from ..db import get_db
 from ..machine_auth import (
+    SCOPE_INGEST_DR,
     SCOPE_INGEST_TIDES,
     MachineIdentity,
     enforce_rate_limit,
@@ -84,6 +88,35 @@ REQUIRED_TIDES_COLUMNS = (
 def object_key(record_id: str) -> str:
     """Content-addressed object-store key (same layout as tides.go)."""
     return f"raw/tides/{record_id}.csv"
+
+
+# DR trips ingest (handoff 0013): same connector discipline over the
+# demand_response_trip v0 wire contract.
+DR_TOPIC = "raw.dr.trips"  # contracts/topics.v0.md
+
+# Required demand_response_trip v0 columns — the same header sanity check as
+# the file-drop connector (dr.go RequiredColumns, from the contract schema's
+# "required" list). Used ONLY to set parse_status; row-level semantics belong
+# to the transform normalizer.
+REQUIRED_DR_COLUMNS = (
+    "dr_trip_id",
+    "service_date",
+    "vehicle_id",
+    "mode",
+    "tos",
+    "pickup_timestamp",
+    "dropoff_timestamp",
+    "riders",
+    "attendants_companions",
+    "ada_related",
+    "sponsored",
+    "no_show",
+)
+
+
+def dr_object_key(record_id: str) -> str:
+    """Content-addressed object-store key (same layout as dr.go)."""
+    return f"raw/dr/{record_id}.csv"
 
 
 # ---------------------------------------------------------------------------
@@ -188,12 +221,14 @@ def producer_from_env() -> Optional[Producer]:
 # ---------------------------------------------------------------------------
 
 
-def check_tides_header(body: bytes) -> Optional[str]:
-    """Return None when every required TIDES column is present in the header
-    row, else a human-readable reason. Mirrors tides.go checkHeader: first
-    record only, BOM-tolerant, never inspects data rows."""
+def _check_header(
+    body: bytes, required: tuple[str, ...], vocabulary: str
+) -> Optional[str]:
+    """Return None when every required column is present in the header row,
+    else a human-readable reason. Mirrors the Go connectors' checkHeader:
+    first record only, BOM-tolerant, never inspects data rows."""
     try:
-        text = body.decode("utf-8-sig")  # tolerate a UTF-8 BOM, like tides.go
+        text = body.decode("utf-8-sig")  # tolerate a UTF-8 BOM, like the Go side
     except UnicodeDecodeError as exc:
         return f"body is not decodable as UTF-8 CSV: {exc}"
     try:
@@ -203,10 +238,20 @@ def check_tides_header(body: bytes) -> Optional[str]:
     if not header:
         return "read header row: file is empty"
     seen = {name.strip() for name in header}
-    missing = [c for c in REQUIRED_TIDES_COLUMNS if c not in seen]
+    missing = [c for c in required if c not in seen]
     if missing:
-        return "missing required TIDES columns: " + ", ".join(missing)
+        return f"missing required {vocabulary} columns: " + ", ".join(missing)
     return None
+
+
+def check_tides_header(body: bytes) -> Optional[str]:
+    """The tides.go header sanity check (parse_status only)."""
+    return _check_header(body, REQUIRED_TIDES_COLUMNS, "TIDES")
+
+
+def check_dr_header(body: bytes) -> Optional[str]:
+    """The dr.go header sanity check (parse_status only)."""
+    return _check_header(body, REQUIRED_DR_COLUMNS, "demand_response_trip")
 
 
 # ---------------------------------------------------------------------------
@@ -219,16 +264,21 @@ class IngestResponse(BaseModel):
     parse_status: str
 
 
-@router.post(
-    "/ingest/tides/passenger-events",
-    response_model=IngestResponse,
-    status_code=202,
-)
-async def ingest_passenger_events(
+async def _ingest_csv_file(
     request: Request,
-    identity: MachineIdentity = Depends(require_machine_scope(SCOPE_INGEST_TIDES)),
-    db=Depends(get_db),
+    identity: MachineIdentity,
+    db,
+    *,
+    topic: str,
+    key_for: Callable[[str], str],
+    header_check: Callable[[bytes], Optional[str]],
+    parse_error_prefix: str,
 ) -> IngestResponse:
+    """The shared connector discipline of both CSV ingest endpoints:
+    content-address, store BEFORE produce, envelope per the v0 contract with
+    the KEY's bound source_label, audit. Parameterized only by the topic,
+    object-key layout, and header sanity check — behavior is otherwise
+    byte-identical between the TIDES and DR paths."""
     # Per-key token bucket (60 req/min default). In-process — the documented
     # single-instance limitation (machine_auth.RateLimiter docstring).
     enforce_rate_limit(request.app.state.machine_rate_limiter, identity.key_prefix)
@@ -280,11 +330,11 @@ async def ingest_passenger_events(
         )
 
     record_id = hashlib.sha256(body).hexdigest()
-    key = object_key(record_id)
+    key = key_for(record_id)
 
     # Header sanity check ONLY classifies parse_status; a malformed body is
     # still stored and produced — fail loudly, never dropped (Guardrail 7).
-    parse_error = check_tides_header(body)
+    parse_error = header_check(body)
     parse_status = "ok" if parse_error is None else "malformed"
 
     # The envelope, EXACTLY per contracts/raw-record-envelope.v0.schema.json.
@@ -303,16 +353,15 @@ async def ingest_passenger_events(
         "parse_status": parse_status,
     }
     if parse_error is not None:
-        envelope["parse_error"] = (
-            f"tides passenger_events header check failed: {parse_error}"
-        )
+        envelope["parse_error"] = f"{parse_error_prefix}: {parse_error}"
 
-    # Store BEFORE produce (tides.go precedent): a consumer must never see an
-    # envelope whose object does not exist. Both operations are idempotent by
-    # content-addressed record_id, so a retry after a mid-flight failure is safe.
+    # Store BEFORE produce (tides.go/dr.go precedent): a consumer must never
+    # see an envelope whose object does not exist. Both operations are
+    # idempotent by content-addressed record_id, so a retry after a
+    # mid-flight failure is safe.
     store.put(key, body, CONTENT_TYPE)
     producer.produce(
-        TOPIC,
+        topic,
         key=record_id.encode("ascii"),
         value=json.dumps(envelope).encode("utf-8"),
     )
@@ -327,7 +376,7 @@ async def ingest_passenger_events(
             subject_kind="raw.records",
             subject_id=record_id,
             detail={
-                "topic": TOPIC,
+                "topic": topic,
                 "object_key": key,
                 "source": identity.source_label,
                 "parse_status": parse_status,
@@ -335,3 +384,51 @@ async def ingest_passenger_events(
             },
         )
     return IngestResponse(record_id=record_id, parse_status=parse_status)
+
+
+@router.post(
+    "/ingest/tides/passenger-events",
+    response_model=IngestResponse,
+    status_code=202,
+)
+async def ingest_passenger_events(
+    request: Request,
+    identity: MachineIdentity = Depends(require_machine_scope(SCOPE_INGEST_TIDES)),
+    db=Depends(get_db),
+) -> IngestResponse:
+    return await _ingest_csv_file(
+        request,
+        identity,
+        db,
+        topic=TOPIC,
+        key_for=object_key,
+        header_check=check_tides_header,
+        parse_error_prefix="tides passenger_events header check failed",
+    )
+
+
+@router.post(
+    "/ingest/dr/trips",
+    response_model=IngestResponse,
+    status_code=202,
+)
+async def ingest_dr_trips(
+    request: Request,
+    identity: MachineIdentity = Depends(require_machine_scope(SCOPE_INGEST_DR)),
+    db=Depends(get_db),
+) -> IngestResponse:
+    """Authenticated push of one demand_response_trips CSV file (handoff
+    0013): the demand_response_trip v0 wire contract as the raw request
+    body. Same connector discipline as the TIDES path — content-addressed,
+    store-before-produce, envelope source = the key's bound source_label
+    (a simulator key is bound to 'dr_simulated'; a client-supplied source is
+    ignored)."""
+    return await _ingest_csv_file(
+        request,
+        identity,
+        db,
+        topic=DR_TOPIC,
+        key_for=dr_object_key,
+        header_check=check_dr_header,
+        parse_error_prefix="demand_response_trip header check failed",
+    )
