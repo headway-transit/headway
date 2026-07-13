@@ -88,6 +88,17 @@ step:
   "certifying official" role — the highest level, able to approve reports
   and manage other accounts. The password is hidden while you type and
   asked twice to catch typos. Use at least 8 characters (72 at most).
+- **Where will people use Headway from?** Three answers: (a) just this
+  computer — the safe default; (b) other computers in our office —
+  Headway gets a secure `https://` address coworkers can open, and the
+  installer walks you through the one-time browser-certificate step;
+  (c) our IT staff will set up access. The trade-offs of each, in plain
+  words, are in [`docs/network-access.md`](../docs/network-access.md).
+  You can change this answer any time — in either direction — with:
+
+  ```
+  ./install/install.sh --reconfigure-access
+  ```
 
 Nothing you type is sent anywhere; it all stays on this computer.
 
@@ -134,6 +145,11 @@ asking for help.
   lake) is [`docs/connecting-your-data.md`](../docs/connecting-your-data.md).
   For the mechanics of the stack itself, see `deploy/compose/README.md` —
   the feed collector runs under the `app` services profile.
+- **Let coworkers use Headway** (or make it private again) whenever you
+  are ready: `./install/install.sh --reconfigure-access`. What it does,
+  the browser-warning explanation, the certificate install steps per
+  operating system, and the secure-tunnel alternative are all in
+  [`docs/network-access.md`](../docs/network-access.md).
 - Keep `deploy/compose/.env` safe. It holds this installation's
   passwords. Do not email it or commit it anywhere.
 
@@ -149,6 +165,8 @@ environment variables instead:
 | `HEADWAY_ADMIN_PASSWORD` | yes | administrator password |
 | `HEADWAY_GTFS_STATIC_URL` | no | GTFS schedule feed address |
 | `HEADWAY_GTFS_RT_VEHICLE_POSITIONS_URL` | no | vehicle positions feed address |
+| `HEADWAY_ACCESS_MODE` | no | where people use Headway from: `local` (default), `lan` (other office computers), or `it` (IT staff set up access) |
+| `HEADWAY_LAN_ADDRESS` | with `lan` | the office-network address coworkers' browsers will use — required because the installer never guesses it silently |
 
 ## Uninstalling
 

@@ -11,6 +11,10 @@
 #   ./install/install.sh --check    only check this computer; change nothing
 #   ./install/install.sh --yes      no questions; inputs come from environment
 #                                   variables (see --help or install/README.md)
+#   ./install/install.sh --reconfigure-access
+#                                   change the answer to "Where will people
+#                                   use Headway from?" on an existing
+#                                   installation (both directions, any time)
 #
 # SECRETS POLICY (no secrets in the log, by construction):
 #   - Generated passwords and typed passwords exist only in shell variables
@@ -37,8 +41,15 @@ umask 077
 
 CHECK_ONLY=0
 ASSUME_YES=0
+RECONFIGURE=0
 FAILURES=0
 WARNINGS=0
+
+# Network access ("Where will people use Headway from?"), see docs/network-access.md.
+#   local = just this computer (default)   lan = other computers in the office
+#   it    = IT staff set up access themselves
+ACCESS_MODE="local"
+LAN_ADDRESS=""
 
 # Ports the Headway stack needs on this computer, and what each one is for.
 REQUIRED_PORTS=(5432 8000 9000 9090 3000 29092 8081 9001)
@@ -52,6 +63,7 @@ port_label() {
     3000)  echo "the dashboards website (Grafana)" ;;
     29092) echo "the message queue (Kafka)" ;;
     8081)  echo "the data-format catalog (Apicurio Registry)" ;;
+    80|443) echo "the secure office doorway (Caddy)" ;;
     *)     echo "a Headway service" ;;
   esac
 }
@@ -66,6 +78,9 @@ service_label() {
     minio)       echo "file storage" ;;
     prometheus)  echo "system metrics" ;;
     grafana)     echo "the dashboards website" ;;
+    api)         echo "the Headway sign-in service (API)" ;;
+    web)         echo "the Headway website" ;;
+    caddy)       echo "the secure office doorway (Caddy)" ;;
     *)           echo "$1" ;;
   esac
 }
@@ -88,6 +103,21 @@ Usage:
                                     HEADWAY_GTFS_STATIC_URL    (optional)
                                     HEADWAY_GTFS_RT_VEHICLE_POSITIONS_URL
                                                                (optional)
+                                    HEADWAY_ACCESS_MODE        (optional:
+                                      local = just this computer [default],
+                                      lan   = other computers in the office,
+                                      it    = IT staff set up access)
+                                    HEADWAY_LAN_ADDRESS        (required when
+                                      HEADWAY_ACCESS_MODE=lan: the address
+                                      coworkers' browsers will use — the
+                                      installer never guesses it silently)
+  ./install/install.sh --reconfigure-access
+                                  Change the answer to "Where will people
+                                  use Headway from?" on an installation that
+                                  already exists. Works in both directions —
+                                  opening Headway to the office, or making it
+                                  private to this computer again — and is
+                                  safe to run repeatedly.
   ./install/install.sh --help     Show this message.
 
 Everything the installer does is recorded in install/install.log.
@@ -100,6 +130,7 @@ for arg in "$@"; do
   case "$arg" in
     --check) CHECK_ONLY=1 ;;
     --yes)   ASSUME_YES=1 ;;
+    --reconfigure-access) RECONFIGURE=1 ;;
     --help|-h) usage; exit 0 ;;
     *)
       echo "Unknown option: $arg"
@@ -138,7 +169,7 @@ if ! touch "$LOG_FILE" 2>/dev/null; then
   exit 1
 fi
 log "================================================================"
-log "installer started: check-only=$CHECK_ONLY non-interactive=$ASSUME_YES"
+log "installer started: check-only=$CHECK_ONLY non-interactive=$ASSUME_YES reconfigure-access=$RECONFIGURE"
 
 # --- Small utilities ----------------------------------------------------------
 
@@ -380,6 +411,17 @@ run_prereq_checks() {
       fixln "$ENV_FILE — this computer appears to already have"
       fixln "Headway installed (or a previous install attempt). The full"
       fixln "installer will refuse to overwrite it; see install/README.md."
+      local mode
+      mode="$(read_env_value HEADWAY_ACCESS_MODE)"
+      case "${mode:-local}" in
+        lan) note "Its network access is set to: other computers in the office"
+             fixln "(https://$(read_env_value HEADWAY_LAN_ADDRESS)). Change it any time with:"
+             fixln "./install/install.sh --reconfigure-access" ;;
+        it)  note "Its network access is set to: IT staff manage access."
+             fixln "Change it any time with: ./install/install.sh --reconfigure-access" ;;
+        *)   note "Its network access is set to: just this computer (the default)."
+             fixln "Change it any time with: ./install/install.sh --reconfigure-access" ;;
+      esac
     fi
   fi
 }
@@ -456,6 +498,7 @@ gather_inputs() {
       exit 1
     fi
     say "Agency ID (from HEADWAY_AGENCY_ID): $AGENCY_ID"
+    read_access_mode_from_env
     return
   fi
 
@@ -491,6 +534,291 @@ gather_inputs() {
   printf '   Vehicle positions address (or press Enter to skip): '
   read -r GTFS_RT_VP_URL_IN
   log "feed urls entered (static: $([ -n "$GTFS_STATIC_URL_IN" ] && echo provided || echo skipped), vehicle positions: $([ -n "$GTFS_RT_VP_URL_IN" ] && echo provided || echo skipped))"
+
+  ask_access_mode
+}
+
+# --- Step 3b: network access ("Where will people use Headway from?") ------------
+# Design contract: docs/handoffs/0016-…-lan-access.md. Plain-language guide
+# for every option: docs/network-access.md. The same question is re-runnable
+# any time on an existing installation via --reconfigure-access, in BOTH
+# directions (open to the office / back to this computer only).
+
+# Non-interactive answers (--yes). The installer never guesses the office
+# address in unattended mode: lan requires HEADWAY_LAN_ADDRESS explicitly.
+read_access_mode_from_env() {
+  ACCESS_MODE="${HEADWAY_ACCESS_MODE:-local}"
+  case "$ACCESS_MODE" in
+    local|it) : ;;
+    lan)
+      LAN_ADDRESS="${HEADWAY_LAN_ADDRESS:-}"
+      if [ -z "$LAN_ADDRESS" ]; then
+        fail "HEADWAY_ACCESS_MODE=lan also needs HEADWAY_LAN_ADDRESS — the"
+        fixln "address coworkers' browsers will use. In non-interactive mode"
+        fixln "the installer cannot ask, and it never guesses an address"
+        fixln "silently (a wrong guess would strand every coworker)."
+        fixln "To fix: HEADWAY_LAN_ADDRESS=192.168.1.50 (your address) ..."
+        exit 1
+      fi
+      if ! printf '%s' "$LAN_ADDRESS" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9.-]*$'; then
+        fail "HEADWAY_LAN_ADDRESS does not look like a network address."
+        fixln "Use the numbers-and-dots form (like 192.168.1.50) or a"
+        fixln "computer name (like headway-box.office.local) — no spaces,"
+        fixln "no slashes, no https:// prefix. Got: '$LAN_ADDRESS'"
+        exit 1
+      fi
+      ;;
+    *)
+      fail "HEADWAY_ACCESS_MODE must be 'local', 'lan' or 'it' (got"
+      fixln "'$ACCESS_MODE'). local = just this computer; lan = other"
+      fixln "computers in the office; it = IT staff set up access."
+      exit 1
+      ;;
+  esac
+  say "Network access (from HEADWAY_ACCESS_MODE): $ACCESS_MODE"
+  log "access mode chosen: $ACCESS_MODE (non-interactive)"
+}
+
+# Best guess at this computer's office-network address. Only ever a
+# suggestion — a human confirms it (never assume; a wrong address strands
+# every coworker with no error message anywhere).
+detect_lan_address() {
+  local addr=""
+  addr="$(ip -4 route get 1.1.1.1 2>/dev/null \
+          | awk '{for (i = 1; i < NF; i++) if ($i == "src") print $(i + 1)}' \
+          | head -n 1)"
+  if [ -z "$addr" ]; then
+    addr="$(hostname -I 2>/dev/null | awk '{print $1}')"
+  fi
+  printf '%s' "$addr"
+}
+
+# Is OUR office doorway already running? (Then ports 80/443 being busy is
+# expected, not a conflict — matters when --reconfigure-access re-picks lan.)
+caddy_is_ours_running() {
+  docker ps --filter name=headway-caddy-1 --format '{{.Names}}' 2>/dev/null \
+    | grep -qx 'headway-caddy-1'
+}
+
+# Option (b) details: ports free? address detected + human-confirmed?
+# Returns 1 (with a plain-language explanation) if (b) cannot work right now.
+configure_lan_address() {
+  if ! caddy_is_ours_running; then
+    local busy=""
+    for port in 80 443; do
+      if port_in_use "$port"; then busy="${busy:+$busy and }port $port"; fi
+    done
+    if [ -n "$busy" ]; then
+      say ""
+      say "   PROBLEM  Something on this computer is already using $busy."
+      say "   The office doorway needs ports 80 and 443 (the standard web"
+      say "   ports every browser expects). Usually another web server"
+      say "   (Apache, nginx, ...) is running here. Find it with:"
+      say "       sudo ss -ltnp | grep -E ':(80|443) '"
+      say "   and stop it, then try again — or pick a different answer."
+      return 1
+    fi
+  fi
+
+  local detected typed
+  detected="$(detect_lan_address)"
+  say ""
+  say "   Headway needs this computer's address on your office network —"
+  say "   that is the address coworkers' browsers will connect to."
+  if [ -n "$detected" ]; then
+    say "   This computer's network address looks like: $detected"
+    printf '   Press Enter to use it, or type a different address: '
+  else
+    say "   The installer could not detect an address by itself."
+    printf '   Type this computer'"'"'s network address (like 192.168.1.50): '
+  fi
+  while true; do
+    read -r typed
+    LAN_ADDRESS="${typed:-$detected}"
+    if printf '%s' "$LAN_ADDRESS" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9.-]*$'; then
+      break
+    fi
+    say "   That does not look like a network address. Use the numbers-and-"
+    say "   dots form (like 192.168.1.50) or a computer name (like"
+    say "   headway-box.office.local) — no spaces, no slashes, no https://."
+    printf '   Address: '
+  done
+  say "   Coworkers will reach Headway at: https://$LAN_ADDRESS"
+  log "lan address confirmed: $LAN_ADDRESS"
+  return 0
+}
+
+ask_access_mode() {
+  blank
+  say "--- Where will people use Headway from? ---"
+  say ""
+  say "Headway keeps everything private to this computer unless you say"
+  say "otherwise. Pick what matches your office — you can change this"
+  say "answer any time with: ./install/install.sh --reconfigure-access"
+  say ""
+  say "  a) Just this computer  (the safe default)"
+  say "     Only web browsers running on this machine can open Headway."
+  say ""
+  say "  b) Other computers in our office"
+  say "     Headway gets a secure https:// address that coworkers on your"
+  say "     office network can open in their browsers. Their first visit"
+  say "     shows a one-time certificate warning; the installer explains"
+  say "     it and how to remove it for good. Nothing is ever exposed to"
+  say "     the internet."
+  say ""
+  say "  c) Our IT staff will set up access"
+  say "     Headway stays private to this computer, and you hand your IT"
+  say "     team docs/network-access.md — it tells them exactly what to"
+  say "     connect and what must never be exposed."
+  say ""
+  local access_answer
+  while true; do
+    printf '   Your answer (a, b or c) [a]: '
+    read -r access_answer
+    case "${access_answer:-a}" in
+      a|A) ACCESS_MODE="local"; break ;;
+      c|C) ACCESS_MODE="it"; break ;;
+      b|B)
+        if configure_lan_address; then
+          ACCESS_MODE="lan"
+          break
+        fi
+        say ""
+        say "   Let's pick again."
+        ;;
+      *) say "   Please answer a, b or c (or press Enter for a)." ;;
+    esac
+  done
+  log "access mode chosen: $ACCESS_MODE"
+}
+
+# Add/remove one profile token in COMPOSE_PROFILES (comma-separated) in .env,
+# preserving whatever else is there. Idempotent by construction.
+add_compose_profile() {
+  local current
+  current="$(read_env_value COMPOSE_PROFILES)"
+  case ",$current," in
+    *",$1,"*) : ;;
+    *) set_env_value COMPOSE_PROFILES "${current:+$current,}$1" ;;
+  esac
+}
+
+remove_compose_profile() {
+  local current rebuilt="" token
+  current="$(read_env_value COMPOSE_PROFILES)"
+  local IFS=','
+  for token in $current; do
+    if [ -n "$token" ] && [ "$token" != "$1" ]; then
+      rebuilt="${rebuilt:+$rebuilt,}$token"
+    fi
+  done
+  set_env_value COMPOSE_PROFILES "$rebuilt"
+}
+
+# Write the whole network-access answer into .env in one place, so the four
+# values that must move together (mode, address, browser origins, the
+# address baked into the website) can never drift apart — the wave-14
+# lesson: this wiring is owned by the installer, never by memory.
+write_access_env() {
+  set_env_value HEADWAY_ACCESS_MODE "$ACCESS_MODE"
+  if [ "$ACCESS_MODE" = "lan" ]; then
+    set_env_value HEADWAY_LAN_ADDRESS "$LAN_ADDRESS"
+    # Web + API share ONE https:// origin behind the doorway, so browser
+    # calls are same-origin by construction; the origins list is kept in
+    # lockstep anyway (belt and suspenders), and localhost:8080 keeps a
+    # browser on this box working against the same rebuilt website.
+    set_env_value HEADWAY_CORS_ORIGINS "https://$LAN_ADDRESS,http://localhost:8080"
+    set_env_value VITE_API_BASE_URL "https://$LAN_ADDRESS/api"
+    add_compose_profile app
+    add_compose_profile lan
+  else
+    set_env_value HEADWAY_LAN_ADDRESS ""
+    set_env_value HEADWAY_CORS_ORIGINS ""
+    set_env_value VITE_API_BASE_URL "http://localhost:8000"
+    remove_compose_profile lan
+  fi
+  log "network access wired in .env (mode: $ACCESS_MODE; values not logged: none are secret, but passwords never are)"
+}
+
+# Firewall help is PRINTED, never run — this installer never runs sudo
+# commands for you (its standing posture).
+print_firewall_guidance() {
+  if command -v ufw >/dev/null 2>&1 && systemctl is-active --quiet ufw 2>/dev/null; then
+    say "This computer's firewall (ufw) is on, and it will block coworkers"
+    say "until the two standard web ports are opened. Run this yourself —"
+    say "the installer never runs sudo commands for you:"
+    say ""
+    say "    sudo ufw allow 80,443/tcp"
+    say ""
+  elif systemctl is-active --quiet firewalld 2>/dev/null; then
+    say "This computer's firewall (firewalld) is on, and it will block"
+    say "coworkers until the two standard web ports are opened. Run these"
+    say "yourself — the installer never runs sudo commands for you:"
+    say ""
+    say "    sudo firewall-cmd --permanent --add-service=http --add-service=https"
+    say "    sudo firewall-cmd --reload"
+    say ""
+  else
+    say "No active firewall was detected on this computer. If your office"
+    say "network has one elsewhere, ask whoever runs it to allow ports 80"
+    say "and 443 to this machine."
+    say ""
+  fi
+}
+
+print_access_summary() {
+  case "$ACCESS_MODE" in
+    lan)
+      say "--- Using Headway from other computers in your office ---"
+      say ""
+      say "The address to share with coworkers:"
+      say ""
+      say "    https://$LAN_ADDRESS"
+      say ""
+      say "It works from any computer on your office network — including"
+      say "this one. The connection is encrypted."
+      say ""
+      print_firewall_guidance
+      say "About the one-time browser warning: the first visit shows a"
+      say "security warning such as \"Your connection is not private\"."
+      say "That is expected, and here is why: Headway created its own"
+      say "certificate for your office network, because the public"
+      say "certificate authorities browsers trust out of the box can only"
+      say "vouch for addresses on the public internet — never for private"
+      say "office addresses like this one. The connection is still"
+      say "encrypted either way. On your own office network, choosing"
+      say "'Advanced' and then 'Proceed' (the wording varies by browser)"
+      say "is a reasonable, informed thing to do."
+      say ""
+      say "To make the warning go away for good, install Headway's"
+      say "certificate on each person's computer — step-by-step Windows,"
+      say "Mac and Linux instructions are in docs/network-access.md,"
+      say "section 'Removing the browser warning'."
+      say ""
+      say "What is deliberately NOT shared with the office: the dashboards"
+      say "(Grafana), file storage, system metrics and the database stay"
+      say "reachable only from this computer. docs/network-access.md"
+      say "explains how an administrator reaches them remotely."
+      ;;
+    it)
+      say "--- Access will be set up by your IT staff ---"
+      say ""
+      say "Headway stays private to this computer until they connect it."
+      say "Hand them docs/network-access.md — it lists exactly what to"
+      say "publish (the website on 127.0.0.1:8080 and the API on"
+      say "127.0.0.1:8000, both on this machine only), what must never be"
+      say "exposed, and the ready-made office option they can turn on with"
+      say "one command if it fits your network."
+      ;;
+    *)
+      say "--- Headway is private to this computer ---"
+      say ""
+      say "Only web browsers on this machine can reach it (the safe"
+      say "default). To let coworkers in your office use it later, run:"
+      say "    ./install/install.sh --reconfigure-access"
+      say "docs/network-access.md explains every option in plain words."
+      ;;
+  esac
 }
 
 write_env_file() {
@@ -518,6 +846,12 @@ write_env_file() {
   [ -n "$GTFS_STATIC_URL_IN" ] && set_env_value GTFS_STATIC_URL "$GTFS_STATIC_URL_IN"
   [ -n "$GTFS_RT_VP_URL_IN" ] && set_env_value GTFS_RT_VEHICLE_POSITIONS_URL "$GTFS_RT_VP_URL_IN"
 
+  # The API needs a signing secret for sign-in sessions; generate one like
+  # the passwords above (it is a secret; it is never logged).
+  set_env_value HEADWAY_SESSION_SECRET "$(openssl rand -hex 32)"
+
+  write_access_env
+
   ok "Configuration file created."
   log "wrote $ENV_FILE (values not logged)"
 }
@@ -529,6 +863,11 @@ start_stack() {
   say "--- Starting Headway ---"
   say "Docker will now download and start Headway's building blocks: the"
   say "database, the message queue, file storage, metrics and dashboards."
+  if [ "$ACCESS_MODE" = "lan" ]; then
+    say "Because you chose office access, the Headway website, its sign-in"
+    say "service and the secure office doorway are also built and started"
+    say "now — that adds some one-time build work."
+  fi
   say "The first start downloads about 2 GB of software, so this can take"
   say "10 to 20 minutes depending on your internet connection."
   blank
@@ -546,10 +885,16 @@ start_stack() {
 wait_for_healthy() {
   blank
   say "--- Waiting for every service to report healthy ---"
+  # In office-access mode the website, sign-in service and doorway are part
+  # of the stack and must come up healthy too.
+  local expected=("${HEALTH_SERVICES[@]}")
+  if [ "$ACCESS_MODE" = "lan" ]; then
+    expected+=(api web caddy)
+  fi
   local deadline=$((SECONDS + 420)) all_ok=0
   while [ "$SECONDS" -lt "$deadline" ]; do
     local not_ready=()
-    for svc in "${HEALTH_SERVICES[@]}"; do
+    for svc in "${expected[@]}"; do
       local status
       status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' \
         "headway-$svc-1" 2>/dev/null || echo "not started")"
@@ -783,19 +1128,152 @@ print_summary() {
   say "Your configuration and passwords: $ENV_FILE"
   say "(readable only by your user account — keep it safe, do not email it)."
   say ""
+  print_access_summary
+  say ""
   say "Your next steps:"
   say "  1. Read install/README.md — it explains day-to-day basics."
-  say "  2. To start collecting your agency's live feed data, see"
-  say "     deploy/compose/README.md (the 'app' services, which include the"
-  say "     feed collector, are started with:"
-  say "     docker compose --project-directory $COMPOSE_DIR --profile app up -d --build )"
-  say "  3. The Headway sign-in website/API ships with the app services;"
-  say "     your administrator account ('$ADMIN_USERNAME') is already set up"
-  say "     and ready for it."
+  if [ "$ACCESS_MODE" = "lan" ]; then
+    say "  2. The Headway website, sign-in service, feed collector and the"
+    say "     office doorway are already running. Sign in as"
+    say "     '$ADMIN_USERNAME' at https://$LAN_ADDRESS — and see"
+    say "     deploy/compose/README.md for what each service is."
+  else
+    say "  2. To start collecting your agency's live feed data, see"
+    say "     deploy/compose/README.md (the 'app' services, which include the"
+    say "     feed collector, are started with:"
+    say "     docker compose --project-directory $COMPOSE_DIR --profile app up -d --build )"
+    say "  3. The Headway sign-in website/API ships with the app services;"
+    say "     your administrator account ('$ADMIN_USERNAME') is already set up"
+    say "     and ready for it."
+  fi
   say ""
   say "Everything above was recorded (without passwords) in:"
   say "  $LOG_FILE"
   log "install completed successfully"
+}
+
+# --- Reconfigure network access on an existing installation ---------------------
+
+NEEDS_WEB_REBUILD=0
+
+apply_access_change() {
+  local old_mode="$1"
+  if ! docker info >/dev/null 2>&1; then
+    warn "Docker is not reachable right now, so the running services were"
+    fixln "not updated — but your answer is saved. Once Docker works again"
+    fixln "(./install/install.sh --check will tell you), run"
+    fixln "./install/install.sh --reconfigure-access once more and apply."
+    return
+  fi
+  blank
+  if [ "$old_mode" = "lan" ] && [ "$ACCESS_MODE" != "lan" ]; then
+    say "Closing the office doorway..."
+    dc --profile lan stop caddy 2>&1 | tee -a "$LOG_FILE" || true
+    dc --profile lan rm -f caddy 2>&1 | tee -a "$LOG_FILE" || true
+    ok "The office doorway is closed; other computers can no longer reach Headway."
+  fi
+  if [ "$NEEDS_WEB_REBUILD" -eq 1 ]; then
+    say "Rebuilding the Headway website with its new address baked in (the"
+    say "address the website calls is fixed when it is built) — this is the"
+    say "slow part, usually a few minutes..."
+    blank
+    if ! dc --profile app build web 2>&1 | tee -a "$LOG_FILE"; then
+      blank
+      fail "Rebuilding the website failed."
+      fixln "The details are just above and in $LOG_FILE. Nothing has been"
+      fixln "half-changed; it is safe to run"
+      fixln "./install/install.sh --reconfigure-access again."
+      exit 1
+    fi
+  fi
+  say "Updating the running services..."
+  blank
+  if ! dc up -d 2>&1 | tee -a "$LOG_FILE"; then
+    blank
+    fail "Docker could not update the Headway services."
+    fixln "The details are just above and in $LOG_FILE. It is safe to run"
+    fixln "./install/install.sh --reconfigure-access again."
+    exit 1
+  fi
+  if [ "$ACCESS_MODE" = "lan" ]; then
+    wait_for_healthy
+  fi
+  ok "The change is live."
+}
+
+reconfigure_access() {
+  blank
+  say "--- Changing where people use Headway from ---"
+  if [ ! -f "$ENV_FILE" ]; then
+    blank
+    fail "No Headway configuration file was found at"
+    fixln "$ENV_FILE, so there is nothing to reconfigure."
+    fixln "This option changes an installation that already exists. To"
+    fixln "install Headway, run: ./install/install.sh"
+    exit 1
+  fi
+  local old_mode old_vite new_vite
+  old_mode="$(read_env_value HEADWAY_ACCESS_MODE)"; old_mode="${old_mode:-local}"
+  old_vite="$(read_env_value VITE_API_BASE_URL)"
+  say ""
+  case "$old_mode" in
+    lan) say "Right now, other computers in your office can use Headway at:"
+         say "    https://$(read_env_value HEADWAY_LAN_ADDRESS)" ;;
+    it)  say "Right now, Headway is private to this computer (connecting it"
+         say "to your network is in your IT staff's hands)." ;;
+    *)   say "Right now, Headway is private to this computer." ;;
+  esac
+
+  if [ "$ASSUME_YES" -eq 1 ]; then
+    read_access_mode_from_env
+  else
+    ask_access_mode
+  fi
+  write_access_env
+  new_vite="$(read_env_value VITE_API_BASE_URL)"
+  NEEDS_WEB_REBUILD=0
+  [ "$old_vite" != "$new_vite" ] && NEEDS_WEB_REBUILD=1
+
+  blank
+  say "Your answer is saved in the configuration file."
+  if [ "$old_mode" = "$ACCESS_MODE" ] && [ "$NEEDS_WEB_REBUILD" -eq 0 ] \
+     && { [ "$ACCESS_MODE" != "lan" ] || caddy_is_ours_running; }; then
+    say "It matches what was already set up, so nothing needs to change."
+    log "reconfigure-access: no change (mode $ACCESS_MODE)"
+    blank
+    print_access_summary
+    exit 0
+  fi
+
+  local apply_answer="yes"
+  if [ "$ASSUME_YES" -ne 1 ]; then
+    say "To make it take effect, Headway's running services need to be"
+    if [ "$NEEDS_WEB_REBUILD" -eq 1 ]; then
+      say "updated, and the website rebuilt (a few minutes)."
+    else
+      say "updated (usually under a minute)."
+    fi
+    printf 'Apply the change now? (yes/no): '
+    read -r apply_answer
+  fi
+  case "$apply_answer" in
+    y|Y|yes|YES|Yes)
+      apply_access_change "$old_mode"
+      blank
+      print_access_summary
+      say ""
+      say "Everything above was recorded (without passwords) in:"
+      say "  $LOG_FILE"
+      log "reconfigure-access completed (mode: $ACCESS_MODE)"
+      ;;
+    *)
+      say "Not applied — nothing running was touched. Your answer is saved;"
+      say "make it take effect any time by running"
+      say "./install/install.sh --reconfigure-access again and choosing to"
+      say "apply."
+      log "reconfigure-access: saved but not applied (mode: $ACCESS_MODE)"
+      ;;
+  esac
 }
 
 # =============================================================================
@@ -811,6 +1289,17 @@ if [ ! -f "$ENV_EXAMPLE" ]; then
   fixln "This installer must run from inside a complete copy of the Headway"
   fixln "project. Please re-download Headway and try again."
   exit 1
+fi
+
+if [ "$RECONFIGURE" -eq 1 ]; then
+  if [ "$CHECK_ONLY" -eq 1 ]; then
+    fail "--check and --reconfigure-access cannot be combined: --check"
+    fixln "promises to change nothing, and --reconfigure-access exists to"
+    fixln "change things. Run them one at a time."
+    exit 1
+  fi
+  reconfigure_access
+  exit 0
 fi
 
 if [ "$CHECK_ONLY" -eq 1 ]; then

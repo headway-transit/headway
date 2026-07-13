@@ -31,6 +31,8 @@ volumes:
   minio-data:
   prometheus-data:
   grafana-data:
+  caddy-data:      # profile `lan`: holds Caddy's local CA — losing it means new certs and fresh browser warnings
+  caddy-config:
 
 services:
   # ---------------------------------------------------------------------------
@@ -351,7 +353,13 @@ services:
   api:
     profiles: [app]
     build:
-      context: ../../services/api
+      # REPO ROOT context, like transform: headway-api installs the in-repo
+      # headway-calc (path dependency; see services/api/Dockerfile and the
+      # release workflow, which build the same way). The old
+      # ../../services/api context stopped working when that dependency
+      # landed — found live 2026-07-13 by the lan-profile boot test.
+      context: ../..
+      dockerfile: services/api/Dockerfile
     image: ghcr.io/headway-transit/headway-api:local
     restart: unless-stopped
     networks: [headway]
@@ -388,6 +396,13 @@ services:
       S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in deploy/compose/.env}
       S3_BUCKET: ${S3_BUCKET:-headway-raw}
       S3_USE_SSL: "false"
+      # Browser origins allowed to call the API cross-origin, comma-separated
+      # (wave-14 lesson: the FIRST real-browser login failed silently because
+      # no CORS headers existed — mocked-fetch tests cannot see this class of
+      # gap). Managed by the installer's network-access wiring
+      # (install/install.sh --reconfigure-access); empty = CORS off, correct
+      # for the default same-origin/localhost layout.
+      HEADWAY_CORS_ORIGINS: ${HEADWAY_CORS_ORIGINS:-}
     healthcheck:
       # python:3.12-slim ships no curl/wget; the interpreter probes the
       # unauthenticated OpenAPI document.
@@ -417,7 +432,66 @@ services:
       api:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://localhost:8080/ || exit 1"]
+      # 127.0.0.1, not localhost: busybox wget resolves localhost to ::1
+      # first and nginx here listens IPv4-only — found live 2026-07-13 by
+      # the lan-profile boot test (the probe was refused and the container
+      # sat "unhealthy" while serving fine).
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:8080/ || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  # ===========================================================================
+  # Optional profile `lan` — Caddy reverse proxy, the "other computers in our
+  # office" answer (handoff 0016). Enabled by the installer's network-access
+  # question (install/install.sh --reconfigure-access) or by adding `lan` to
+  # COMPOSE_PROFILES in .env. Plain-language guide: docs/network-access.md.
+  #
+  # What it does: terminates HTTPS on the office network using Caddy's own
+  # built-in local certificate authority (`local_certs` in caddy/Caddyfile —
+  # private addresses cannot get public certificates), and forwards exactly
+  # two things: the web app (/) and the API (/api/*) — both under ONE
+  # https:// origin, so browser->API calls are same-origin by construction
+  # (the wave-14 CORS lesson, solved structurally).
+  #
+  # What it deliberately does NOT do: proxy any admin surface. Grafana,
+  # MinIO (API + console), Prometheus, Apicurio, Kafka and Postgres stay
+  # bound to 127.0.0.1 on the Headway box and are reachable only from it
+  # (or over an SSH tunnel — docs/network-access.md). web/api host ports
+  # also stay on 127.0.0.1; from other computers the ONLY way in is Caddy.
+  # ===========================================================================
+  caddy:
+    profiles: [lan]
+    # Pinned exact version; Apache-2.0 (github.com/caddyserver/caddy), same
+    # open-license posture as every other infra image in this stack.
+    image: caddy:2.10.2
+    restart: unless-stopped
+    networks: [headway]
+    ports:
+      # THE one deliberate non-localhost binding in this stack: the doorway
+      # other office computers use. 80 exists only to redirect to https.
+      - "80:80"
+      - "443:443"
+    environment:
+      # The office-network address (IP or name) coworkers will type. Set by
+      # the installer, which detects it and asks for confirmation — never
+      # assumed. Empty => Caddy refuses to start (fail loudly): a doorway
+      # that guessed its own address would guess wrong for someone.
+      # (`:-` not `:?` — compose interpolates `:?` file-wide even when the
+      # profile is inactive; see the HEADWAY_SESSION_SECRET note above.)
+      HEADWAY_LAN_ADDRESS: ${HEADWAY_LAN_ADDRESS:-}
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data      # the local CA lives here; keep it or browsers re-warn
+      - caddy-config:/config
+    # No depends_on: web/api may (re)start in any order or profile mix; Caddy
+    # answers 502 while an upstream is down and heals on its own.
+    healthcheck:
+      # Caddy's admin endpoint (loopback-only inside the container).
+      # 127.0.0.1, not localhost: busybox wget tries ::1 first and the
+      # admin socket is IPv4 (same finding as the web healthcheck).
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:2019/config/"]
       interval: 15s
       timeout: 5s
       retries: 10

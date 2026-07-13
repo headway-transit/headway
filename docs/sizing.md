@@ -45,9 +45,12 @@ Disk grows with what you keep:
   sources (GTFS/GTFS-RT URLs, vendor endpoints). No inbound access from the internet is
   needed or expected.
 - **All service ports bind to 127.0.0.1 by default** (API 8000, web 8080, Grafana 3000,
-  and the rest). To reach the UI from your workstation, either SSH-tunnel
-  (`ssh -L 8080:localhost:8080 <vm>`) — the right default for an evaluation — or
-  deliberately re-bind behind your organization's reverse proxy/TLS for shared use.
+  and the rest). To reach the UI from elsewhere, pick a deliberate path — all three are
+  walked through in plain language in [network-access.md](network-access.md):
+  SSH-tunnel (`ssh -L 8080:localhost:8080 -L 8000:localhost:8000 <vm>`) — the right
+  default for a one-person evaluation; the installer's office-access option
+  (`./install/install.sh --reconfigure-access`, Compose profile `lan`: HTTPS via a
+  pinned Caddy with a local CA); or your organization's own reverse proxy/VPN.
 
 ## Connecting agency data systems (what to line up)
 

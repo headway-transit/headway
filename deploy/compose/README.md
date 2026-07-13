@@ -58,6 +58,7 @@ never produces to missing topics or writes to a missing bucket.
 | `bootstrap-kafka` | One-shot init container that creates the v0 Kafka topics (idempotent; exits 0). |
 | `bootstrap-minio` | One-shot init container that creates the MinIO raw-payload bucket (idempotent; exits 0). |
 | `ingestion` (profile `app`) | The Go connector runtime that pulls agency feeds (GTFS/GTFS-RT) and produces content-addressed raw records to Kafka. |
+| `caddy` (profile `lan`) | The office doorway: a pinned Caddy (Apache-2.0) terminating HTTPS with its built-in local CA (`local_certs`) and proxying exactly two upstreams — `/` → web, `/api/*` → API — under one https origin. Managed by `install/install.sh --reconfigure-access`; plain-language guide in `docs/network-access.md`. |
 | `keycloak` (profile `sso-broker`, commented) | Optional identity broker for SAML-only IdPs or IdP aggregation (ADR-0011); the default stack uses the API's native OIDC + local accounts instead. |
 
 `transform`, `api`, and `web` have live services under the `app` profile in `compose.yaml`
@@ -65,6 +66,21 @@ and join the `app` profile in the next slice waves.
 
 Host-published ports (all bound to 127.0.0.1 only): Kafka dev listener 29092,
 Postgres 5432, Apicurio 8081, MinIO 9000/9001, Prometheus 9090, Grafana 3000.
+
+## Profile `lan` — office network access
+
+The one deliberate exception to "127.0.0.1 only": with the `lan` profile
+active, `caddy` publishes ports 80 and 443 on all interfaces so other
+computers in the office can reach the web app and API over HTTPS — and
+nothing else (admin surfaces above stay loopback-only, on purpose). The
+installer owns the wiring — the confirmed office address
+(`HEADWAY_LAN_ADDRESS`), the origin list (`HEADWAY_CORS_ORIGINS`), the
+rebuilt web bundle (`VITE_API_BASE_URL=https://<address>/api`), and
+`COMPOSE_PROFILES=app,lan` move together via
+`./install/install.sh --reconfigure-access` (both directions, re-runnable).
+Do not hand-edit one of the four without the others; `docs/network-access.md`
+explains the whole design, the browser-certificate story, and what must
+never be exposed.
 
 ## Verification status
 
@@ -84,6 +100,20 @@ Per the shared constraint **verification before assertion**:
     walking skeleton.
   - That run found topics and the bucket had to be created manually — the
     gap now closed by the `bootstrap-kafka`/`bootstrap-minio` init services.
+- **Verified (live Docker stack, 2026-07-13 — see handoff 0016 "Outputs —
+  evidence" for the full record):**
+  - The `lan` profile's `caddy` (pinned 2.10.2) booted healthy in a
+    disposable project against this file's real service definition; issued
+    a local-CA certificate for the box's LAN IP; served the web app and API
+    through one HTTPS origin against the LAN interface address, with a real
+    login + metrics fetch and correct CORS headers through the proxy; admin
+    ports confirmed unreachable from the LAN address.
+  - That test found and fixed three live bugs in this file/dir: the `api`
+    build context predated the in-repo `headway-calc` dependency (now repo
+    root, like `transform`); the `web` and `caddy` healthchecks probed
+    `localhost`, which busybox wget resolves to `::1` while the servers
+    listen IPv4-only (now `127.0.0.1`); and Caddy needs `default_sni` for
+    bare-IP addresses because browsers send no TLS server name for them.
 - **PENDING — not yet verified:**
   - Live execution of the `bootstrap-kafka`/`bootstrap-minio` init services
     (authored after the 2026-07-09 run; both exit 0 with everything already
@@ -93,3 +123,6 @@ Per the shared constraint **verification before assertion**:
     pullable at that same run.
   - Kafka heap (512 MiB) is a starting point, not a measured ceiling —
     single-box sizing must be measured under real load (ADR-0002).
+  - The `lan` profile as the *installer* drives it (question → `.env`
+    wiring → `docker compose up` with `COMPOSE_PROFILES=app,lan`) on a
+    fresh box — part of the standing fresh-box installer pending.

@@ -1,0 +1,49 @@
+# Headway LAN doorway — Compose profile `lan` (handoff 0016).
+#
+# One HTTPS origin for the whole office: the web app at /, the API at /api/.
+# Upstreams are reached over the compose network; their host ports stay on
+# 127.0.0.1. Admin surfaces (Grafana, MinIO, Prometheus, Apicurio, Kafka,
+# Postgres) are DELIBERATELY not proxied — they remain reachable only from
+# the Headway box itself. Plain-language guide: docs/network-access.md.
+{
+	# Issue certificates from Caddy's built-in local certificate authority
+	# instead of a public one (Let's Encrypt): public authorities can only
+	# vouch for public-internet names, never for private office addresses
+	# like 192.168.x.x. Browsers warn until the local CA's root
+	# certificate is installed on each computer — docs/network-access.md,
+	# section "Removing the browser warning". The CA persists in the
+	# caddy-data volume.
+	local_certs
+	# Don't try to install the CA into the container's own trust store —
+	# nothing inside the container needs to trust it (quiet, not silent:
+	# issuance itself is still logged).
+	skip_install_trust
+	# Browsers (and curl) send NO TLS server name when the address is a
+	# bare IP, and without one Caddy cannot pick a certificate and drops
+	# the handshake — found live 2026-07-13 (openssl with a literal-IP
+	# server name worked; a plain connection got "internal error"). Treat
+	# nameless connections as connections to the office address.
+	default_sni {$HEADWAY_LAN_ADDRESS}
+}
+
+# The address people in the office will type. Set via the compose service's
+# HEADWAY_LAN_ADDRESS environment variable (installer-managed); if it is
+# empty the site address is invalid and Caddy refuses to start — fail loudly
+# rather than serve on a guessed address. Plain http:// on port 80 is
+# answered only with a redirect to https:// (Caddy does this automatically
+# for the site below).
+https://{$HEADWAY_LAN_ADDRESS} {
+	# The API, under the /api/ prefix. handle_path strips the prefix, so
+	# the API service sees the same paths it always serves (/auth/login,
+	# /metrics/values, ...). Same https:// origin as the web app: the
+	# browser never makes a cross-origin call through this doorway — the
+	# wave-14 CORS bug class is structurally impossible here.
+	handle_path /api/* {
+		reverse_proxy api:8000
+	}
+
+	# Everything else: the web app's static files.
+	handle {
+		reverse_proxy web:8080
+	}
+}
