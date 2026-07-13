@@ -41,7 +41,7 @@ Deviations from the letter of the design (reported, not silent):
 - **`DELETE /webhooks/{id}` is a soft revoke** (`revoked_at`), mirroring api_keys — the design did not specify; deletion would erase audit history.
 - **Delivery success is also audited** (`webhook_delivered`), beyond the required failure auditing — extra trail, no behavior change.
 
-Verification (2026-07-10, Python 3.12, `/home/daniel/venv`, fakes only — the live stack was not touched):
+Verification (2026-07-10, Python 3.12, `~/venv`, fakes only — the live stack was not touched):
 
 ```
 $ cd services/api && python3 -m pytest tests/ -q
@@ -68,7 +68,7 @@ Design point 3 said `read:metrics` covers "machine read of computed values **+ l
 - **Human path**: unchanged — any signed-in role, no rate limit, no extra audit.
 - **No credential-type leak**: every authentication failure on this endpoint (absent header, bad/expired session token, unknown or revoked key) is ONE identical generic 401 that names neither credential type; the audit trail keeps the specific reason.
 
-Verification (2026-07-11, Python 3.12, `/home/daniel/venv`, fakes only — live stack untouched): `cd services/api && python3 -m pytest tests/ -q` → **96 passed** (90 pre-existing + 6 new: key traverses the canned tree byte-identical to the human response + audited; ingest-only key 403 audited; revoked key generic 401 audited; identical generic-401 wording across all four failure modes with no "machine"/"api key"/"session"/"sign in" leak; human path unaffected by an exhausted machine bucket and never machine-audited; per-key 429 shared with `/machine/metrics`). `openapi.json` regenerated: **no schema change** (auth is header-level; only the two endpoint description strings picked up the updated docstrings) — still OpenAPI 3.1.0, 15 paths.
+Verification (2026-07-11, Python 3.12, `~/venv`, fakes only — live stack untouched): `cd services/api && python3 -m pytest tests/ -q` → **96 passed** (90 pre-existing + 6 new: key traverses the canned tree byte-identical to the human response + audited; ingest-only key 403 audited; revoked key generic 401 audited; identical generic-401 wording across all four failure modes with no "machine"/"api key"/"session"/"sign in" leak; human path unaffected by an exhausted machine bucket and never machine-audited; per-key 429 shared with `/machine/metrics`). `openapi.json` regenerated: **no schema change** (auth is header-level; only the two endpoint description strings picked up the updated docstrings) — still OpenAPI 3.1.0, 15 paths.
 
 ## Live verification (orchestrator, 2026-07-10 evening)
 Migration 0013 applied; API restarted with real MinIO/Kafka wiring. Live flow: key issued (`hwk_m8FQxcdG…`, shown once with warning) → TIDES CSV pushed over HTTP with the key → 202 `{record_id: 574af469…, parse_status: ok}` → drained through transform → **1 row in canonical.passenger_events with source=tides_simulated (bound from the key) and the content-addressed record id intact**. Human session token on the machine endpoint → 401 (credential-type separation). `GET /public/metrics/certified` unauthenticated → both certified figures served. Suites: api 76, db 12, all green.
@@ -101,7 +101,7 @@ design, recorded here dated rather than silently absorbed.
   trigger) drained by a dispatcher; **v0 ticketing integration** =
   `dq.issue.resolved` push + polling `GET /dq/issues`.
 
-Verification (2026-07-11, Python 3.12, `/home/daniel/venv`, fakes only — live
+Verification (2026-07-11, Python 3.12, `~/venv`, fakes only — live
 stack untouched): `cd services/api && python3 -m pytest tests/ -q` → **136
 passed** (123 pre-existing unchanged); `cd db && python3 -m pytest
 test_migrations_static.py -q` → **15 passed** (0016 registered);

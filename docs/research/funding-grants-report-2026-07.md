@@ -22,7 +22,7 @@ Limits: `volpe.dot.gov`, `transit.dot.gov`, `transportation.gov`, `opentech.fund
 
 | # | Program | Path | Money | Next date | Why this rank |
 |---|---------|------|-------|-----------|---------------|
-| 1 | **NSF PESOSE Track 1** (NSF 26-506) | DIRECT — for-profit small businesses are explicitly eligible; Daniel as PI, Bekus Solutions as proposing org | $300K / 1 yr (Track 2: $1.5M / 2 yrs later) | **Sept 1, 2026** (then Mar 2, 2027) | The only federal program whose literal purpose is funding an open-source ecosystem around an existing product. Strong fit, direct eligibility, real money, live deadline. Gate: 3–5 letters from independent users/contributors. |
+| 1 | **NSF PESOSE Track 1** (NSF 26-506) | DIRECT — for-profit small businesses are explicitly eligible; the founder as PI, Bekus Solutions as proposing org | $300K / 1 yr (Track 2: $1.5M / 2 yrs later) | **Sept 1, 2026** (then Mar 2, 2027) | The only federal program whose literal purpose is funding an open-source ecosystem around an existing product. Strong fit, direct eligibility, real money, live deadline. Gate: 3–5 letters from independent users/contributors. |
 | 2 | **TRB Transit IDEA** | DIRECT — "open to all," individuals and small businesses | up to $100K (most awards $70–85K) | FY26 closed Jun 30, 2026; next ~mid-2027 | Transit-specific, investigator-driven, small-business-friendly; safety/efficiency focus areas match NTD S&S + reporting automation exactly. Smaller dollars, annual cycle. |
 | 3 | **NSF SBIR Phase I** (America's Seed Fund, NSF 26-510) | DIRECT — Bekus Solutions qualifies; mandatory Project Pitch first | $305K Phase I → $1.25M Phase II | Pitch by early fall for the **Nov 4, 2026** deadline | Largest direct-award ladder available; moderate fit (must frame the provenance-computation R&D, not "reporting software"); the Project Pitch is a cheap appetite test. |
 | 4 | **WSDOT Consolidated Grant Program** (2027-2029 biennium) | PARTNER — nonprofits, tribes, transit and local agencies only | prior cycle: $136.5M across 153 projects; tech purchases eligible under Capital | **Applications due 3 p.m. Sept 9, 2026** (opened Jun 16) | The big in-state channel, open right now. Needs one WA agency to carry Headway as a technology line item; otherwise the next cycle is ~June 2028. |
@@ -38,7 +38,7 @@ Watch list (real, recurring, nothing open today): **USDOT SBIR FY27** (pre-solic
 
 **What it is.** The successor to POSE (archived; final solicitation NSF 24-606) and Safe-OSE (also archived; absorbed as PESOSE Track 3). Posted 2026-02-19, lead directorate CISE with seven other directorates participating. Goal: translation of open-source products "into safe and sustainable ecosystems that address national and societal challenges" ([solicitation](https://www.nsf.gov/funding/opportunities/pesose-pathways-enable-secure-open-source-ecosystems/nsf26-506/solicitation); [program page](https://www.nsf.gov/funding/opportunities/pesose-pathways-enable-secure-open-source-ecosystems)).
 
-**Eligibility (verified, verbatim from the solicitation).** "For-profit organizations: U.S.-based commercial organizations, including small businesses, with strong capabilities in scientific or engineering research or education and a passion for innovation" may submit; the PI "must be an employee of the proposing organization." So Bekus Solutions can be the proposing/managing organization with Daniel as PI. Individuals cannot apply directly. Every proposal must point to an existing publicly-available open-source product and document its user and contributor base — and must include **3–5 letters of collaboration from current users or contributors not directly related to the proposing team**.
+**Eligibility (verified, verbatim from the solicitation).** "For-profit organizations: U.S.-based commercial organizations, including small businesses, with strong capabilities in scientific or engineering research or education and a passion for innovation" may submit; the PI "must be an employee of the proposing organization." So Bekus Solutions can be the proposing/managing organization with the founder as PI. Individuals cannot apply directly. Every proposal must point to an existing publicly-available open-source product and document its user and contributor base — and must include **3–5 letters of collaboration from current users or contributors not directly related to the proposing team**.
 
 **Structure and money.** Track 1 (Scoping & Planning): up to **$300K / 1 year**, ~30 awards — ecosystem discovery, governance design, risk/security plan, community-building strategy. Track 2 (Establishing & Expanding): up to **$1.5M / 2 years**, ~10 awards — requires documented demand and an existing user/contributor base. Track 3 (security of mature OSEs): $1.5M / 2 years. $40M total, 40–60 awards, no LOI required, no per-org proposal limit.
 
@@ -46,13 +46,13 @@ Watch list (real, recurring, nothing open today): **USDOT SBIR FY27** (pre-solic
 
 **Fit.** Strong. A federally mandated reporting pipeline used by ~2,000+ NTD reporters is a legible "national and societal challenge"; the new "secure" framing rewards exactly Headway's provenance/auditability/supply-chain story (Track 1 already requires security safeguards and risk analysis as deliverables). Risks: (a) the 3–5 independent user/contributor letters are a hard gate if traction is thin; (b) "science and engineering-focused research product" framing is weaker for a civic-data tool than for a lab-born one — worth a program-officer conversation before July 21.
 
-**What Daniel would do next.** Start the letters *now* — identify 3–5 independent users/contributors (pilot agencies, consultancies, contributors) and ask this week; register/attend the July 21 Q&A and Aug 11 webinar; draft a Track 1 proposal (ecosystem scoping: governance, agency onboarding, contributor pipeline, security plan) targeting Sept 1, with Mar 2, 2027 as the fallback if letters aren't ready.
+**What to do next.** Start the letters *now* — identify 3–5 independent users/contributors (pilot agencies, consultancies, contributors) and ask this week; register/attend the July 21 Q&A and Aug 11 webinar; draft a Track 1 proposal (ecosystem scoping: governance, agency onboarding, contributor pipeline, security plan) targeting Sept 1, with Mar 2, 2027 as the fallback if letters aren't ready.
 
 ## 2. TRB Transit IDEA — **DIRECT**
 
 **What it is.** TRB's small-innovator arm of TCRP (FTA-funded, National Academies-managed): investigator-driven exploratory projects in transit, priority areas including transit safety/security and operational efficiency ([IDEA program page](https://www.trb.org/IDEAProgram/IDEAProgram.aspx); [Program Announcement PDF](https://onlinepubs.trb.org/onlinepubs/IDEA/IDEA_Program_Announcement.pdf)).
 
-**Eligibility (verified).** The Program Announcement states verbatim that "IDEA programs are open to all" — inventors, businesses, academia; private-sector proposers need SAM registration. A small business, or Daniel individually, can propose.
+**Eligibility (verified).** The Program Announcement states verbatim that "IDEA programs are open to all" — inventors, businesses, academia; private-sector proposers need SAM registration. A small business, or the founder individually, can propose.
 
 **Money.** Type 1 (concept) and Type 2 (prototype) proposals "for up to $100,000 in IDEA costs"; Type 2 requires ≥20% cost share; most awards run $70,000–$85,000 ([TRB project page](https://apps.trb.org/cmsfeed/TRBNetProjectDisplay.asp?ProjectID=1170)). *Caveat:* the posted announcement PDF is dated (~2020 deadlines inside); reconfirm the ceiling when the 2027 announcement posts.
 
@@ -60,7 +60,7 @@ Watch list (real, recurring, nothing open today): **USDOT SBIR FY27** (pre-solic
 
 **Fit.** Strong: "provenance-backed automation of NTD Safety & Security and service reporting for small agencies" sits squarely in the safety and efficiency focus areas, and the announcement explicitly encourages transit-agency participation and early-implementation paths — pilot-agency letters would carry weight.
 
-**What Daniel would do next.** Email the IDEA office to confirm the 2027 cycle and get on the announcement list; line up 1–2 WA pilot agencies as named participants; draft a Type 1 concept around the NTD S&S module.
+**What to do next.** Email the IDEA office to confirm the 2027 cycle and get on the announcement list; line up 1–2 WA pilot agencies as named participants; draft a Type 1 concept around the NTD S&S module.
 
 ## 3. NSF SBIR — America's Seed Fund (NSF 26-510) — **DIRECT**
 
@@ -74,7 +74,7 @@ Watch list (real, recurring, nothing open today): **USDOT SBIR FY27** (pre-solic
 
 **Fit.** Moderate, with a framing job: NTD reporting automation reads as govtech SaaS unless the pitch isolates the genuinely novel R&D (provenance-carrying deterministic computation over heterogeneous transit data; verifiable regulatory reporting). The open-source/commercialization tension resolves the standard way: Apache-2.0 engine + Bekus Solutions' hosted/support/certification layer as the commercial story.
 
-**What Daniel would do next.** Write the 2-page Project Pitch (free, fast, non-binding) in September framed on the provenance-computation R&D; submit targeting the November 4 Phase I deadline only if invited.
+**What to do next.** Write the 2-page Project Pitch (free, fast, non-binding) in September framed on the provenance-computation R&D; submit targeting the November 4 Phase I deadline only if invited.
 
 ## 4. WSDOT Consolidated Grant Program (2027-2029) — **PARTNER, open now**
 
@@ -86,7 +86,7 @@ Watch list (real, recurring, nothing open today): **USDOT SBIR FY27** (pre-solic
 
 **Fit / partnership path.** A rural/special-needs WA agency (exactly the small-agency audience Headway's one-box deployment targets) includes Headway procurement + support as a Capital technology line item, then procures Bekus Solutions under normal public procurement. NTD reporting burden is a documented pain point for the 5311-sized agencies this program funds.
 
-**What Daniel would do next.** This is an eight-week window: contact the 2–3 friendliest WA small-agency prospects immediately and offer to draft the technology line item and justification for their application. If none bites by mid-August, target the 2029-2031 cycle (applications ~June 2028) with pilots already running.
+**What to do next.** This is an eight-week window: contact the 2–3 friendliest WA small-agency prospects immediately and offer to draft the technology line item and justification for their application. If none bites by mid-August, target the 2029-2031 cycle (applications ~June 2028) with pilots already running.
 
 ## 5. WSTIP member grants — **PARTNER, always-on**
 
@@ -96,7 +96,7 @@ Watch list (real, recurring, nothing open today): **USDOT SBIR FY27** (pre-solic
 
 **Fit — honest shape.** WSTIP grants go to members, never vendors: **there is no mechanism that pays Bekus Solutions directly.** But the precedent is exactly Headway's shape — members using pool grants to procure vendor risk/safety technology — and the NTD Safety & Security reporting module is a clean loss-prevention/compliance-risk story. WSTIP also has pool-wide technology-initiative history (it once won a TRB IDEA grant to evaluate collision-avoidance tech across members — [Mass Transit coverage](https://www.masstransitmag.com/bus/article/12127151/wstip-awarded-trb-idea-grant-to-study-and-evaluate-collision-avoidance-technology), secondary source) and its 2024 Annual Report emphasizes intensifying proactive loss prevention.
 
-**What Daniel would do next.** One call to Member Services: pitch provenance-backed NTD S&S reporting as a member risk-reduction tool, ask for the Technology Grant terms, and ask whether WSTIP would flag it to members as grant-eligible. Then let member agencies apply with Headway as the named procurement — a repeatable motion across 25 prospects.
+**What to do next.** One call to Member Services: pitch provenance-backed NTD S&S reporting as a member risk-reduction tool, ask for the Technology Grant terms, and ask whether WSTIP would flag it to members as grant-eligible. Then let member agencies apply with Headway as the named procurement — a repeatable motion across 25 prospects.
 
 ---
 
@@ -108,7 +108,7 @@ Watch list (real, recurring, nothing open today): **USDOT SBIR FY27** (pre-solic
 
 **Eligibility.** Standard SBIR: for-profit ≤500 employees, majority U.S.-owned, PI primarily employed by the firm ([sbir.gov tutorial](https://www.sbir.gov/tutorials/program-basics/tutorial-2)). Open-source licensing is a business-model consideration (commercialization is scored), not an eligibility bar.
 
-**What Daniel would do next.** Calendar the FY27 pre-solicitation watch for ~April 2027 (volpe.dot.gov + SAM.gov); use the public Q&A forum ([usdot.uservoice.com](https://usdot.uservoice.com/forums/967226)) that cycle; longer-game, get "NTD data quality/reporting automation" in front of FTA research staff so a topic like it exists to bid on.
+**What to do next.** Calendar the FY27 pre-solicitation watch for ~April 2027 (volpe.dot.gov + SAM.gov); use the public Q&A forum ([usdot.uservoice.com](https://usdot.uservoice.com/forums/967226)) that cycle; longer-game, get "NTD data quality/reporting automation" in front of FTA research staff so a topic like it exists to bid on.
 
 ## 7. FTA Public Transportation Innovation (49 USC 5312) — **DIRECT eligibility, WATCH for NOFOs**
 
@@ -118,13 +118,13 @@ Watch list (real, recurring, nothing open today): **USDOT SBIR FY27** (pre-solic
 
 **Current status (verified via the grants.gov API, 2026-07-13).** FTA has exactly two posted opportunities — Tribal Transit FY2026 (tribes only, closes 8/25/2026) and ICAM (below) — and **zero forecasted research NOFOs**. All other FY2026 FTA competitions have been capital programs.
 
-**What Daniel would do next.** Stand up a lightweight watch (grants.gov saved search, agency DOT-FTA + Federal Register FTA notices — the same "regulatory watch" motion the feature-gap report recommends for NTD dockets). When a data/standards/safety-research NOFO appears, Bekus Solutions applies directly; the FY2023 Transit Standards Development Program (FTA-2023-004-TRI) is the on-point precedent topic.
+**What to do next.** Stand up a lightweight watch (grants.gov saved search, agency DOT-FTA + Federal Register FTA notices — the same "regulatory watch" motion the feature-gap report recommends for NTD dockets). When a data/standards/safety-research NOFO appears, Bekus Solutions applies directly; the FY2023 Transit Standards Development Program (FTA-2023-004-TRI) is the on-point precedent topic.
 
 ## 8. TCRP — **agenda-setting + subcontract path, slow**
 
 **How it works (verified).** Anyone may submit a problem statement → screening panel (August 2026 this cycle) → TOPS Commission selection (October 2026) → panels → **RFPs to research contractors (spring 2027)** ([TCRP Getting Involved](https://www.trb.org/TCRP/TCRPGettingInvolved.aspx)). FY2027 problem statements closed **June 22, 2026**. Any qualified research organization — including a small business — can compete for TCRP contracts ([RFP page](https://www.trb.org/TCRP/RequestsforProposals.aspx); the live RFP list is JS-loaded and couldn't be enumerated — check by hand). TCRP is FTA-funded under 5312(i) and TRB-managed; APTA convenes oversight and dissemination only ([FTA TCRP page](https://www.transit.dot.gov/funding/grants/transit-cooperative-research-program-5312i); [APTA on TCRP](https://www.apta.com/news-research/transit-cooperative-research-program/about-tcrp/)).
 
-**What Daniel would do next.** Two-track: submit an FY2028 problem statement (~June 2027, *extrapolated — not yet posted*) on NTD reporting burden/data-quality automation (free, agenda-shaping); meanwhile watch issued RFPs for a subcontract slot with an incumbent research firm or university — the realistic near-term entry. Even a selected problem statement leads to an openly-competed RFP ~18 months later.
+**What to do next.** Two-track: submit an FY2028 problem statement (~June 2027, *extrapolated — not yet posted*) on NTD reporting burden/data-quality automation (free, agenda-shaping); meanwhile watch issued RFPs for a subcontract slot with an incumbent research firm or university — the realistic near-term entry. Even a selected problem statement leads to an openly-competed RFP ~18 months later.
 
 ## 9. FTA ICAM FY2026 pilot — **PARTNER, open now, moderate fit**
 

@@ -149,7 +149,7 @@ cd services/transform && python3 -m pytest tests/ -q
   "Outputs — backend evidence".
 - **2026-07-13 (hardening pass, Batch B — intake robustness + replay
   idempotency):** `python3 -m pytest tests/ -q` → **83 passed in 0.23s**
-  (was 66 before this batch; Python 3.12.3, venv `/home/daniel/venv`).
+  (was 66 before this batch; Python 3.12.3, venv `~/venv`).
   New coverage (`tests/test_hardening.py` + writer/model additions): the
   reviewers' three reproduced hostile-CSV inputs — oversized field
   (mid-iteration `csv.Error` captured per row), NUL cell (rejected at
@@ -195,7 +195,7 @@ cd services/transform && python3 -m pytest tests/ -q
   connection — evidence in handoff 0011, "Outputs — evidence".
 
 - `python3 -m pytest tests/ -q` → **49 passed in 0.22s** (2026-07-10,
-  Python 3.12.3, venv `/home/daniel/venv`). Covers: envelope contract
+  Python 3.12.3, venv `~/venv`). Covers: envelope contract
   validation (valid/invalid/extra-property/bad-version); real FeedMessage
   round trip (built with gtfs-realtime-bindings in-test) with one lineage
   edge per row; header-timestamp fallback noted; no-timestamp →

@@ -1,5 +1,5 @@
 /**
- * Period-granularity bucketing for the dashboard chart filters (Daniel's #1).
+ * Period-granularity bucketing for the dashboard chart filters (maintainer feedback #1).
  *
  * THE RULE, stated once and enforced everywhere: bucketing is DATE MATH ON
  * PERIOD BOUNDARIES ONLY — deciding which hour/day/week/month/quarter a

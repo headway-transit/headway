@@ -467,4 +467,4 @@ refusal list legible in each).
   (dq.issues rows) — no new UI room was needed for them; the per-figure
   refusal accounting is on the cards and receipts as required.
 - Housekeeping: Vite dev server left running on :5173 against the live
-  API for Daniel's click-through (`VITE_API_BASE_URL=http://127.0.0.1:8000`).
+  API for the maintainer's click-through (`VITE_API_BASE_URL=http://127.0.0.1:8000`).

@@ -283,4 +283,4 @@ The frontend build agent completed all work and reported "all gates green" but w
 - `npm run check:contrast`: all token pairs meet WCAG 2.1 AA.
 - extract-quotes: `sampling_v0` section mapped; quotes.json regenerated.
 - Live API: all 9 `/sampling` routes served on 127.0.0.1:8000 (restarted by orchestrator with same session secret after the router landed).
-- CAVEAT (honest): the agent's own live-vs-mock click-through status was not recovered from its final report; its tests run against typed mocks matching the shipped contract. A human live click-through of /sampling (login → wizard → worksheet → measurements → estimate receipt) remains PENDING and is queued for Daniel's next demo pass.
+- CAVEAT (honest): the agent's own live-vs-mock click-through status was not recovered from its final report; its tests run against typed mocks matching the shipped contract. A human live click-through of /sampling (login → wizard → worksheet → measurements → estimate receipt) remains PENDING and is queued for the maintainer's next demo pass.

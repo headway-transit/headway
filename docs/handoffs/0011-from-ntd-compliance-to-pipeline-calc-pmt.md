@@ -17,7 +17,7 @@ PMT is the largest NTD number Headway doesn't compute (research report #1). Defi
 Migration 0019 + transform normalizer live-verified, pmt_v0 with goldens incl. Exhibit 44, runner/persistence wiring, one live PMT figure computed against real MBTA static geometry + TIDES passenger events (or an honest REFUSE with the gap receipt if coverage doesn't clear — either outcome is a valid live verification), suites green, tracker version row, evidence appended here.
 
 ## Open Questions
-- 2009 NTD Sampling Manual acquisition (Daniel) → unlocks FTA-approved sampling templates tier.
+- 2009 NTD Sampling Manual acquisition (project lead) → unlocks FTA-approved sampling templates tier.
 - APC scale-up grouping schemes (p. 151 "group similar vehicle trips") — v1 design with agency-configurable grouping.
 - APC benchmarking workbook (checklist items 1–18) — research report #2, natural next wave.
 - Shape-based distance via shapes.txt polyline interpolation (upgrade from stop-to-stop haversine fallback).

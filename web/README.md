@@ -235,7 +235,7 @@ dist/assets/index-iiZvbLRJ.js   481.09 kB │ gzip: 139.62 kB
 `npm test -- --run` (every view test asserts zero axe violations):
 
 ```
- RUN  v4.1.10 /home/daniel/headway/web
+ RUN  v4.1.10 ~/headway/web
  Test Files  20 passed (20)
       Tests  116 passed (116)
 ```

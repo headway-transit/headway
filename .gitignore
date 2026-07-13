@@ -56,3 +56,7 @@ ds-bundle/
 .design-sync/.cache/
 .design-sync/learnings/
 .design-sync/node_modules
+
+# Proprietary vendor docs stay local (docs/reference/vendor/README.md)
+docs/reference/vendor/*
+!docs/reference/vendor/README.md
