@@ -444,6 +444,280 @@ export interface SafetyDeadlines {
   ss50_citation: string;
 }
 
+// ---- /sampling (handoff 0012 — NTD sampling support v0) ----
+//
+// Typed against services/api routers/sampling.py's request/response
+// models EXACTLY (PlanCreate/PlanRecord/PlanCreated, DrawRequest/
+// DrawRecord/DrawCreated, MeasurementCreate/MeasurementRecord/
+// MeasurementCreated, PlanProgress, EstimateRequest/EstimateBlock/
+// EstimateResponse, OptionsResponse). The router was built in parallel
+// against the same handoff; if it changes, the Backend Engineer issues a
+// new handoff and these are updated against the new export — never
+// guessed.
+
+/**
+ * GET /sampling/options — the plan wizard's vocabulary, straight from the
+ * sampling_v0 calc selector's constants (Table 41.01 / §41.07), plus the
+ * §41.01/§41.03 eligibility guidance and the p. 150 retention note. Every
+ * string is the calc's own text, shown verbatim.
+ */
+export interface SamplingOptions {
+  /** NTD mode code → plain-language mode-group label. */
+  modes: Record<string, string>;
+  /** NTD mode code → the units Table 41.01 allows for that mode. */
+  units_by_mode: Record<string, string[]>;
+  /** All efficiency-option tokens the selector knows (§41.07(c)). */
+  efficiency_options: string[];
+  /** The subset the API will actually create plans for (aptl, base). */
+  creatable_options: string[];
+  /** quarterly | monthly | weekly (§41.07(d)). */
+  frequencies: string[];
+  /** Weekday | Saturday | Sunday (§83.01(b) day-type estimates). */
+  service_day_types: string[];
+  /** The calc's §41.01/§41.03/p. 149 guidance strings, verbatim. */
+  eligibility_guidance: string[];
+  /** The calc's p. 150 ≥3-year documentation-retention note, verbatim. */
+  retention_note: string;
+}
+
+/** POST /sampling/plans request body (router PlanCreate). */
+export interface SamplingPlanRequest {
+  /** The NTD report year this plan samples for (2000–2100). */
+  report_year: number;
+  /** NTD mode code per Table 41.01: DR, VP, MB, TB, CR, LR, HR, MR, AG. */
+  mode: string;
+  /** e.g. DO (directly operated) or PT (purchased transportation). */
+  type_of_service: string;
+  /** vehicle_days | one_way_trips | round_trips | one_way_car_trips | one_way_train_trips */
+  unit: string;
+  /** aptl | base (aptl_grouped cells are read-only reference). */
+  efficiency_option: string;
+  /** quarterly | monthly | weekly */
+  frequency: string;
+}
+
+/**
+ * A sampling plan as the API serves it (router PlanRecord).
+ * required_per_period and required_annual are BOTH verbatim table cells
+ * (whole service-unit counts — exact as JSON integers, never derived from
+ * each other); table_citation and selector_version are the calc's own
+ * strings, shown verbatim.
+ */
+export interface SamplingPlanRecord {
+  plan_id: string;
+  report_year: number;
+  mode: string;
+  type_of_service: string;
+  unit: string;
+  efficiency_option: string;
+  frequency: string;
+  /** The "<unit> for a <period>" table row, verbatim. */
+  required_per_period: number;
+  /** The "Total Sample Size for Year" table row, verbatim. */
+  required_annual: number;
+  /** The calc's citation for the table cell (table, column, both rows). */
+  table_citation: string;
+  /** e.g. "sampling_v0 0.1.0" — displayed verbatim, never parsed. */
+  selector_version: string;
+  /** created (no draw yet) | active — shown raw if unknown. */
+  status: string;
+  created_by: string;
+  /** ISO date-time */
+  created_at: string;
+}
+
+/** POST /sampling/plans 201 response (router PlanCreated). */
+export interface SamplingPlanCreated {
+  plan: SamplingPlanRecord;
+  /** The calc's eligibility guidance + option caveats, verbatim. */
+  guidance: string[];
+  /** The calc's p. 150 retention note, verbatim. */
+  retention_note: string;
+  audit_event_id: number;
+}
+
+/**
+ * POST /sampling/plans/{id}/draws body (router DrawRequest): ONE
+ * random-selection act for ONE period at the plan's frequency. The
+ * service-unit list must be ALL units expected to operate in the period
+ * (§63.07), period-qualified so ids never repeat across periods. seed is
+ * optional — blank lets the API generate one from a cryptographic source;
+ * either way it is RECORDED for reproducibility.
+ */
+export interface SamplingDrawRequest {
+  /** e.g. 2026-Q1, 2026-01, 2026-W14 — one draw per period. */
+  period_label: string;
+  service_units: string[];
+  /** Optional (min 8 chars when given); recorded either way. */
+  seed?: string;
+  /** Extra randomly-drawn units beyond the per-period size (default 0). */
+  oversample_units?: number;
+}
+
+/** One recorded draw (router DrawRecord). */
+export interface SamplingDrawRecord {
+  draw_id: string;
+  plan_id: string;
+  period_label: string;
+  /** How many units were in the provided list (the sampling frame). */
+  frame_size: number;
+  /** The selected units IN DRAW ORDER — the ride checker's list. */
+  selected_units: string[];
+  /** The recorded seed (§63.03 reproducibility anchor). */
+  seed: string;
+  required_per_period: number;
+  oversample_units: number;
+  /** e.g. "sampling_v0 0.1.0" — displayed verbatim. */
+  drawer_version: string;
+  drawn_by: string;
+  /** ISO date-time */
+  drawn_at: string;
+}
+
+/** POST /sampling/plans/{id}/draws 201 response (router DrawCreated). */
+export interface SamplingDrawCreated {
+  draw: SamplingDrawRecord;
+  /** The calc's documented §63.03 draw procedure, verbatim. */
+  method: string;
+  /** The oversampling-only-if-random citation when oversampling; else null. */
+  oversampling_note: string | null;
+  retention_note: string;
+  audit_event_id: number;
+}
+
+/**
+ * POST /sampling/plans/{id}/measurements body (router MeasurementCreate):
+ * one ride-check observation for one drawn unit. observed_pmt is a
+ * decimal STRING (exact NUMERIC, never a float) — the MetricValue.value
+ * discipline; this UI never parses it.
+ */
+export interface SamplingMeasurementRequest {
+  unit_id: string;
+  /** Whole boardings counted by the ride checker. */
+  observed_upt: number;
+  /** Decimal-string passenger miles measured on this unit. */
+  observed_pmt: string;
+  /** Weekday | Saturday | Sunday — needed only for day-type estimates. */
+  service_day_type?: string | null;
+  /** ISO date the ride check was performed. */
+  service_date?: string | null;
+  notes?: string | null;
+}
+
+/** One recorded observation (router MeasurementRecord). Append-only:
+ *  corrections supersede via superseded_by; originals never change. */
+export interface SamplingMeasurementRecord {
+  measurement_id: string;
+  plan_id: string;
+  unit_id: string;
+  observed_upt: number;
+  /** Exact NUMERIC as a JSON string, never a float. */
+  observed_pmt: string;
+  service_day_type: string | null;
+  /** ISO date */
+  service_date: string | null;
+  /** e.g. "manual_ride_check" — provenance of the observation. */
+  data_source: string;
+  notes: string | null;
+  entered_by: string;
+  /** ISO date-time */
+  entered_at: string;
+  /** measurement_id of the correction, or null while this one stands. */
+  superseded_by: string | null;
+}
+
+/** POST /sampling/plans/{id}/measurements 201 response. */
+export interface SamplingMeasurementCreated {
+  measurement: SamplingMeasurementRecord;
+  /** The manual-entry caveat, verbatim. */
+  source_caveat: string;
+  retention_note: string;
+  audit_event_id: number;
+}
+
+/** Per-draw progress (router DrawProgress) — API-computed workflow counts. */
+export interface SamplingDrawProgress {
+  period_label: string;
+  selected: number;
+  measured: number;
+  oversample_units: number;
+}
+
+/**
+ * GET /sampling/plans/{id}/progress (router PlanProgress): measured vs
+ * required, per draw and overall, with the worksheet of
+ * drawn-but-unmeasured units. undersampled and every count are computed
+ * BY THE API; the citations are its verbatim regulatory text.
+ */
+export interface SamplingPlanProgress {
+  plan: SamplingPlanRecord;
+  required_per_period: number;
+  required_annual: number;
+  draws: SamplingDrawProgress[];
+  units_selected: number;
+  units_measured: number;
+  /** Drawn units still needing a ride check, in draw order. */
+  units_unmeasured: string[];
+  undersampled: boolean;
+  /** The API's no-undersampling citation (p. 149 quotes), verbatim. */
+  undersampling_citation: string;
+  /** The API's oversampling-only-if-random citation, verbatim. */
+  oversampling_citation: string;
+  retention_note: string;
+}
+
+/**
+ * POST /sampling/plans/{id}/estimate body (router EstimateRequest). The
+ * expansion factor IS the agency's 100% count of annual UPT (§83.01(a)),
+ * supplied as a decimal STRING. upt_100pct_by_day_type additionally
+ * requests per-day-type estimates (§83.01(b)) — not offered by this UI
+ * in v0 (day-type blocks are still rendered if the API serves them).
+ */
+export interface SamplingEstimateRequest {
+  annual_upt_100pct: string;
+  upt_100pct_by_day_type?: Record<string, string>;
+}
+
+/**
+ * One §83 estimate block (router EstimateBlock — the calc's
+ * SampledPmtEstimate verbatim). Every figure except the whole counts is a
+ * decimal STRING; method is the calc's fixed sampled-estimate provenance
+ * label.
+ */
+export interface SamplingEstimateBlock {
+  /** 'annual' or a service-day type (Weekday/Saturday/Sunday). */
+  scope: string;
+  sample_size: number;
+  sample_total_upt: number;
+  /** Σ observed PMT over the sample, decimal string verbatim. */
+  sample_total_pmt: string;
+  /** Ratio of totals (§83.05(a)), decimal string verbatim. */
+  sample_aptl: string;
+  /** The 100% UPT expansion factor (§83.01), echoed verbatim. */
+  expansion_factor_upt: string;
+  /** expansion factor × sample APTL (§83.07), verbatim — the estimate. */
+  estimated_pmt: string;
+  /** The calc's fixed provenance label — a SAMPLED ESTIMATE. */
+  method: string;
+}
+
+/** POST /sampling/plans/{id}/estimate response (router EstimateResponse). */
+export interface SamplingEstimateResponse {
+  plan_id: string;
+  estimate: SamplingEstimateBlock;
+  by_service_day: SamplingEstimateBlock[] | null;
+  units_measured: number;
+  required_annual: number;
+  /** measured − required (random oversampling; 0 when exactly on target). */
+  oversampled_by: number;
+  /** The API's caveats (sampled-estimate, manual-entry, …), verbatim. */
+  caveats: string[];
+  /** The API's §83 citations + the plan's table citation, verbatim. */
+  citations: string[];
+  retention_note: string;
+  audit_event_id: number;
+}
+
 // ---- error envelopes (FastAPI) ----
 
 export interface ValidationErrorItem {

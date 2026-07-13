@@ -280,6 +280,53 @@ def test_dq_resolution_minutes_nullable_nonnegative_no_default():
     )
 
 
+def test_stops_and_stop_times_preserve_nulls():
+    # Handoff 0011 / migration 0019: GTFS stop geometry for PMT distances.
+    # stops.latitude/longitude nullable (GTFS requires coordinates only for
+    # location_type 0/1/2); stop_times.shape_dist_traveled NULLABLE and
+    # preserved — a feed that omits it stays NULL, a distance is never
+    # fabricated; GTFS-native identity (trip_id, stop_sequence).
+    sql = all_sql()
+    assert re.search(r"CREATE TABLE\s+canonical\.stops\b", sql), (
+        "canonical.stops not created by any migration"
+    )
+    assert re.search(r"CREATE TABLE\s+canonical\.stop_times\b", sql), (
+        "canonical.stop_times not created by any migration"
+    )
+    sql_0019 = (MIGRATIONS_DIR / "0019_stops_stop_times.sql").read_text(
+        encoding="utf-8"
+    )
+    statements = "\n".join(
+        line
+        for line in sql_0019.splitlines()
+        if not line.lstrip().startswith("--")
+    )
+    # Nullable coordinates: DOUBLE PRECISION with no NOT NULL, no default.
+    assert re.search(r"latitude\s+DOUBLE PRECISION\s*,", statements)
+    assert re.search(r"longitude\s+DOUBLE PRECISION\s*$", statements, re.M)
+    assert not re.search(
+        r"(latitude|longitude)\s+DOUBLE PRECISION\s+(NOT NULL|DEFAULT)",
+        statements,
+    ), "canonical.stops coordinates must stay nullable with no default"
+    # shape_dist_traveled: nullable, no default — NULL preserved, never
+    # fabricated (handoff 0011, binding).
+    assert re.search(
+        r"shape_dist_traveled\s+DOUBLE PRECISION\s*,", statements
+    ), "canonical.stop_times.shape_dist_traveled must be DOUBLE PRECISION"
+    assert not re.search(
+        r"shape_dist_traveled\s+DOUBLE PRECISION\s+(NOT NULL|DEFAULT)",
+        statements,
+    ), "shape_dist_traveled must stay nullable with no default"
+    assert re.search(
+        r"PRIMARY KEY \(trip_id, stop_sequence\)", statements
+    ), "canonical.stop_times identity must be (trip_id, stop_sequence)"
+    # The design rationale must be carried in the migration itself.
+    assert "NEVER fabricated" in sql_0019 or "never fabricated" in sql_0019
+    assert "haversine" in sql_0019, (
+        "0019 must document the pmt_v0 haversine fallback the NULL feeds"
+    )
+
+
 def test_immutability_triggers_present():
     sql = all_sql()
     assert re.search(r"BEFORE UPDATE OR DELETE ON raw\.records", sql)
@@ -386,4 +433,94 @@ def test_safety_events_runaway_and_row_evacuation_fields():
     )
     assert "append-only trigger" in sql_0018, (
         "0018 must note the 0017 trigger covers the new columns"
+    )
+
+
+def test_sampling_plans_draws_measurements_append_only():
+    # Handoff 0012 / migration 0020: NTD sampling plan support. Plans,
+    # draws (seed + frame recorded for reproducibility, §63.03), and
+    # measurements (append-only supersede corrections, the 0017 pattern).
+    # Required sample sizes come from the versioned calc selector — the
+    # migration must document that no regulatory number originates here.
+    sql = all_sql()
+    for table in ("sampling.plans", "sampling.draws", "sampling.measurements"):
+        assert re.search(
+            rf"CREATE TABLE\s+{re.escape(table)}\b", sql
+        ), f"{table} not created by any migration"
+    sql_0020 = (MIGRATIONS_DIR / "0020_sampling_plans.sql").read_text(
+        encoding="utf-8"
+    )
+    assert re.search(r"CREATE SCHEMA IF NOT EXISTS sampling", sql_0020)
+    # Plans: the ready-to-use vocabulary, CHECK-constrained; both required
+    # sizes present; selector version recorded.
+    for mode in ("DR", "VP", "MB", "TB", "CR", "LR", "HR", "MR", "AG"):
+        assert f"'{mode}'" in sql_0020, f"plans.mode CHECK must include {mode!r}"
+    for unit in (
+        "vehicle_days", "one_way_trips", "round_trips",
+        "one_way_car_trips", "one_way_train_trips",
+    ):
+        assert f"'{unit}'" in sql_0020, f"plans.unit CHECK must include {unit!r}"
+    assert re.search(
+        r"required_per_period INTEGER NOT NULL CHECK \(required_per_period > 0\)",
+        sql_0020,
+    )
+    assert re.search(
+        r"required_annual\s+INTEGER NOT NULL CHECK \(required_annual > 0\)",
+        sql_0020,
+    )
+    assert re.search(r"selector_version\s+TEXT NOT NULL", sql_0020)
+    assert re.search(
+        r"No\s+(-- )?regulatory number originates in the API or in this schema",
+        sql_0020,
+    ), "0020 must document that no regulatory number originates here"
+    assert re.search(r"BEFORE UPDATE OR DELETE ON sampling\.plans", sql_0020), (
+        "sampling.plans needs the append-only trigger"
+    )
+    # Draws: seed + frame + selection recorded, strictly append-only, one
+    # draw per plan period, oversample flagged.
+    assert re.search(r"service_units\s+TEXT\[\] NOT NULL", sql_0020)
+    assert re.search(r"selected_units\s+TEXT\[\] NOT NULL", sql_0020)
+    assert re.search(r"seed\s+TEXT NOT NULL CHECK \(length\(seed\) > 0\)", sql_0020)
+    assert re.search(
+        r"oversample_units INTEGER NOT NULL DEFAULT 0 CHECK \(oversample_units >= 0\)",
+        sql_0020,
+    )
+    assert re.search(r"UNIQUE \(plan_id, period_label\)", sql_0020)
+    assert re.search(r"BEFORE UPDATE OR DELETE ON sampling\.draws", sql_0020), (
+        "sampling.draws needs the append-only trigger"
+    )
+    # Measurements: NUMERIC PMT (never float), supersede pattern, one active
+    # observation per unit.
+    assert re.search(
+        r"observed_pmt\s+NUMERIC NOT NULL CHECK \(observed_pmt >= 0\)", sql_0020
+    ), "observed_pmt must be NUMERIC (never float) with a >= 0 CHECK"
+    assert re.search(
+        r"observed_upt\s+INTEGER NOT NULL CHECK \(observed_upt >= 0\)", sql_0020
+    )
+    assert re.search(
+        r"superseded_by\s+UUID REFERENCES sampling\.measurements", sql_0020
+    ), "superseded_by must reference sampling.measurements (append-only correction)"
+    assert re.search(
+        r"REFERENCES sampling\.measurements \(measurement_id\)\s+"
+        r"DEFERRABLE INITIALLY DEFERRED",
+        sql_0020,
+    ), (
+        "superseded_by FK must be DEFERRABLE (link-then-insert under the "
+        "one-active-per-unit index — 2026-07-12 live-walkthrough finding)"
+    )
+    assert re.search(r"superseded_by <> measurement_id", sql_0020), (
+        "a measurement must never supersede itself"
+    )
+    assert re.search(
+        r"CREATE UNIQUE INDEX\s+measurements_one_active_per_unit\s+"
+        r"ON sampling\.measurements \(plan_id, unit_id\)\s+"
+        r"WHERE superseded_by IS NULL",
+        sql_0020,
+    ), "exactly one active measurement per (plan, unit)"
+    assert re.search(
+        r"BEFORE UPDATE OR DELETE ON sampling\.measurements", sql_0020
+    ), "sampling.measurements needs the append-only trigger"
+    # Retention basis surfaced in the schema documentation.
+    assert "p. 150" in sql_0020 and "3 years" in sql_0020, (
+        "0020 must carry the documentation-retention basis"
     )

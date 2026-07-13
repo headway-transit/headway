@@ -122,6 +122,51 @@ class PassengerEvent:
 
 
 @dataclass(frozen=True)
+class StopTime:
+    """One canonical.stop_times row joined with its stop's coordinates
+    (read contract: canonical.stop_times LEFT JOIN canonical.stops,
+    migration 0019, handoff 0011).
+
+    ``latitude``/``longitude`` are None when the stop is unknown or carries
+    no coordinates (nullable per the GTFS spec for nodes/boarding areas) —
+    pmt_v0 then fails loudly for the affected trip, never guesses a point.
+    ``shape_dist_traveled`` is None when the feed omits the optional GTFS
+    column (preserved NULL, migration 0019 — never fabricated); its UNITS
+    are feed-defined per the GTFS spec, so consuming it requires an explicit
+    unit conversion input (see headway_calc.pmt.compute_pmt).
+    """
+
+    trip_id: str
+    stop_id: str
+    stop_sequence: int
+    latitude: float | None
+    longitude: float | None
+    shape_dist_traveled: float | None
+
+    def __post_init__(self) -> None:
+        if self.latitude is not None and not (-90.0 <= self.latitude <= 90.0):
+            raise ValueError(
+                f"latitude {self.latitude!r} out of range [-90, 90] "
+                f"(trip_id={self.trip_id!r}, stop_id={self.stop_id!r})"
+            )
+        if self.longitude is not None and not (
+            -180.0 <= self.longitude <= 180.0
+        ):
+            raise ValueError(
+                f"longitude {self.longitude!r} out of range [-180, 180] "
+                f"(trip_id={self.trip_id!r}, stop_id={self.stop_id!r})"
+            )
+        if self.shape_dist_traveled is not None and not (
+            self.shape_dist_traveled >= 0.0
+        ):
+            raise ValueError(
+                f"shape_dist_traveled {self.shape_dist_traveled!r} must be "
+                f">= 0 or None (trip_id={self.trip_id!r}, "
+                f"stop_id={self.stop_id!r})"
+            )
+
+
+@dataclass(frozen=True)
 class Finding:
     """A data-quality finding raised by a calculation.
 
@@ -310,6 +355,89 @@ class UptDetail:
 
 
 @dataclass(frozen=True)
+class PmtDetail:
+    """Detail of one pmt_v0 run (handoff 0011), persisted verbatim into
+    computed.metric_values.detail (JSONB, migration 0010).
+
+    - ``passenger_miles_counted`` — the deterministic pre-factor base: the
+      sum over VALID trips of (running load × segment distance), quantized
+      0.01 mile ROUND_HALF_EVEN (the vrm_v0 mile convention).
+    - ``operated_trips`` / ``trips_with_events`` / ``missing_trips`` — the
+      p. 146 missing-trip inputs, exactly upt_v0's vocabulary: operated =
+      distinct trip_ids observed in canonical.vehicle_positions; missing =
+      operated with zero passenger events.
+    - ``valid_trips`` / ``invalid_trips`` — trips with events that passed /
+      failed the p. 151 validity checks (imbalance, negative load) plus the
+      pmt-specific data-sufficiency checks; ``invalid_trip_reasons`` counts
+      each invalid trip once under its FIRST failing reason in the
+      documented priority order (see headway_calc.pmt).
+    - ``missing_or_invalid_share`` — (missing + invalid operated trips) /
+      operated, quantized 0.0001 ROUND_HALF_EVEN for reporting (the p. 146
+      threshold COMPARISON is exact, never the quantized value).
+    - ``factor_applied`` — operated/(operated − missing − invalid_operated),
+      quantized 0.000001 for reporting; None when the run was blocked.
+    - ``distance_source_segments`` — segments priced from GTFS
+      ``shape_dist_traveled`` deltas vs stop-to-stop haversine (the
+      DOCUMENTED DIVERGENCE — straight-line understates path distance;
+      flagged on every figure it touches via the
+      'haversine_distance_fallback' info finding).
+    - ``shape_dist_unit_miles`` — the explicit miles-per-unit conversion
+      input for shape_dist_traveled (feed-defined units per the GTFS spec);
+      None when not supplied (shape data then unusable — never guessed).
+    - ``source_mix`` and both thresholds — exactly as UptDetail carries
+      them (simulated-data rule + threshold provenance).
+
+    ``to_dict`` renders every Decimal as a string; dict keys are emitted
+    sorted.
+    """
+
+    passenger_miles_counted: Decimal
+    operated_trips: int
+    trips_with_events: int
+    valid_trips: int
+    invalid_trips: int
+    missing_trips: int
+    invalid_trip_reasons: dict[str, int]
+    missing_or_invalid_share: Decimal
+    factor_applied: Decimal | None
+    distance_source_segments: dict[str, int]
+    shape_dist_unit_miles: Decimal | None
+    source_mix: dict[str, int]
+    missing_trip_threshold: Decimal
+    imbalance_threshold: Decimal
+
+    def to_dict(self) -> dict:
+        return {
+            "passenger_miles_counted": str(self.passenger_miles_counted),
+            "operated_trips": self.operated_trips,
+            "trips_with_events": self.trips_with_events,
+            "valid_trips": self.valid_trips,
+            "invalid_trips": self.invalid_trips,
+            "missing_trips": self.missing_trips,
+            "invalid_trip_reasons": {
+                k: self.invalid_trip_reasons[k]
+                for k in sorted(self.invalid_trip_reasons)
+            },
+            "missing_or_invalid_share": str(self.missing_or_invalid_share),
+            "factor_applied": (
+                None if self.factor_applied is None else str(self.factor_applied)
+            ),
+            "distance_source_segments": {
+                k: self.distance_source_segments[k]
+                for k in sorted(self.distance_source_segments)
+            },
+            "shape_dist_unit_miles": (
+                None
+                if self.shape_dist_unit_miles is None
+                else str(self.shape_dist_unit_miles)
+            ),
+            "source_mix": {k: self.source_mix[k] for k in sorted(self.source_mix)},
+            "missing_trip_threshold": str(self.missing_trip_threshold),
+            "imbalance_threshold": str(self.imbalance_threshold),
+        }
+
+
+@dataclass(frozen=True)
 class VomsDetail:
     """Detail of one voms_v0 run (handoff 0009), persisted verbatim into
     computed.metric_values.detail (JSONB, migration 0010).
@@ -359,7 +487,8 @@ class CalcResult:
     id); records of excluded groups appear ONLY in their warning findings.
     ``detail`` carries the 0.2.0 coverage detail (a BlockCoverageDetail for
     0.3.0 block-aware VRH; an UptDetail for upt_v0, handoff 0005; a
-    VomsDetail for voms_v0, handoff 0009; None for 0.1.0 results).
+    VomsDetail for voms_v0, handoff 0009; a PmtDetail for pmt_v0, handoff
+    0011; None for 0.1.0 results).
     """
 
     value: Decimal | None
@@ -370,7 +499,7 @@ class CalcResult:
     blocking_issues: tuple[Finding, ...]
     warnings: tuple[Finding, ...] = ()
     infos: tuple[Finding, ...] = ()
-    detail: CoverageDetail | UptDetail | VomsDetail | None = None
+    detail: CoverageDetail | UptDetail | VomsDetail | PmtDetail | None = None
 
     def __post_init__(self) -> None:
         if self.blocking_issues and self.value is not None:

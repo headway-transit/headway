@@ -36,8 +36,10 @@ from headway_calc.types import (
     CalcResult,
     Finding,
     PassengerEvent,
+    StopTime,
     VehiclePosition,
 )
+from headway_calc.pmt import compute_pmt
 from headway_calc.upt import IMBALANCE_THRESHOLD, MISSING_TRIP_THRESHOLD, compute_upt
 from headway_calc.voms import compute_voms
 from headway_calc.vrh import compute_vrh
@@ -225,6 +227,45 @@ def compute_upt_by_mode(
             operated_buckets.get(bucket, []),
             missing_trip_threshold=missing_trip_threshold,
             imbalance_threshold=imbalance_threshold,
+        )
+    return results
+
+
+def compute_pmt_by_mode(
+    events: Iterable[PassengerEvent],
+    positions: Iterable[VehiclePosition],
+    stop_times: Iterable[StopTime],
+    *,
+    missing_trip_threshold: Decimal = MISSING_TRIP_THRESHOLD,
+    imbalance_threshold: Decimal = IMBALANCE_THRESHOLD,
+    shape_dist_unit_miles: Decimal | None = None,
+) -> dict[str, CalcResult]:
+    """pmt_v0 0.1.0 per mode bucket (handoff 0011): the UNCHANGED compute_pmt
+    over each mode's events, with that mode's operated-trip denominator
+    derived from the run's positions — bucket construction identical to
+    compute_upt_by_mode (a mode with operated trips but zero events still
+    gets a result: its missing share is 1, so the p. 146 rule blocks it —
+    the honest outcome, never an invented zero). The stop geometry is passed
+    WHOLE: it is keyed by trip_id, so each mode's trips consume exactly
+    their own rows (input selection, not a semantics change). Sorted bucket
+    keys.
+
+    Note the p. 146 factor-up applies PER MODE on this path — closer to the
+    manual's per-mode/TOS totals than the fleet-wide factor; the fleet-wide
+    scope 'agency' figure is unchanged (the upt_v0 precedent)."""
+    positions = list(positions)
+    stop_times = list(stop_times)
+    event_buckets = partition_events_by_mode(events)
+    operated_buckets = operated_trip_ids_by_mode(positions)
+    results: dict[str, CalcResult] = {}
+    for bucket in sorted(set(event_buckets) | set(operated_buckets)):
+        results[bucket] = compute_pmt(
+            event_buckets.get(bucket, []),
+            operated_buckets.get(bucket, []),
+            stop_times,
+            missing_trip_threshold=missing_trip_threshold,
+            imbalance_threshold=imbalance_threshold,
+            shape_dist_unit_miles=shape_dist_unit_miles,
         )
     return results
 

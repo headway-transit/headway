@@ -1,0 +1,152 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://headway.dev/contracts/demand-response-trip.v0.schema.json",
+  "title": "Headway Demand Response Trip v0",
+  "description": "One demand-response (DR) passenger trip (booking) as exported by a dispatch/scheduling platform (handoff 0013, ADR-0006). Vendor-neutral: Via/Spare/Ecolane/Trapeze-class exports map onto these fields (worked example: demand-response-trip.v0.md). Wire serialization is CSV — one file of records per drop/push, one record per row, header row required, columns named exactly as the properties here; booleans are the literals true/false (case-insensitive); absent optional values are empty cells; timestamps are ISO 8601 WITH a UTC offset (never naive); decimals are plain decimal strings (exact NUMERIC downstream, never binary float). This document defines record semantics; transport is the raw-record envelope (raw-record-envelope.v0.schema.json) on topic raw.dr.trips (topics.v0.md). Regulatory field semantics are pointers to the 2026 NTD Full Reporting Policy Manual as quoted in services/calc/REGULATORY_TRACKER.md 'Verified — Demand Response / on-demand reporting' — verify against current published guidance, never from memory.",
+  "type": "object",
+  "required": [
+    "dr_trip_id",
+    "service_date",
+    "vehicle_id",
+    "mode",
+    "tos",
+    "pickup_timestamp",
+    "dropoff_timestamp",
+    "riders",
+    "attendants_companions",
+    "ada_related",
+    "sponsored",
+    "no_show"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "dr_trip_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Vendor-unique identifier of this passenger trip (booking). One record per booking: a shared ride is multiple records on the same vehicle with overlapping onboard windows."
+    },
+    "service_date": {
+      "type": "string",
+      "format": "date",
+      "description": "The dispatch day this trip belongs to (ISO 8601 date). Vehicle-day accounting (revenue spans, Exhibit 36 semantics) groups by (vehicle_id, service_date)."
+    },
+    "vehicle_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The vehicle that served (or was dispatched to) this trip."
+    },
+    "mode": {
+      "const": "DR",
+      "description": "NTD mode code. This contract carries Demand Response only (2026 NTD Policy Manual p. 33 definition, quoted in the tracker)."
+    },
+    "tos": {
+      "type": "string",
+      "enum": ["DO", "PT", "TX", "TN"],
+      "description": "NTD type of service (manual pp. 37–39, quoted in the tracker): DO directly operated; PT purchased transportation; TX taxi (non-dedicated vehicles — note the quoted rule 'Voucher Programs are not considered public transportation', an intake validation concern documented in demand-response-trip.v0.md); TN transportation network company. TOS changes the revenue rule: TX reports only passenger-onboard miles/hours (p. 129); TX/TN report no deadhead (p. 130)."
+    },
+    "request_timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Optional: when the passenger (or their agent) requested the ride. ISO 8601 with UTC offset."
+    },
+    "dispatch_timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Optional: when the trip was dispatched to the vehicle. ISO 8601 with UTC offset."
+    },
+    "pickup_timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Boarding time (ISO 8601 with UTC offset). For no_show=true: the vehicle's ARRIVAL time at the pickup point (the no-show wait is revenue time per the Exhibit 36 no-show row, quoted in the tracker)."
+    },
+    "dropoff_timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Alighting time (ISO 8601 with UTC offset); must be >= pickup_timestamp. For no_show=true: when the vehicle departed the pickup point after the no-show was resolved."
+    },
+    "pickup_lat": {
+      "type": "number",
+      "minimum": -90,
+      "maximum": 90,
+      "description": "Optional pickup location, WGS84."
+    },
+    "pickup_lon": {
+      "type": "number",
+      "minimum": -180,
+      "maximum": 180,
+      "description": "Optional pickup location, WGS84."
+    },
+    "dropoff_lat": {
+      "type": "number",
+      "minimum": -90,
+      "maximum": 90,
+      "description": "Optional dropoff location, WGS84."
+    },
+    "dropoff_lon": {
+      "type": "number",
+      "minimum": -180,
+      "maximum": 180,
+      "description": "Optional dropoff location, WGS84."
+    },
+    "onboard_miles": {
+      "type": "string",
+      "pattern": "^\\d+(\\.\\d+)?$",
+      "description": "Optional: measured distance of this booking's passenger-onboard segment(s), statute miles, decimal string (exact NUMERIC downstream). The source of TX passenger-onboard-only miles (p. 129) and of DR passenger-mile sums. Absent means UNMEASURED — downstream calcs flag the gap, never guess."
+    },
+    "distance_source": {
+      "type": "string",
+      "enum": ["odometer", "gps"],
+      "description": "Optional: how onboard_miles was measured."
+    },
+    "pickup_odometer_miles": {
+      "type": "string",
+      "pattern": "^\\d+(\\.\\d+)?$",
+      "description": "Optional: vehicle odometer at boarding (miles, decimal string). Odometer pairs let downstream calcs measure empty inter-passenger travel and whole revenue spans exactly (revenue by Exhibit 36 — quoted in the tracker); without them those legs are flagged unmeasured."
+    },
+    "dropoff_odometer_miles": {
+      "type": "string",
+      "pattern": "^\\d+(\\.\\d+)?$",
+      "description": "Optional: vehicle odometer at alighting (miles, decimal string)."
+    },
+    "riders": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Passengers who boarded on this booking. MUST be 0 when no_show=true (a no-show is revenue time but never a boarding — UPT zero)."
+    },
+    "attendants_companions": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "NON-EMPLOYEE attendants and companions who boarded with the riders. The exporter applies the employee rule at source: attendants/companions count in UPT 'as long as they are not employees of the transit agency' (manual pp. 143–144, quoted in the tracker) — agency employees/contractors on agency business are NEVER included here. MUST be 0 when no_show=true."
+    },
+    "ada_related": {
+      "type": "boolean",
+      "description": "True when the trip is ADA complementary paratransit. ADA-related UPT is split out but INCLUDED in total UPT and NEVER counted as sponsored (manual pp. 143–144, quoted in the tracker)."
+    },
+    "sponsored": {
+      "type": "boolean",
+      "description": "True when a third party (Medicaid, Meals-On-Wheels, etc.) sponsors the trip. Sponsored UPT is split out but INCLUDED in total UPT (manual pp. 143–144, quoted in the tracker). Requires sponsor."
+    },
+    "sponsor": {
+      "type": "string",
+      "description": "The sponsoring program's label. REQUIRED (non-empty) when sponsored=true; must be absent/empty when sponsored=false."
+    },
+    "no_show": {
+      "type": "boolean",
+      "description": "True when the driver traveled to the pickup but the passenger did not show. Exhibit 36 (quoted in the tracker): a no-show trip is actual AND revenue time — but it is never a boarding, so riders/attendants_companions must be 0. For TX there is never a passenger onboard on a no-show, so it contributes nothing to TX onboard-only figures."
+    },
+    "interruption_after": {
+      "type": "string",
+      "enum": ["none", "lunch", "fuel", "garage_return", "dispatch_return"],
+      "default": "none",
+      "description": "Service interruption between this trip's dropoff and the vehicle's NEXT pickup on the same service_date: lunch break, fueling/servicing, return to garage, or return to the dispatching point. Any value other than none BREAKS the vehicle-day revenue span there (p. 129 DR revenue-time rule, quoted in the tracker: revenue runs first pickup to last dropoff 'as long as the vehicle does not return to the garage or dispatching point or have interruptions in service, such as lunch breaks or vehicle fueling and servicing'). Empty cell means none."
+    },
+    "driver_shift_id": {
+      "type": "string",
+      "description": "Optional reference to the driver shift this trip was served under. Carried so a future shift-level feed can measure the six p. 130 deadhead leg types (quoted in the tracker); trip records alone cannot time them."
+    },
+    "dispatching_point_id": {
+      "type": "string",
+      "description": "Optional reference to the dispatching point ('the location where a driver receives the schedule to provide revenue service', p. 130 — quoted in the tracker). Same deadhead-measurement purpose as driver_shift_id."
+    }
+  }
+}

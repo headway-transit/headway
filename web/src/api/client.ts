@@ -31,6 +31,19 @@ import type {
   SafetyEventRequest,
   SafetyEventSuperseded,
   SafetySupersedeRequest,
+  SamplingDrawCreated,
+  SamplingDrawRecord,
+  SamplingDrawRequest,
+  SamplingEstimateRequest,
+  SamplingEstimateResponse,
+  SamplingMeasurementCreated,
+  SamplingMeasurementRecord,
+  SamplingMeasurementRequest,
+  SamplingOptions,
+  SamplingPlanCreated,
+  SamplingPlanProgress,
+  SamplingPlanRecord,
+  SamplingPlanRequest,
   Setting,
   UpdateSettingResponse,
 } from "./types";
@@ -299,6 +312,129 @@ export function supersedeSafetyEvent(
 export function getSafetyDeadlines(month?: string): Promise<SafetyDeadlines> {
   const qs = month ? `?${new URLSearchParams({ month })}` : "";
   return request<SafetyDeadlines>("GET", `/safety/deadlines${qs}`);
+}
+
+// ---- sampling (handoff 0012) ----
+//
+// Typed against services/api routers/sampling.py exactly (the module was
+// built in parallel against the same handoff). The measurement-supersede
+// endpoint (POST /sampling/measurements/{id}/supersede) exists in the API
+// but has no UI room yet — an honest v0 gap recorded in the handoff
+// evidence, not a hidden one: the API's own 409 for a duplicate
+// measurement names that endpoint and is surfaced verbatim.
+
+/**
+ * GET /sampling/options — the wizard's vocabulary (modes, Table 41.01
+ * units per mode, efficiency options and which are creatable,
+ * frequencies, day types) plus the calc's eligibility guidance and
+ * retention note, all verbatim. Any signed-in role.
+ */
+export function getSamplingOptions(): Promise<SamplingOptions> {
+  return request<SamplingOptions>("GET", "/sampling/options");
+}
+
+/**
+ * POST /sampling/plans (data_steward+ — enforced server-side; audited).
+ * The deterministic sampling_v0 selector supplies the required per-period
+ * and annual sizes verbatim from Tables 43.01–43.07 with their citation.
+ * The UI displays those sizes — it never computes one.
+ */
+export function createSamplingPlan(
+  body: SamplingPlanRequest,
+): Promise<SamplingPlanCreated> {
+  return request<SamplingPlanCreated>("POST", "/sampling/plans", body);
+}
+
+/** GET /sampling/plans — every recorded plan, any signed-in role. */
+export function listSamplingPlans(): Promise<SamplingPlanRecord[]> {
+  return request<SamplingPlanRecord[]>("GET", "/sampling/plans");
+}
+
+/** GET /sampling/plans/{id}/draws — the plan's recorded period draws. */
+export function listSamplingDraws(
+  planId: string,
+): Promise<SamplingDrawRecord[]> {
+  return request<SamplingDrawRecord[]>(
+    "GET",
+    `/sampling/plans/${encodeURIComponent(planId)}/draws`,
+  );
+}
+
+/**
+ * POST /sampling/plans/{id}/draws (data_steward+; audited): one seeded,
+ * WITHOUT-replacement random-selection act for one period (§63.03),
+ * drawn by the versioned calc drawer. The UI never draws — it displays
+ * the drawn list and the recorded seed.
+ */
+export function drawSamplingPeriod(
+  planId: string,
+  body: SamplingDrawRequest,
+): Promise<SamplingDrawCreated> {
+  return request<SamplingDrawCreated>(
+    "POST",
+    `/sampling/plans/${encodeURIComponent(planId)}/draws`,
+    body,
+  );
+}
+
+/** GET /sampling/plans/{id}/measurements — every recorded observation,
+ *  superseded ones included (append-only history). */
+export function listSamplingMeasurements(
+  planId: string,
+): Promise<SamplingMeasurementRecord[]> {
+  return request<SamplingMeasurementRecord[]>(
+    "GET",
+    `/sampling/plans/${encodeURIComponent(planId)}/measurements`,
+  );
+}
+
+/**
+ * POST /sampling/plans/{id}/measurements (data_steward+; audited): one
+ * ride-check observation for one drawn unit. observed_pmt stays a
+ * decimal string end to end.
+ */
+export function recordSamplingMeasurement(
+  planId: string,
+  body: SamplingMeasurementRequest,
+): Promise<SamplingMeasurementCreated> {
+  return request<SamplingMeasurementCreated>(
+    "POST",
+    `/sampling/plans/${encodeURIComponent(planId)}/measurements`,
+    body,
+  );
+}
+
+/**
+ * GET /sampling/plans/{id}/progress — measured vs required, per draw and
+ * overall, with the unmeasured-unit worksheet, all computed BY THE API.
+ */
+export function getSamplingProgress(
+  planId: string,
+): Promise<SamplingPlanProgress> {
+  return request<SamplingPlanProgress>(
+    "GET",
+    `/sampling/plans/${encodeURIComponent(planId)}/progress`,
+  );
+}
+
+/**
+ * POST /sampling/plans/{id}/estimate (report_preparer+ — enforced
+ * server-side; audited): the §83 APTL estimate — sample APTL as a RATIO
+ * OF TOTALS (§83.05) expanded by the supplied 100% UPT count (§83.01).
+ * Computed by sampling_v0, never by this UI; undersampled and
+ * Base-option plans are refused by the API and the refusal is surfaced
+ * verbatim. The result is a SAMPLED ESTIMATE — never persisted to
+ * computed.metric_values.
+ */
+export function estimateSamplingPmt(
+  planId: string,
+  body: SamplingEstimateRequest,
+): Promise<SamplingEstimateResponse> {
+  return request<SamplingEstimateResponse>(
+    "POST",
+    `/sampling/plans/${encodeURIComponent(planId)}/estimate`,
+    body,
+  );
 }
 
 // ---- branding + settings (handoff 0008, pillar C) ----

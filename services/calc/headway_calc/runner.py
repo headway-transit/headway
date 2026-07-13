@@ -54,6 +54,7 @@ from headway_calc.dq import route_findings
 from headway_calc.mode import (
     MODE_DIMENSION_NAME,
     MODE_DIMENSION_VERSION,
+    compute_pmt_by_mode,
     compute_upt_by_mode,
     compute_voms_by_mode,
     compute_vrh_by_mode,
@@ -62,9 +63,11 @@ from headway_calc.mode import (
     unknown_mode_finding,
 )
 from headway_calc.persist import _METRIC_BY_CALC_NAME, persist_result
+from headway_calc.pmt import compute_pmt
 from headway_calc.reader import (
     load_operated_trip_ids,
     load_passenger_events,
+    load_trip_geometries,
     load_vehicle_positions,
 )
 from headway_calc.settings import load_policy_settings
@@ -176,6 +179,10 @@ class RunReport:
     outcomes: tuple[MetricOutcome, ...]
     per_mode: bool = False
     run_info_ids: tuple[str, ...] = ()
+    #: canonical.stop_times rows loaded for the period's event trips —
+    #: pmt_v0's geometry input (handoff 0011); default 0 keeps pre-0011
+    #: constructions working.
+    stop_times_loaded: int = 0
 
     @property
     def persisted_count(self) -> int:
@@ -223,6 +230,7 @@ class RunReport:
             "positions_loaded": self.positions_loaded,
             "passenger_events_loaded": self.passenger_events_loaded,
             "operated_trips_loaded": self.operated_trips_loaded,
+            "stop_times_loaded": self.stop_times_loaded,
             "per_mode": self.per_mode,
             "run_info_ids": list(self.run_info_ids),
             "persisted_count": self.persisted_count,
@@ -250,10 +258,13 @@ def run_period(
     read_settings: bool = True,
     per_mode: bool = False,
 ) -> RunReport:
-    """Run vrm_v0 (0.2.0), vrh_v0 (0.4.0) and upt_v0 (0.1.0) over one
-    half-open period; with ``per_mode=True`` (the MR-20 path, handoff 0009)
-    additionally voms_v0 (0.1.0) and one mode-scoped result per mode per
-    metric.
+    """Run vrm_v0 (0.2.0), vrh_v0 (0.4.0), upt_v0 (0.1.0) and pmt_v0
+    (0.1.0, handoff 0011) over one half-open period; with ``per_mode=True``
+    (the MR-20 path, handoff 0009) additionally voms_v0 (0.1.0) and one
+    mode-scoped result per mode per metric. pmt_v0 shares upt_v0's p. 146
+    missing_trip_threshold and p. 151 imbalance_threshold and additionally
+    loads the period's event-trip stop geometry (migration 0019) for
+    per-segment distances.
 
     Threshold precedence (per threshold, highest wins) — recorded per
     threshold in ``RunReport.threshold_sources``:
@@ -377,12 +388,26 @@ def run_period(
     positions = load_vehicle_positions(conn, period_start, period_end)
     passenger_events = load_passenger_events(conn, period_start, period_end)
     operated_trip_ids = load_operated_trip_ids(conn, period_start, period_end)
+    trip_geometries = load_trip_geometries(conn, period_start, period_end)
     results: tuple[CalcResult, ...] = (
         compute_vrm(positions, threshold, cov_threshold),
         compute_vrh(positions, threshold, cov_threshold, layover_max),
         compute_upt(
             passenger_events,
             operated_trip_ids,
+            missing_trip_threshold=missing_threshold,
+            imbalance_threshold=imbal_threshold,
+        ),
+        # pmt_v0 (handoff 0011): the same p. 146 threshold family as upt_v0.
+        # shape_dist_unit_miles is deliberately NOT set here: the GTFS spec
+        # leaves shape_dist units feed-defined, so consuming them requires an
+        # explicit per-feed conversion (a future per-agency knob — handoff
+        # 0011 Response); without it pmt_v0 uses the flagged haversine
+        # fallback and says so.
+        compute_pmt(
+            passenger_events,
+            operated_trip_ids,
+            trip_geometries,
             missing_trip_threshold=missing_threshold,
             imbalance_threshold=imbal_threshold,
         ),
@@ -405,6 +430,13 @@ def run_period(
             compute_upt_by_mode(
                 passenger_events,
                 positions,
+                missing_trip_threshold=missing_threshold,
+                imbalance_threshold=imbal_threshold,
+            ),
+            compute_pmt_by_mode(
+                passenger_events,
+                positions,
+                trip_geometries,
                 missing_trip_threshold=missing_threshold,
                 imbalance_threshold=imbal_threshold,
             ),
@@ -531,6 +563,7 @@ def run_period(
         outcomes=tuple(outcomes),
         per_mode=per_mode,
         run_info_ids=run_info_ids,
+        stop_times_loaded=len(trip_geometries),
     )
 
 

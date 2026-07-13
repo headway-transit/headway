@@ -1107,6 +1107,602 @@
           }
         }
       }
+    },
+    "/sampling/options": {
+      "get": {
+        "tags": [
+          "sampling"
+        ],
+        "summary": "Get Options",
+        "description": "The plan wizard's vocabulary, straight from the calc selector's\nconstants (Table 41.01 / \u00a741.07), with the eligibility guidance.",
+        "operationId": "get_options_sampling_options_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OptionsResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sampling/requirements": {
+      "get": {
+        "tags": [
+          "sampling"
+        ],
+        "summary": "Get Requirement",
+        "description": "Look up one ready-to-use table cell (verbatim, cited) without\ncreating a plan \u2014 the wizard's live preview. All encoded cells are\nreadable here, including the reference-only grouped-APTL cells.",
+        "operationId": "get_requirement_sampling_requirements_get",
+        "parameters": [
+          {
+            "name": "mode",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Mode"
+            }
+          },
+          {
+            "name": "unit",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Unit"
+            }
+          },
+          {
+            "name": "efficiency_option",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Efficiency Option"
+            }
+          },
+          {
+            "name": "frequency",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Frequency"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequirementResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sampling/plans": {
+      "post": {
+        "tags": [
+          "sampling"
+        ],
+        "summary": "Create Plan",
+        "description": "Create a sampling plan. The required sizes are the calc selector's\nverbatim table cells; the selector version is recorded on the row.",
+        "operationId": "create_plan_sampling_plans_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlanCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlanCreated"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "sampling"
+        ],
+        "summary": "List Plans",
+        "operationId": "list_plans_sampling_plans_get",
+        "parameters": [
+          {
+            "name": "report_year",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Report Year"
+            }
+          },
+          {
+            "name": "mode",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Mode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PlanRecord"
+                  },
+                  "title": "Response List Plans Sampling Plans Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sampling/plans/{plan_id}": {
+      "get": {
+        "tags": [
+          "sampling"
+        ],
+        "summary": "Get Plan",
+        "operationId": "get_plan_sampling_plans__plan_id__get",
+        "parameters": [
+          {
+            "name": "plan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Plan Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlanRecord"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sampling/plans/{plan_id}/draws": {
+      "get": {
+        "tags": [
+          "sampling"
+        ],
+        "summary": "List Draws",
+        "operationId": "list_draws_sampling_plans__plan_id__draws_get",
+        "parameters": [
+          {
+            "name": "plan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Plan Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/DrawRecord"
+                  },
+                  "title": "Response List Draws Sampling Plans  Plan Id  Draws Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "sampling"
+        ],
+        "summary": "Draw Period Sample",
+        "description": "One random-selection act for one period: seeded, recorded, WITHOUT\nreplacement (\u00a763.03), drawn by the versioned calc drawer.",
+        "operationId": "draw_period_sample_sampling_plans__plan_id__draws_post",
+        "parameters": [
+          {
+            "name": "plan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Plan Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DrawRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DrawCreated"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sampling/plans/{plan_id}/measurements": {
+      "post": {
+        "tags": [
+          "sampling"
+        ],
+        "summary": "Create Measurement",
+        "description": "Record one ride-check observation for one drawn unit. Append-only:\ncorrections supersede.",
+        "operationId": "create_measurement_sampling_plans__plan_id__measurements_post",
+        "parameters": [
+          {
+            "name": "plan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Plan Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MeasurementCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeasurementCreated"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "sampling"
+        ],
+        "summary": "List Measurements",
+        "operationId": "list_measurements_sampling_plans__plan_id__measurements_get",
+        "parameters": [
+          {
+            "name": "plan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Plan Id"
+            }
+          },
+          {
+            "name": "include_superseded",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Include Superseded"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/MeasurementRecord"
+                  },
+                  "title": "Response List Measurements Sampling Plans  Plan Id  Measurements Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sampling/measurements/{measurement_id}/supersede": {
+      "post": {
+        "tags": [
+          "sampling"
+        ],
+        "summary": "Supersede Measurement",
+        "description": "Append-only correction: enter the CORRECTED observation in full; the\noriginal stays untouched except for its superseded_by link (the\nmigration-0017 supersede pattern; migration 0020's trigger enforces\nit).",
+        "operationId": "supersede_measurement_sampling_measurements__measurement_id__supersede_post",
+        "parameters": [
+          {
+            "name": "measurement_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Measurement Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MeasurementSupersedeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeasurementSuperseded"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sampling/plans/{plan_id}/progress": {
+      "get": {
+        "tags": [
+          "sampling"
+        ],
+        "summary": "Get Progress",
+        "description": "Measured vs required, per draw and overall, with the worksheet of\ndrawn-but-unmeasured units.",
+        "operationId": "get_progress_sampling_plans__plan_id__progress_get",
+        "parameters": [
+          {
+            "name": "plan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Plan Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlanProgress"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sampling/plans/{plan_id}/estimate": {
+      "post": {
+        "tags": [
+          "sampling"
+        ],
+        "summary": "Generate Estimate",
+        "description": "The \u00a783 APTL estimate over the plan's active measurements. REFUSES\nBase-option plans and undersampled plans; the result is a SAMPLED\nESTIMATE (provenance-labeled) and is never written to\ncomputed.metric_values.",
+        "operationId": "generate_estimate_sampling_plans__plan_id__estimate_post",
+        "parameters": [
+          {
+            "name": "plan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Plan Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EstimateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EstimateResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1553,6 +2149,335 @@
         ],
         "title": "DqIssue"
       },
+      "DrawCreated": {
+        "properties": {
+          "draw": {
+            "$ref": "#/components/schemas/DrawRecord"
+          },
+          "method": {
+            "type": "string",
+            "title": "Method"
+          },
+          "oversampling_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Oversampling Note"
+          },
+          "retention_note": {
+            "type": "string",
+            "title": "Retention Note"
+          },
+          "audit_event_id": {
+            "type": "integer",
+            "title": "Audit Event Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "draw",
+          "method",
+          "oversampling_note",
+          "retention_note",
+          "audit_event_id"
+        ],
+        "title": "DrawCreated"
+      },
+      "DrawProgress": {
+        "properties": {
+          "period_label": {
+            "type": "string",
+            "title": "Period Label"
+          },
+          "selected": {
+            "type": "integer",
+            "title": "Selected"
+          },
+          "measured": {
+            "type": "integer",
+            "title": "Measured"
+          },
+          "oversample_units": {
+            "type": "integer",
+            "title": "Oversample Units"
+          }
+        },
+        "type": "object",
+        "required": [
+          "period_label",
+          "selected",
+          "measured",
+          "oversample_units"
+        ],
+        "title": "DrawProgress"
+      },
+      "DrawRecord": {
+        "properties": {
+          "draw_id": {
+            "type": "string",
+            "title": "Draw Id"
+          },
+          "plan_id": {
+            "type": "string",
+            "title": "Plan Id"
+          },
+          "period_label": {
+            "type": "string",
+            "title": "Period Label"
+          },
+          "frame_size": {
+            "type": "integer",
+            "title": "Frame Size"
+          },
+          "selected_units": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Selected Units"
+          },
+          "seed": {
+            "type": "string",
+            "title": "Seed"
+          },
+          "required_per_period": {
+            "type": "integer",
+            "title": "Required Per Period"
+          },
+          "oversample_units": {
+            "type": "integer",
+            "title": "Oversample Units"
+          },
+          "drawer_version": {
+            "type": "string",
+            "title": "Drawer Version"
+          },
+          "drawn_by": {
+            "type": "string",
+            "title": "Drawn By"
+          },
+          "drawn_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Drawn At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "draw_id",
+          "plan_id",
+          "period_label",
+          "frame_size",
+          "selected_units",
+          "seed",
+          "required_per_period",
+          "oversample_units",
+          "drawer_version",
+          "drawn_by",
+          "drawn_at"
+        ],
+        "title": "DrawRecord"
+      },
+      "DrawRequest": {
+        "properties": {
+          "period_label": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Period Label",
+            "description": "Which period this draw covers at the plan's frequency (for example 2026-Q1, 2026-01, or 2026-W14). One draw per period."
+          },
+          "service_units": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Service Units",
+            "description": "ALL service units you expect to operate in this period, in the plan's unit of sampling (\u00a763.07) \u2014 for scheduled service including trippers, shuttles, and other special operations. Use period-qualified ids (for example 2026-01-15/trip-5012) so a unit id never repeats across periods."
+          },
+          "seed": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 8
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seed",
+            "description": "Random seed for the draw. Leave blank to let Headway generate one from a cryptographic randomness source. Either way the seed is RECORDED on the draw so the selection can be reproduced and audited."
+          },
+          "oversample_units": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Oversample Units",
+            "description": "Extra units to select BEYOND the plan's required per-period size. Oversampling is allowed only when the extra units are selected randomly \u2014 Headway draws them from the same seeded random order, and flags them on the draw record.",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "required": [
+          "period_label",
+          "service_units"
+        ],
+        "title": "DrawRequest"
+      },
+      "EstimateBlock": {
+        "properties": {
+          "scope": {
+            "type": "string",
+            "title": "Scope"
+          },
+          "sample_size": {
+            "type": "integer",
+            "title": "Sample Size"
+          },
+          "sample_total_upt": {
+            "type": "integer",
+            "title": "Sample Total Upt"
+          },
+          "sample_total_pmt": {
+            "type": "string",
+            "title": "Sample Total Pmt"
+          },
+          "sample_aptl": {
+            "type": "string",
+            "title": "Sample Aptl"
+          },
+          "expansion_factor_upt": {
+            "type": "string",
+            "title": "Expansion Factor Upt"
+          },
+          "estimated_pmt": {
+            "type": "string",
+            "title": "Estimated Pmt"
+          },
+          "method": {
+            "type": "string",
+            "title": "Method"
+          }
+        },
+        "type": "object",
+        "required": [
+          "scope",
+          "sample_size",
+          "sample_total_upt",
+          "sample_total_pmt",
+          "sample_aptl",
+          "expansion_factor_upt",
+          "estimated_pmt",
+          "method"
+        ],
+        "title": "EstimateBlock"
+      },
+      "EstimateRequest": {
+        "properties": {
+          "annual_upt_100pct": {
+            "type": "string",
+            "title": "Annual Upt 100Pct",
+            "description": "Your agency's 100% count of annual UPT for this mode and type of service \u2014 the \u00a783.01(a) expansion factor, as a decimal string."
+          },
+          "upt_100pct_by_day_type": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Upt 100Pct By Day Type",
+            "description": "Optional: 100% UPT counts by type of service day (Weekday / Saturday / Sunday) to also get per-day-type estimates (\u00a783.01(b)). Every measurement must then carry its service-day type."
+          }
+        },
+        "type": "object",
+        "required": [
+          "annual_upt_100pct"
+        ],
+        "title": "EstimateRequest"
+      },
+      "EstimateResponse": {
+        "properties": {
+          "plan_id": {
+            "type": "string",
+            "title": "Plan Id"
+          },
+          "estimate": {
+            "$ref": "#/components/schemas/EstimateBlock"
+          },
+          "by_service_day": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/EstimateBlock"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "By Service Day"
+          },
+          "units_measured": {
+            "type": "integer",
+            "title": "Units Measured"
+          },
+          "required_annual": {
+            "type": "integer",
+            "title": "Required Annual"
+          },
+          "oversampled_by": {
+            "type": "integer",
+            "title": "Oversampled By"
+          },
+          "caveats": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Caveats"
+          },
+          "citations": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Citations"
+          },
+          "retention_note": {
+            "type": "string",
+            "title": "Retention Note"
+          },
+          "audit_event_id": {
+            "type": "integer",
+            "title": "Audit Event Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "plan_id",
+          "estimate",
+          "by_service_day",
+          "units_measured",
+          "required_annual",
+          "oversampled_by",
+          "caveats",
+          "citations",
+          "retention_note",
+          "audit_event_id"
+        ],
+        "title": "EstimateResponse"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -1775,6 +2700,293 @@
         ],
         "title": "LogoUploadResponse"
       },
+      "MeasurementCreate": {
+        "properties": {
+          "unit_id": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Unit Id",
+            "description": "The drawn service unit this ride check observed."
+          },
+          "observed_upt": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Observed Upt",
+            "description": "Unlinked passenger trips (boardings) counted on this unit by the ride checker."
+          },
+          "observed_pmt": {
+            "type": "string",
+            "title": "Observed Pmt",
+            "description": "Passenger miles traveled measured on this unit, as a decimal string (values are exact decimals, never floats)."
+          },
+          "service_day_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Service Day Type",
+            "description": "Weekday, Saturday, or Sunday \u2014 required later only if you want estimates broken out by type of service day."
+          },
+          "service_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Service Date",
+            "description": "The date the ride check was performed."
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "unit_id",
+          "observed_upt",
+          "observed_pmt"
+        ],
+        "title": "MeasurementCreate"
+      },
+      "MeasurementCreated": {
+        "properties": {
+          "measurement": {
+            "$ref": "#/components/schemas/MeasurementRecord"
+          },
+          "source_caveat": {
+            "type": "string",
+            "title": "Source Caveat"
+          },
+          "retention_note": {
+            "type": "string",
+            "title": "Retention Note"
+          },
+          "audit_event_id": {
+            "type": "integer",
+            "title": "Audit Event Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "measurement",
+          "source_caveat",
+          "retention_note",
+          "audit_event_id"
+        ],
+        "title": "MeasurementCreated"
+      },
+      "MeasurementRecord": {
+        "properties": {
+          "measurement_id": {
+            "type": "string",
+            "title": "Measurement Id"
+          },
+          "plan_id": {
+            "type": "string",
+            "title": "Plan Id"
+          },
+          "unit_id": {
+            "type": "string",
+            "title": "Unit Id"
+          },
+          "observed_upt": {
+            "type": "integer",
+            "title": "Observed Upt"
+          },
+          "observed_pmt": {
+            "type": "string",
+            "title": "Observed Pmt"
+          },
+          "service_day_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Service Day Type"
+          },
+          "service_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Service Date"
+          },
+          "data_source": {
+            "type": "string",
+            "title": "Data Source"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          },
+          "entered_by": {
+            "type": "string",
+            "title": "Entered By"
+          },
+          "entered_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Entered At"
+          },
+          "superseded_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Superseded By"
+          }
+        },
+        "type": "object",
+        "required": [
+          "measurement_id",
+          "plan_id",
+          "unit_id",
+          "observed_upt",
+          "observed_pmt",
+          "service_day_type",
+          "service_date",
+          "data_source",
+          "notes",
+          "entered_by",
+          "entered_at",
+          "superseded_by"
+        ],
+        "title": "MeasurementRecord"
+      },
+      "MeasurementSupersedeRequest": {
+        "properties": {
+          "unit_id": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Unit Id",
+            "description": "The drawn service unit this ride check observed."
+          },
+          "observed_upt": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Observed Upt",
+            "description": "Unlinked passenger trips (boardings) counted on this unit by the ride checker."
+          },
+          "observed_pmt": {
+            "type": "string",
+            "title": "Observed Pmt",
+            "description": "Passenger miles traveled measured on this unit, as a decimal string (values are exact decimals, never floats)."
+          },
+          "service_day_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Service Day Type",
+            "description": "Weekday, Saturday, or Sunday \u2014 required later only if you want estimates broken out by type of service day."
+          },
+          "service_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Service Date",
+            "description": "The date the ride check was performed."
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Reason",
+            "description": "Why the original observation is being corrected (kept in the audit log \u2014 the original measurement itself is never edited)."
+          }
+        },
+        "type": "object",
+        "required": [
+          "unit_id",
+          "observed_upt",
+          "observed_pmt",
+          "reason"
+        ],
+        "title": "MeasurementSupersedeRequest"
+      },
+      "MeasurementSuperseded": {
+        "properties": {
+          "original_measurement_id": {
+            "type": "string",
+            "title": "Original Measurement Id"
+          },
+          "replacement": {
+            "$ref": "#/components/schemas/MeasurementRecord"
+          },
+          "source_caveat": {
+            "type": "string",
+            "title": "Source Caveat"
+          },
+          "audit_event_id": {
+            "type": "integer",
+            "title": "Audit Event Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "original_measurement_id",
+          "replacement",
+          "source_caveat",
+          "audit_event_id"
+        ],
+        "title": "MeasurementSuperseded"
+      },
       "MetricValue": {
         "properties": {
           "metric_value_id": {
@@ -1846,6 +3058,302 @@
           "certification_status"
         ],
         "title": "MetricValue"
+      },
+      "OptionsResponse": {
+        "properties": {
+          "modes": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Modes"
+          },
+          "units_by_mode": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "type": "object",
+            "title": "Units By Mode"
+          },
+          "efficiency_options": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Efficiency Options"
+          },
+          "creatable_options": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Creatable Options"
+          },
+          "frequencies": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Frequencies"
+          },
+          "service_day_types": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Service Day Types"
+          },
+          "eligibility_guidance": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Eligibility Guidance"
+          },
+          "retention_note": {
+            "type": "string",
+            "title": "Retention Note"
+          }
+        },
+        "type": "object",
+        "required": [
+          "modes",
+          "units_by_mode",
+          "efficiency_options",
+          "creatable_options",
+          "frequencies",
+          "service_day_types",
+          "eligibility_guidance",
+          "retention_note"
+        ],
+        "title": "OptionsResponse"
+      },
+      "PlanCreate": {
+        "properties": {
+          "report_year": {
+            "type": "integer",
+            "maximum": 2100.0,
+            "minimum": 2000.0,
+            "title": "Report Year",
+            "description": "The NTD report year this plan samples for."
+          },
+          "mode": {
+            "type": "string",
+            "title": "Mode",
+            "description": "NTD mode code the ready-to-use plans cover: DR (demand response), VP (commuter vanpool), MB/TB (bus), CR (commuter rail), LR/HR/MR/AG (other rail)."
+          },
+          "type_of_service": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Type Of Service",
+            "description": "Type of service this plan samples (e.g. DO for directly operated, PT for purchased transportation). Sampling meets the FTA floor per mode AND type of service."
+          },
+          "unit": {
+            "type": "string",
+            "title": "Unit",
+            "description": "Unit of sampling and measurement (Table 41.01): vehicle_days, one_way_trips, round_trips, one_way_car_trips, or one_way_train_trips \u2014 must match the mode."
+          },
+          "efficiency_option": {
+            "type": "string",
+            "title": "Efficiency Option",
+            "description": "'aptl' (report a 100% UPT count, sample average passenger trip length; for bus this is the Without Route Grouping column) or 'base' (sample both UPT and PMT; note that Base-option ESTIMATION is not yet available \u2014 Section 70)."
+          },
+          "frequency": {
+            "type": "string",
+            "title": "Frequency",
+            "description": "Sampling frequency: quarterly, monthly, or weekly."
+          }
+        },
+        "type": "object",
+        "required": [
+          "report_year",
+          "mode",
+          "type_of_service",
+          "unit",
+          "efficiency_option",
+          "frequency"
+        ],
+        "title": "PlanCreate"
+      },
+      "PlanCreated": {
+        "properties": {
+          "plan": {
+            "$ref": "#/components/schemas/PlanRecord"
+          },
+          "guidance": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Guidance"
+          },
+          "retention_note": {
+            "type": "string",
+            "title": "Retention Note"
+          },
+          "audit_event_id": {
+            "type": "integer",
+            "title": "Audit Event Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "plan",
+          "guidance",
+          "retention_note",
+          "audit_event_id"
+        ],
+        "title": "PlanCreated"
+      },
+      "PlanProgress": {
+        "properties": {
+          "plan": {
+            "$ref": "#/components/schemas/PlanRecord"
+          },
+          "required_per_period": {
+            "type": "integer",
+            "title": "Required Per Period"
+          },
+          "required_annual": {
+            "type": "integer",
+            "title": "Required Annual"
+          },
+          "draws": {
+            "items": {
+              "$ref": "#/components/schemas/DrawProgress"
+            },
+            "type": "array",
+            "title": "Draws"
+          },
+          "units_selected": {
+            "type": "integer",
+            "title": "Units Selected"
+          },
+          "units_measured": {
+            "type": "integer",
+            "title": "Units Measured"
+          },
+          "units_unmeasured": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Units Unmeasured"
+          },
+          "undersampled": {
+            "type": "boolean",
+            "title": "Undersampled"
+          },
+          "undersampling_citation": {
+            "type": "string",
+            "title": "Undersampling Citation"
+          },
+          "oversampling_citation": {
+            "type": "string",
+            "title": "Oversampling Citation"
+          },
+          "retention_note": {
+            "type": "string",
+            "title": "Retention Note"
+          }
+        },
+        "type": "object",
+        "required": [
+          "plan",
+          "required_per_period",
+          "required_annual",
+          "draws",
+          "units_selected",
+          "units_measured",
+          "units_unmeasured",
+          "undersampled",
+          "undersampling_citation",
+          "oversampling_citation",
+          "retention_note"
+        ],
+        "title": "PlanProgress"
+      },
+      "PlanRecord": {
+        "properties": {
+          "plan_id": {
+            "type": "string",
+            "title": "Plan Id"
+          },
+          "report_year": {
+            "type": "integer",
+            "title": "Report Year"
+          },
+          "mode": {
+            "type": "string",
+            "title": "Mode"
+          },
+          "type_of_service": {
+            "type": "string",
+            "title": "Type Of Service"
+          },
+          "unit": {
+            "type": "string",
+            "title": "Unit"
+          },
+          "efficiency_option": {
+            "type": "string",
+            "title": "Efficiency Option"
+          },
+          "frequency": {
+            "type": "string",
+            "title": "Frequency"
+          },
+          "required_per_period": {
+            "type": "integer",
+            "title": "Required Per Period"
+          },
+          "required_annual": {
+            "type": "integer",
+            "title": "Required Annual"
+          },
+          "table_citation": {
+            "type": "string",
+            "title": "Table Citation"
+          },
+          "selector_version": {
+            "type": "string",
+            "title": "Selector Version"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "created_by": {
+            "type": "string",
+            "title": "Created By"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "plan_id",
+          "report_year",
+          "mode",
+          "type_of_service",
+          "unit",
+          "efficiency_option",
+          "frequency",
+          "required_per_period",
+          "required_annual",
+          "table_citation",
+          "selector_version",
+          "status",
+          "created_by",
+          "created_at"
+        ],
+        "title": "PlanRecord"
       },
       "PublicMetricValue": {
         "properties": {
@@ -1919,6 +3427,82 @@
         ],
         "title": "PublicMetricValue",
         "description": "A certified figure, publishable form. No PII, no certifier identity."
+      },
+      "RequirementResponse": {
+        "properties": {
+          "mode": {
+            "type": "string",
+            "title": "Mode"
+          },
+          "mode_group": {
+            "type": "string",
+            "title": "Mode Group"
+          },
+          "unit": {
+            "type": "string",
+            "title": "Unit"
+          },
+          "efficiency_option": {
+            "type": "string",
+            "title": "Efficiency Option"
+          },
+          "frequency": {
+            "type": "string",
+            "title": "Frequency"
+          },
+          "required_per_period": {
+            "type": "integer",
+            "title": "Required Per Period"
+          },
+          "required_annual": {
+            "type": "integer",
+            "title": "Required Annual"
+          },
+          "table": {
+            "type": "string",
+            "title": "Table"
+          },
+          "column": {
+            "type": "string",
+            "title": "Column"
+          },
+          "citation": {
+            "type": "string",
+            "title": "Citation"
+          },
+          "guidance": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Guidance"
+          },
+          "selector_name": {
+            "type": "string",
+            "title": "Selector Name"
+          },
+          "selector_version": {
+            "type": "string",
+            "title": "Selector Version"
+          }
+        },
+        "type": "object",
+        "required": [
+          "mode",
+          "mode_group",
+          "unit",
+          "efficiency_option",
+          "frequency",
+          "required_per_period",
+          "required_annual",
+          "table",
+          "column",
+          "citation",
+          "guidance",
+          "selector_name",
+          "selector_version"
+        ],
+        "title": "RequirementResponse"
       },
       "ResolveRequest": {
         "properties": {

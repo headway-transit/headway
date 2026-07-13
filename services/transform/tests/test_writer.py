@@ -8,7 +8,12 @@ from datetime import date
 
 from headway_transform.envelope import validate_envelope
 from headway_transform.gtfs_rt_positions import CanonicalVehiclePosition
-from headway_transform.gtfs_static import CanonicalRoute, CanonicalTrip
+from headway_transform.gtfs_static import (
+    CanonicalRoute,
+    CanonicalStop,
+    CanonicalStopTime,
+    CanonicalTrip,
+)
 from headway_transform.model import DQFinding, LineageEdge
 from headway_transform.tides_passenger_events import CanonicalPassengerEvent
 from headway_transform.writer import DbWriter
@@ -75,6 +80,37 @@ def test_upsert_trip_without_block_id_binds_null(fake_connection) -> None:
     DbWriter(fake_connection).upsert_trips([CanonicalTrip("T2", "R1", "WKDY", 1)])
     _sql, params = fake_connection.sql_for("canonical.trips")[0]
     assert params == ("T2", "R1", "WKDY", 1, None)
+
+
+def test_upsert_stops_and_stop_times_sql(fake_connection) -> None:
+    writer = DbWriter(fake_connection)
+    writer.upsert_stops([CanonicalStop("S1", "First St", 42.35, -71.06)])
+    writer.upsert_stop_times(
+        [CanonicalStopTime("T1", "S1", 1, 38400, 38430, 1.25)]
+    )
+
+    stop_sql, stop_params = fake_connection.sql_for("canonical.stops")[0]
+    assert "ON CONFLICT (stop_id) DO UPDATE" in stop_sql
+    assert stop_params == ("S1", "First St", 42.35, -71.06)
+
+    st_sql, st_params = fake_connection.sql_for("canonical.stop_times")[0]
+    assert "ON CONFLICT (trip_id, stop_sequence) DO UPDATE" in st_sql
+    assert "shape_dist_traveled = EXCLUDED.shape_dist_traveled" in st_sql
+    assert st_params == ("T1", "S1", 1, 38400, 38430, 1.25)
+
+
+def test_upsert_stop_and_stop_time_nulls_bind_null(fake_connection) -> None:
+    """NULL coordinates, times and shape_dist_traveled are preserved as NULL
+    (handoff 0011: never fabricated)."""
+    writer = DbWriter(fake_connection)
+    writer.upsert_stops([CanonicalStop("node-1", None, None, None)])
+    writer.upsert_stop_times(
+        [CanonicalStopTime("T1", "S2", 2, None, None, None)]
+    )
+    _sql, stop_params = fake_connection.sql_for("canonical.stops")[0]
+    assert stop_params == ("node-1", None, None, None)
+    _sql, st_params = fake_connection.sql_for("canonical.stop_times")[0]
+    assert st_params == ("T1", "S2", 2, None, None, None)
 
 
 def test_insert_vehicle_positions_conflict_do_nothing_on_unique_key(

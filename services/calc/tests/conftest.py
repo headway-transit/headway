@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from headway_calc.types import PassengerEvent, VehiclePosition
+from headway_calc.types import PassengerEvent, StopTime, VehiclePosition
 
 # services/calc/tests/conftest.py -> repo root is parents[3]
 GOLDEN_DIR = Path(__file__).resolve().parents[3] / "tests" / "golden" / "vrm_vrh_v0"
@@ -25,6 +25,7 @@ UPT_GOLDEN_DIR = Path(__file__).resolve().parents[3] / "tests" / "golden" / "upt
 VOMS_GOLDEN_DIR = Path(__file__).resolve().parents[3] / "tests" / "golden" / "voms_v0"
 MODE_GOLDEN_DIR = Path(__file__).resolve().parents[3] / "tests" / "golden" / "mode_scope"
 MR20_GOLDEN_DIR = Path(__file__).resolve().parents[3] / "tests" / "golden" / "mr20"
+PMT_GOLDEN_DIR = Path(__file__).resolve().parents[3] / "tests" / "golden" / "pmt_v0"
 
 
 def load_positions(raw: dict) -> list[VehiclePosition]:
@@ -65,6 +66,38 @@ def load_events(raw_case: dict) -> list[PassengerEvent]:
         )
         for e in raw_case["events"]
     ]
+
+
+def load_stop_times(raw_case: dict) -> list[StopTime]:
+    """Map one pmt_v0 golden case's stop_times rows onto StopTime."""
+    return [
+        StopTime(
+            trip_id=st["trip_id"],
+            stop_id=st["stop_id"],
+            stop_sequence=st["stop_sequence"],
+            latitude=st["latitude"],
+            longitude=st["longitude"],
+            shape_dist_traveled=st["shape_dist_traveled"],
+        )
+        for st in raw_case["stop_times"]
+    ]
+
+
+@pytest.fixture(scope="session")
+def pmt_golden_fixture() -> dict:
+    """PMT fixture for pmt_v0 0.1.0 (handoff 0011): hand-worked multi-stop
+    load profiles (shape-delta and haversine distance sources), a blocked
+    case (missing + invalid trips above the FTA 2% threshold) and a factored
+    case (share exactly 0.02) — see tests/golden/pmt_v0/BASIS.md."""
+    return json.loads((PMT_GOLDEN_DIR / "fixture.json").read_text())
+
+
+@pytest.fixture(scope="session")
+def pmt_golden_expected() -> dict:
+    """Expectations for pmt_v0 CALC_VERSION 0.1.0 over the PMT fixture, plus
+    the Exhibit 44 estimator's VERBATIM worked example — see
+    tests/golden/pmt_v0/BASIS.md."""
+    return json.loads((PMT_GOLDEN_DIR / "expected.json").read_text())
 
 
 @pytest.fixture(scope="session")
@@ -221,6 +254,27 @@ def events_to_rows(events: list[PassengerEvent]) -> list[tuple]:
     ]
 
 
+def stop_times_to_rows(stop_times: list[StopTime]) -> list[tuple]:
+    """Render StopTimes as reader result rows (the handoff-0011
+    canonical.stop_times columns joined with canonical.stops coordinates),
+    in the reader's SQL order (trip_id, stop_sequence, stop_id) — the fake
+    stands in for the database, so it honors the ORDER BY."""
+    ordered = sorted(
+        stop_times, key=lambda st: (st.trip_id, st.stop_sequence, st.stop_id)
+    )
+    return [
+        (
+            st.trip_id,
+            st.stop_id,
+            st.stop_sequence,
+            st.latitude,
+            st.longitude,
+            st.shape_dist_traveled,
+        )
+        for st in ordered
+    ]
+
+
 #: app.settings rows exactly as seeded by migration 0014, in the reader's
 #: deterministic ORDER BY setting_key — the fake connection serves these by
 #: default so a plain RecordingConnection models a post-0014 database whose
@@ -261,6 +315,11 @@ class RecordingCursor:
                         'relation "app.settings" does not exist'
                     )
                 self._pending_all = list(conn.settings_rows)
+            elif "canonical.stop_times" in sql:
+                # pmt_v0's geometry SELECT (handoff 0011) — its subquery
+                # also names canonical.passenger_events, so this branch must
+                # come FIRST.
+                self._pending_all = list(conn.stop_time_rows)
             elif "canonical.passenger_events" in sql:
                 self._pending_all = list(conn.passenger_event_rows)
             elif "SELECT DISTINCT trip_id" in sql:
@@ -323,10 +382,13 @@ class RecordingConnection:
         safety_event_rows: list[tuple] | None = None,
         safety_single_event_rows: list[tuple] | None = None,
         operated_mode_rows: list[tuple] | None = None,
+        stop_time_rows: list[tuple] | None = None,
     ):
         self.position_rows = position_rows or []
         self.passenger_event_rows = passenger_event_rows or []
         self.operated_trip_rows = operated_trip_rows or []
+        # pmt_v0's geometry rows (handoff 0011, migration 0019).
+        self.stop_time_rows = stop_time_rows or []
         self.metric_value_rows = metric_value_rows or []
         # Safety & Security (handoff 0010): ss50's pre-joined month rows,
         # ss40's single-event rows, and the operated-mode derivation rows.

@@ -109,6 +109,9 @@ export function Layout() {
                   <NavLink to="/safety">{copy.nav.safety}</NavLink>
                 </li>
                 <li>
+                  <NavLink to="/sampling">{copy.nav.sampling}</NavLink>
+                </li>
+                <li>
                   <NavLink to="/dq">{copy.nav.dq}</NavLink>
                 </li>
                 {/* Shown only to the certifying official — UX, not security:

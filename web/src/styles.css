@@ -1438,3 +1438,140 @@ ul.detail-panel li {
   color: var(--color-text-muted);
   font-size: var(--text-sm);
 }
+
+/* ---- PMT sampling (/sampling — handoff 0012) ----
+   Every color here is an EXISTING AA-verified token pair
+   (scripts/check-contrast.mjs): the sampled-estimate tag reuses the info
+   pair, chips/forms/receipts reuse the safety module's classes and
+   spacing. No new pairs to add. */
+
+.sampling-panel {
+  padding: var(--space-3);
+  margin: var(--space-3) 0;
+}
+.sampling-panel > h2 {
+  margin-top: 0;
+}
+.sampling-form .field-hint,
+.sampling-panel .field-hint,
+.sampling-plan .field-hint {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  margin: 0 0 var(--space-2);
+  max-width: 36rem;
+}
+.sampling-form select {
+  display: block;
+  font: inherit;
+  color: var(--color-text);
+  background: var(--color-bg);
+  border: 1px solid var(--color-input-border);
+  border-radius: var(--radius-1);
+  padding: var(--space-2);
+  margin-bottom: var(--space-3);
+  max-width: 28rem;
+}
+.sampling-form .count-input {
+  max-width: 12rem;
+}
+/* Efficiency options: a bordered radio group (the .rail-fields pattern)
+   so "pick one of the manual's three options" reads as one boundary. */
+.sampling-options {
+  border: 1px solid var(--color-border);
+  border-left: 4px solid var(--color-accent);
+  border-radius: var(--radius-1);
+  padding: var(--space-3);
+  margin: var(--space-3) 0;
+}
+.sampling-options legend {
+  font-weight: 700;
+  padding: 0 var(--space-1);
+}
+/* Inline radio + label pair (same exemption as .safety-checkbox). */
+.sampling-option {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-2);
+}
+.sampling-option label {
+  display: inline;
+  margin: 0;
+  font-weight: 600;
+}
+
+/* Plan cards. */
+.plan-list {
+  list-style: none;
+  padding: 0;
+  display: grid;
+  gap: var(--space-3);
+}
+.sampling-plan {
+  padding: var(--space-3);
+}
+.sampling-plan h3 {
+  margin-top: 0;
+}
+.sampling-created {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+.sampling-size-citation cite {
+  color: var(--color-text-muted);
+}
+.sampling-seed {
+  font-weight: 600;
+}
+.sampling-plan dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: var(--space-1) var(--space-3);
+  margin: var(--space-2) 0;
+}
+.sampling-plan dt {
+  font-weight: 600;
+}
+.sampling-plan dd {
+  margin: 0;
+}
+
+/* The sampled-estimate provenance tag: info tokens (AA-verified pair) with
+   a border — visually DISTINCT from the certified/pre-verification tags a
+   computed figure carries, and it always rides with the distinct-note
+   sentence, never color alone. */
+.tag.estimate {
+  background: var(--color-info-bg);
+  color: var(--color-info-text);
+  border: 2px solid var(--color-info-text);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+.sampling-distinct-note {
+  font-weight: 600;
+}
+.sampling-method-label cite {
+  color: var(--color-text-muted);
+}
+.sampling-under-target {
+  border-left: 4px solid var(--color-warning-text);
+  padding-left: var(--space-3);
+  margin: var(--space-2) 0;
+}
+
+/* ---- print: the drawn-sample worksheet (handoff 0012, design point 3).
+   Printing the page keeps each plan's worksheet (heading, seed, verbatim
+   §63.03 rules, the units table) and drops the app chrome, forms, and
+   meters. Plain black-on-white is left to the browser's print defaults. */
+@media print {
+  .app-header,
+  .skip-link,
+  .no-print {
+    display: none !important;
+  }
+  .sampling-plan,
+  .card {
+    box-shadow: none;
+    border: none;
+  }
+}

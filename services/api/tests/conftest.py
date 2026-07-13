@@ -73,6 +73,10 @@ class FakeConn:
         self.safety_events: dict[str, dict] = {}
         self.safety_classifications: list[dict] = []
         self.operated_modes: list[str] = []
+        # Sampling (handoff 0012 / migration 0020).
+        self.sampling_plans: dict[str, dict] = {}
+        self.sampling_draws: list[dict] = []
+        self.sampling_measurements: dict[str, dict] = {}
         self._next_classification_id = 1
         self._next_event_id = 1
         self.executed: list[tuple[str, tuple]] = []
@@ -93,6 +97,9 @@ class FakeConn:
                 self.settings,
                 self.safety_events,
                 self.safety_classifications,
+                self.sampling_plans,
+                self.sampling_draws,
+                self.sampling_measurements,
                 self._next_classification_id,
                 self._next_event_id,
             )
@@ -111,6 +118,9 @@ class FakeConn:
                 self.settings,
                 self.safety_events,
                 self.safety_classifications,
+                self.sampling_plans,
+                self.sampling_draws,
+                self.sampling_measurements,
                 self._next_classification_id,
                 self._next_event_id,
             ) = snapshot
@@ -512,6 +522,165 @@ class FakeConn:
             # canonical.vehicle_positions (headway_calc.ss50).
             return FakeCursor([(m,) for m in self.operated_modes])
 
+        # -- Sampling (handoff 0012 / migration 0020) -------------------------
+        if q.startswith("INSERT INTO sampling.plans"):
+            (report_year, mode, type_of_service, unit, efficiency_option,
+             frequency, required_per_period, required_annual,
+             table_citation, selector_version, created_by) = params
+            plan = {
+                "plan_id": str(uuid.uuid4()),
+                "report_year": report_year,
+                "mode": mode,
+                "type_of_service": type_of_service,
+                "unit": unit,
+                "efficiency_option": efficiency_option,
+                "frequency": frequency,
+                "required_per_period": required_per_period,
+                "required_annual": required_annual,
+                "table_citation": table_citation,
+                "selector_version": selector_version,
+                "status": "created",
+                "created_by": created_by,
+                "created_at": dt.datetime.now(UTC),
+            }
+            self.sampling_plans[plan["plan_id"]] = plan
+            return FakeCursor(
+                [(plan["plan_id"], plan["status"], plan["created_at"])]
+            )
+
+        if q.startswith("SELECT plan_id, report_year"):
+            if "WHERE plan_id = %s" in q:
+                plan = self.sampling_plans.get(str(params[0]))
+                rows = [plan] if plan else []
+            else:
+                rows = list(self.sampling_plans.values())
+                i = 0
+                if "report_year = %s" in q:
+                    rows = [r for r in rows if r["report_year"] == params[i]]
+                    i += 1
+                if "mode = %s" in q:
+                    rows = [r for r in rows if r["mode"] == params[i]]
+                    i += 1
+                rows.sort(key=lambda r: (r["created_at"], r["plan_id"]))
+            columns = (
+                "plan_id", "report_year", "mode", "type_of_service", "unit",
+                "efficiency_option", "frequency", "required_per_period",
+                "required_annual", "table_citation", "selector_version",
+                "status", "created_by", "created_at",
+            )
+            return FakeCursor([tuple(r[c] for c in columns) for r in rows])
+
+        if q.startswith("UPDATE sampling.plans SET status = 'active'"):
+            plan = self.sampling_plans.get(str(params[0]))
+            if plan is None or plan["status"] != "created":
+                return FakeCursor([])
+            plan["status"] = "active"
+            return FakeCursor([(plan["plan_id"],)])
+
+        if q.startswith("INSERT INTO sampling.draws"):
+            (plan_id, period_label, service_units, selected_units, seed,
+             oversample_units, drawer_version, drawn_by) = params
+            draw = {
+                "draw_id": str(uuid.uuid4()),
+                "plan_id": str(plan_id),
+                "period_label": period_label,
+                "service_units": list(service_units),
+                "selected_units": list(selected_units),
+                "seed": seed,
+                "oversample_units": oversample_units,
+                "drawer_version": drawer_version,
+                "drawn_by": drawn_by,
+                "drawn_at": dt.datetime.now(UTC),
+            }
+            self.sampling_draws.append(draw)
+            return FakeCursor([(draw["draw_id"], draw["drawn_at"])])
+
+        if q.startswith("SELECT draw_id, plan_id, period_label"):
+            rows = sorted(
+                (
+                    d for d in self.sampling_draws
+                    if d["plan_id"] == str(params[0])
+                ),
+                key=lambda d: (d["drawn_at"], d["draw_id"]),
+            )
+            columns = (
+                "draw_id", "plan_id", "period_label", "service_units",
+                "selected_units", "seed", "oversample_units",
+                "drawer_version", "drawn_by", "drawn_at",
+            )
+            return FakeCursor([tuple(d[c] for c in columns) for d in rows])
+
+        if q.startswith("INSERT INTO sampling.measurements"):
+            if "(measurement_id, plan_id" in q:
+                (measurement_id, plan_id, unit_id, observed_upt,
+                 observed_pmt, service_day_type, service_date, data_source,
+                 notes, entered_by) = params
+                measurement_id = str(measurement_id)
+            else:
+                measurement_id = str(uuid.uuid4())
+                (plan_id, unit_id, observed_upt, observed_pmt,
+                 service_day_type, service_date, data_source, notes,
+                 entered_by) = params
+            # Honest model of migration 0020's partial unique index
+            # measurements_one_active_per_unit — the 2026-07-12 live
+            # walkthrough caught an insert-before-link supersede bug this
+            # fake had masked without it.
+            for existing in self.sampling_measurements.values():
+                if (
+                    existing["plan_id"] == str(plan_id)
+                    and existing["unit_id"] == unit_id
+                    and existing["superseded_by"] is None
+                ):
+                    raise AssertionError(
+                        "unique index measurements_one_active_per_unit "
+                        "violated: an active measurement for "
+                        f"({plan_id}, {unit_id}) already exists"
+                    )
+            m = {
+                "measurement_id": measurement_id,
+                "plan_id": str(plan_id),
+                "unit_id": unit_id,
+                "observed_upt": observed_upt,
+                "observed_pmt": Decimal(str(observed_pmt)),
+                "service_day_type": service_day_type,
+                "service_date": service_date,
+                "data_source": data_source,
+                "notes": notes,
+                "entered_by": entered_by,
+                "entered_at": dt.datetime.now(UTC),
+                "superseded_by": None,
+            }
+            self.sampling_measurements[m["measurement_id"]] = m
+            return FakeCursor([(m["measurement_id"], m["entered_at"])])
+
+        if q.startswith("SELECT measurement_id, plan_id"):
+            if "WHERE measurement_id = %s" in q:
+                m = self.sampling_measurements.get(str(params[0]))
+                rows = [m] if m else []
+            else:
+                rows = sorted(
+                    (
+                        m for m in self.sampling_measurements.values()
+                        if m["plan_id"] == str(params[0])
+                    ),
+                    key=lambda m: (m["entered_at"], m["measurement_id"]),
+                )
+            columns = (
+                "measurement_id", "plan_id", "unit_id", "observed_upt",
+                "observed_pmt", "service_day_type", "service_date",
+                "data_source", "notes", "entered_by", "entered_at",
+                "superseded_by",
+            )
+            return FakeCursor([tuple(m[c] for c in columns) for m in rows])
+
+        if q.startswith("UPDATE sampling.measurements SET superseded_by"):
+            replacement_id, measurement_id = params
+            m = self.sampling_measurements.get(str(measurement_id))
+            if m is None or m["superseded_by"] is not None:
+                return FakeCursor([])
+            m["superseded_by"] = str(replacement_id)
+            return FakeCursor([(m["measurement_id"],)])
+
         raise AssertionError(f"FakeConn has no handler for SQL: {q!r}")
 
     def _latest_safety_rows(self) -> list[dict]:
@@ -743,6 +912,71 @@ class FakeConn:
         event.update(overrides)
         self.safety_events[event["event_id"]] = event
         return event
+
+    def add_sampling_plan(self, **overrides):
+        """Seed one sampling.plans row (handoff 0012 / migration 0020).
+        Defaults: DR / APTL / quarterly — Table 43.01 cell (12, 48)."""
+        plan = {
+            "plan_id": str(uuid.uuid4()),
+            "report_year": 2026,
+            "mode": "DR",
+            "type_of_service": "DO",
+            "unit": "vehicle_days",
+            "efficiency_option": "aptl",
+            "frequency": "quarterly",
+            "required_per_period": 12,
+            "required_annual": 48,
+            "table_citation": (
+                "Table 43.01. Ready-to-Use Sampling Plans for Non-Scheduled "
+                "Services (p. 4), 'Reporting 100% UPT (APTL Option)': "
+                "Vehicle days for a Quarter = 12; Total Sample Size for "
+                "Year = 48. (seeded fixture)"
+            ),
+            "selector_version": "sampling_v0 0.1.0",
+            "status": "created",
+            "created_by": "stella",
+            "created_at": dt.datetime(2026, 7, 1, 9, 0, tzinfo=UTC),
+        }
+        plan.update(overrides)
+        self.sampling_plans[plan["plan_id"]] = plan
+        return plan
+
+    def add_sampling_draw(self, plan_id, *, period_label="2026-Q1",
+                          service_units=None, selected_units=None,
+                          seed="seeded-fixture-seed", oversample_units=0):
+        draw = {
+            "draw_id": str(uuid.uuid4()),
+            "plan_id": str(plan_id),
+            "period_label": period_label,
+            "service_units": list(service_units or []),
+            "selected_units": list(selected_units or []),
+            "seed": seed,
+            "oversample_units": oversample_units,
+            "drawer_version": "sampling_v0 0.1.0",
+            "drawn_by": "stella",
+            "drawn_at": dt.datetime.now(UTC),
+        }
+        self.sampling_draws.append(draw)
+        return draw
+
+    def add_sampling_measurement(self, plan_id, unit_id, *, observed_upt=10,
+                                 observed_pmt="40", service_day_type=None):
+        m = {
+            "measurement_id": str(uuid.uuid4()),
+            "plan_id": str(plan_id),
+            "unit_id": unit_id,
+            "observed_upt": observed_upt,
+            "observed_pmt": Decimal(observed_pmt),
+            "service_day_type": service_day_type,
+            "service_date": None,
+            "data_source": "manual_ride_check",
+            "notes": None,
+            "entered_by": "stella",
+            "entered_at": dt.datetime.now(UTC),
+            "superseded_by": None,
+        }
+        self.sampling_measurements[m["measurement_id"]] = m
+        return m
 
     def add_safety_classification(self, event_id, classification="non_major",
                                   thresholds_met=(), classified_at=None,

@@ -145,11 +145,13 @@ def _handle_gtfs_static(
     else:
         zip_bytes = envelope.decode_payload()
 
-    routes, trips, edges, findings = gtfs_static.normalize(
+    routes, trips, stops, stop_times, edges, findings = gtfs_static.normalize(
         zip_bytes, envelope.record_id
     )
     writer.upsert_routes(routes)
     writer.upsert_trips(trips)
+    writer.upsert_stops(stops)
+    writer.upsert_stop_times(stop_times)
     writer.insert_lineage_edges(edges)
     writer.insert_dq_issues(findings)
 

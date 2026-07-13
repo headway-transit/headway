@@ -185,6 +185,73 @@ computes UPT from TIDES passenger events (2026 NTD Policy Manual p. 143:
 - **Fleet-wide limitation**: the factor-up is fleet-wide in v0, not per
   mode/TOS (handoff 0005 open question; see `REGULATORY_TRACKER.md`).
 
+## Passenger Miles Traveled — pmt_v0 0.1.0 (handoff 0011)
+
+`headway_calc.pmt.compute_pmt(events, operated_trip_ids, stop_times, ...)`
+— PMT per the 2026 NTD Policy Manual pp. 143–155 (verified; tracker section
+"Verified — Passenger Miles Traveled"): per trip, the running passenger
+load by stop_sequence × each segment's distance between consecutive
+scheduled stops (canonical.stop_times + canonical.stops, migration 0019),
+summed over VALID trips, quantized 0.01 mile. The load-bearing rules — the
+per-segment distance-source precedence (shape_dist deltas need an EXPLICIT
+feed-unit conversion; haversine fallback is a flagged, documented
+understating divergence), the pp. 151–152 invalid-trip discard discipline
+(unlike upt_v0, a defective load profile is EXCLUDED and counts against the
+p. 146 2% rule; above the line the run REFUSES with the statistician
+citation), the TIDES `trip_stop_sequence`-is-ordinal join assumption, and
+the never-guess treatment of NULL counts/coordinates/sequences — are
+specified in the module docstring and the tracker row; goldens (incl. the
+manual's own Exhibit 44 worked example, verbatim) are hand-worked in
+`tests/golden/pmt_v0/BASIS.md`. The runner computes pmt_v0 on the default
+path (and per mode on `--per-mode`), sharing upt_v0's
+`missing_trip_threshold`/`imbalance_threshold` knobs; the persisted metric
+is `pmt` (unit `passenger_miles`).
+
+**Estimator, never conflated with computed PMT:**
+`estimate_pmt_average_trip_length` /
+`estimate_pmt_from_average_trip_length` implement the Exhibit 44
+average-trip-length method (pp. 154–155) as pure functions whose results
+carry the fixed `ESTIMATION_METHOD` provenance label; they persist nothing.
+
+## NTD sampling support — sampling_v0 0.1.0 (handoff 0012)
+
+`headway_calc.sampling` — the sampling tier for agencies WITHOUT full APC
+coverage (FTA NTD Sampling Manual, March 31, 2009; tracker sections
+"Verified — NTD Sampling Manual" + "Sampling plan tables — implementation
+quotes"). Three pure facilities, none of which writes
+`computed.metric_values`:
+
+- **Plan selector** — `plan_requirement(mode, unit, efficiency_option,
+  frequency)` returns the required per-period AND annual sample sizes as
+  VERBATIM cells of Tables 43.01/43.03/43.05/43.07 (all 48 cells pinned
+  one-for-one in `tests/test_golden_sampling.py`, including the manual's
+  own printed per-week-vs-annual inconsistency in Table 43.07, kept AS
+  PRINTED), with the §41.01/§41.03 eligibility rules attached as
+  plain-language guidance strings — never silent logic.
+- **§83 APTL estimator** — `sample_aptl` (sample total PMT ÷ sample total
+  UPT — the §83.05(a) ratio of totals), `estimate_annual_pmt` (100% UPT
+  expansion factor × sample APTL, §83.01(a)/§83.07(a)) and
+  `estimate_pmt_by_service_day`. The §83.05(b) ban ("You must not determine
+  the sample APTL as the average of the APTL across individual service
+  units") is STRUCTURAL: the input is per-unit (UPT, PMT) observation
+  pairs, no per-unit ratio exists anywhere in the API, and a
+  merge-invariance Hypothesis property proves the computed quantity is a
+  ratio of totals. Every result carries the `SAMPLING_ESTIMATION_METHOD`
+  provenance label — a sampled ESTIMATE, never conflated with computed
+  pmt_v0.
+- **Sample drawer** — `draw_sample(service_units, sample_size, seed)`:
+  keyed-hash (SHA-256) random ordering under a caller-supplied RECORDED
+  seed — a §63.03(b) "any other method", without replacement BY
+  CONSTRUCTION, deterministic per (seed, frame) forever (golden
+  reproducibility anchor + prefix-consistency property, which is what makes
+  random oversampling sound). The module itself contains no randomness
+  (purity guardrail): the API generates the seed with a CSPRNG and records
+  it.
+
+Hand-worked goldens: `tests/golden/sampling_v0/BASIS.md`. Persistence/API:
+migration 0020 (`sampling.plans`/`draws`/`measurements`, all append-only by
+trigger) + the `/sampling/*` endpoints in services/api.
+
 ## Mode dimension, VOMS and the MR-20 package — handoff 0009
 
 MR-20 (2025 NTD Monthly and Weekly Reference Policy Manual pp. 32–33,
@@ -507,7 +574,49 @@ handoff 0001).
 
 ## Verification status
 
-### What ran (2026-07-12, handoff 0010 — Safety & Security, incl. the addendum correction round)
+### What ran (2026-07-12, handoff 0012 — NTD sampling support)
+
+```
+$ cd services/calc && python3 -m pytest tests/ -q
+406 passed in 14.22s
+```
+
+(319 pre-0012 tests unchanged plus 87 new: all 48 Tables 43.01–43.07 cells
+pinned one-for-one against `tests/golden/sampling_v0/expected.json`
+(hand-transcribed in BASIS.md, incl. the manual's own printed Table 43.07
+weekly inconsistency kept AS PRINTED), the hand-worked §83 APTL example and
+by-service-day variants, the verbatim §83.05(a)/(b) quote pins + the
+structural average-of-ratios-unconstructible shape test, selector
+validation/guidance tests, drawer refusals + the pinned reproducibility
+anchor, and Hypothesis properties: draw reproducibility, without-
+replacement, frame-order independence, prefix consistency (random
+oversampling soundness), APTL permutation- and merge-invariance.) LIVE
+(2026-07-12): the full plan→draw→measure→estimate walkthrough ran against
+the compose stack through the API — evidence in handoff 0012, "Outputs —
+backend evidence".
+
+### What ran (2026-07-12, handoff 0011 — Passenger Miles Traveled)
+
+```
+$ cd services/calc && python3 -m pytest tests/ -q
+319 passed in 12.24s
+```
+
+(294 pre-0011 tests green — runner tests updated for the fourth default
+metric — plus 25 new: pmt goldens incl. the verbatim Exhibit 44 worked
+example, unit tests for the distance precedence/unit discipline/degenerate
+inputs/estimator refusals, Hypothesis properties, and the runner
+pass-through with geometry.) Live (2026-07-12): migration 0019 applied and
+psql-verified; normalize_gtfs_static 0.3.0 replayed over the ingested MBTA
+feed (10,309 stops / 3,077,103 stop_times / 3,200,393 lineage edges, 0
+findings); `python -m headway_calc.runner --period-start 2026-07-09
+--period-end 2026-07-10 --per-mode` produced an HONEST PMT REFUSAL in every
+scope (missing+invalid share 0.3659 fleet-wide vs the p. 146 0.02 line —
+driven by the TIDES ordinal-sequence join gap on rail/subway and the
+simulated events' imbalances), with the blocking receipts, 6,494 per-trip
+exclusion warnings, and zero pmt metric rows verified from a separate psql
+connection and served by the live API. Full evidence: handoff 0011,
+"Outputs — evidence".
 
 ```
 $ cd services/calc && python3 -m pytest tests/ -q

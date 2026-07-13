@@ -7,6 +7,14 @@ import type {
   SafetyEventCreated,
   SafetyEventRecord,
   SafetyEventSuperseded,
+  SamplingDrawCreated,
+  SamplingDrawRecord,
+  SamplingEstimateResponse,
+  SamplingMeasurementRecord,
+  SamplingOptions,
+  SamplingPlanCreated,
+  SamplingPlanProgress,
+  SamplingPlanRecord,
 } from "../api/types";
 
 /** Values as the API serves them: `value` is a decimal STRING, never a number. */
@@ -654,4 +662,813 @@ export const safetySupersededResponse: SafetyEventSuperseded = {
     ],
   },
   audit_event_id: 43,
+};
+
+
+// ---- sampling (handoff 0012) ----
+//
+// Mocks typed against services/api routers/sampling.py exactly. Every
+// regulatory string below (citations, guidance, method labels, caveats,
+// the retention note) is the REAL sampling_v0 / router text, extracted
+// programmatically from the live modules when these fixtures were
+// generated — and every figure (required sizes, drawn units, estimate)
+// is the calc's own output for these inputs, never a hand-made number.
+
+/** GET /sampling/options — the calc selector's vocabulary, verbatim. */
+export const samplingOptions: SamplingOptions = {
+  "modes": {
+    "DR": "demand response (DR)",
+    "VP": "commuter vanpool (VP)",
+    "MB": "bus (MB and TB)",
+    "TB": "bus (MB and TB)",
+    "CR": "commuter rail (CR)",
+    "LR": "other rail modes (LR, HR, MR, AG)",
+    "HR": "other rail modes (LR, HR, MR, AG)",
+    "MR": "other rail modes (LR, HR, MR, AG)",
+    "AG": "other rail modes (LR, HR, MR, AG)"
+  },
+  "units_by_mode": {
+    "DR": [
+      "vehicle_days"
+    ],
+    "VP": [
+      "vehicle_days"
+    ],
+    "MB": [
+      "one_way_trips",
+      "round_trips"
+    ],
+    "TB": [
+      "one_way_trips",
+      "round_trips"
+    ],
+    "CR": [
+      "one_way_car_trips"
+    ],
+    "LR": [
+      "one_way_car_trips",
+      "one_way_train_trips"
+    ],
+    "HR": [
+      "one_way_car_trips",
+      "one_way_train_trips"
+    ],
+    "MR": [
+      "one_way_car_trips",
+      "one_way_train_trips"
+    ],
+    "AG": [
+      "one_way_car_trips",
+      "one_way_train_trips"
+    ]
+  },
+  "efficiency_options": [
+    "aptl",
+    "aptl_grouped",
+    "base"
+  ],
+  "creatable_options": [
+    "aptl",
+    "base"
+  ],
+  "frequencies": [
+    "quarterly",
+    "monthly",
+    "weekly"
+  ],
+  "service_day_types": [
+    "Weekday",
+    "Saturday",
+    "Sunday"
+  ],
+  "eligibility_guidance": [
+    "Ready-to-use sampling plans may be used only under the §41.01 conditions — (a) New Mode: 'If you will be sampling and reporting for the first time this current report year for a particular mode that you do not already operate'; (b) New Type of Service: 'If you will be sampling and reporting this current report year for a particular type of service for the first time'; or (c) No Sample Data: 'If you have reported your service to the NTD before through random sampling, but no longer have the original raw sample data.' Headway records your plan; whether your agency meets one of these conditions is your determination. (FTA NTD Sampling Manual, March 31, 2009 (verified 2026-07-12, REGULATORY_TRACKER.md 'Verified — NTD Sampling Manual' / 'Sampling plan tables — implementation quotes'), §41.01, p. 3)",
+    "Reuse next year: 'You should not use it again if your next report year is your mandatory sampling year. After you have collected the sample data from this year, you should develop a template sampling plan with that sample data for your next report year.' You may reuse it only if next year is not a mandatory sampling year (§41.03(b)). Template plans (Section 50) are not yet mechanized in Headway. (FTA NTD Sampling Manual, March 31, 2009 (verified 2026-07-12, REGULATORY_TRACKER.md 'Verified — NTD Sampling Manual' / 'Sampling plan tables — implementation quotes'), §41.03, p. 3)",
+    "The estimate this plan supports must meet FTA's floor: 'Minimum confidence of 95 percent; and Minimum precision level of ±10 percent' — met by following the plan exactly: 'If a transit agency samples, they must follow the sampling technique exactly.' (2026 NTD Policy Manual, Full Reporting, p. 149 — verified 2026-07-12, REGULATORY_TRACKER.md 'Verified — Passenger Miles Traveled')"
+  ],
+  "retention_note": "Keep every sampling record — the plan, the recorded seed, the drawn service-unit lists, and each unit's observed UPT and PMT — for at least 3 years (2026 NTD Policy Manual, Full Reporting, p. 150; verified 2026-07-12, REGULATORY_TRACKER.md 'Verified — Passenger Miles Traveled'). Headway keeps them indefinitely: sampling records are append-only and are corrected by superseding, never by editing."
+};
+
+/** A freshly created bus plan (no draw yet — status 'created'). */
+export const samplingPlanMb: SamplingPlanRecord = {
+  "plan_id": "plan-mb-1",
+  "report_year": 2026,
+  "mode": "MB",
+  "type_of_service": "DO",
+  "unit": "one_way_trips",
+  "efficiency_option": "aptl",
+  "frequency": "monthly",
+  "required_per_period": 27,
+  "required_annual": 324,
+  "table_citation": "Table 43.03. Ready-to-Use Sampling Plans for Bus (MB and TB) Services (p. 5), 'Reporting 100% UPT (APTL Option) — Without Route Grouping, column (2)': One-way trips for a Month = 27; Total Sample Size for Year = 324. (FTA NTD Sampling Manual, March 31, 2009 (verified 2026-07-12, REGULATORY_TRACKER.md 'Verified — NTD Sampling Manual' / 'Sampling plan tables — implementation quotes'))",
+  "selector_version": "sampling_v0 0.1.0",
+  "status": "created",
+  "created_by": "dsteward",
+  "created_at": "2026-07-12T10:00:00Z"
+};
+
+export const samplingPlanMbCreated: SamplingPlanCreated = {
+  plan: samplingPlanMb,
+  guidance: [
+    "Ready-to-use sampling plans may be used only under the §41.01 conditions — (a) New Mode: 'If you will be sampling and reporting for the first time this current report year for a particular mode that you do not already operate'; (b) New Type of Service: 'If you will be sampling and reporting this current report year for a particular type of service for the first time'; or (c) No Sample Data: 'If you have reported your service to the NTD before through random sampling, but no longer have the original raw sample data.' Headway records your plan; whether your agency meets one of these conditions is your determination. (FTA NTD Sampling Manual, March 31, 2009 (verified 2026-07-12, REGULATORY_TRACKER.md 'Verified — NTD Sampling Manual' / 'Sampling plan tables — implementation quotes'), §41.01, p. 3)",
+    "Reuse next year: 'You should not use it again if your next report year is your mandatory sampling year. After you have collected the sample data from this year, you should develop a template sampling plan with that sample data for your next report year.' You may reuse it only if next year is not a mandatory sampling year (§41.03(b)). Template plans (Section 50) are not yet mechanized in Headway. (FTA NTD Sampling Manual, March 31, 2009 (verified 2026-07-12, REGULATORY_TRACKER.md 'Verified — NTD Sampling Manual' / 'Sampling plan tables — implementation quotes'), §41.03, p. 3)",
+    "The estimate this plan supports must meet FTA's floor: 'Minimum confidence of 95 percent; and Minimum precision level of ±10 percent' — met by following the plan exactly: 'If a transit agency samples, they must follow the sampling technique exactly.' (2026 NTD Policy Manual, Full Reporting, p. 149 — verified 2026-07-12, REGULATORY_TRACKER.md 'Verified — Passenger Miles Traveled')"
+  ],
+  retention_note: "Keep every sampling record — the plan, the recorded seed, the drawn service-unit lists, and each unit's observed UPT and PMT — for at least 3 years (2026 NTD Policy Manual, Full Reporting, p. 150; verified 2026-07-12, REGULATORY_TRACKER.md 'Verified — Passenger Miles Traveled'). Headway keeps them indefinitely: sampling records are append-only and are corrected by superseding, never by editing.",
+  audit_event_id: 71,
+};
+
+/** An active commuter-rail plan: 4 quarterly draws of 8 on file. */
+export const samplingPlanCr: SamplingPlanRecord = {
+  "plan_id": "plan-cr-1",
+  "report_year": 2026,
+  "mode": "CR",
+  "type_of_service": "DO",
+  "unit": "one_way_car_trips",
+  "efficiency_option": "aptl",
+  "frequency": "quarterly",
+  "required_per_period": 8,
+  "required_annual": 32,
+  "table_citation": "Table 43.05. Ready-to-Use Sampling Plans for Commuter Rail (CR) (p. 6), 'Reporting 100% UPT (APTL Option)': One-way car trips for a Quarter = 8; Total Sample Size for Year = 32. (FTA NTD Sampling Manual, March 31, 2009 (verified 2026-07-12, REGULATORY_TRACKER.md 'Verified — NTD Sampling Manual' / 'Sampling plan tables — implementation quotes'))",
+  "selector_version": "sampling_v0 0.1.0",
+  "status": "active",
+  "created_by": "dsteward",
+  "created_at": "2026-01-05T08:00:00Z"
+};
+
+/** The four quarterly draws — selected units are the REAL calc drawer's
+ *  output for these frames and seeds (reproducible forever). */
+export const samplingDrawsCr: SamplingDrawRecord[] = [
+  {
+    "draw_id": "draw-cr-1",
+    "plan_id": "plan-cr-1",
+    "period_label": "2026-Q1",
+    "frame_size": 20,
+    "selected_units": [
+      "2026-Q1/car-trip-14",
+      "2026-Q1/car-trip-07",
+      "2026-Q1/car-trip-12",
+      "2026-Q1/car-trip-16",
+      "2026-Q1/car-trip-19",
+      "2026-Q1/car-trip-10",
+      "2026-Q1/car-trip-01",
+      "2026-Q1/car-trip-20"
+    ],
+    "seed": "headway-cr-2026-q1",
+    "required_per_period": 8,
+    "oversample_units": 0,
+    "drawer_version": "sampling_v0 0.1.0",
+    "drawn_by": "dsteward",
+    "drawn_at": "2026-01-02T09:00:00Z"
+  },
+  {
+    "draw_id": "draw-cr-2",
+    "plan_id": "plan-cr-1",
+    "period_label": "2026-Q2",
+    "frame_size": 20,
+    "selected_units": [
+      "2026-Q2/car-trip-20",
+      "2026-Q2/car-trip-14",
+      "2026-Q2/car-trip-19",
+      "2026-Q2/car-trip-07",
+      "2026-Q2/car-trip-03",
+      "2026-Q2/car-trip-10",
+      "2026-Q2/car-trip-16",
+      "2026-Q2/car-trip-01"
+    ],
+    "seed": "headway-cr-2026-q2",
+    "required_per_period": 8,
+    "oversample_units": 0,
+    "drawer_version": "sampling_v0 0.1.0",
+    "drawn_by": "dsteward",
+    "drawn_at": "2026-04-02T09:00:00Z"
+  },
+  {
+    "draw_id": "draw-cr-3",
+    "plan_id": "plan-cr-1",
+    "period_label": "2026-Q3",
+    "frame_size": 20,
+    "selected_units": [
+      "2026-Q3/car-trip-01",
+      "2026-Q3/car-trip-08",
+      "2026-Q3/car-trip-17",
+      "2026-Q3/car-trip-20",
+      "2026-Q3/car-trip-15",
+      "2026-Q3/car-trip-10",
+      "2026-Q3/car-trip-18",
+      "2026-Q3/car-trip-14"
+    ],
+    "seed": "headway-cr-2026-q3",
+    "required_per_period": 8,
+    "oversample_units": 0,
+    "drawer_version": "sampling_v0 0.1.0",
+    "drawn_by": "dsteward",
+    "drawn_at": "2026-07-02T09:00:00Z"
+  },
+  {
+    "draw_id": "draw-cr-4",
+    "plan_id": "plan-cr-1",
+    "period_label": "2026-Q4",
+    "frame_size": 20,
+    "selected_units": [
+      "2026-Q4/car-trip-02",
+      "2026-Q4/car-trip-20",
+      "2026-Q4/car-trip-18",
+      "2026-Q4/car-trip-19",
+      "2026-Q4/car-trip-04",
+      "2026-Q4/car-trip-05",
+      "2026-Q4/car-trip-11",
+      "2026-Q4/car-trip-01"
+    ],
+    "seed": "headway-cr-2026-q4",
+    "required_per_period": 8,
+    "oversample_units": 0,
+    "drawer_version": "sampling_v0 0.1.0",
+    "drawn_by": "dsteward",
+    "drawn_at": "2026-010-02T09:00:00Z"
+  }
+];
+
+/** POST …/draws 201 response for the first quarter (method = the calc's
+ *  documented §63.03 procedure, verbatim). */
+export const samplingDrawCreatedQ1: SamplingDrawCreated = {
+  draw: samplingDrawsCr[0],
+  method: "Keyed-hash random ordering (a §63.03(b) 'any other method'): each service unit in the provided list is keyed by SHA-256 of the recorded seed and the unit id; the list is ordered by key and the first n units are selected. With a seed produced by a cryptographic randomness source (recorded on the plan for audit), the ordering is random — §63.03(b)(1); each unit appears exactly once in the ordering and duplicate unit ids are refused, so no unit can be selected more than once — without replacement, §63.03(b)(2) ('Without replacement means that the method will not select the same service unit more than once.'). Given the same seed and the same unit list the draw reproduces exactly. (FTA NTD Sampling Manual, March 31, 2009 (verified 2026-07-12, REGULATORY_TRACKER.md 'Verified — NTD Sampling Manual' / 'Sampling plan tables — implementation quotes'), §63.03, p. 19)",
+  oversampling_note: null,
+  retention_note: "Keep every sampling record — the plan, the recorded seed, the drawn service-unit lists, and each unit's observed UPT and PMT — for at least 3 years (2026 NTD Policy Manual, Full Reporting, p. 150; verified 2026-07-12, REGULATORY_TRACKER.md 'Verified — Passenger Miles Traveled'). Headway keeps them indefinitely: sampling records are append-only and are corrected by superseding, never by editing.",
+  audit_event_id: 72,
+};
+
+/** 31 of the 32 drawn units measured (the last drawn unit is pending). */
+export const samplingMeasurementsCr: SamplingMeasurementRecord[] = [
+  {
+    "measurement_id": "meas-01",
+    "plan_id": "plan-cr-1",
+    "unit_id": "2026-Q1/car-trip-14",
+    "observed_upt": 25,
+    "observed_pmt": "112.40",
+    "service_day_type": null,
+    "service_date": null,
+    "data_source": "manual_ride_check",
+    "notes": null,
+    "entered_by": "checker",
+    "entered_at": "2026-07-10T09:00:00Z",
+    "superseded_by": null
+  },
+  {
+    "measurement_id": "meas-02",
+    "plan_id": "plan-cr-1",
+    "unit_id": "2026-Q1/car-trip-07",
+    "observed_upt": 25,
+    "observed_pmt": "112.40",
+    "service_day_type": null,
+    "service_date": null,
+    "data_source": "manual_ride_check",
+    "notes": null,
+    "entered_by": "checker",
+    "entered_at": "2026-07-10T09:00:00Z",
+    "superseded_by": null
+  },
+  {
+    "measurement_id": "meas-03",
+    "plan_id": "plan-cr-1",
+    "unit_id": "2026-Q1/car-trip-12",
+    "observed_upt": 25,
+    "observed_pmt": "112.40",
+    "service_day_type": null,
+    "service_date": null,
+    "data_source": "manual_ride_check",
+    "notes": null,
+    "entered_by": "checker",
+    "entered_at": "2026-07-10T09:00:00Z",
+    "superseded_by": null
+  },
+  {
+    "measurement_id": "meas-04",
+    "plan_id": "plan-cr-1",
+    "unit_id": "2026-Q1/car-trip-16",
+    "observed_upt": 25,
+    "observed_pmt": "112.40",
+    "service_day_type": null,
+    "service_date": null,
+    "data_source": "manual_ride_check",
+    "notes": null,
+    "entered_by": "checker",
+    "entered_at": "2026-07-10T09:00:00Z",
+    "superseded_by": null
+  },
+  {
+    "measurement_id": "meas-05",
+    "plan_id": "plan-cr-1",
+    "unit_id": "2026-Q1/car-trip-19",
+    "observed_upt": 25,
+    "observed_pmt": "112.40",
+    "service_day_type": null,
+    "service_date": null,
+    "data_source": "manual_ride_check",
+    "notes": null,
+    "entered_by": "checker",
+    "entered_at": "2026-07-10T09:00:00Z",
+    "superseded_by": null
+  },
+  {
+    "measurement_id": "meas-06",
+    "plan_id": "plan-cr-1",
+    "unit_id": "2026-Q1/car-trip-10",
+    "observed_upt": 25,
+    "observed_pmt": "112.40",
+    "service_day_type": null,
+    "service_date": null,
+    "data_source": "manual_ride_check",
+    "notes": null,
+    "entered_by": "checker",
+    "entered_at": "2026-07-10T09:00:00Z",
+    "superseded_by": null
+  },
+  {
+    "measurement_id": "meas-07",
+    "plan_id": "plan-cr-1",
+    "unit_id": "2026-Q1/car-trip-01",
+    "observed_upt": 25,
+    "observed_pmt": "112.40",
+    "service_day_type": null,
+    "service_date": null,
+    "data_source": "manual_ride_check",
+    "notes": null,
+    "entered_by": "checker",
+    "entered_at": "2026-07-10T09:00:00Z",
+    "superseded_by": null
+  },
+  {
+    "measurement_id": "meas-08",
+    "plan_id": "plan-cr-1",
+    "unit_id": "2026-Q1/car-trip-20",
+    "observed_upt": 25,
+    "observed_pmt": "112.40",
+    "service_day_type": null,
+    "service_date": null,
+    "data_source": "manual_ride_check",
+    "notes": null,
+    "entered_by": "checker",
+    "entered_at": "2026-07-10T09:00:00Z",
+    "superseded_by": null
+  },
+  {
+    "measurement_id": "meas-09",
+    "plan_id": "plan-cr-1",
+    "unit_id": "2026-Q2/car-trip-20",
+    "observed_upt": 25,
+    "observed_pmt": "112.40",
+    "service_day_type": null,
+    "service_date": null,
+    "data_source": "manual_ride_check",
+    "notes": null,
+    "entered_by": "checker",
+    "entered_at": "2026-07-10T09:00:00Z",
+    "superseded_by": null
+  },
+  {
+    "measurement_id": "meas-10",
+    "plan_id": "plan-cr-1",
+    "unit_id": "2026-Q2/car-trip-14",
+    "observed_upt": 25,
+    "observed_pmt": "112.40",
+    "service_day_type": null,
+    "service_date": null,
+    "data_source": "manual_ride_check",
+    "notes": null,
+    "entered_by": "checker",
+    "entered_at": "2026-07-10T09:00:00Z",
+    "superseded_by": null
+  },
+  {
+    "measurement_id": "meas-11",
+    "plan_id": "plan-cr-1",
+    "unit_id": "2026-Q2/car-trip-19",
+    "observed_upt": 25,
+    "observed_pmt": "112.40",
+    "service_day_type": null,
+    "service_date": null,
+    "data_source": "manual_ride_check",
+    "notes": null,
+    "entered_by": "checker",
+    "entered_at": "2026-07-10T09:00:00Z",
+    "superseded_by": null
+  },
+  {
+    "measurement_id": "meas-12",
+    "plan_id": "plan-cr-1",
+    "unit_id": "2026-Q2/car-trip-07",
+    "observed_upt": 25,
+    "observed_pmt": "112.40",
+    "service_day_type": null,
+    "service_date": null,
+    "data_source": "manual_ride_check",
+    "notes": null,
+    "entered_by": "checker",
+    "entered_at": "2026-07-10T09:00:00Z",
+    "superseded_by": null
+  },
+  {
+    "measurement_id": "meas-13",
+    "plan_id": "plan-cr-1",
+    "unit_id": "2026-Q2/car-trip-03",
+    "observed_upt": 25,
+    "observed_pmt": "112.40",
+    "service_day_type": null,
+    "service_date": null,
+    "data_source": "manual_ride_check",
+    "notes": null,
+    "entered_by": "checker",
+    "entered_at": "2026-07-10T09:00:00Z",
+    "superseded_by": null
+  },
+  {
+    "measurement_id": "meas-14",
+    "plan_id": "plan-cr-1",
+    "unit_id": "2026-Q2/car-trip-10",
+    "observed_upt": 25,
+    "observed_pmt": "112.40",
+    "service_day_type": null,
+    "service_date": null,
+    "data_source": "manual_ride_check",
+    "notes": null,
+    "entered_by": "checker",
+    "entered_at": "2026-07-10T09:00:00Z",
+    "superseded_by": null
+  },
+  {
+    "measurement_id": "meas-15",
+    "plan_id": "plan-cr-1",
+    "unit_id": "2026-Q2/car-trip-16",
+    "observed_upt": 25,
+    "observed_pmt": "112.40",
+    "service_day_type": null,
+    "service_date": null,
+    "data_source": "manual_ride_check",
+    "notes": null,
+    "entered_by": "checker",
+    "entered_at": "2026-07-10T09:00:00Z",
+    "superseded_by": null
+  },
+  {
+    "measurement_id": "meas-16",
+    "plan_id": "plan-cr-1",
+    "unit_id": "2026-Q2/car-trip-01",
+    "observed_upt": 25,
+    "observed_pmt": "112.40",
+    "service_day_type": null,
+    "service_date": null,
+    "data_source": "manual_ride_check",
+    "notes": null,
+    "entered_by": "checker",
+    "entered_at": "2026-07-10T09:00:00Z",
+    "superseded_by": null
+  },
+  {
+    "measurement_id": "meas-17",
+    "plan_id": "plan-cr-1",
+    "unit_id": "2026-Q3/car-trip-01",
+    "observed_upt": 25,
+    "observed_pmt": "112.40",
+    "service_day_type": null,
+    "service_date": null,
+    "data_source": "manual_ride_check",
+    "notes": null,
+    "entered_by": "checker",
+    "entered_at": "2026-07-10T09:00:00Z",
+    "superseded_by": null
+  },
+  {
+    "measurement_id": "meas-18",
+    "plan_id": "plan-cr-1",
+    "unit_id": "2026-Q3/car-trip-08",
+    "observed_upt": 25,
+    "observed_pmt": "112.40",
+    "service_day_type": null,
+    "service_date": null,
+    "data_source": "manual_ride_check",
+    "notes": null,
+    "entered_by": "checker",
+    "entered_at": "2026-07-10T09:00:00Z",
+    "superseded_by": null
+  },
+  {
+    "measurement_id": "meas-19",
+    "plan_id": "plan-cr-1",
+    "unit_id": "2026-Q3/car-trip-17",
+    "observed_upt": 25,
+    "observed_pmt": "112.40",
+    "service_day_type": null,
+    "service_date": null,
+    "data_source": "manual_ride_check",
+    "notes": null,
+    "entered_by": "checker",
+    "entered_at": "2026-07-10T09:00:00Z",
+    "superseded_by": null
+  },
+  {
+    "measurement_id": "meas-20",
+    "plan_id": "plan-cr-1",
+    "unit_id": "2026-Q3/car-trip-20",
+    "observed_upt": 25,
+    "observed_pmt": "112.40",
+    "service_day_type": null,
+    "service_date": null,
+    "data_source": "manual_ride_check",
+    "notes": null,
+    "entered_by": "checker",
+    "entered_at": "2026-07-10T09:00:00Z",
+    "superseded_by": null
+  },
+  {
+    "measurement_id": "meas-21",
+    "plan_id": "plan-cr-1",
+    "unit_id": "2026-Q3/car-trip-15",
+    "observed_upt": 25,
+    "observed_pmt": "112.40",
+    "service_day_type": null,
+    "service_date": null,
+    "data_source": "manual_ride_check",
+    "notes": null,
+    "entered_by": "checker",
+    "entered_at": "2026-07-10T09:00:00Z",
+    "superseded_by": null
+  },
+  {
+    "measurement_id": "meas-22",
+    "plan_id": "plan-cr-1",
+    "unit_id": "2026-Q3/car-trip-10",
+    "observed_upt": 25,
+    "observed_pmt": "112.40",
+    "service_day_type": null,
+    "service_date": null,
+    "data_source": "manual_ride_check",
+    "notes": null,
+    "entered_by": "checker",
+    "entered_at": "2026-07-10T09:00:00Z",
+    "superseded_by": null
+  },
+  {
+    "measurement_id": "meas-23",
+    "plan_id": "plan-cr-1",
+    "unit_id": "2026-Q3/car-trip-18",
+    "observed_upt": 25,
+    "observed_pmt": "112.40",
+    "service_day_type": null,
+    "service_date": null,
+    "data_source": "manual_ride_check",
+    "notes": null,
+    "entered_by": "checker",
+    "entered_at": "2026-07-10T09:00:00Z",
+    "superseded_by": null
+  },
+  {
+    "measurement_id": "meas-24",
+    "plan_id": "plan-cr-1",
+    "unit_id": "2026-Q3/car-trip-14",
+    "observed_upt": 25,
+    "observed_pmt": "112.40",
+    "service_day_type": null,
+    "service_date": null,
+    "data_source": "manual_ride_check",
+    "notes": null,
+    "entered_by": "checker",
+    "entered_at": "2026-07-10T09:00:00Z",
+    "superseded_by": null
+  },
+  {
+    "measurement_id": "meas-25",
+    "plan_id": "plan-cr-1",
+    "unit_id": "2026-Q4/car-trip-02",
+    "observed_upt": 25,
+    "observed_pmt": "112.40",
+    "service_day_type": null,
+    "service_date": null,
+    "data_source": "manual_ride_check",
+    "notes": null,
+    "entered_by": "checker",
+    "entered_at": "2026-07-10T09:00:00Z",
+    "superseded_by": null
+  },
+  {
+    "measurement_id": "meas-26",
+    "plan_id": "plan-cr-1",
+    "unit_id": "2026-Q4/car-trip-20",
+    "observed_upt": 25,
+    "observed_pmt": "112.40",
+    "service_day_type": null,
+    "service_date": null,
+    "data_source": "manual_ride_check",
+    "notes": null,
+    "entered_by": "checker",
+    "entered_at": "2026-07-10T09:00:00Z",
+    "superseded_by": null
+  },
+  {
+    "measurement_id": "meas-27",
+    "plan_id": "plan-cr-1",
+    "unit_id": "2026-Q4/car-trip-18",
+    "observed_upt": 25,
+    "observed_pmt": "112.40",
+    "service_day_type": null,
+    "service_date": null,
+    "data_source": "manual_ride_check",
+    "notes": null,
+    "entered_by": "checker",
+    "entered_at": "2026-07-10T09:00:00Z",
+    "superseded_by": null
+  },
+  {
+    "measurement_id": "meas-28",
+    "plan_id": "plan-cr-1",
+    "unit_id": "2026-Q4/car-trip-19",
+    "observed_upt": 25,
+    "observed_pmt": "112.40",
+    "service_day_type": null,
+    "service_date": null,
+    "data_source": "manual_ride_check",
+    "notes": null,
+    "entered_by": "checker",
+    "entered_at": "2026-07-10T09:00:00Z",
+    "superseded_by": null
+  },
+  {
+    "measurement_id": "meas-29",
+    "plan_id": "plan-cr-1",
+    "unit_id": "2026-Q4/car-trip-04",
+    "observed_upt": 25,
+    "observed_pmt": "112.40",
+    "service_day_type": null,
+    "service_date": null,
+    "data_source": "manual_ride_check",
+    "notes": null,
+    "entered_by": "checker",
+    "entered_at": "2026-07-10T09:00:00Z",
+    "superseded_by": null
+  },
+  {
+    "measurement_id": "meas-30",
+    "plan_id": "plan-cr-1",
+    "unit_id": "2026-Q4/car-trip-05",
+    "observed_upt": 25,
+    "observed_pmt": "112.40",
+    "service_day_type": null,
+    "service_date": null,
+    "data_source": "manual_ride_check",
+    "notes": null,
+    "entered_by": "checker",
+    "entered_at": "2026-07-10T09:00:00Z",
+    "superseded_by": null
+  },
+  {
+    "measurement_id": "meas-31",
+    "plan_id": "plan-cr-1",
+    "unit_id": "2026-Q4/car-trip-11",
+    "observed_upt": 25,
+    "observed_pmt": "112.40",
+    "service_day_type": null,
+    "service_date": null,
+    "data_source": "manual_ride_check",
+    "notes": null,
+    "entered_by": "checker",
+    "entered_at": "2026-07-10T09:00:00Z",
+    "superseded_by": null
+  }
+];
+
+/** The final unit's observation (recorded by the measurement test). */
+export const samplingFinalMeasurement: SamplingMeasurementRecord = {
+  "measurement_id": "meas-32",
+  "plan_id": "plan-cr-1",
+  "unit_id": "2026-Q4/car-trip-01",
+  "observed_upt": 30,
+  "observed_pmt": "141.00",
+  "service_day_type": null,
+  "service_date": null,
+  "data_source": "manual_ride_check",
+  "notes": null,
+  "entered_by": "preparer",
+  "entered_at": "2026-07-12T09:00:00Z",
+  "superseded_by": null
+};
+
+/** GET …/progress — one unit short of the required 32 (undersampled). */
+export const samplingProgressUnder: SamplingPlanProgress = {
+  "plan": samplingPlanCr,
+  "required_per_period": 8,
+  "required_annual": 32,
+  "draws": [
+    {
+      "period_label": "2026-Q1",
+      "selected": 8,
+      "measured": 8,
+      "oversample_units": 0
+    },
+    {
+      "period_label": "2026-Q2",
+      "selected": 8,
+      "measured": 8,
+      "oversample_units": 0
+    },
+    {
+      "period_label": "2026-Q3",
+      "selected": 8,
+      "measured": 8,
+      "oversample_units": 0
+    },
+    {
+      "period_label": "2026-Q4",
+      "selected": 8,
+      "measured": 7,
+      "oversample_units": 0
+    }
+  ],
+  "units_selected": 32,
+  "units_measured": 31,
+  "units_unmeasured": [
+    "2026-Q4/car-trip-01"
+  ],
+  "undersampled": true,
+  "undersampling_citation": "An estimate from fewer units than the plan requires does not follow the FTA-approved technique: 'If a transit agency samples, they must follow the sampling technique exactly.' and the estimate must meet 'Minimum confidence of 95 percent; and Minimum precision level of ±10 percent' (2026 NTD Policy Manual, Full Reporting, p. 149 — verified 2026-07-12, REGULATORY_TRACKER.md, 'Verified — Passenger Miles Traveled').",
+  "oversampling_citation": "Sampling more units than required is allowed only when the extra units are selected randomly (2026 NTD Policy Manual, Full Reporting, p. 149 — verified 2026-07-12). Headway's drawer extends the same seeded random order, so oversampled units are random by construction and are flagged on the draw record.",
+  "retention_note": "Keep every sampling record — the plan, the recorded seed, the drawn service-unit lists, and each unit's observed UPT and PMT — for at least 3 years (2026 NTD Policy Manual, Full Reporting, p. 150; verified 2026-07-12, REGULATORY_TRACKER.md 'Verified — Passenger Miles Traveled'). Headway keeps them indefinitely: sampling records are append-only and are corrected by superseding, never by editing."
+};
+
+/** GET …/progress — target met. */
+export const samplingProgressComplete: SamplingPlanProgress = {
+  "plan": samplingPlanCr,
+  "required_per_period": 8,
+  "required_annual": 32,
+  "draws": [
+    {
+      "period_label": "2026-Q1",
+      "selected": 8,
+      "measured": 8,
+      "oversample_units": 0
+    },
+    {
+      "period_label": "2026-Q2",
+      "selected": 8,
+      "measured": 8,
+      "oversample_units": 0
+    },
+    {
+      "period_label": "2026-Q3",
+      "selected": 8,
+      "measured": 8,
+      "oversample_units": 0
+    },
+    {
+      "period_label": "2026-Q4",
+      "selected": 8,
+      "measured": 8,
+      "oversample_units": 0
+    }
+  ],
+  "units_selected": 32,
+  "units_measured": 32,
+  "units_unmeasured": [],
+  "undersampled": false,
+  "undersampling_citation": "An estimate from fewer units than the plan requires does not follow the FTA-approved technique: 'If a transit agency samples, they must follow the sampling technique exactly.' and the estimate must meet 'Minimum confidence of 95 percent; and Minimum precision level of ±10 percent' (2026 NTD Policy Manual, Full Reporting, p. 149 — verified 2026-07-12, REGULATORY_TRACKER.md, 'Verified — Passenger Miles Traveled').",
+  "oversampling_citation": "Sampling more units than required is allowed only when the extra units are selected randomly (2026 NTD Policy Manual, Full Reporting, p. 149 — verified 2026-07-12). Headway's drawer extends the same seeded random order, so oversampled units are random by construction and are flagged on the draw record.",
+  "retention_note": "Keep every sampling record — the plan, the recorded seed, the drawn service-unit lists, and each unit's observed UPT and PMT — for at least 3 years (2026 NTD Policy Manual, Full Reporting, p. 150; verified 2026-07-12, REGULATORY_TRACKER.md 'Verified — Passenger Miles Traveled'). Headway keeps them indefinitely: sampling records are append-only and are corrected by superseding, never by editing."
+};
+
+/**
+ * POST …/estimate response: the estimate block is the REAL sampling_v0
+ * output for these 32 observations and a 12,750,000 expansion factor
+ * (ratio of totals, §83.05(a); quantization the calc's). Deliberately
+ * carries NO metric_value_id — a sampled estimate is never persisted
+ * among computed figures.
+ */
+export const samplingEstimate: SamplingEstimateResponse = {
+  "plan_id": "plan-cr-1",
+  "estimate": {
+    "scope": "annual",
+    "sample_size": 32,
+    "sample_total_upt": 805,
+    "sample_total_pmt": "3625.40",
+    "sample_aptl": "4.50",
+    "expansion_factor_upt": "12750000",
+    "estimated_pmt": "57375000",
+    "method": "estimated — sampled average passenger trip length (APTL) method (FTA NTD Sampling Manual, March 31, 2009, Subsection 83): sample APTL = sample total PMT ÷ sample total UPT (§83.05(a) ratio of totals); estimated PMT = 100% UPT expansion factor × sample APTL (§83.01(a), §83.07). Sample observations are manually entered ride-check data; this figure is a sampled ESTIMATE, not a computed PMT measurement."
+  },
+  "by_service_day": null,
+  "units_measured": 32,
+  "required_annual": 32,
+  "oversampled_by": 0,
+  "caveats": [
+    "This figure is a SAMPLED ESTIMATE produced by the §83 APTL method. It is not, and is never stored as, a computed PMT measurement (computed.metric_values is untouched by this endpoint).",
+    "Sample observations are MANUALLY ENTERED ride-check data: Headway records who entered each observation and when, but cannot verify the on-board counts themselves. Corrections supersede — originals are never edited.",
+    "The 100% UPT expansion factor is supplied by the caller and must be the agency's actual 100% count of UPT (§83.01(a): 'You must use your 100% count of UPT as the expansion factor.'). Headway does not verify it against computed UPT figures in v0 — cross-check it against your certified UPT before using this estimate in a submission.",
+    "Sampling more units than required is allowed only when the extra units are selected randomly (2026 NTD Policy Manual, Full Reporting, p. 149 — verified 2026-07-12). Headway's drawer extends the same seeded random order, so oversampled units are random by construction and are flagged on the draw record."
+  ],
+  "citations": [
+    "Sample APTL: 'You must determine the sample APTL for a given sample as the ratio of sample total PMT over sample total UPT' — and never the banned average: 'You must not determine the sample APTL as the average of the APTL across individual service units in the sample.' (FTA NTD Sampling Manual, 2009, §83.05(a)/(b), p. 42).",
+    "Expansion: 'You must use your 100% count of UPT as the expansion factor.' (§83.01(a), p. 42); annual total PMT per §83.07(a), p. 43.",
+    "Table 43.05. Ready-to-Use Sampling Plans for Commuter Rail (CR) (p. 6), 'Reporting 100% UPT (APTL Option)': One-way car trips for a Quarter = 8; Total Sample Size for Year = 32. (FTA NTD Sampling Manual, March 31, 2009 (verified 2026-07-12, REGULATORY_TRACKER.md 'Verified — NTD Sampling Manual' / 'Sampling plan tables — implementation quotes'))"
+  ],
+  "retention_note": "Keep every sampling record — the plan, the recorded seed, the drawn service-unit lists, and each unit's observed UPT and PMT — for at least 3 years (2026 NTD Policy Manual, Full Reporting, p. 150; verified 2026-07-12, REGULATORY_TRACKER.md 'Verified — Passenger Miles Traveled'). Headway keeps them indefinitely: sampling records are append-only and are corrected by superseding, never by editing.",
+  "audit_event_id": 73
 };

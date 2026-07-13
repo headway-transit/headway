@@ -41,7 +41,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, timezone
 
-from headway_calc.types import PassengerEvent, VehiclePosition
+from headway_calc.types import PassengerEvent, StopTime, VehiclePosition
 
 #: Column names and order per handoff 0001 (canonical.vehicle_positions) plus
 #: canonical.trips.block_id (handoff 0003, migration 0011) and
@@ -80,6 +80,27 @@ _SELECT_OPERATED_TRIP_IDS_SQL = (
     "SELECT DISTINCT trip_id FROM canonical.vehicle_positions "
     "WHERE trip_id IS NOT NULL AND time >= %s AND time < %s "
     "ORDER BY trip_id"
+)
+
+
+#: Stop geometry for pmt_v0 (handoff 0011, migration 0019): the scheduled
+#: stop sequence of every trip that has at least one passenger event in the
+#: period, each row joined with its stop's coordinates. LEFT JOIN — an
+#: unknown stop or a stop without coordinates yields NULL lat/lon (the calc
+#: then fails loudly for the affected trip; a point is never guessed).
+#: Scoped to event trips: trips without events are missing under the p. 146
+#: rule regardless, so their geometry is never consumed. Deterministic
+#: ORDER BY (trip_id, stop_sequence — the PK — then stop_id).
+_SELECT_TRIP_GEOMETRY_SQL = (
+    "SELECT st.trip_id, st.stop_id, st.stop_sequence, "
+    "s.latitude, s.longitude, st.shape_dist_traveled "
+    "FROM canonical.stop_times AS st "
+    "LEFT JOIN canonical.stops AS s ON s.stop_id = st.stop_id "
+    "WHERE st.trip_id IN ("
+    "SELECT DISTINCT e.trip_id FROM canonical.passenger_events AS e "
+    "WHERE e.trip_id IS NOT NULL "
+    "AND e.event_timestamp >= %s AND e.event_timestamp < %s) "
+    "ORDER BY st.trip_id, st.stop_sequence, st.stop_id"
 )
 
 
@@ -177,6 +198,41 @@ def load_passenger_events(
             source=row[8],
             source_record_id=row[9],
             mode=row[10],
+        )
+        for row in cur.fetchall()
+    ]
+
+
+def load_trip_geometries(
+    conn,
+    period_start: date,
+    period_end: date,
+) -> list[StopTime]:
+    """Load the stop geometry of every trip with passenger events in the
+    half-open period [start, end) — pmt_v0's distance input (handoff 0011).
+
+    One StopTime per canonical.stop_times row of an event trip, joined with
+    its stop's coordinates (NULL lat/lon preserved as None — LEFT JOIN, see
+    the SQL comment); ``shape_dist_traveled`` NULL stays None (migration
+    0019: never fabricated). Deterministic order (trip_id, stop_sequence,
+    stop_id); the dataclass's own validation fails loudly on out-of-range
+    coordinates or a negative shape_dist. Refuses (ValueError) an empty or
+    inverted period.
+    """
+    _refuse_bad_period(period_start, period_end)
+    cur = conn.cursor()
+    cur.execute(
+        _SELECT_TRIP_GEOMETRY_SQL,
+        (_utc_midnight(period_start), _utc_midnight(period_end)),
+    )
+    return [
+        StopTime(
+            trip_id=row[0],
+            stop_id=row[1],
+            stop_sequence=row[2],
+            latitude=row[3],
+            longitude=row[4],
+            shape_dist_traveled=row[5],
         )
         for row in cur.fetchall()
     ]

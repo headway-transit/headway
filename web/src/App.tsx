@@ -20,6 +20,7 @@ import { MetricsView } from "./views/MetricsView";
 import { MonthlyReportView } from "./views/MonthlyReportView";
 import { PublicDataView } from "./views/PublicDataView";
 import { SafetyView } from "./views/SafetyView";
+import { SamplingView } from "./views/SamplingView";
 
 function RequireAuth() {
   const session = useSession();
@@ -68,6 +69,10 @@ export function AppRoutes() {
               recording/correcting is data_steward+ (UX only — the API
               enforces the role on every safety write). */}
           <Route path="/safety" element={<SafetyView />} />
+          {/* PMT sampling (handoff 0012): any signed-in role reads;
+              planning/drawing/measuring/estimating is data_steward+ (UX
+              only — the API enforces the role on every sampling write). */}
+          <Route path="/sampling" element={<SamplingView />} />
           <Route path="/dq" element={<DqView />} />
           {/* Role-gated in the UI (nav link + in-page notice); the API
               enforces certifying_official on POST /certifications. */}

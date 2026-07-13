@@ -35,6 +35,15 @@ preserved end to end; floating point never touches a figure).
 | GET | `/safety/events` | any signed-in role | Events with each one's LATEST classification; filters: `classification` (major/non_major/not_reportable), `month` (YYYY-MM, UTC half-open on `occurred_at`), `mode`. `property_damage_usd` is a string (exact NUMERIC). |
 | POST | `/safety/events/{id}/supersede` | `data_steward` or above | Append-only correction: the full corrected event is entered as a NEW row (classified like any entry), and the original gets its one permitted update — the `superseded_by` link (migration 0017 trigger enforces this). Requires a `reason` (audited). 404 unknown; 409 if already corrected. |
 | GET | `/safety/deadlines` | any signed-in role | Computed due dates, quote-cited: S&S-40 per open (unsuperseded) major event — `occurred_at` + 30 days (Exhibit 2, p. 4); S&S-50 per mode for the month (`?month=YYYY-MM`, default current UTC month) — due end of the following month (Exhibit 3), INCLUDING zero-event rows for every operated mode (derived like the handoff-0009 per-mode calc path). |
+| GET | `/sampling/options` | any signed-in role | The sampling plan wizard's vocabulary (modes, units per mode per Table 41.01, options, frequencies), the §41.01/§41.03 eligibility guidance strings, and the ≥3-year documentation-retention note (2026 manual p. 150). All from `headway_calc.sampling` constants. |
+| GET | `/sampling/requirements` | any signed-in role | One ready-to-use table cell, verbatim + cited (`mode`,`unit`,`efficiency_option`,`frequency`) — the wizard's live preview. Reads every encoded cell incl. the reference-only grouped-APTL columns. Plain-language 422 for combinations outside the tables. |
+| POST | `/sampling/plans` | `data_steward` or above | Create a sampling plan (handoff 0012; migration 0020). Required per-period + annual sizes come from the calc selector (sampling_v0) with its version recorded — this API never encodes a regulatory number. `aptl` and `base` only (grouped deferred, honest scope). Audited. |
+| GET | `/sampling/plans` (+ `/{id}`, `/{id}/draws`, `/{id}/measurements`) | any signed-in role | Plans (filter `report_year`, `mode`), a plan, its draws (seed, frame, selection all recorded), its measurements (`observed_pmt` a string; `include_superseded=true` for full history). |
+| POST | `/sampling/plans/{id}/draws` | `data_steward` or above | One random-selection act per period at the plan's frequency: caller supplies the period's full expected service-unit list (§63.07); the seeded calc drawer selects WITHOUT replacement (§63.03); seed recorded (generated via CSPRNG when not supplied). Optional random `oversample_units`, flagged with the p. 149 citation. 409 for a repeated period; 422 for reused unit ids across periods, duplicate ids, or an undersized frame. Audited. |
+| POST | `/sampling/plans/{id}/measurements` | `data_steward` or above | Manual ride-check entry for ONE drawn unit (observed UPT, PMT; optional Weekday/Saturday/Sunday label + service date). Refuses units outside the drawn sample (hand-picked extras are not random sampling). 409 if the unit already has an active observation — corrections supersede. Audited. |
+| POST | `/sampling/measurements/{id}/supersede` | `data_steward` or above | Append-only correction (the migration-0017 pattern): corrected observation entered as a NEW row, original gets its one permitted `superseded_by` update (link-then-insert under the one-active-per-unit index; deferrable FK). Requires a `reason` (audited). |
+| GET | `/sampling/plans/{id}/progress` | any signed-in role | Measured vs required, per draw and overall, with the drawn-but-unmeasured worksheet, the undersampling citation (p. 149: follow the technique exactly), and the retention note. |
+| POST | `/sampling/plans/{id}/estimate` | `report_preparer` or above | The §83 APTL estimate over the plan's active measurements: sample APTL = ratio of totals (the §83.05(b)-banned average-of-ratios is unconstructible in the calc API), estimated PMT = caller-supplied 100% UPT × APTL, optional by-service-day breakdown. REFUSES undersampled plans (with the citation) and Base-option plans (Section 70 deferred). Result is a provenance-labeled SAMPLED ESTIMATE — `computed.metric_values` is never written. Audited. |
 | POST | `/branding/logo` | `certifying_official` | Upload the agency logo (multipart): SVG or PNG only (415 otherwise), ≤ 512 KiB (413 above), stored to the object store at `branding/logo`, content type recorded in `app.settings.brand_logo_meta`. Audited. |
 | GET | `/branding/logo` | **none — public** | The agency logo bytes with the stored content type, `Cache-Control: public, max-age=300`, `nosniff` (+ script-blocking CSP for SVG). Plain-language 404 while no logo is uploaded. Rate-limited per client IP. |
 | GET | `/branding` | **none — public** | `{display_name, primary, accent, has_logo}` for the app shell — colors already passed the contrast guardrail at write time. Rate-limited per client IP. |
@@ -354,7 +363,27 @@ python3 -m pytest tests/ -q
 
 ## Verification status
 
-- `pytest tests/ -q`: **154 passed** (2026-07-12, Python 3.12, this repo) —
+- `pytest tests/ -q`: **179 passed** (2026-07-12, Python 3.12, this repo) —
+  the pre-0012 suite unchanged plus 25 sampling tests (handoff 0012):
+  wizard options/requirements lookups (verbatim cells + citations), plan
+  creation with selector-recorded sizes and the grouped-option refusal,
+  seeded reproducible draws (explicit-seed determinism, oversample flagged
+  random, repeated-period 409, reused-unit-id/duplicate/undersized-frame
+  422s), measurement entry limited to drawn units with supersede
+  corrections (same-unit rule, double-correction 409, honest FakeConn model
+  of the one-active-per-unit unique index), progress with the worksheet,
+  and the §83 estimate (undersampling refusal with citation, Base-option
+  refusal, hand-computed ratio-of-totals figures, provenance label,
+  by-service-day variant, `computed.metric_values` untouched). LIVE
+  (2026-07-12): migration 0020 applied + psql-verified (append-only proven
+  by attack on all three tables); the full walkthrough (create plan → 4
+  quarterly draws → 50 measurements incl. one supersede → progress →
+  estimate) ran through the running API with rows confirmed from a
+  separate psql connection — and the live run caught a real supersede
+  ordering bug the unit fake had masked (fixed: deferrable FK,
+  link-then-insert; the fake now models the unique index honestly).
+  Evidence in handoff 0012, "Outputs — backend evidence".
+- Earlier record — `pytest tests/ -q`: **154 passed** (2026-07-12, Python 3.12, this repo) —
   the pre-0010 suite unchanged plus 18 Safety & Security tests (handoff
   0010 + the addendum correction round): role denials, synchronous
   classification (sscls_v0 0.1.1) with citation-bearing explanations,

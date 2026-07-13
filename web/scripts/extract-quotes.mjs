@@ -57,6 +57,18 @@ function calcNamesForHeading(heading) {
   if (heading.startsWith("Verified — Monthly Ridership form MR-20")) {
     return ["voms_v0"];
   }
+  // The PMT section backs pmt_v0 (handoff 0011): the p. 145 definition, the
+  // p. 146 missing-trip rule, the pp. 151-152 validity/discard discipline
+  // and the Exhibit 44 average-trip-length method its estimator implements.
+  if (heading.startsWith("Verified — Passenger Miles Traveled")) {
+    return ["pmt_v0"];
+  }
+  // The NTD Sampling Manual section backs sampling_v0 (handoff 0012): the
+  // §41.01 eligibility quote, the §63.03 random/without-replacement rules,
+  // and the §83.05(b) ratio-of-totals ban the /sampling UI's receipts show.
+  if (heading.startsWith("Verified — NTD Sampling Manual")) {
+    return ["sampling_v0"];
+  }
   return null;
 }
 
@@ -87,7 +99,9 @@ function isQuoteSection(line) {
   return (
     line.startsWith("## Verified definitions") ||
     line.startsWith("## Verified — Safety & Security reporting") ||
-    line.startsWith("## Verified — Monthly Ridership form MR-20")
+    line.startsWith("## Verified — Monthly Ridership form MR-20") ||
+    line.startsWith("## Verified — Passenger Miles Traveled") ||
+    line.startsWith("## Verified — NTD Sampling Manual")
   );
 }
 const sections = [];
@@ -143,11 +157,16 @@ for (const section of sections) {
   const entries = [];
   for (const bullet of bullets) {
     if (bullet === null) continue;
-    // Two labeled-bullet shapes exist in the tracker:
+    // Three labeled-bullet shapes exist in the tracker:
     //   **Label** (page reference): …quotes…        (Verified definitions)
+    //   **Label(sub-refs) (p. N), note:** …         (implementation quotes —
+    //     the label may carry parenthesized sub-refs like "§83.01(a)/(b)",
+    //     so a "(p. N)"/"(pp. N)" group inside the bold head is preferred
+    //     as the page reference over the first parenthesized group)
     //   **Label (page reference)[ — trailing note]:** …   (S&S sections)
     const head =
       /^\*\*(.+?)\*\*\s*\(([^)]+)\)/.exec(bullet) ??
+      /^\*\*([^*]+?)\s*\((pp?\.\s?[^()]+)\)[^*]*\*\*/.exec(bullet) ??
       /^\*\*(.+?)\s*\(([^()]+)\)[^*]*\*\*/.exec(bullet);
     if (!head) continue; // not a labeled quote bullet
     const label = head[1];

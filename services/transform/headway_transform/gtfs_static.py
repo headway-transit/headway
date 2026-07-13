@@ -1,9 +1,25 @@
-"""Minimal GTFS static loader: routes.txt + trips.txt -> canonical.routes/trips.
+"""Minimal GTFS static loader: routes.txt + trips.txt + stops.txt +
+stop_times.txt -> canonical.routes/trips/stops/stop_times.
 
-Parses a GTFS static zip (stdlib zipfile + csv) into CanonicalRoute and
-CanonicalTrip dataclasses per handoff 0001, with one LineageEdge per row back
-to the static feed's content-addressed record_id, and a DQFinding for every
-row or file that could not be normalized — never a silent skip.
+Parses a GTFS static zip (stdlib zipfile + csv) into CanonicalRoute,
+CanonicalTrip, CanonicalStop and CanonicalStopTime dataclasses per handoffs
+0001 and 0011, with one LineageEdge per row back to the static feed's
+content-addressed record_id, and a DQFinding for every row or file that
+could not be normalized — never a silent skip.
+
+Stop geometry rules (handoff 0011, binding — PMT per-segment distances):
+
+- ``shape_dist_traveled`` is NULLABLE and preserved as-is: a feed that omits
+  the optional column (e.g. MBTA) stays NULL; a distance is NEVER fabricated
+  here (pmt_v0 falls back to flagged stop-to-stop haversine).
+- stop coordinates are nullable: the GTFS Schedule Reference (stops.txt,
+  gtfs.org, verified 2026-07-12) requires them only for location_type 0/1/2;
+  generic nodes (3) and boarding areas (4) may omit them. A coordinate
+  missing where the spec requires one is a warning DQFinding, stored NULL —
+  never a guessed point.
+- GTFS times may exceed 24:00:00 (service past midnight): parsed to integer
+  seconds ("noon minus 12 h" convention); empty times are valid GTFS on
+  non-timepoint rows -> NULL, no finding; malformed times -> NULL + warning.
 """
 
 from __future__ import annotations
@@ -21,13 +37,16 @@ from .model import (
 )
 
 TRANSFORM_NAME = "normalize_gtfs_static"
-# 0.2.0: parses trips.txt block_id (handoff 0003, block-aware VRH). New
-# version so lineage edges distinguish rows normalized with block_id support.
-TRANSFORM_VERSION = "0.2.0"
+# 0.2.0: parses trips.txt block_id (handoff 0003, block-aware VRH).
+# 0.3.0: parses stops.txt + stop_times.txt (handoff 0011, PMT geometry). New
+# version so lineage edges distinguish rows normalized with stop support.
+TRANSFORM_VERSION = "0.3.0"
 
 INPUT_KIND = "raw.records"
 ROUTES_OUTPUT_KIND = "canonical.routes"
 TRIPS_OUTPUT_KIND = "canonical.trips"
+STOPS_OUTPUT_KIND = "canonical.stops"
+STOP_TIMES_OUTPUT_KIND = "canonical.stop_times"
 
 # GTFS route_type -> canonical text mode.
 # Source: GTFS Schedule Reference, routes.txt route_type enum, gtfs.org
@@ -72,6 +91,28 @@ class CanonicalTrip:
     block_id: str | None = None  # TEXT (migration 0011; optional per GTFS)
 
 
+@dataclass(frozen=True)
+class CanonicalStop:
+    """One canonical.stops row (handoff 0011 / migration 0019)."""
+
+    stop_id: str  # TEXT PRIMARY KEY
+    name: str | None  # TEXT
+    latitude: float | None  # DOUBLE PRECISION (nullable — see module doc)
+    longitude: float | None  # DOUBLE PRECISION (nullable)
+
+
+@dataclass(frozen=True)
+class CanonicalStopTime:
+    """One canonical.stop_times row (handoff 0011 / migration 0019)."""
+
+    trip_id: str  # TEXT NOT NULL
+    stop_id: str  # TEXT NOT NULL
+    stop_sequence: int  # INTEGER NOT NULL; PK (trip_id, stop_sequence)
+    arrival_seconds: int | None  # INTEGER (GTFS HH:MM:SS, may exceed 24 h)
+    departure_seconds: int | None  # INTEGER
+    shape_dist_traveled: float | None  # DOUBLE PRECISION — NULL preserved
+
+
 def _read_csv(zf: zipfile.ZipFile, name: str) -> list[dict[str, str]]:
     with zf.open(name) as fh:
         # utf-8-sig: GTFS files commonly carry a BOM.
@@ -79,17 +120,48 @@ def _read_csv(zf: zipfile.ZipFile, name: str) -> list[dict[str, str]]:
         return list(csv.DictReader(text))
 
 
+def _parse_gtfs_time(raw: str) -> int:
+    """GTFS H:MM:SS / HH:MM:SS -> seconds after "noon minus 12 h".
+
+    Hours may exceed 23 (service past midnight is e.g. 25:30:00 per the GTFS
+    Schedule Reference). Raises ValueError on anything else — the caller
+    quarantines, never guesses.
+    """
+    parts = raw.split(":")
+    if len(parts) != 3:
+        raise ValueError(f"not an H:MM:SS time: {raw!r}")
+    hours, minutes, seconds = (int(p) for p in parts)
+    if hours < 0 or not (0 <= minutes <= 59) or not (0 <= seconds <= 59):
+        raise ValueError(f"out-of-range H:MM:SS time: {raw!r}")
+    return hours * 3600 + minutes * 60 + seconds
+
+
+#: GTFS location_type values whose coordinates are REQUIRED by the spec
+#: (stops.txt, gtfs.org: required for 0/empty, 1, 2; optional for 3, 4).
+_COORD_REQUIRED_LOCATION_TYPES = ("", "0", "1", "2")
+
+
 def normalize(
     zip_bytes: bytes, record_id: str
-) -> tuple[list[CanonicalRoute], list[CanonicalTrip], list[LineageEdge], list[DQFinding]]:
-    """Normalize a GTFS static zip's routes.txt and trips.txt.
+) -> tuple[
+    list[CanonicalRoute],
+    list[CanonicalTrip],
+    list[CanonicalStop],
+    list[CanonicalStopTime],
+    list[LineageEdge],
+    list[DQFinding],
+]:
+    """Normalize a GTFS static zip's routes.txt, trips.txt, stops.txt and
+    stop_times.txt.
 
-    Returns (routes, trips, lineage_edges, dq_findings). Every emitted row
-    has exactly one lineage edge (input = the feed's record_id); every file
-    or row that cannot be normalized is a DQFinding.
+    Returns (routes, trips, stops, stop_times, lineage_edges, dq_findings).
+    Every emitted row has exactly one lineage edge (input = the feed's
+    record_id); every file or row that cannot be normalized is a DQFinding.
     """
     routes: list[CanonicalRoute] = []
     trips: list[CanonicalTrip] = []
+    stops: list[CanonicalStop] = []
+    stop_times: list[CanonicalStopTime] = []
     edges: list[LineageEdge] = []
     findings: list[DQFinding] = []
 
@@ -108,7 +180,7 @@ def normalize(
                 source_record_ids=[record_id],
             )
         )
-        return routes, trips, edges, findings
+        return routes, trips, stops, stop_times, edges, findings
 
     with zf:
         names = set(zf.namelist())
@@ -282,4 +354,246 @@ def normalize(
                 trips.append(trip)
                 edges.append(_edge(TRIPS_OUTPUT_KIND, trip.trip_id))
 
-    return routes, trips, edges, findings
+        # --- stops.txt (handoff 0011 — PMT geometry) ----------------------
+        if "stops.txt" not in names:
+            findings.append(
+                DQFinding(
+                    issue_type="malformed_entity",
+                    severity=SEVERITY_BLOCKING,
+                    title="GTFS static feed is missing stops.txt",
+                    description=(
+                        f"Record {record_id}: stops.txt (required by the "
+                        "GTFS Schedule spec, gtfs.org, for fixed-route "
+                        "feeds) is absent; no stops normalized — PMT "
+                        "distances cannot be derived from this feed."
+                    ),
+                    source_record_ids=[record_id],
+                )
+            )
+        else:
+            for index, row in enumerate(_read_csv(zf, "stops.txt")):
+                stop_id = (row.get("stop_id") or "").strip()
+                if not stop_id:
+                    findings.append(
+                        DQFinding(
+                            issue_type="malformed_entity",
+                            severity=SEVERITY_WARNING,
+                            title="stops.txt row has no stop_id",
+                            description=(
+                                f"Record {record_id}, stops.txt row {index}: "
+                                "stop_id is missing/empty; row quarantined, "
+                                "not dropped silently."
+                            ),
+                            source_record_ids=[record_id],
+                        )
+                    )
+                    continue
+
+                location_type = (row.get("location_type") or "").strip()
+                coords: dict[str, float | None] = {}
+                for field, lo, hi in (
+                    ("stop_lat", -90.0, 90.0),
+                    ("stop_lon", -180.0, 180.0),
+                ):
+                    raw = (row.get(field) or "").strip()
+                    value: float | None
+                    if not raw:
+                        value = None
+                        # Coordinates are REQUIRED for location_type 0/1/2
+                        # (GTFS Schedule Reference, stops.txt) — an absence
+                        # there is a defect; nodes (3) / boarding areas (4)
+                        # legitimately omit them (no finding).
+                        if location_type in _COORD_REQUIRED_LOCATION_TYPES:
+                            findings.append(
+                                DQFinding(
+                                    issue_type="stop_missing_coordinates",
+                                    severity=SEVERITY_WARNING,
+                                    title=(
+                                        f"stops.txt stop {stop_id!r} is "
+                                        f"missing {field}"
+                                    ),
+                                    description=(
+                                        f"Record {record_id}, stop "
+                                        f"{stop_id!r} (location_type "
+                                        f"{location_type or '0 (default)'}): "
+                                        f"{field} is empty though the GTFS "
+                                        "Schedule spec requires coordinates "
+                                        "for this location_type. Stored "
+                                        "NULL — a coordinate is never "
+                                        "guessed; distance calculations "
+                                        "needing this stop fail loudly."
+                                    ),
+                                    source_record_ids=[record_id],
+                                )
+                            )
+                    else:
+                        try:
+                            value = float(raw)
+                        except ValueError:
+                            value = None
+                        if value is not None and not (lo <= value <= hi):
+                            value = None
+                        if value is None:
+                            findings.append(
+                                DQFinding(
+                                    issue_type="malformed_entity",
+                                    severity=SEVERITY_WARNING,
+                                    title=(
+                                        f"stops.txt stop {stop_id!r} has an "
+                                        f"unusable {field}"
+                                    ),
+                                    description=(
+                                        f"Record {record_id}, stop "
+                                        f"{stop_id!r}: {field} {raw!r} is "
+                                        f"not a number in [{lo}, {hi}]. "
+                                        "Stored NULL and flagged — never "
+                                        "coerced to a guess."
+                                    ),
+                                    source_record_ids=[record_id],
+                                )
+                            )
+                    coords[field] = value
+
+                stop = CanonicalStop(
+                    stop_id=stop_id,
+                    name=(row.get("stop_name") or "").strip() or None,
+                    latitude=coords["stop_lat"],
+                    longitude=coords["stop_lon"],
+                )
+                stops.append(stop)
+                edges.append(_edge(STOPS_OUTPUT_KIND, stop.stop_id))
+
+        # --- stop_times.txt (handoff 0011 — PMT geometry) -----------------
+        if "stop_times.txt" not in names:
+            findings.append(
+                DQFinding(
+                    issue_type="malformed_entity",
+                    severity=SEVERITY_BLOCKING,
+                    title="GTFS static feed is missing stop_times.txt",
+                    description=(
+                        f"Record {record_id}: stop_times.txt (required by "
+                        "the GTFS Schedule spec, gtfs.org) is absent; no "
+                        "stop times normalized — PMT per-segment distances "
+                        "cannot be derived from this feed."
+                    ),
+                    source_record_ids=[record_id],
+                )
+            )
+        else:
+            for index, row in enumerate(_read_csv(zf, "stop_times.txt")):
+                trip_id = (row.get("trip_id") or "").strip()
+                stop_id = (row.get("stop_id") or "").strip()
+                raw_sequence = (row.get("stop_sequence") or "").strip()
+                sequence: int | None
+                try:
+                    sequence = int(raw_sequence) if raw_sequence else None
+                except ValueError:
+                    sequence = None
+                if sequence is not None and sequence < 0:
+                    sequence = None  # non-negative per the GTFS spec
+                if not trip_id or not stop_id or sequence is None:
+                    findings.append(
+                        DQFinding(
+                            issue_type="malformed_entity",
+                            severity=SEVERITY_WARNING,
+                            title=(
+                                "stop_times.txt row is missing required "
+                                "fields"
+                            ),
+                            description=(
+                                f"Record {record_id}, stop_times.txt row "
+                                f"{index}: trip_id={trip_id!r}, stop_id="
+                                f"{stop_id!r}, stop_sequence="
+                                f"{raw_sequence!r} — a required identity "
+                                "field is missing or not a non-negative "
+                                "integer; row quarantined, not dropped "
+                                "silently."
+                            ),
+                            source_record_ids=[record_id],
+                        )
+                    )
+                    continue
+
+                times: dict[str, int | None] = {}
+                for field in ("arrival_time", "departure_time"):
+                    raw = (row.get(field) or "").strip()
+                    if not raw:
+                        # Valid GTFS on non-timepoint rows: NULL, no finding
+                        # (never interpolated).
+                        times[field] = None
+                        continue
+                    try:
+                        times[field] = _parse_gtfs_time(raw)
+                    except ValueError:
+                        times[field] = None
+                        findings.append(
+                            DQFinding(
+                                issue_type="malformed_entity",
+                                severity=SEVERITY_WARNING,
+                                title=(
+                                    f"stop_times.txt trip {trip_id!r} seq "
+                                    f"{sequence} has an unusable {field}"
+                                ),
+                                description=(
+                                    f"Record {record_id}, trip {trip_id!r} "
+                                    f"stop_sequence {sequence}: {field} "
+                                    f"{raw!r} is not a GTFS H:MM:SS time. "
+                                    "Stored NULL and flagged — never "
+                                    "coerced to a guess."
+                                ),
+                                source_record_ids=[record_id],
+                            )
+                        )
+
+                # shape_dist_traveled: OPTIONAL per the GTFS Schedule
+                # Reference — absent column or empty value is valid GTFS →
+                # NULL, NO finding (handoff 0011: preserve NULL, never
+                # fabricate). A present but unusable value is a defect.
+                raw_sdt = (row.get("shape_dist_traveled") or "").strip()
+                sdt: float | None = None
+                if raw_sdt:
+                    try:
+                        sdt = float(raw_sdt)
+                    except ValueError:
+                        sdt = None
+                    if sdt is not None and not (sdt >= 0.0):
+                        sdt = None  # negative or NaN: non-negative per spec
+                    if sdt is None:
+                        findings.append(
+                            DQFinding(
+                                issue_type="malformed_entity",
+                                severity=SEVERITY_WARNING,
+                                title=(
+                                    f"stop_times.txt trip {trip_id!r} seq "
+                                    f"{sequence} has an unusable "
+                                    "shape_dist_traveled"
+                                ),
+                                description=(
+                                    f"Record {record_id}, trip {trip_id!r} "
+                                    f"stop_sequence {sequence}: "
+                                    f"shape_dist_traveled {raw_sdt!r} is "
+                                    "not a non-negative number. Stored "
+                                    "NULL and flagged — a distance is "
+                                    "never fabricated."
+                                ),
+                                source_record_ids=[record_id],
+                            )
+                        )
+
+                stop_time = CanonicalStopTime(
+                    trip_id=trip_id,
+                    stop_id=stop_id,
+                    stop_sequence=sequence,
+                    arrival_seconds=times["arrival_time"],
+                    departure_seconds=times["departure_time"],
+                    shape_dist_traveled=sdt,
+                )
+                stop_times.append(stop_time)
+                edges.append(
+                    _edge(
+                        STOP_TIMES_OUTPUT_KIND,
+                        f"{trip_id}:{sequence}",
+                    )
+                )
+
+    return routes, trips, stops, stop_times, edges, findings

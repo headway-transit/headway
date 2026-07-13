@@ -25,7 +25,7 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="python -m headway_calc.runner",
         description=(
-            "Run vrm_v0/vrh_v0/upt_v0 over one half-open period "
+            "Run vrm_v0/vrh_v0/upt_v0/pmt_v0 over one half-open period "
             "[period-start, period-end) (UTC) against the database named by "
             "HEADWAY_DATABASE_URL, and print the RunReport as JSON."
         ),

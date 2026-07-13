@@ -78,6 +78,25 @@ cd services/transform && python3 -m pytest tests/ -q
 
 ## Verification status
 
+- **2026-07-12 (handoff 0011 — GTFS stop geometry):** `python3 -m pytest
+  tests/ -q` → **58 passed** (49 pre-0011 green with the widened
+  `normalize` signature, plus 9 new: stops/stop_times normalization with
+  one edge per row at transform version 0.3.0; nullable node coordinates
+  with NO finding vs missing REQUIRED coordinates → warning + NULL, never a
+  guess; GTFS >24:00:00 times parsed, empty times NULL with no finding,
+  malformed times/negative shape_dist warned; absent `shape_dist_traveled`
+  → NULL preserved, present values parsed; row-by-row quarantine of
+  malformed stop_times identities; writer upsert SQL/params incl. NULL
+  binds; consumer wiring). **Live-verified the same day** against the
+  already-ingested MBTA static feed (record `48dc4271…`, fetched from
+  MinIO, replayed through `normalize` + `DbWriter` with the consumer's
+  one-commit boundary): **403 routes / 112,578 trips / 10,309 stops /
+  3,077,103 stop_times normalized, 3,200,393 lineage edges at 0.3.0, 0 DQ
+  findings**; counts and spot-checked rows (GTFS `10:40:00` → 38400 s; 691
+  coordinate-less generic nodes stored NULL; zero fabricated shape_dist
+  values on a feed that omits the column) verified from a separate psql
+  connection — evidence in handoff 0011, "Outputs — evidence".
+
 - `python3 -m pytest tests/ -q` → **49 passed in 0.22s** (2026-07-10,
   Python 3.12.3, venv `/home/daniel/venv`). Covers: envelope contract
   validation (valid/invalid/extra-property/bad-version); real FeedMessage

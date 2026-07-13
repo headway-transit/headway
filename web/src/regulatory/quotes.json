@@ -1,4 +1,160 @@
 {
+  "pmt_v0": [
+    {
+      "quote": "Passenger Miles Traveled (PMT) is the sum of the distances each passenger traveled during the year.",
+      "citation": "Definition — 2026 NTD Full Reporting Policy Manual, p. 145"
+    },
+    {
+      "quote": "Transit agencies must report PMT only once under FB, because the other public or private vehicle is not moving under its own power while aboard the ferry service.",
+      "citation": "Definition — 2026 NTD Full Reporting Policy Manual, p. 145"
+    },
+    {
+      "quote": "Only Full Reporters report PMT data to the NTD.",
+      "citation": "Who reports — 2026 NTD Full Reporting Policy Manual, pp. 145, 149"
+    },
+    {
+      "quote": "a reasonable approach for estimating PMT.",
+      "citation": "Who reports — 2026 NTD Full Reporting Policy Manual, pp. 145, 149"
+    },
+    {
+      "quote": "if the actual 100 percent data are ... reliably collected and routinely processed.",
+      "citation": "100% counts — 2026 NTD Full Reporting Policy Manual, p. 146"
+    },
+    {
+      "quote": "2 percent or less of the total, transit agencies should factor up the data",
+      "citation": "100% counts — 2026 NTD Full Reporting Policy Manual, p. 146"
+    },
+    {
+      "quote": "if the vehicle trips with missing data exceed 2 percent of total trips, agencies must have a qualified statistician approve the factoring method.",
+      "citation": "100% counts — 2026 NTD Full Reporting Policy Manual, p. 146"
+    },
+    {
+      "quote": "Minimum confidence of 95 percent; and Minimum precision level of ±10 percent,",
+      "citation": "Estimation floor — 2026 NTD Full Reporting Policy Manual, p. 149"
+    },
+    {
+      "quote": "If a transit agency samples, they must follow the sampling technique exactly",
+      "citation": "Estimation floor — 2026 NTD Full Reporting Policy Manual, p. 149"
+    },
+    {
+      "quote": "The next benchmarking year is Report Year (RY) 2028",
+      "citation": "APC certification — 2026 NTD Full Reporting Policy Manual, pp. 146–149"
+    },
+    {
+      "quote": "the percent difference between manual and APC data in the sample, for both UPT and PMT, is less than 5 percent. The percent difference is calculated as (manual data − APC data) ∕ manual data",
+      "citation": "APC certification — 2026 NTD Full Reporting Policy Manual, pp. 146–149"
+    },
+    {
+      "quote": "less than 50 percent of the number of trips on APC-equipped vehicles",
+      "citation": "APC certification — 2026 NTD Full Reporting Policy Manual, pp. 146–149"
+    },
+    {
+      "quote": "Do not reject APC data from the sample due to discrepancies with the manual data.",
+      "citation": "APC certification — 2026 NTD Full Reporting Policy Manual, pp. 146–149"
+    },
+    {
+      "quote": "trips or blocks where the difference between boardings and alightings is greater than 10 percent, or trips where the passenger load drops below zero",
+      "citation": "APC scale-up method — 2026 NTD Full Reporting Policy Manual, pp. 151–152"
+    },
+    {
+      "quote": "If a group had no trips with valid data, use the average UPT and PMT from a similar group",
+      "citation": "APC scale-up method — 2026 NTD Full Reporting Policy Manual, pp. 151–152"
+    },
+    {
+      "quote": "Used all available APC data, which was less than 98 percent of trips, scaled up using a statistically valid method.",
+      "citation": "APC scale-up method — 2026 NTD Full Reporting Policy Manual, pp. 151–152"
+    },
+    {
+      "quote": "This year (FY 2026) is a mandatory sampling year. The next mandatory sampling year is FY 2029.",
+      "citation": "Sampling cycles — 2026 NTD Full Reporting Policy Manual, Exhibit 43, p. 153"
+    },
+    {
+      "quote": "estimate PMT data in a non-sampling year by multiplying the average trip length from the most recent mandatory year by the UPT for the current year,",
+      "citation": "Average-trip-length method — 2026 NTD Full Reporting Policy Manual, pp. 154–155, Exhibit 44"
+    },
+    {
+      "quote": "Verified — NTD Sampling Manual",
+      "citation": "NTD Sampling Manual — 2026 NTD Full Reporting Policy Manual, p. 150"
+    }
+  ],
+  "sampling_v0": [
+    {
+      "quote": "you have reported ... through random sampling, but no longer have the original raw sample data.",
+      "citation": "Ready-to-use plans — eligibility — FTA NTD Sampling Manual, March 31, 2009, §41.01"
+    },
+    {
+      "quote": "sampling under the method is random",
+      "citation": "Random selection — FTA NTD Sampling Manual, March 31, 2009, §63.03"
+    },
+    {
+      "quote": "without replacement.",
+      "citation": "Random selection — FTA NTD Sampling Manual, March 31, 2009, §63.03"
+    },
+    {
+      "quote": "You must not determine the sample APTL as the average of the APTL across individual service units in the sample",
+      "citation": "Estimation with 100% UPT — FTA NTD Sampling Manual, March 31, 2009, §81"
+    },
+    {
+      "quote": "major changes to my service",
+      "citation": "Template plans — FTA NTD Sampling Manual, March 31, 2009, Sections 50, 55–57"
+    },
+    {
+      "quote": "Vehicle days",
+      "citation": "Table 41.01 — FTA NTD Sampling Manual, March 31, 2009, p. 4"
+    },
+    {
+      "quote": "Vehicle days",
+      "citation": "Table 41.01 — FTA NTD Sampling Manual, March 31, 2009, p. 4"
+    },
+    {
+      "quote": "One-way trips, round trips",
+      "citation": "Table 41.01 — FTA NTD Sampling Manual, March 31, 2009, p. 4"
+    },
+    {
+      "quote": "One-way car trips",
+      "citation": "Table 41.01 — FTA NTD Sampling Manual, March 31, 2009, p. 4"
+    },
+    {
+      "quote": "One-way car trips, one-way train trips",
+      "citation": "Table 41.01 — FTA NTD Sampling Manual, March 31, 2009, p. 4"
+    },
+    {
+      "quote": "(a) New Mode – If you will be sampling and reporting for the first time this current report year for a particular mode that you do not already operate. … (b) New Type of Service – If you will be sampling and reporting this current report year for a particular type of service for the first time. … (c) No Sample Data – If you have reported your service to the NTD before through random sampling, but no longer have the original raw sample data.",
+      "citation": "§41.01 — FTA NTD Sampling Manual, March 31, 2009, p. 3"
+    },
+    {
+      "quote": "(a) You should not use it again if your next report year is your mandatory sampling year. After you have collected the sample data from this year, you should develop a template sampling plan with that sample data for your next report year. (b) You may use it again for the next report year if that year is not a mandatory sampling year.",
+      "citation": "§41.03 — FTA NTD Sampling Manual, March 31, 2009, p. 3"
+    },
+    {
+      "quote": "You should not use the ready-to-use sampling plans for commuter vanpool if your vanpool service does not serve commuters exclusively.",
+      "citation": "§41.05(a) — FTA NTD Sampling Manual, March 31, 2009, p. 3"
+    },
+    {
+      "quote": "(1) Base Option – you must estimate both UPT and PMT through random sampling. (2) APTL Option – you must report a 100% count of UPT, estimate the average passenger trip length (APTL) through random sampling, and obtain annual PMT by multiplying the 100% UPT with the estimated APTL. (3) Grouping Option – you must divide your bus routes into two groups by route length.",
+      "citation": "§41.07(c) — FTA NTD Sampling Manual, March 31, 2009, p. 4"
+    },
+    {
+      "quote": "(a) You may use the commonly used method based on a table of random numbers. (b) You may use any other method for random sampling as long as it meets these two criteria: (1) sampling under the method is random. (2) sampling under the method is without replacement. Without replacement means that the method will not select the same service unit more than once.",
+      "citation": "§63.03 — FTA NTD Sampling Manual, March 31, 2009, p. 19"
+    },
+    {
+      "quote": "any other method",
+      "citation": "§63.03 — FTA NTD Sampling Manual, March 31, 2009, p. 19"
+    },
+    {
+      "quote": "(a) You must determine the sample APTL for a given sample as the ratio of sample total PMT over sample total UPT for the following cases: (1) for the entire sample, (2) by type of service days, or (3) by service group. (b) You must not determine the sample APTL as the average of the APTL across individual service units in the sample.",
+      "citation": "§83.05 — FTA NTD Sampling Manual, March 31, 2009, p. 42"
+    },
+    {
+      "quote": "(a) You must use your 100% count of UPT as the expansion factor. (b) For estimating average daily PMT by type of service days, use your annual total 100% count of UPT by type of service days.",
+      "citation": "§83.01(a)/(b) — FTA NTD Sampling Manual, March 31, 2009, p. 42"
+    },
+    {
+      "quote": "If your sampling plan is not based on service grouping, you should multiply your sample APTL for the entire annual sample with your corresponding annual expansion factor (i.e., 100% count of annual UPT) to get an estimate of the annual total PMT.",
+      "citation": "§83.07(a) — FTA NTD Sampling Manual, March 31, 2009, p. 43"
+    }
+  ],
   "sscls_v0": [
     {
       "quote": "CR and AR modes must only report non-major assaults on a transit worker",

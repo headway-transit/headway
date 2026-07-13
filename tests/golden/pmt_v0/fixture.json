@@ -1,0 +1,2495 @@
+{
+  "shape_case": {
+    "shape_dist_unit_miles": "1",
+    "operated_trip_ids": [
+      "trip-A",
+      "trip-B"
+    ],
+    "stop_times": [
+      {
+        "trip_id": "trip-A",
+        "stop_id": "SA1",
+        "stop_sequence": 1,
+        "latitude": 42.0,
+        "longitude": -71.0,
+        "shape_dist_traveled": 0.0
+      },
+      {
+        "trip_id": "trip-A",
+        "stop_id": "SA2",
+        "stop_sequence": 2,
+        "latitude": 43.0,
+        "longitude": -71.0,
+        "shape_dist_traveled": 1.0
+      },
+      {
+        "trip_id": "trip-A",
+        "stop_id": "SA3",
+        "stop_sequence": 3,
+        "latitude": 44.0,
+        "longitude": -71.0,
+        "shape_dist_traveled": 2.5
+      },
+      {
+        "trip_id": "trip-A",
+        "stop_id": "SA4",
+        "stop_sequence": 4,
+        "latitude": 45.0,
+        "longitude": -71.0,
+        "shape_dist_traveled": 4.0
+      },
+      {
+        "trip_id": "trip-B",
+        "stop_id": "SB1",
+        "stop_sequence": 1,
+        "latitude": 42.0,
+        "longitude": -70.0,
+        "shape_dist_traveled": 0.0
+      },
+      {
+        "trip_id": "trip-B",
+        "stop_id": "SB2",
+        "stop_sequence": 2,
+        "latitude": 43.0,
+        "longitude": -70.0,
+        "shape_dist_traveled": 2.0
+      },
+      {
+        "trip_id": "trip-B",
+        "stop_id": "SB3",
+        "stop_sequence": 3,
+        "latitude": 44.0,
+        "longitude": -70.0,
+        "shape_dist_traveled": 3.0
+      }
+    ],
+    "events": [
+      {
+        "event_timestamp": "2026-06-01T12:00:00+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-a-1",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-A",
+        "trip_stop_sequence": 1,
+        "event_type": "Passenger boarded",
+        "event_count": 5,
+        "source": "tides",
+        "source_record_id": "rec-a-1"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:01:00+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-a-2",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-A",
+        "trip_stop_sequence": 2,
+        "event_type": "Passenger boarded",
+        "event_count": 3,
+        "source": "tides",
+        "source_record_id": "rec-a-2"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:01:30+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-a-3",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-A",
+        "trip_stop_sequence": 2,
+        "event_type": "Passenger alighted",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-a-3"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:02:00+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-a-4",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-A",
+        "trip_stop_sequence": 3,
+        "event_type": "Passenger alighted",
+        "event_count": 3,
+        "source": "tides",
+        "source_record_id": "rec-a-4"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:03:00+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-a-5",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-A",
+        "trip_stop_sequence": 4,
+        "event_type": "Passenger alighted",
+        "event_count": 3,
+        "source": "tides",
+        "source_record_id": "rec-a-5"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:04:00+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-b-1",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-B",
+        "trip_stop_sequence": 1,
+        "event_type": "Passenger boarded",
+        "event_count": 4,
+        "source": "tides",
+        "source_record_id": "rec-b-1"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:05:00+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-b-2",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-B",
+        "trip_stop_sequence": 2,
+        "event_type": "Passenger alighted",
+        "event_count": 1,
+        "source": "tides",
+        "source_record_id": "rec-b-2"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:06:00+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-b-3",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-B",
+        "trip_stop_sequence": 3,
+        "event_type": "Passenger alighted",
+        "event_count": 3,
+        "source": "tides",
+        "source_record_id": "rec-b-3"
+      }
+    ]
+  },
+  "haversine_case": {
+    "shape_dist_unit_miles": null,
+    "operated_trip_ids": [
+      "trip-C"
+    ],
+    "stop_times": [
+      {
+        "trip_id": "trip-C",
+        "stop_id": "SC1",
+        "stop_sequence": 1,
+        "latitude": 42.0,
+        "longitude": -71.0,
+        "shape_dist_traveled": null
+      },
+      {
+        "trip_id": "trip-C",
+        "stop_id": "SC2",
+        "stop_sequence": 2,
+        "latitude": 42.01,
+        "longitude": -71.0,
+        "shape_dist_traveled": null
+      },
+      {
+        "trip_id": "trip-C",
+        "stop_id": "SC3",
+        "stop_sequence": 3,
+        "latitude": 42.03,
+        "longitude": -71.0,
+        "shape_dist_traveled": null
+      }
+    ],
+    "events": [
+      {
+        "event_timestamp": "2026-06-01T12:00:00+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-c-1",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-C",
+        "trip_stop_sequence": 1,
+        "event_type": "Passenger boarded",
+        "event_count": 2,
+        "source": "tides_simulated",
+        "source_record_id": "rec-c-1"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:01:00+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-c-2",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-C",
+        "trip_stop_sequence": 2,
+        "event_type": "Passenger boarded",
+        "event_count": 1,
+        "source": "tides_simulated",
+        "source_record_id": "rec-c-2"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:01:30+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-c-3",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-C",
+        "trip_stop_sequence": 2,
+        "event_type": "Passenger alighted",
+        "event_count": 1,
+        "source": "tides_simulated",
+        "source_record_id": "rec-c-3"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:02:00+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-c-4",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-C",
+        "trip_stop_sequence": 3,
+        "event_type": "Passenger alighted",
+        "event_count": 2,
+        "source": "tides_simulated",
+        "source_record_id": "rec-c-4"
+      }
+    ]
+  },
+  "blocked_case": {
+    "shape_dist_unit_miles": "1",
+    "operated_trip_ids": [
+      "trip-E",
+      "trip-F",
+      "trip-G",
+      "trip-H"
+    ],
+    "stop_times": [
+      {
+        "trip_id": "trip-E",
+        "stop_id": "SE1",
+        "stop_sequence": 1,
+        "latitude": 42.0,
+        "longitude": -71.0,
+        "shape_dist_traveled": 0.0
+      },
+      {
+        "trip_id": "trip-E",
+        "stop_id": "SE2",
+        "stop_sequence": 2,
+        "latitude": 42.1,
+        "longitude": -71.0,
+        "shape_dist_traveled": 1.0
+      },
+      {
+        "trip_id": "trip-F",
+        "stop_id": "SF1",
+        "stop_sequence": 1,
+        "latitude": 42.0,
+        "longitude": -71.0,
+        "shape_dist_traveled": 0.0
+      },
+      {
+        "trip_id": "trip-F",
+        "stop_id": "SF2",
+        "stop_sequence": 2,
+        "latitude": 42.1,
+        "longitude": -71.0,
+        "shape_dist_traveled": 1.0
+      },
+      {
+        "trip_id": "trip-G",
+        "stop_id": "SG1",
+        "stop_sequence": 1,
+        "latitude": 42.0,
+        "longitude": -71.0,
+        "shape_dist_traveled": 0.0
+      },
+      {
+        "trip_id": "trip-G",
+        "stop_id": "SG2",
+        "stop_sequence": 2,
+        "latitude": 42.1,
+        "longitude": -71.0,
+        "shape_dist_traveled": 1.0
+      },
+      {
+        "trip_id": "trip-H",
+        "stop_id": "SH1",
+        "stop_sequence": 1,
+        "latitude": 42.0,
+        "longitude": -71.0,
+        "shape_dist_traveled": 0.0
+      },
+      {
+        "trip_id": "trip-H",
+        "stop_id": "SH2",
+        "stop_sequence": 2,
+        "latitude": 42.1,
+        "longitude": -71.0,
+        "shape_dist_traveled": 1.0
+      },
+      {
+        "trip_id": "trip-I",
+        "stop_id": "SI1",
+        "stop_sequence": 1,
+        "latitude": 42.0,
+        "longitude": -71.0,
+        "shape_dist_traveled": 0.0
+      },
+      {
+        "trip_id": "trip-I",
+        "stop_id": "SI2",
+        "stop_sequence": 2,
+        "latitude": 42.1,
+        "longitude": -71.0,
+        "shape_dist_traveled": 1.0
+      }
+    ],
+    "events": [
+      {
+        "event_timestamp": "2026-06-01T12:00:00+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-e-1",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-E",
+        "trip_stop_sequence": 1,
+        "event_type": "Passenger boarded",
+        "event_count": 3,
+        "source": "tides",
+        "source_record_id": "rec-e-1"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:01:00+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-e-2",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-E",
+        "trip_stop_sequence": 2,
+        "event_type": "Passenger alighted",
+        "event_count": 3,
+        "source": "tides",
+        "source_record_id": "rec-e-2"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:02:00+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-f-1",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-F",
+        "trip_stop_sequence": 1,
+        "event_type": "Passenger alighted",
+        "event_count": 4,
+        "source": "tides",
+        "source_record_id": "rec-f-1"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:03:00+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-f-2",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-F",
+        "trip_stop_sequence": 2,
+        "event_type": "Passenger boarded",
+        "event_count": 4,
+        "source": "tides",
+        "source_record_id": "rec-f-2"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:04:00+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-h-1",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-H",
+        "trip_stop_sequence": 1,
+        "event_type": "Passenger boarded",
+        "event_count": 10,
+        "source": "tides",
+        "source_record_id": "rec-h-1"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:05:00+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-h-2",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-H",
+        "trip_stop_sequence": 2,
+        "event_type": "Passenger alighted",
+        "event_count": 5,
+        "source": "tides",
+        "source_record_id": "rec-h-2"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:06:00+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-i-1",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-I",
+        "trip_stop_sequence": 1,
+        "event_type": "Passenger boarded",
+        "event_count": null,
+        "source": "tides",
+        "source_record_id": "rec-i-1"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:07:00+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-i-2",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-I",
+        "trip_stop_sequence": null,
+        "event_type": "Passenger alighted",
+        "event_count": 1,
+        "source": "tides",
+        "source_record_id": "rec-i-2"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:08:00+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-j-1",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-J",
+        "trip_stop_sequence": 1,
+        "event_type": "Passenger boarded",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-j-1"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:09:00+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-j-2",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-J",
+        "trip_stop_sequence": 2,
+        "event_type": "Passenger alighted",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-j-2"
+      }
+    ]
+  },
+  "factored_case": {
+    "shape_dist_unit_miles": "1",
+    "operated_trip_ids": [
+      "trip-01",
+      "trip-02",
+      "trip-03",
+      "trip-04",
+      "trip-05",
+      "trip-06",
+      "trip-07",
+      "trip-08",
+      "trip-09",
+      "trip-10",
+      "trip-11",
+      "trip-12",
+      "trip-13",
+      "trip-14",
+      "trip-15",
+      "trip-16",
+      "trip-17",
+      "trip-18",
+      "trip-19",
+      "trip-20",
+      "trip-21",
+      "trip-22",
+      "trip-23",
+      "trip-24",
+      "trip-25",
+      "trip-26",
+      "trip-27",
+      "trip-28",
+      "trip-29",
+      "trip-30",
+      "trip-31",
+      "trip-32",
+      "trip-33",
+      "trip-34",
+      "trip-35",
+      "trip-36",
+      "trip-37",
+      "trip-38",
+      "trip-39",
+      "trip-40",
+      "trip-41",
+      "trip-42",
+      "trip-43",
+      "trip-44",
+      "trip-45",
+      "trip-46",
+      "trip-47",
+      "trip-48",
+      "trip-49",
+      "trip-50"
+    ],
+    "stop_times": [
+      {
+        "trip_id": "trip-01",
+        "stop_id": "S01a",
+        "stop_sequence": 1,
+        "latitude": 42.0,
+        "longitude": -71.0,
+        "shape_dist_traveled": 0.0
+      },
+      {
+        "trip_id": "trip-01",
+        "stop_id": "S01b",
+        "stop_sequence": 2,
+        "latitude": 42.1,
+        "longitude": -71.0,
+        "shape_dist_traveled": 1.0
+      },
+      {
+        "trip_id": "trip-02",
+        "stop_id": "S02a",
+        "stop_sequence": 1,
+        "latitude": 42.0,
+        "longitude": -71.0,
+        "shape_dist_traveled": 0.0
+      },
+      {
+        "trip_id": "trip-02",
+        "stop_id": "S02b",
+        "stop_sequence": 2,
+        "latitude": 42.1,
+        "longitude": -71.0,
+        "shape_dist_traveled": 1.0
+      },
+      {
+        "trip_id": "trip-03",
+        "stop_id": "S03a",
+        "stop_sequence": 1,
+        "latitude": 42.0,
+        "longitude": -71.0,
+        "shape_dist_traveled": 0.0
+      },
+      {
+        "trip_id": "trip-03",
+        "stop_id": "S03b",
+        "stop_sequence": 2,
+        "latitude": 42.1,
+        "longitude": -71.0,
+        "shape_dist_traveled": 1.0
+      },
+      {
+        "trip_id": "trip-04",
+        "stop_id": "S04a",
+        "stop_sequence": 1,
+        "latitude": 42.0,
+        "longitude": -71.0,
+        "shape_dist_traveled": 0.0
+      },
+      {
+        "trip_id": "trip-04",
+        "stop_id": "S04b",
+        "stop_sequence": 2,
+        "latitude": 42.1,
+        "longitude": -71.0,
+        "shape_dist_traveled": 1.0
+      },
+      {
+        "trip_id": "trip-05",
+        "stop_id": "S05a",
+        "stop_sequence": 1,
+        "latitude": 42.0,
+        "longitude": -71.0,
+        "shape_dist_traveled": 0.0
+      },
+      {
+        "trip_id": "trip-05",
+        "stop_id": "S05b",
+        "stop_sequence": 2,
+        "latitude": 42.1,
+        "longitude": -71.0,
+        "shape_dist_traveled": 1.0
+      },
+      {
+        "trip_id": "trip-06",
+        "stop_id": "S06a",
+        "stop_sequence": 1,
+        "latitude": 42.0,
+        "longitude": -71.0,
+        "shape_dist_traveled": 0.0
+      },
+      {
+        "trip_id": "trip-06",
+        "stop_id": "S06b",
+        "stop_sequence": 2,
+        "latitude": 42.1,
+        "longitude": -71.0,
+        "shape_dist_traveled": 1.0
+      },
+      {
+        "trip_id": "trip-07",
+        "stop_id": "S07a",
+        "stop_sequence": 1,
+        "latitude": 42.0,
+        "longitude": -71.0,
+        "shape_dist_traveled": 0.0
+      },
+      {
+        "trip_id": "trip-07",
+        "stop_id": "S07b",
+        "stop_sequence": 2,
+        "latitude": 42.1,
+        "longitude": -71.0,
+        "shape_dist_traveled": 1.0
+      },
+      {
+        "trip_id": "trip-08",
+        "stop_id": "S08a",
+        "stop_sequence": 1,
+        "latitude": 42.0,
+        "longitude": -71.0,
+        "shape_dist_traveled": 0.0
+      },
+      {
+        "trip_id": "trip-08",
+        "stop_id": "S08b",
+        "stop_sequence": 2,
+        "latitude": 42.1,
+        "longitude": -71.0,
+        "shape_dist_traveled": 1.0
+      },
+      {
+        "trip_id": "trip-09",
+        "stop_id": "S09a",
+        "stop_sequence": 1,
+        "latitude": 42.0,
+        "longitude": -71.0,
+        "shape_dist_traveled": 0.0
+      },
+      {
+        "trip_id": "trip-09",
+        "stop_id": "S09b",
+        "stop_sequence": 2,
+        "latitude": 42.1,
+        "longitude": -71.0,
+        "shape_dist_traveled": 1.0
+      },
+      {
+        "trip_id": "trip-10",
+        "stop_id": "S10a",
+        "stop_sequence": 1,
+        "latitude": 42.0,
+        "longitude": -71.0,
+        "shape_dist_traveled": 0.0
+      },
+      {
+        "trip_id": "trip-10",
+        "stop_id": "S10b",
+        "stop_sequence": 2,
+        "latitude": 42.1,
+        "longitude": -71.0,
+        "shape_dist_traveled": 1.0
+      },
+      {
+        "trip_id": "trip-11",
+        "stop_id": "S11a",
+        "stop_sequence": 1,
+        "latitude": 42.0,
+        "longitude": -71.0,
+        "shape_dist_traveled": 0.0
+      },
+      {
+        "trip_id": "trip-11",
+        "stop_id": "S11b",
+        "stop_sequence": 2,
+        "latitude": 42.1,
+        "longitude": -71.0,
+        "shape_dist_traveled": 1.0
+      },
+      {
+        "trip_id": "trip-12",
+        "stop_id": "S12a",
+        "stop_sequence": 1,
+        "latitude": 42.0,
+        "longitude": -71.0,
+        "shape_dist_traveled": 0.0
+      },
+      {
+        "trip_id": "trip-12",
+        "stop_id": "S12b",
+        "stop_sequence": 2,
+        "latitude": 42.1,
+        "longitude": -71.0,
+        "shape_dist_traveled": 1.0
+      },
+      {
+        "trip_id": "trip-13",
+        "stop_id": "S13a",
+        "stop_sequence": 1,
+        "latitude": 42.0,
+        "longitude": -71.0,
+        "shape_dist_traveled": 0.0
+      },
+      {
+        "trip_id": "trip-13",
+        "stop_id": "S13b",
+        "stop_sequence": 2,
+        "latitude": 42.1,
+        "longitude": -71.0,
+        "shape_dist_traveled": 1.0
+      },
+      {
+        "trip_id": "trip-14",
+        "stop_id": "S14a",
+        "stop_sequence": 1,
+        "latitude": 42.0,
+        "longitude": -71.0,
+        "shape_dist_traveled": 0.0
+      },
+      {
+        "trip_id": "trip-14",
+        "stop_id": "S14b",
+        "stop_sequence": 2,
+        "latitude": 42.1,
+        "longitude": -71.0,
+        "shape_dist_traveled": 1.0
+      },
+      {
+        "trip_id": "trip-15",
+        "stop_id": "S15a",
+        "stop_sequence": 1,
+        "latitude": 42.0,
+        "longitude": -71.0,
+        "shape_dist_traveled": 0.0
+      },
+      {
+        "trip_id": "trip-15",
+        "stop_id": "S15b",
+        "stop_sequence": 2,
+        "latitude": 42.1,
+        "longitude": -71.0,
+        "shape_dist_traveled": 1.0
+      },
+      {
+        "trip_id": "trip-16",
+        "stop_id": "S16a",
+        "stop_sequence": 1,
+        "latitude": 42.0,
+        "longitude": -71.0,
+        "shape_dist_traveled": 0.0
+      },
+      {
+        "trip_id": "trip-16",
+        "stop_id": "S16b",
+        "stop_sequence": 2,
+        "latitude": 42.1,
+        "longitude": -71.0,
+        "shape_dist_traveled": 1.0
+      },
+      {
+        "trip_id": "trip-17",
+        "stop_id": "S17a",
+        "stop_sequence": 1,
+        "latitude": 42.0,
+        "longitude": -71.0,
+        "shape_dist_traveled": 0.0
+      },
+      {
+        "trip_id": "trip-17",
+        "stop_id": "S17b",
+        "stop_sequence": 2,
+        "latitude": 42.1,
+        "longitude": -71.0,
+        "shape_dist_traveled": 1.0
+      },
+      {
+        "trip_id": "trip-18",
+        "stop_id": "S18a",
+        "stop_sequence": 1,
+        "latitude": 42.0,
+        "longitude": -71.0,
+        "shape_dist_traveled": 0.0
+      },
+      {
+        "trip_id": "trip-18",
+        "stop_id": "S18b",
+        "stop_sequence": 2,
+        "latitude": 42.1,
+        "longitude": -71.0,
+        "shape_dist_traveled": 1.0
+      },
+      {
+        "trip_id": "trip-19",
+        "stop_id": "S19a",
+        "stop_sequence": 1,
+        "latitude": 42.0,
+        "longitude": -71.0,
+        "shape_dist_traveled": 0.0
+      },
+      {
+        "trip_id": "trip-19",
+        "stop_id": "S19b",
+        "stop_sequence": 2,
+        "latitude": 42.1,
+        "longitude": -71.0,
+        "shape_dist_traveled": 1.0
+      },
+      {
+        "trip_id": "trip-20",
+        "stop_id": "S20a",
+        "stop_sequence": 1,
+        "latitude": 42.0,
+        "longitude": -71.0,
+        "shape_dist_traveled": 0.0
+      },
+      {
+        "trip_id": "trip-20",
+        "stop_id": "S20b",
+        "stop_sequence": 2,
+        "latitude": 42.1,
+        "longitude": -71.0,
+        "shape_dist_traveled": 1.0
+      },
+      {
+        "trip_id": "trip-21",
+        "stop_id": "S21a",
+        "stop_sequence": 1,
+        "latitude": 42.0,
+        "longitude": -71.0,
+        "shape_dist_traveled": 0.0
+      },
+      {
+        "trip_id": "trip-21",
+        "stop_id": "S21b",
+        "stop_sequence": 2,
+        "latitude": 42.1,
+        "longitude": -71.0,
+        "shape_dist_traveled": 1.0
+      },
+      {
+        "trip_id": "trip-22",
+        "stop_id": "S22a",
+        "stop_sequence": 1,
+        "latitude": 42.0,
+        "longitude": -71.0,
+        "shape_dist_traveled": 0.0
+      },
+      {
+        "trip_id": "trip-22",
+        "stop_id": "S22b",
+        "stop_sequence": 2,
+        "latitude": 42.1,
+        "longitude": -71.0,
+        "shape_dist_traveled": 1.0
+      },
+      {
+        "trip_id": "trip-23",
+        "stop_id": "S23a",
+        "stop_sequence": 1,
+        "latitude": 42.0,
+        "longitude": -71.0,
+        "shape_dist_traveled": 0.0
+      },
+      {
+        "trip_id": "trip-23",
+        "stop_id": "S23b",
+        "stop_sequence": 2,
+        "latitude": 42.1,
+        "longitude": -71.0,
+        "shape_dist_traveled": 1.0
+      },
+      {
+        "trip_id": "trip-24",
+        "stop_id": "S24a",
+        "stop_sequence": 1,
+        "latitude": 42.0,
+        "longitude": -71.0,
+        "shape_dist_traveled": 0.0
+      },
+      {
+        "trip_id": "trip-24",
+        "stop_id": "S24b",
+        "stop_sequence": 2,
+        "latitude": 42.1,
+        "longitude": -71.0,
+        "shape_dist_traveled": 1.0
+      },
+      {
+        "trip_id": "trip-25",
+        "stop_id": "S25a",
+        "stop_sequence": 1,
+        "latitude": 42.0,
+        "longitude": -71.0,
+        "shape_dist_traveled": 0.0
+      },
+      {
+        "trip_id": "trip-25",
+        "stop_id": "S25b",
+        "stop_sequence": 2,
+        "latitude": 42.1,
+        "longitude": -71.0,
+        "shape_dist_traveled": 1.0
+      },
+      {
+        "trip_id": "trip-26",
+        "stop_id": "S26a",
+        "stop_sequence": 1,
+        "latitude": 42.0,
+        "longitude": -71.0,
+        "shape_dist_traveled": 0.0
+      },
+      {
+        "trip_id": "trip-26",
+        "stop_id": "S26b",
+        "stop_sequence": 2,
+        "latitude": 42.1,
+        "longitude": -71.0,
+        "shape_dist_traveled": 1.0
+      },
+      {
+        "trip_id": "trip-27",
+        "stop_id": "S27a",
+        "stop_sequence": 1,
+        "latitude": 42.0,
+        "longitude": -71.0,
+        "shape_dist_traveled": 0.0
+      },
+      {
+        "trip_id": "trip-27",
+        "stop_id": "S27b",
+        "stop_sequence": 2,
+        "latitude": 42.1,
+        "longitude": -71.0,
+        "shape_dist_traveled": 1.0
+      },
+      {
+        "trip_id": "trip-28",
+        "stop_id": "S28a",
+        "stop_sequence": 1,
+        "latitude": 42.0,
+        "longitude": -71.0,
+        "shape_dist_traveled": 0.0
+      },
+      {
+        "trip_id": "trip-28",
+        "stop_id": "S28b",
+        "stop_sequence": 2,
+        "latitude": 42.1,
+        "longitude": -71.0,
+        "shape_dist_traveled": 1.0
+      },
+      {
+        "trip_id": "trip-29",
+        "stop_id": "S29a",
+        "stop_sequence": 1,
+        "latitude": 42.0,
+        "longitude": -71.0,
+        "shape_dist_traveled": 0.0
+      },
+      {
+        "trip_id": "trip-29",
+        "stop_id": "S29b",
+        "stop_sequence": 2,
+        "latitude": 42.1,
+        "longitude": -71.0,
+        "shape_dist_traveled": 1.0
+      },
+      {
+        "trip_id": "trip-30",
+        "stop_id": "S30a",
+        "stop_sequence": 1,
+        "latitude": 42.0,
+        "longitude": -71.0,
+        "shape_dist_traveled": 0.0
+      },
+      {
+        "trip_id": "trip-30",
+        "stop_id": "S30b",
+        "stop_sequence": 2,
+        "latitude": 42.1,
+        "longitude": -71.0,
+        "shape_dist_traveled": 1.0
+      },
+      {
+        "trip_id": "trip-31",
+        "stop_id": "S31a",
+        "stop_sequence": 1,
+        "latitude": 42.0,
+        "longitude": -71.0,
+        "shape_dist_traveled": 0.0
+      },
+      {
+        "trip_id": "trip-31",
+        "stop_id": "S31b",
+        "stop_sequence": 2,
+        "latitude": 42.1,
+        "longitude": -71.0,
+        "shape_dist_traveled": 1.0
+      },
+      {
+        "trip_id": "trip-32",
+        "stop_id": "S32a",
+        "stop_sequence": 1,
+        "latitude": 42.0,
+        "longitude": -71.0,
+        "shape_dist_traveled": 0.0
+      },
+      {
+        "trip_id": "trip-32",
+        "stop_id": "S32b",
+        "stop_sequence": 2,
+        "latitude": 42.1,
+        "longitude": -71.0,
+        "shape_dist_traveled": 1.0
+      },
+      {
+        "trip_id": "trip-33",
+        "stop_id": "S33a",
+        "stop_sequence": 1,
+        "latitude": 42.0,
+        "longitude": -71.0,
+        "shape_dist_traveled": 0.0
+      },
+      {
+        "trip_id": "trip-33",
+        "stop_id": "S33b",
+        "stop_sequence": 2,
+        "latitude": 42.1,
+        "longitude": -71.0,
+        "shape_dist_traveled": 1.0
+      },
+      {
+        "trip_id": "trip-34",
+        "stop_id": "S34a",
+        "stop_sequence": 1,
+        "latitude": 42.0,
+        "longitude": -71.0,
+        "shape_dist_traveled": 0.0
+      },
+      {
+        "trip_id": "trip-34",
+        "stop_id": "S34b",
+        "stop_sequence": 2,
+        "latitude": 42.1,
+        "longitude": -71.0,
+        "shape_dist_traveled": 1.0
+      },
+      {
+        "trip_id": "trip-35",
+        "stop_id": "S35a",
+        "stop_sequence": 1,
+        "latitude": 42.0,
+        "longitude": -71.0,
+        "shape_dist_traveled": 0.0
+      },
+      {
+        "trip_id": "trip-35",
+        "stop_id": "S35b",
+        "stop_sequence": 2,
+        "latitude": 42.1,
+        "longitude": -71.0,
+        "shape_dist_traveled": 1.0
+      },
+      {
+        "trip_id": "trip-36",
+        "stop_id": "S36a",
+        "stop_sequence": 1,
+        "latitude": 42.0,
+        "longitude": -71.0,
+        "shape_dist_traveled": 0.0
+      },
+      {
+        "trip_id": "trip-36",
+        "stop_id": "S36b",
+        "stop_sequence": 2,
+        "latitude": 42.1,
+        "longitude": -71.0,
+        "shape_dist_traveled": 1.0
+      },
+      {
+        "trip_id": "trip-37",
+        "stop_id": "S37a",
+        "stop_sequence": 1,
+        "latitude": 42.0,
+        "longitude": -71.0,
+        "shape_dist_traveled": 0.0
+      },
+      {
+        "trip_id": "trip-37",
+        "stop_id": "S37b",
+        "stop_sequence": 2,
+        "latitude": 42.1,
+        "longitude": -71.0,
+        "shape_dist_traveled": 1.0
+      },
+      {
+        "trip_id": "trip-38",
+        "stop_id": "S38a",
+        "stop_sequence": 1,
+        "latitude": 42.0,
+        "longitude": -71.0,
+        "shape_dist_traveled": 0.0
+      },
+      {
+        "trip_id": "trip-38",
+        "stop_id": "S38b",
+        "stop_sequence": 2,
+        "latitude": 42.1,
+        "longitude": -71.0,
+        "shape_dist_traveled": 1.0
+      },
+      {
+        "trip_id": "trip-39",
+        "stop_id": "S39a",
+        "stop_sequence": 1,
+        "latitude": 42.0,
+        "longitude": -71.0,
+        "shape_dist_traveled": 0.0
+      },
+      {
+        "trip_id": "trip-39",
+        "stop_id": "S39b",
+        "stop_sequence": 2,
+        "latitude": 42.1,
+        "longitude": -71.0,
+        "shape_dist_traveled": 1.0
+      },
+      {
+        "trip_id": "trip-40",
+        "stop_id": "S40a",
+        "stop_sequence": 1,
+        "latitude": 42.0,
+        "longitude": -71.0,
+        "shape_dist_traveled": 0.0
+      },
+      {
+        "trip_id": "trip-40",
+        "stop_id": "S40b",
+        "stop_sequence": 2,
+        "latitude": 42.1,
+        "longitude": -71.0,
+        "shape_dist_traveled": 1.0
+      },
+      {
+        "trip_id": "trip-41",
+        "stop_id": "S41a",
+        "stop_sequence": 1,
+        "latitude": 42.0,
+        "longitude": -71.0,
+        "shape_dist_traveled": 0.0
+      },
+      {
+        "trip_id": "trip-41",
+        "stop_id": "S41b",
+        "stop_sequence": 2,
+        "latitude": 42.1,
+        "longitude": -71.0,
+        "shape_dist_traveled": 1.0
+      },
+      {
+        "trip_id": "trip-42",
+        "stop_id": "S42a",
+        "stop_sequence": 1,
+        "latitude": 42.0,
+        "longitude": -71.0,
+        "shape_dist_traveled": 0.0
+      },
+      {
+        "trip_id": "trip-42",
+        "stop_id": "S42b",
+        "stop_sequence": 2,
+        "latitude": 42.1,
+        "longitude": -71.0,
+        "shape_dist_traveled": 1.0
+      },
+      {
+        "trip_id": "trip-43",
+        "stop_id": "S43a",
+        "stop_sequence": 1,
+        "latitude": 42.0,
+        "longitude": -71.0,
+        "shape_dist_traveled": 0.0
+      },
+      {
+        "trip_id": "trip-43",
+        "stop_id": "S43b",
+        "stop_sequence": 2,
+        "latitude": 42.1,
+        "longitude": -71.0,
+        "shape_dist_traveled": 1.0
+      },
+      {
+        "trip_id": "trip-44",
+        "stop_id": "S44a",
+        "stop_sequence": 1,
+        "latitude": 42.0,
+        "longitude": -71.0,
+        "shape_dist_traveled": 0.0
+      },
+      {
+        "trip_id": "trip-44",
+        "stop_id": "S44b",
+        "stop_sequence": 2,
+        "latitude": 42.1,
+        "longitude": -71.0,
+        "shape_dist_traveled": 1.0
+      },
+      {
+        "trip_id": "trip-45",
+        "stop_id": "S45a",
+        "stop_sequence": 1,
+        "latitude": 42.0,
+        "longitude": -71.0,
+        "shape_dist_traveled": 0.0
+      },
+      {
+        "trip_id": "trip-45",
+        "stop_id": "S45b",
+        "stop_sequence": 2,
+        "latitude": 42.1,
+        "longitude": -71.0,
+        "shape_dist_traveled": 1.0
+      },
+      {
+        "trip_id": "trip-46",
+        "stop_id": "S46a",
+        "stop_sequence": 1,
+        "latitude": 42.0,
+        "longitude": -71.0,
+        "shape_dist_traveled": 0.0
+      },
+      {
+        "trip_id": "trip-46",
+        "stop_id": "S46b",
+        "stop_sequence": 2,
+        "latitude": 42.1,
+        "longitude": -71.0,
+        "shape_dist_traveled": 1.0
+      },
+      {
+        "trip_id": "trip-47",
+        "stop_id": "S47a",
+        "stop_sequence": 1,
+        "latitude": 42.0,
+        "longitude": -71.0,
+        "shape_dist_traveled": 0.0
+      },
+      {
+        "trip_id": "trip-47",
+        "stop_id": "S47b",
+        "stop_sequence": 2,
+        "latitude": 42.1,
+        "longitude": -71.0,
+        "shape_dist_traveled": 1.0
+      },
+      {
+        "trip_id": "trip-48",
+        "stop_id": "S48a",
+        "stop_sequence": 1,
+        "latitude": 42.0,
+        "longitude": -71.0,
+        "shape_dist_traveled": 0.0
+      },
+      {
+        "trip_id": "trip-48",
+        "stop_id": "S48b",
+        "stop_sequence": 2,
+        "latitude": 42.1,
+        "longitude": -71.0,
+        "shape_dist_traveled": 1.0
+      },
+      {
+        "trip_id": "trip-49",
+        "stop_id": "S49a",
+        "stop_sequence": 1,
+        "latitude": 42.0,
+        "longitude": -71.0,
+        "shape_dist_traveled": 0.0
+      },
+      {
+        "trip_id": "trip-49",
+        "stop_id": "S49b",
+        "stop_sequence": 2,
+        "latitude": 42.1,
+        "longitude": -71.0,
+        "shape_dist_traveled": 1.0
+      },
+      {
+        "trip_id": "trip-50",
+        "stop_id": "S50a",
+        "stop_sequence": 1,
+        "latitude": 42.0,
+        "longitude": -71.0,
+        "shape_dist_traveled": 0.0
+      },
+      {
+        "trip_id": "trip-50",
+        "stop_id": "S50b",
+        "stop_sequence": 2,
+        "latitude": 42.1,
+        "longitude": -71.0,
+        "shape_dist_traveled": 1.0
+      }
+    ],
+    "events": [
+      {
+        "event_timestamp": "2026-06-01T12:01:00+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-01-1",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-01",
+        "trip_stop_sequence": 1,
+        "event_type": "Passenger boarded",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-01-1"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:01:30+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-01-2",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-01",
+        "trip_stop_sequence": 2,
+        "event_type": "Passenger alighted",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-01-2"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:02:00+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-02-1",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-02",
+        "trip_stop_sequence": 1,
+        "event_type": "Passenger boarded",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-02-1"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:02:30+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-02-2",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-02",
+        "trip_stop_sequence": 2,
+        "event_type": "Passenger alighted",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-02-2"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:03:00+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-03-1",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-03",
+        "trip_stop_sequence": 1,
+        "event_type": "Passenger boarded",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-03-1"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:03:30+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-03-2",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-03",
+        "trip_stop_sequence": 2,
+        "event_type": "Passenger alighted",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-03-2"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:04:00+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-04-1",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-04",
+        "trip_stop_sequence": 1,
+        "event_type": "Passenger boarded",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-04-1"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:04:30+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-04-2",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-04",
+        "trip_stop_sequence": 2,
+        "event_type": "Passenger alighted",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-04-2"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:05:00+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-05-1",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-05",
+        "trip_stop_sequence": 1,
+        "event_type": "Passenger boarded",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-05-1"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:05:30+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-05-2",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-05",
+        "trip_stop_sequence": 2,
+        "event_type": "Passenger alighted",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-05-2"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:06:00+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-06-1",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-06",
+        "trip_stop_sequence": 1,
+        "event_type": "Passenger boarded",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-06-1"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:06:30+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-06-2",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-06",
+        "trip_stop_sequence": 2,
+        "event_type": "Passenger alighted",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-06-2"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:07:00+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-07-1",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-07",
+        "trip_stop_sequence": 1,
+        "event_type": "Passenger boarded",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-07-1"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:07:30+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-07-2",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-07",
+        "trip_stop_sequence": 2,
+        "event_type": "Passenger alighted",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-07-2"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:08:00+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-08-1",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-08",
+        "trip_stop_sequence": 1,
+        "event_type": "Passenger boarded",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-08-1"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:08:30+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-08-2",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-08",
+        "trip_stop_sequence": 2,
+        "event_type": "Passenger alighted",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-08-2"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:09:00+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-09-1",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-09",
+        "trip_stop_sequence": 1,
+        "event_type": "Passenger boarded",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-09-1"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:09:30+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-09-2",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-09",
+        "trip_stop_sequence": 2,
+        "event_type": "Passenger alighted",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-09-2"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:10:00+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-10-1",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-10",
+        "trip_stop_sequence": 1,
+        "event_type": "Passenger boarded",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-10-1"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:10:30+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-10-2",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-10",
+        "trip_stop_sequence": 2,
+        "event_type": "Passenger alighted",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-10-2"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:11:00+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-11-1",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-11",
+        "trip_stop_sequence": 1,
+        "event_type": "Passenger boarded",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-11-1"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:11:30+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-11-2",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-11",
+        "trip_stop_sequence": 2,
+        "event_type": "Passenger alighted",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-11-2"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:12:00+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-12-1",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-12",
+        "trip_stop_sequence": 1,
+        "event_type": "Passenger boarded",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-12-1"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:12:30+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-12-2",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-12",
+        "trip_stop_sequence": 2,
+        "event_type": "Passenger alighted",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-12-2"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:13:00+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-13-1",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-13",
+        "trip_stop_sequence": 1,
+        "event_type": "Passenger boarded",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-13-1"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:13:30+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-13-2",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-13",
+        "trip_stop_sequence": 2,
+        "event_type": "Passenger alighted",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-13-2"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:14:00+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-14-1",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-14",
+        "trip_stop_sequence": 1,
+        "event_type": "Passenger boarded",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-14-1"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:14:30+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-14-2",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-14",
+        "trip_stop_sequence": 2,
+        "event_type": "Passenger alighted",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-14-2"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:15:00+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-15-1",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-15",
+        "trip_stop_sequence": 1,
+        "event_type": "Passenger boarded",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-15-1"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:15:30+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-15-2",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-15",
+        "trip_stop_sequence": 2,
+        "event_type": "Passenger alighted",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-15-2"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:16:00+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-16-1",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-16",
+        "trip_stop_sequence": 1,
+        "event_type": "Passenger boarded",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-16-1"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:16:30+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-16-2",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-16",
+        "trip_stop_sequence": 2,
+        "event_type": "Passenger alighted",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-16-2"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:17:00+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-17-1",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-17",
+        "trip_stop_sequence": 1,
+        "event_type": "Passenger boarded",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-17-1"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:17:30+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-17-2",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-17",
+        "trip_stop_sequence": 2,
+        "event_type": "Passenger alighted",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-17-2"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:18:00+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-18-1",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-18",
+        "trip_stop_sequence": 1,
+        "event_type": "Passenger boarded",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-18-1"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:18:30+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-18-2",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-18",
+        "trip_stop_sequence": 2,
+        "event_type": "Passenger alighted",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-18-2"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:19:00+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-19-1",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-19",
+        "trip_stop_sequence": 1,
+        "event_type": "Passenger boarded",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-19-1"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:19:30+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-19-2",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-19",
+        "trip_stop_sequence": 2,
+        "event_type": "Passenger alighted",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-19-2"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:20:00+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-20-1",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-20",
+        "trip_stop_sequence": 1,
+        "event_type": "Passenger boarded",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-20-1"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:20:30+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-20-2",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-20",
+        "trip_stop_sequence": 2,
+        "event_type": "Passenger alighted",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-20-2"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:21:00+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-21-1",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-21",
+        "trip_stop_sequence": 1,
+        "event_type": "Passenger boarded",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-21-1"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:21:30+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-21-2",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-21",
+        "trip_stop_sequence": 2,
+        "event_type": "Passenger alighted",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-21-2"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:22:00+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-22-1",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-22",
+        "trip_stop_sequence": 1,
+        "event_type": "Passenger boarded",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-22-1"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:22:30+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-22-2",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-22",
+        "trip_stop_sequence": 2,
+        "event_type": "Passenger alighted",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-22-2"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:23:00+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-23-1",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-23",
+        "trip_stop_sequence": 1,
+        "event_type": "Passenger boarded",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-23-1"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:23:30+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-23-2",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-23",
+        "trip_stop_sequence": 2,
+        "event_type": "Passenger alighted",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-23-2"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:24:00+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-24-1",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-24",
+        "trip_stop_sequence": 1,
+        "event_type": "Passenger boarded",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-24-1"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:24:30+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-24-2",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-24",
+        "trip_stop_sequence": 2,
+        "event_type": "Passenger alighted",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-24-2"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:25:00+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-25-1",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-25",
+        "trip_stop_sequence": 1,
+        "event_type": "Passenger boarded",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-25-1"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:25:30+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-25-2",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-25",
+        "trip_stop_sequence": 2,
+        "event_type": "Passenger alighted",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-25-2"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:26:00+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-26-1",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-26",
+        "trip_stop_sequence": 1,
+        "event_type": "Passenger boarded",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-26-1"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:26:30+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-26-2",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-26",
+        "trip_stop_sequence": 2,
+        "event_type": "Passenger alighted",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-26-2"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:27:00+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-27-1",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-27",
+        "trip_stop_sequence": 1,
+        "event_type": "Passenger boarded",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-27-1"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:27:30+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-27-2",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-27",
+        "trip_stop_sequence": 2,
+        "event_type": "Passenger alighted",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-27-2"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:28:00+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-28-1",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-28",
+        "trip_stop_sequence": 1,
+        "event_type": "Passenger boarded",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-28-1"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:28:30+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-28-2",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-28",
+        "trip_stop_sequence": 2,
+        "event_type": "Passenger alighted",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-28-2"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:29:00+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-29-1",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-29",
+        "trip_stop_sequence": 1,
+        "event_type": "Passenger boarded",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-29-1"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:29:30+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-29-2",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-29",
+        "trip_stop_sequence": 2,
+        "event_type": "Passenger alighted",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-29-2"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:30:00+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-30-1",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-30",
+        "trip_stop_sequence": 1,
+        "event_type": "Passenger boarded",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-30-1"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:30:30+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-30-2",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-30",
+        "trip_stop_sequence": 2,
+        "event_type": "Passenger alighted",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-30-2"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:31:00+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-31-1",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-31",
+        "trip_stop_sequence": 1,
+        "event_type": "Passenger boarded",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-31-1"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:31:30+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-31-2",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-31",
+        "trip_stop_sequence": 2,
+        "event_type": "Passenger alighted",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-31-2"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:32:00+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-32-1",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-32",
+        "trip_stop_sequence": 1,
+        "event_type": "Passenger boarded",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-32-1"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:32:30+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-32-2",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-32",
+        "trip_stop_sequence": 2,
+        "event_type": "Passenger alighted",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-32-2"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:33:00+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-33-1",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-33",
+        "trip_stop_sequence": 1,
+        "event_type": "Passenger boarded",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-33-1"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:33:30+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-33-2",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-33",
+        "trip_stop_sequence": 2,
+        "event_type": "Passenger alighted",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-33-2"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:34:00+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-34-1",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-34",
+        "trip_stop_sequence": 1,
+        "event_type": "Passenger boarded",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-34-1"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:34:30+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-34-2",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-34",
+        "trip_stop_sequence": 2,
+        "event_type": "Passenger alighted",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-34-2"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:35:00+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-35-1",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-35",
+        "trip_stop_sequence": 1,
+        "event_type": "Passenger boarded",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-35-1"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:35:30+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-35-2",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-35",
+        "trip_stop_sequence": 2,
+        "event_type": "Passenger alighted",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-35-2"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:36:00+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-36-1",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-36",
+        "trip_stop_sequence": 1,
+        "event_type": "Passenger boarded",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-36-1"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:36:30+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-36-2",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-36",
+        "trip_stop_sequence": 2,
+        "event_type": "Passenger alighted",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-36-2"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:37:00+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-37-1",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-37",
+        "trip_stop_sequence": 1,
+        "event_type": "Passenger boarded",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-37-1"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:37:30+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-37-2",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-37",
+        "trip_stop_sequence": 2,
+        "event_type": "Passenger alighted",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-37-2"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:38:00+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-38-1",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-38",
+        "trip_stop_sequence": 1,
+        "event_type": "Passenger boarded",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-38-1"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:38:30+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-38-2",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-38",
+        "trip_stop_sequence": 2,
+        "event_type": "Passenger alighted",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-38-2"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:39:00+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-39-1",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-39",
+        "trip_stop_sequence": 1,
+        "event_type": "Passenger boarded",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-39-1"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:39:30+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-39-2",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-39",
+        "trip_stop_sequence": 2,
+        "event_type": "Passenger alighted",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-39-2"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:40:00+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-40-1",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-40",
+        "trip_stop_sequence": 1,
+        "event_type": "Passenger boarded",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-40-1"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:40:30+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-40-2",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-40",
+        "trip_stop_sequence": 2,
+        "event_type": "Passenger alighted",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-40-2"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:41:00+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-41-1",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-41",
+        "trip_stop_sequence": 1,
+        "event_type": "Passenger boarded",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-41-1"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:41:30+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-41-2",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-41",
+        "trip_stop_sequence": 2,
+        "event_type": "Passenger alighted",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-41-2"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:42:00+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-42-1",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-42",
+        "trip_stop_sequence": 1,
+        "event_type": "Passenger boarded",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-42-1"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:42:30+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-42-2",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-42",
+        "trip_stop_sequence": 2,
+        "event_type": "Passenger alighted",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-42-2"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:43:00+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-43-1",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-43",
+        "trip_stop_sequence": 1,
+        "event_type": "Passenger boarded",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-43-1"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:43:30+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-43-2",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-43",
+        "trip_stop_sequence": 2,
+        "event_type": "Passenger alighted",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-43-2"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:44:00+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-44-1",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-44",
+        "trip_stop_sequence": 1,
+        "event_type": "Passenger boarded",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-44-1"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:44:30+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-44-2",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-44",
+        "trip_stop_sequence": 2,
+        "event_type": "Passenger alighted",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-44-2"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:45:00+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-45-1",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-45",
+        "trip_stop_sequence": 1,
+        "event_type": "Passenger boarded",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-45-1"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:45:30+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-45-2",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-45",
+        "trip_stop_sequence": 2,
+        "event_type": "Passenger alighted",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-45-2"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:46:00+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-46-1",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-46",
+        "trip_stop_sequence": 1,
+        "event_type": "Passenger boarded",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-46-1"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:46:30+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-46-2",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-46",
+        "trip_stop_sequence": 2,
+        "event_type": "Passenger alighted",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-46-2"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:47:00+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-47-1",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-47",
+        "trip_stop_sequence": 1,
+        "event_type": "Passenger boarded",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-47-1"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:47:30+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-47-2",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-47",
+        "trip_stop_sequence": 2,
+        "event_type": "Passenger alighted",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-47-2"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:48:00+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-48-1",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-48",
+        "trip_stop_sequence": 1,
+        "event_type": "Passenger boarded",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-48-1"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:48:30+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-48-2",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-48",
+        "trip_stop_sequence": 2,
+        "event_type": "Passenger alighted",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-48-2"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:49:00+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-49-1",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-49",
+        "trip_stop_sequence": 1,
+        "event_type": "Passenger boarded",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-49-1"
+      },
+      {
+        "event_timestamp": "2026-06-01T12:49:30+00:00",
+        "service_date": "2026-06-01",
+        "passenger_event_id": "pe-49-2",
+        "vehicle_id": "veh-1",
+        "trip_id": "trip-49",
+        "trip_stop_sequence": 2,
+        "event_type": "Passenger alighted",
+        "event_count": 2,
+        "source": "tides",
+        "source_record_id": "rec-49-2"
+      }
+    ]
+  }
+}

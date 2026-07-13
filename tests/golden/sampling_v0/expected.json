@@ -1,0 +1,96 @@
+{
+  "table_cells": {
+    "demand_response|vehicle_days|aptl|quarterly": [12, 48],
+    "demand_response|vehicle_days|aptl|monthly": [4, 48],
+    "demand_response|vehicle_days|aptl|weekly": [1, 52],
+    "demand_response|vehicle_days|base|quarterly": [22, 88],
+    "demand_response|vehicle_days|base|monthly": [8, 96],
+    "demand_response|vehicle_days|base|weekly": [2, 104],
+    "commuter_vanpool|vehicle_days|aptl|quarterly": [31, 124],
+    "commuter_vanpool|vehicle_days|aptl|monthly": [10, 120],
+    "commuter_vanpool|vehicle_days|aptl|weekly": [2, 104],
+    "commuter_vanpool|vehicle_days|base|quarterly": [45, 180],
+    "commuter_vanpool|vehicle_days|base|monthly": [15, 180],
+    "commuter_vanpool|vehicle_days|base|weekly": [4, 208],
+    "bus|one_way_trips|aptl_grouped|quarterly": [52, 208],
+    "bus|one_way_trips|aptl_grouped|monthly": [18, 216],
+    "bus|one_way_trips|aptl_grouped|weekly": [4, 208],
+    "bus|one_way_trips|aptl|quarterly": [78, 312],
+    "bus|one_way_trips|aptl|monthly": [27, 324],
+    "bus|one_way_trips|aptl|weekly": [6, 312],
+    "bus|one_way_trips|base|quarterly": [138, 552],
+    "bus|one_way_trips|base|monthly": [46, 552],
+    "bus|one_way_trips|base|weekly": [11, 572],
+    "bus|round_trips|aptl_grouped|quarterly": [39, 156],
+    "bus|round_trips|aptl_grouped|monthly": [13, 156],
+    "bus|round_trips|aptl_grouped|weekly": [3, 156],
+    "bus|round_trips|aptl|quarterly": [59, 236],
+    "bus|round_trips|aptl|monthly": [20, 240],
+    "bus|round_trips|aptl|weekly": [5, 260],
+    "bus|round_trips|base|quarterly": [103, 412],
+    "bus|round_trips|base|monthly": [35, 420],
+    "bus|round_trips|base|weekly": [8, 416],
+    "commuter_rail|one_way_car_trips|aptl|quarterly": [8, 32],
+    "commuter_rail|one_way_car_trips|aptl|monthly": [3, 36],
+    "commuter_rail|one_way_car_trips|aptl|weekly": [1, 52],
+    "commuter_rail|one_way_car_trips|base|quarterly": [80, 320],
+    "commuter_rail|one_way_car_trips|base|monthly": [27, 324],
+    "commuter_rail|one_way_car_trips|base|weekly": [7, 364],
+    "other_rail|one_way_train_trips|aptl|quarterly": [6, 24],
+    "other_rail|one_way_train_trips|aptl|monthly": [2, 24],
+    "other_rail|one_way_train_trips|aptl|weekly": [1, 52],
+    "other_rail|one_way_train_trips|base|quarterly": [45, 180],
+    "other_rail|one_way_train_trips|base|monthly": [15, 180],
+    "other_rail|one_way_train_trips|base|weekly": [4, 208],
+    "other_rail|one_way_car_trips|aptl|quarterly": [12, 48],
+    "other_rail|one_way_car_trips|aptl|monthly": [4, 48],
+    "other_rail|one_way_car_trips|aptl|weekly": [1, 52],
+    "other_rail|one_way_car_trips|base|quarterly": [72, 288],
+    "other_rail|one_way_car_trips|base|monthly": [24, 288],
+    "other_rail|one_way_car_trips|base|weekly": [6, 288]
+  },
+  "mode_to_cell_spotchecks": [
+    {"mode": "DR", "unit": "vehicle_days", "option": "aptl", "frequency": "quarterly", "per_period": 12, "annual": 48, "table_contains": "Table 43.01"},
+    {"mode": "VP", "unit": "vehicle_days", "option": "base", "frequency": "weekly", "per_period": 4, "annual": 208, "table_contains": "Table 43.01"},
+    {"mode": "MB", "unit": "one_way_trips", "option": "base", "frequency": "weekly", "per_period": 11, "annual": 572, "table_contains": "Table 43.03"},
+    {"mode": "TB", "unit": "round_trips", "option": "aptl", "frequency": "monthly", "per_period": 20, "annual": 240, "table_contains": "Table 43.03"},
+    {"mode": "CR", "unit": "one_way_car_trips", "option": "aptl", "frequency": "monthly", "per_period": 3, "annual": 36, "table_contains": "Table 43.05"},
+    {"mode": "LR", "unit": "one_way_train_trips", "option": "base", "frequency": "quarterly", "per_period": 45, "annual": 180, "table_contains": "Table 43.07"},
+    {"mode": "HR", "unit": "one_way_car_trips", "option": "aptl", "frequency": "weekly", "per_period": 1, "annual": 52, "table_contains": "Table 43.07"}
+  ],
+  "aptl_example": {
+    "observations": [
+      {"unit_id": "d1", "observed_upt": 12, "observed_pmt": "60"},
+      {"unit_id": "d2", "observed_upt": 8, "observed_pmt": "20"},
+      {"unit_id": "d3", "observed_upt": 0, "observed_pmt": "0"},
+      {"unit_id": "d4", "observed_upt": 20, "observed_pmt": "130"}
+    ],
+    "sample_total_upt": 40,
+    "sample_total_pmt": "210",
+    "sample_aptl": "5.25",
+    "banned_average_of_ratios_over_defined_units": "4.67",
+    "annual_upt_100pct": "250000",
+    "estimated_annual_pmt": "1312500"
+  },
+  "by_service_day_example": {
+    "observations": [
+      {"unit_id": "w1", "observed_upt": 10, "observed_pmt": "40", "service_day_type": "Weekday"},
+      {"unit_id": "w2", "observed_upt": 30, "observed_pmt": "140", "service_day_type": "Weekday"},
+      {"unit_id": "s1", "observed_upt": 5, "observed_pmt": "30", "service_day_type": "Saturday"},
+      {"unit_id": "u1", "observed_upt": 4, "observed_pmt": "10", "service_day_type": "Sunday"}
+    ],
+    "upt_100pct_by_day_type": {"Weekday": "200000", "Saturday": "30000", "Sunday": "20000"},
+    "expected": [
+      {"scope": "Weekday", "sample_size": 2, "sample_total_upt": 40, "sample_total_pmt": "180", "sample_aptl": "4.50", "estimated_pmt": "900000"},
+      {"scope": "Saturday", "sample_size": 1, "sample_total_upt": 5, "sample_total_pmt": "30", "sample_aptl": "6.00", "estimated_pmt": "180000"},
+      {"scope": "Sunday", "sample_size": 1, "sample_total_upt": 4, "sample_total_pmt": "10", "sample_aptl": "2.50", "estimated_pmt": "50000"}
+    ],
+    "sum_of_day_type_estimates": "1130000"
+  },
+  "draw_example": {
+    "frame": ["trip-01", "trip-02", "trip-03", "trip-04", "trip-05", "trip-06", "trip-07", "trip-08", "trip-09", "trip-10"],
+    "seed": "headway-0012-golden-seed",
+    "sample_size": 4,
+    "selected_units": ["trip-09", "trip-02", "trip-06", "trip-10"]
+  }
+}

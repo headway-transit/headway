@@ -30,7 +30,12 @@ from typing import Any, Protocol
 
 from .envelope import Envelope
 from .gtfs_rt_positions import CanonicalVehiclePosition
-from .gtfs_static import CanonicalRoute, CanonicalTrip
+from .gtfs_static import (
+    CanonicalRoute,
+    CanonicalStop,
+    CanonicalStopTime,
+    CanonicalTrip,
+)
 from .model import DQFinding, LineageEdge
 from .tides_passenger_events import CanonicalPassengerEvent
 
@@ -69,6 +74,27 @@ SET route_id     = EXCLUDED.route_id,
     service_id   = EXCLUDED.service_id,
     direction_id = EXCLUDED.direction_id,
     block_id     = EXCLUDED.block_id
+""".strip()
+
+UPSERT_STOP_SQL = """
+INSERT INTO canonical.stops (stop_id, name, latitude, longitude)
+VALUES (%s, %s, %s, %s)
+ON CONFLICT (stop_id) DO UPDATE
+SET name      = EXCLUDED.name,
+    latitude  = EXCLUDED.latitude,
+    longitude = EXCLUDED.longitude
+""".strip()
+
+UPSERT_STOP_TIME_SQL = """
+INSERT INTO canonical.stop_times
+    (trip_id, stop_id, stop_sequence,
+     arrival_seconds, departure_seconds, shape_dist_traveled)
+VALUES (%s, %s, %s, %s, %s, %s)
+ON CONFLICT (trip_id, stop_sequence) DO UPDATE
+SET stop_id             = EXCLUDED.stop_id,
+    arrival_seconds     = EXCLUDED.arrival_seconds,
+    departure_seconds   = EXCLUDED.departure_seconds,
+    shape_dist_traveled = EXCLUDED.shape_dist_traveled
 """.strip()
 
 INSERT_VEHICLE_POSITION_SQL = """
@@ -155,6 +181,27 @@ class DbWriter:
                     trip.service_id,
                     trip.direction_id,
                     trip.block_id,
+                ),
+            )
+
+    def upsert_stops(self, stops: Iterable[CanonicalStop]) -> None:
+        for stop in stops:
+            self._execute(
+                UPSERT_STOP_SQL,
+                (stop.stop_id, stop.name, stop.latitude, stop.longitude),
+            )
+
+    def upsert_stop_times(self, rows: Iterable[CanonicalStopTime]) -> None:
+        for row in rows:
+            self._execute(
+                UPSERT_STOP_TIME_SQL,
+                (
+                    row.trip_id,
+                    row.stop_id,
+                    row.stop_sequence,
+                    row.arrival_seconds,
+                    row.departure_seconds,
+                    row.shape_dist_traveled,
                 ),
             )
 

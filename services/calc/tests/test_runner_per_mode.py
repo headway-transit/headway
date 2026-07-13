@@ -51,9 +51,14 @@ def test_per_mode_default_off_no_voms_no_mode_rows(mode_golden_fixture):
 
     assert report.per_mode is False
     assert report.run_info_ids == ()
-    assert len(report.outcomes) == 3  # vrm, vrh, upt — no voms, no mode rows
-    assert [o.metric for o in report.outcomes] == ["vrm", "vrh", "upt"]
+    # vrm, vrh, upt, pmt — no voms, no mode rows.
+    assert len(report.outcomes) == 4
+    assert [o.metric for o in report.outcomes] == ["vrm", "vrh", "upt", "pmt"]
     assert {o.scope for o in report.outcomes} == {"agency"}
+    # pmt is honestly BLOCKED here: the fake serves no stop geometry, so both
+    # event trips are geometry_unavailable — 2 of 2 operated > the 2% line.
+    persisted_metrics = [o.metric for o in report.outcomes if o.persisted]
+    assert persisted_metrics == ["vrm", "vrh", "upt"]
     mv_inserts = conn.statements_matching("INSERT INTO computed.metric_values")
     assert [p[4] for _, p in mv_inserts] == ["agency"] * 3
     # No unknown_mode_share, no voms findings routed on the default path.
@@ -72,19 +77,44 @@ def test_per_mode_run_emits_agency_plus_scoped_rows(
     report = run_period(conn, PERIOD_START, PERIOD_END, per_mode=True)
 
     assert report.per_mode is True
-    # 4 agency outcomes (vrm, vrh, upt + voms) + 4 metrics x 3 buckets.
-    assert len(report.outcomes) == 16
-    assert report.persisted_count == 16 and report.blocked_count == 0
+    # 5 agency outcomes (vrm, vrh, upt, pmt + voms) + 5 metrics x 3 buckets.
+    assert len(report.outcomes) == 20
+    # pmt is honestly BLOCKED wherever the (geometry-less) fake leaves its
+    # event trips unusable: agency + bus + subway; the degenerate unknown
+    # bucket (no operated trips, no placeable events) persists 0.00.
+    assert report.persisted_count == 17 and report.blocked_count == 3
 
     # Agency rows first, unchanged values (golden), then per-metric buckets.
     expected_order = (
-        [("vrm", "agency"), ("vrh", "agency"), ("upt", "agency"), ("voms", "agency")]
+        [
+            ("vrm", "agency"),
+            ("vrh", "agency"),
+            ("upt", "agency"),
+            ("pmt", "agency"),
+            ("voms", "agency"),
+        ]
         + [("vrm", f"mode:{m}") for m in ("bus", "subway", "unknown")]
         + [("vrh", f"mode:{m}") for m in ("bus", "subway", "unknown")]
         + [("upt", f"mode:{m}") for m in ("bus", "subway", "unknown")]
+        + [("pmt", f"mode:{m}") for m in ("bus", "subway", "unknown")]
         + [("voms", f"mode:{m}") for m in ("bus", "subway", "unknown")]
     )
     assert [(o.metric, o.scope) for o in report.outcomes] == expected_order
+
+    # The pmt blocking is per scope, with the geometry gap named.
+    pmt_blocked = [
+        o for o in report.outcomes if o.metric == "pmt" and not o.persisted
+    ]
+    assert [(o.scope) for o in pmt_blocked] == [
+        "agency",
+        "mode:bus",
+        "mode:subway",
+    ]
+    for o in pmt_blocked:
+        assert o.detail["invalid_trip_reasons"] == {"geometry_unavailable": 1} or (
+            o.scope == "agency"
+            and o.detail["invalid_trip_reasons"] == {"geometry_unavailable": 2}
+        )
 
     by_key = {(o.metric, o.scope): o for o in report.outcomes}
     exp = mode_golden_expected
@@ -101,9 +131,13 @@ def test_per_mode_run_emits_agency_plus_scoped_rows(
     assert by_key[("voms", "mode:bus")].calc_version == "0.1.0"
     assert by_key[("voms", "agency")].unit == "vehicles"
 
-    # The scope column is bound on every INSERT (param index 4).
+    # The scope column is bound on every INSERT (param index 4); the three
+    # blocked pmt scopes persist NO row (the structural guardrail).
+    blocked_keys = {("pmt", "agency"), ("pmt", "mode:bus"), ("pmt", "mode:subway")}
     mv_inserts = conn.statements_matching("INSERT INTO computed.metric_values")
-    assert [p[4] for _, p in mv_inserts] == [scope for _, scope in expected_order]
+    assert [(p[0], p[4]) for _, p in mv_inserts] == [
+        key for key in expected_order if key not in blocked_keys
+    ]
 
     # ONE run-level unknown_mode_share info routed (the fixture carries
     # NULL-mode rows), counted in the report's info total.

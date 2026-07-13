@@ -1,0 +1,347 @@
+{
+  "shape_case": {
+    "pmt_v0_0_1": {
+      "calc_name": "pmt_v0",
+      "calc_version": "0.1.0",
+      "unit": "passenger_miles",
+      "value": "29.50",
+      "blocking": [],
+      "warnings": [],
+      "infos": [],
+      "input_record_ids": [
+        "rec-a-1",
+        "rec-a-2",
+        "rec-a-3",
+        "rec-a-4",
+        "rec-a-5",
+        "rec-b-1",
+        "rec-b-2",
+        "rec-b-3"
+      ],
+      "detail": {
+        "passenger_miles_counted": "29.50",
+        "operated_trips": 2,
+        "trips_with_events": 2,
+        "valid_trips": 2,
+        "invalid_trips": 0,
+        "missing_trips": 0,
+        "invalid_trip_reasons": {},
+        "missing_or_invalid_share": "0.0000",
+        "factor_applied": "1.000000",
+        "distance_source_segments": {
+          "haversine": 0,
+          "shape_dist_traveled": 5
+        },
+        "shape_dist_unit_miles": "1",
+        "source_mix": {
+          "tides": 8
+        },
+        "missing_trip_threshold": "0.02",
+        "imbalance_threshold": "0.10"
+      }
+    }
+  },
+  "haversine_case": {
+    "pmt_v0_0_1": {
+      "calc_name": "pmt_v0",
+      "calc_version": "0.1.0",
+      "unit": "passenger_miles",
+      "value": "4.15",
+      "blocking": [],
+      "warnings": [],
+      "infos": [
+        {
+          "issue_type": "simulated_source_data",
+          "severity": "info",
+          "source_record_ids": [
+            "rec-c-1",
+            "rec-c-2",
+            "rec-c-3",
+            "rec-c-4"
+          ]
+        },
+        {
+          "issue_type": "haversine_distance_fallback",
+          "severity": "info",
+          "source_record_ids": []
+        }
+      ],
+      "input_record_ids": [
+        "rec-c-1",
+        "rec-c-2",
+        "rec-c-3",
+        "rec-c-4"
+      ],
+      "detail": {
+        "passenger_miles_counted": "4.15",
+        "operated_trips": 1,
+        "trips_with_events": 1,
+        "valid_trips": 1,
+        "invalid_trips": 0,
+        "missing_trips": 0,
+        "invalid_trip_reasons": {},
+        "missing_or_invalid_share": "0.0000",
+        "factor_applied": "1.000000",
+        "distance_source_segments": {
+          "haversine": 2,
+          "shape_dist_traveled": 0
+        },
+        "shape_dist_unit_miles": null,
+        "source_mix": {
+          "tides_simulated": 4
+        },
+        "missing_trip_threshold": "0.02",
+        "imbalance_threshold": "0.10"
+      }
+    }
+  },
+  "blocked_case": {
+    "pmt_v0_0_1": {
+      "calc_name": "pmt_v0",
+      "calc_version": "0.1.0",
+      "unit": "passenger_miles",
+      "value": null,
+      "blocking": [
+        {
+          "issue_type": "apc_missing_trips_above_fta_threshold",
+          "severity": "blocking",
+          "source_record_ids": []
+        }
+      ],
+      "warnings": [
+        {
+          "issue_type": "pmt_invalid_trip_excluded",
+          "severity": "warning",
+          "trip_id": "trip-F",
+          "first_reason": "negative_load",
+          "source_record_ids": [
+            "rec-f-1",
+            "rec-f-2"
+          ]
+        },
+        {
+          "issue_type": "pmt_invalid_trip_excluded",
+          "severity": "warning",
+          "trip_id": "trip-H",
+          "first_reason": "count_imbalance",
+          "source_record_ids": [
+            "rec-h-1",
+            "rec-h-2"
+          ]
+        },
+        {
+          "issue_type": "pmt_invalid_trip_excluded",
+          "severity": "warning",
+          "trip_id": "trip-I",
+          "first_reason": "null_event_count",
+          "source_record_ids": [
+            "rec-i-1",
+            "rec-i-2"
+          ]
+        },
+        {
+          "issue_type": "pmt_invalid_trip_excluded",
+          "severity": "warning",
+          "trip_id": "trip-J",
+          "first_reason": "geometry_unavailable",
+          "source_record_ids": [
+            "rec-j-1",
+            "rec-j-2"
+          ]
+        }
+      ],
+      "infos": [],
+      "input_record_ids": [
+        "rec-e-1",
+        "rec-e-2"
+      ],
+      "detail": {
+        "passenger_miles_counted": "3.00",
+        "operated_trips": 4,
+        "trips_with_events": 5,
+        "valid_trips": 1,
+        "invalid_trips": 4,
+        "missing_trips": 1,
+        "invalid_trip_reasons": {
+          "count_imbalance": 1,
+          "geometry_unavailable": 1,
+          "negative_load": 1,
+          "null_event_count": 1
+        },
+        "missing_or_invalid_share": "0.7500",
+        "factor_applied": null,
+        "distance_source_segments": {
+          "haversine": 0,
+          "shape_dist_traveled": 1
+        },
+        "shape_dist_unit_miles": "1",
+        "source_mix": {
+          "tides": 10
+        },
+        "missing_trip_threshold": "0.02",
+        "imbalance_threshold": "0.10"
+      }
+    }
+  },
+  "factored_case": {
+    "pmt_v0_0_1": {
+      "calc_name": "pmt_v0",
+      "calc_version": "0.1.0",
+      "unit": "passenger_miles",
+      "value": "100.00",
+      "blocking": [],
+      "warnings": [],
+      "infos": [],
+      "input_record_ids": [
+        "rec-01-1",
+        "rec-01-2",
+        "rec-02-1",
+        "rec-02-2",
+        "rec-03-1",
+        "rec-03-2",
+        "rec-04-1",
+        "rec-04-2",
+        "rec-05-1",
+        "rec-05-2",
+        "rec-06-1",
+        "rec-06-2",
+        "rec-07-1",
+        "rec-07-2",
+        "rec-08-1",
+        "rec-08-2",
+        "rec-09-1",
+        "rec-09-2",
+        "rec-10-1",
+        "rec-10-2",
+        "rec-11-1",
+        "rec-11-2",
+        "rec-12-1",
+        "rec-12-2",
+        "rec-13-1",
+        "rec-13-2",
+        "rec-14-1",
+        "rec-14-2",
+        "rec-15-1",
+        "rec-15-2",
+        "rec-16-1",
+        "rec-16-2",
+        "rec-17-1",
+        "rec-17-2",
+        "rec-18-1",
+        "rec-18-2",
+        "rec-19-1",
+        "rec-19-2",
+        "rec-20-1",
+        "rec-20-2",
+        "rec-21-1",
+        "rec-21-2",
+        "rec-22-1",
+        "rec-22-2",
+        "rec-23-1",
+        "rec-23-2",
+        "rec-24-1",
+        "rec-24-2",
+        "rec-25-1",
+        "rec-25-2",
+        "rec-26-1",
+        "rec-26-2",
+        "rec-27-1",
+        "rec-27-2",
+        "rec-28-1",
+        "rec-28-2",
+        "rec-29-1",
+        "rec-29-2",
+        "rec-30-1",
+        "rec-30-2",
+        "rec-31-1",
+        "rec-31-2",
+        "rec-32-1",
+        "rec-32-2",
+        "rec-33-1",
+        "rec-33-2",
+        "rec-34-1",
+        "rec-34-2",
+        "rec-35-1",
+        "rec-35-2",
+        "rec-36-1",
+        "rec-36-2",
+        "rec-37-1",
+        "rec-37-2",
+        "rec-38-1",
+        "rec-38-2",
+        "rec-39-1",
+        "rec-39-2",
+        "rec-40-1",
+        "rec-40-2",
+        "rec-41-1",
+        "rec-41-2",
+        "rec-42-1",
+        "rec-42-2",
+        "rec-43-1",
+        "rec-43-2",
+        "rec-44-1",
+        "rec-44-2",
+        "rec-45-1",
+        "rec-45-2",
+        "rec-46-1",
+        "rec-46-2",
+        "rec-47-1",
+        "rec-47-2",
+        "rec-48-1",
+        "rec-48-2",
+        "rec-49-1",
+        "rec-49-2"
+      ],
+      "detail": {
+        "passenger_miles_counted": "98.00",
+        "operated_trips": 50,
+        "trips_with_events": 49,
+        "valid_trips": 49,
+        "invalid_trips": 0,
+        "missing_trips": 1,
+        "invalid_trip_reasons": {},
+        "missing_or_invalid_share": "0.0200",
+        "factor_applied": "1.020408",
+        "distance_source_segments": {
+          "haversine": 0,
+          "shape_dist_traveled": 49
+        },
+        "shape_dist_unit_miles": "1",
+        "source_mix": {
+          "tides": 98
+        },
+        "missing_trip_threshold": "0.02",
+        "imbalance_threshold": "0.10"
+      }
+    }
+  },
+  "exhibit_44": {
+    "annual": {
+      "mandatory_year_pmt": "60000000",
+      "mandatory_year_upt": "12750000",
+      "average_trip_length": "4.71",
+      "current_year_upt": "13400000",
+      "estimated_pmt": "63114000"
+    },
+    "per_schedule": [
+      {
+        "schedule_type": "Weekday",
+        "average_trip_length": "5.0",
+        "current_year_upt": "10500000",
+        "estimated_pmt": "52500000"
+      },
+      {
+        "schedule_type": "Saturday",
+        "average_trip_length": "3.5",
+        "current_year_upt": "2100000",
+        "estimated_pmt": "7350000"
+      },
+      {
+        "schedule_type": "Sunday",
+        "average_trip_length": "4.0",
+        "current_year_upt": "800000",
+        "estimated_pmt": "3200000"
+      }
+    ]
+  }
+}

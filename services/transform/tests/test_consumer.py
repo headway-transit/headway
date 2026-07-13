@@ -143,6 +143,15 @@ def test_gtfs_static_with_fetcher_normalizes_routes_and_trips() -> None:
     with zipfile.ZipFile(buf, "w") as zf:
         zf.writestr("routes.txt", "route_id,route_type\nR1,3\n")
         zf.writestr("trips.txt", "trip_id,route_id,service_id\nT1,R1,WKDY\n")
+        zf.writestr(
+            "stops.txt",
+            "stop_id,stop_name,stop_lat,stop_lon\nS1,First St,42.35,-71.06\n",
+        )
+        zf.writestr(
+            "stop_times.txt",
+            "trip_id,arrival_time,departure_time,stop_id,stop_sequence\n"
+            "T1,10:40:00,10:40:00,S1,1\n",
+        )
     zip_bytes = buf.getvalue()
 
     conn = FakeConnection()
@@ -169,7 +178,9 @@ def test_gtfs_static_with_fetcher_normalizes_routes_and_trips() -> None:
     assert fetched == ["objects/feed.zip"]
     assert len(conn.sql_for("canonical.routes")) == 1
     assert len(conn.sql_for("canonical.trips")) == 1
-    assert len(conn.sql_for("lineage.edges")) == 2  # one per canonical row
+    assert len(conn.sql_for("canonical.stops")) == 1
+    assert len(conn.sql_for("canonical.stop_times")) == 1
+    assert len(conn.sql_for("lineage.edges")) == 4  # one per canonical row
 
 
 def test_tides_passenger_events_routed_with_fetcher_normalizes_rows() -> None:

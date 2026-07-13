@@ -24,6 +24,14 @@ import {
   SS50_QUOTE_SNIPPET,
   THRESHOLD_QUOTE_SNIPPETS,
 } from "../regulatory/safetyRules";
+import {
+  EXPANSION_FACTOR_QUOTE_SNIPPET,
+  MULTIPLY_QUOTE_SNIPPET,
+  OPTIONS_QUOTE_SNIPPET,
+  PRECISION_FLOOR_QUOTE_SNIPPET,
+  RATIO_OF_TOTALS_QUOTE_SNIPPET,
+  SELECTION_QUOTE_SNIPPET,
+} from "../regulatory/samplingRules";
 
 const quotesByCalc: Record<string, { quote: string; citation: string }[]> =
   quotes;
@@ -165,5 +173,56 @@ describe("regulatory quotes (src/regulatory/quotes.json)", () => {
     }
     expect(quoteContaining("sscls_v0", SS40_QUOTE_SNIPPET)).not.toBeNull();
     expect(quoteContaining("sscls_v0", SS50_QUOTE_SNIPPET)).not.toBeNull();
+  });
+
+  it("ships the NTD Sampling Manual section's quotes for sampling_v0 VERBATIM and resolves EVERY snippet the /sampling UI depends on (handoff 0012)", () => {
+    const tracker = readFileSync(trackerPath, "utf8");
+    const sampling = quotesByCalc.sampling_v0;
+    expect(
+      sampling,
+      "sampling_v0 has NO quotes in quotes.json — run npm run extract:quotes; " +
+        "the /sampling wizard, worksheets, and estimate receipt must never " +
+        "ship without their rules",
+    ).toBeDefined();
+
+    // The §83.05 rule — ratio of totals (a) AND the (b) ban — character
+    // for character, present in the real tracker.
+    const ratio = quoteContaining("sampling_v0", RATIO_OF_TOTALS_QUOTE_SNIPPET);
+    expect(ratio?.quote).toBe(
+      "(a) You must determine the sample APTL for a given sample as the ratio of sample total PMT over sample total UPT for the following cases: (1) for the entire sample, (2) by type of service days, or (3) by service group. (b) You must not determine the sample APTL as the average of the APTL across individual service units in the sample.",
+    );
+    expect(tracker).toContain(`"${ratio?.quote}"`);
+    expect(ratio?.citation).toBe(
+      "§83.05 — FTA NTD Sampling Manual, March 31, 2009, p. 42",
+    );
+
+    // The §83.01 expansion-factor rule (a label with parenthesized
+    // sub-refs — the head parse must still cite the PAGE, not the "(a)").
+    const expansion = quoteContaining(
+      "sampling_v0",
+      EXPANSION_FACTOR_QUOTE_SNIPPET,
+    );
+    expect(expansion?.quote).toBe(
+      "(a) You must use your 100% count of UPT as the expansion factor. (b) For estimating average daily PMT by type of service days, use your annual total 100% count of UPT by type of service days.",
+    );
+    expect(expansion?.citation).toBe(
+      "§83.01(a)/(b) — FTA NTD Sampling Manual, March 31, 2009, p. 42",
+    );
+
+    // The §63.03 selection rule the worksheets carry.
+    const selection = quoteContaining("sampling_v0", SELECTION_QUOTE_SNIPPET);
+    expect(selection?.citation).toBe(
+      "§63.03 — FTA NTD Sampling Manual, March 31, 2009, p. 19",
+    );
+    expect(selection?.quote).toContain(
+      "(1) sampling under the method is random. (2) sampling under the method is without replacement.",
+    );
+
+    // Every remaining snippet the /sampling UI depends on resolves.
+    expect(quoteContaining("sampling_v0", OPTIONS_QUOTE_SNIPPET)).not.toBeNull();
+    expect(quoteContaining("sampling_v0", MULTIPLY_QUOTE_SNIPPET)).not.toBeNull();
+    expect(
+      quoteContaining("pmt_v0", PRECISION_FLOOR_QUOTE_SNIPPET),
+    ).not.toBeNull();
   });
 });

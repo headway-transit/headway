@@ -28,6 +28,7 @@ export const copy = {
     metrics: "Metrics",
     reports: "Monthly ridership",
     safety: "Safety & security",
+    sampling: "PMT sampling",
     dq: "Data quality",
     certify: "Certify",
     branding: "Branding",
@@ -962,5 +963,321 @@ export const copy = {
         `Go to the correction of ${eventLabel}`,
       supersededBy: (id: string) => `Corrected by event ${id}`,
     },
+  },
+
+  /**
+   * The PMT sampling module (/sampling — handoff 0012, design point 3).
+   * Every regulatory rule shown is either the VERBATIM tracker quote
+   * (src/regulatory/quotes.json: sampling_v0 / pmt_v0) with its citation,
+   * or the API's own regulatory text (eligibility guidance, table-cell
+   * citations, undersampling/oversampling citations, the estimate's
+   * method label, citations, and caveats) rendered verbatim — never a
+   * paraphrase presented as a quotation. Every sample size, count, ratio,
+   * and estimate displayed is the API's own figure (sampling_v0,
+   * deterministic calc code), shown verbatim: this page never computes a
+   * sample size or an estimate.
+   */
+  sampling: {
+    heading: "PMT sampling",
+    intro:
+      "For agencies that cannot count passenger miles on every trip: plan a ready-to-use sample from the FTA's NTD Sampling Manual, draw each period's units at random, hand the worksheet to a ride checker, record what they measured, and let Headway's deterministic calculation produce the estimate. Every size and figure on this page comes from that calculation — never from this page and never from an AI.",
+    /** Honest scope (handoff 0012, design point 4): stated on every visit. */
+    alphaBanner:
+      "Alpha preview — not certified for submission. Headway covers the ready-to-use plans end to end for the averaging (APTL) option without route grouping. Base-option plans can be recorded, drawn, and measured, but their estimation (Sampling Manual Section 70) is deferred; the route-grouping option is reference-only. Template plans built from your own past samples (Section 50) are not mechanized, and certification of a custom technique by a qualified statistician (§57) is your agency's own workflow — Headway records plans and estimates but certifies nothing. Estimates here are sampled estimates, never computed passenger-mile figures.",
+
+    optionsLoading: "Loading the sampling vocabulary…",
+    optionsError:
+      "Headway could not load the sampling vocabulary from the server. The plan wizard needs it, so planning is unavailable — the error above says what the server reported.",
+
+    /** NTD mode codes the Sampling Manual's Table 41.01 covers. */
+    modeLabels: {
+      MB: "Bus (MB)",
+      TB: "Trolleybus (TB)",
+      DR: "Demand response (DR)",
+      VP: "Commuter vanpool (VP)",
+      CR: "Commuter rail (CR)",
+      LR: "Light rail (LR)",
+      HR: "Heavy rail (HR)",
+      MR: "Monorail (MR)",
+      AG: "Automated guideway (AG)",
+    } as Record<string, string>,
+    unitLabels: {
+      vehicle_days: "Vehicle-days",
+      one_way_trips: "One-way trips",
+      round_trips: "Round trips",
+      one_way_car_trips: "One-way car trips",
+      one_way_train_trips: "One-way train trips",
+    } as Record<string, string>,
+    optionLabels: {
+      aptl: "Averaging option (APTL, without route grouping)",
+      aptl_grouped: "Averaging option with route grouping",
+      base: "Base option",
+    } as Record<string, string>,
+    frequencyLabels: {
+      quarterly: "Quarterly",
+      monthly: "Monthly",
+      weekly: "Weekly",
+    } as Record<string, string>,
+    tosLabels: {
+      DO: "The agency itself (directly operated, DO)",
+      PT: "A contractor (purchased transportation, PT)",
+    } as Record<string, string>,
+    statusLabels: {
+      created: "No sample drawn yet",
+      active: "Sampling under way",
+    } as Record<string, string>,
+    /** "2026 — Bus (MB), one-way trips — Averaging option …, monthly" */
+    planLabel: (
+      reportYear: string,
+      modeLabel: string,
+      unitLabel: string,
+      optionLabel: string,
+      frequencyLabel: string,
+    ) =>
+      `${reportYear} — ${modeLabel}, ${unitLabel.toLowerCase()} — ${optionLabel}, ${frequencyLabel.toLowerCase()}`,
+
+    wizard: {
+      heading: "Plan a sample",
+      intro:
+        "Answer six questions and Headway's calculation looks up the required per-period and annual sample sizes, verbatim from the manual's tables. Nothing is estimated here — this step only fixes the plan you will sample under.",
+      notAllowed:
+        "Only a data steward or above can create sampling plans, draw period samples, or record measurements. You can still read every plan, worksheet, and progress meter on this page.",
+      eligibilityHeading: "Is a ready-to-use plan right for your agency?",
+      /** The API's guidance strings are rendered verbatim below this. */
+      eligibilityIntro:
+        "The calculation's own guidance, word for word — the manual's eligibility conditions (§41.01) and reuse limits (§41.03) are quoted inside it:",
+      reportYear: "Which NTD report year is this plan for?",
+      reportYearHint:
+        "The report year the sample covers. Sampling must meet the FTA floor for each mode and type of service in the year it is reported.",
+      mode: "Which mode are you sampling?",
+      modeUnselected: "Choose a mode",
+      tos: "Who operates this service?",
+      tosUnselected: "Choose who operates it",
+      unit: "What is one sampled unit of service?",
+      unitUnselected: "Choose a unit",
+      unitHint:
+        "The manual fixes the unit per mode (NTD Sampling Manual, Table 41.01) — only the units the table allows for your mode are offered, exactly as the calculation serves them.",
+      option: "How will you measure and estimate?",
+      /** The manual's §41.07(c) options, quoted below the radios. */
+      optionsRuleIntro:
+        "The manual's own words for the three options, word for word:",
+      optionAptlExplanation:
+        "Ride checkers count boardings and passenger miles on a smaller sample, and the estimate combines the sample's average passenger trip length with your complete boarding count. This option REQUIRES a 100% count of unlinked passenger trips (every boarding, all year) — pick it only if your agency counts every boarding.",
+      optionBaseExplanation:
+        "Ride checkers count boardings and passenger miles on a larger sample, and both figures are estimated from the sample alone. No 100% boarding count is needed, but the required samples are the largest — and Headway v0 can record a Base plan, its draws, and its measurements, but cannot yet run the Base-option estimate (Sampling Manual Section 70 is deferred; the estimate button will say so).",
+      optionGroupedExplanation:
+        "Bus routes are split into two groups by route length and each group is sampled and estimated separately, which can shrink the total sample. Not available yet: Headway v0 does not mechanize per-group sampling or the grouped estimate, so this option cannot be picked — its table cells remain readable for reference.",
+      frequency: "How often will you sample?",
+      frequencyUnselected: "Choose a frequency",
+      frequencyHint:
+        "Ready-to-use plans spread the sample across the year — quarterly, monthly, or weekly. The manual's required sizes differ by frequency, so the calculation needs your choice to look up the right table cell.",
+      submit: "Create this plan",
+      validationHeading:
+        "The plan was not created. Fix the following and try again:",
+      reportYearInvalid:
+        "Enter the NTD report year as a four-digit year, like 2026.",
+      modeRequired: "Pick which mode you are sampling.",
+      tosRequired: "Pick who operates this service.",
+      unitRequired: "Pick what one sampled unit of service is.",
+      frequencyRequired: "Pick how often you will sample.",
+      created: (annual: string) =>
+        `The plan is created. Required sample size, from the manual's table: ${annual} units for the year. The full plan receipt is below.`,
+    },
+
+    /** The plan receipt: the required sizes with their table citation. */
+    planReceipt: {
+      label: (planLabel: string) => `Plan receipt for ${planLabel}`,
+      /** The wizard's copy of the receipt: a DISTINCT accessible name, so
+       *  the two landmarks (here and on the plan card) stay unique. */
+      newLabel: (planLabel: string) => `New plan receipt for ${planLabel}`,
+      requiredLine: (annual: string) =>
+        `Required sample size: ${annual} units for the year.`,
+      perPeriodLine: (perPeriod: string, frequencyLabel: string) =>
+        `${perPeriod} units per ${frequencyLabel.toLowerCase()} period — both sizes are the manual's own table rows, never derived from each other.`,
+      citationIntro:
+        "Where these sizes come from, as cited by the calculation:",
+      lookedUpBy: (selectorVersion: string) =>
+        `Sizes looked up by ${selectorVersion} — deterministic, versioned calculation code. Neither this page nor an AI computes a required sample size.`,
+      guidanceHeading: "Guidance from the calculation, word for word",
+      floorIntro:
+        "The estimation floor the ready-to-use plans are designed to meet (2026 NTD Policy Manual, p. 149), word for word:",
+    },
+
+    plans: {
+      heading: "Sampling plans",
+      loading: "Loading sampling plans…",
+      empty:
+        "No sampling plans yet. Create one above — the plan fixes the unit, option, frequency, and required sample sizes before any unit is drawn.",
+      statusUnknown: (status: string) =>
+        `This plan has a status this version of Headway does not label yet (\u201c${status}\u201d). It is shown raw so nothing is hidden.`,
+      createdLine: (by: string, at: string) => `Created by ${by} at ${at}`,
+      detailError: (message: string) =>
+        `Headway could not load this plan's draws, measurements, or progress: ${message}`,
+    },
+
+    draw: {
+      heading: "Draw a period's sample",
+      intro:
+        "One draw per period, at the plan's frequency. List every service unit you expect to operate in the period — trippers, shuttles, and special operations included — and Headway's deterministic drawer selects the required number at random, without replacement. The seed is recorded so the same list and seed always reproduce the same sample.",
+      periodLabel: "Which period is this draw for?",
+      periodHint:
+        "Name the period at the plan's frequency, for example 2026-Q1, 2026-01, or 2026-W14. Each period is drawn exactly once.",
+      unitsLabel: "Service units expected this period (one per line)",
+      unitsHint:
+        "The list must cover the period's entire expected service — a unit left out can never be selected, which breaks the randomness the manual requires. Qualify unit ids with their period or date (for example 2026-01-15/trip-5012) so an id never repeats across periods.",
+      seedLabel: "Random seed (optional)",
+      seedHint:
+        "Leave blank and Headway generates one from a cryptographic randomness source. If you provide your own, use at least 8 characters. Either way the seed is recorded with the draw, so anyone can re-run it and get the same sample.",
+      oversampleLabel: "Extra units to draw beyond the required size (optional)",
+      oversampleHint:
+        "Oversampling is allowed only when the extra units are selected randomly — Headway draws them from the same seeded random order and flags them on the draw record. Leave 0 to draw exactly the required per-period size.",
+      submit: "Draw this period's sample",
+      validationHeading:
+        "The sample was not drawn. Fix the following and try again:",
+      periodRequired: "Name which period this draw is for.",
+      unitsRequired:
+        "List at least one service unit for the period — one per line.",
+      seedTooShort:
+        "A seed you provide yourself needs at least 8 characters — or leave it blank and Headway generates one.",
+      oversampleInvalid:
+        "Extra units must be a whole number, 0 or more.",
+      drawn: (count: string, period: string) =>
+        `The sample for ${period} is drawn: ${count} units were selected at random, without replacement. The worksheet is below.`,
+      /** The drawer's documented procedure (DrawCreated.method), verbatim. */
+      methodIntro:
+        "How the drawer selected this list — the recorded procedure, word for word:",
+    },
+
+    worksheet: {
+      heading: (period: string) => `Ride-checker worksheet — ${period}`,
+      intro:
+        "Hand this list to the ride checker. Each selected unit needs its boardings (UPT) and passenger miles (PMT) measured on board.",
+      printButton: "Print the worksheets",
+      seedLine: (seed: string) =>
+        `Random seed recorded for reproducibility: ${seed}`,
+      frameLine: (frame: string) =>
+        `Drawn from the period's full list of ${frame} service units.`,
+      oversampleLine: (count: string) =>
+        `Includes ${count} randomly drawn extra unit(s) beyond the required size (flagged on the draw record).`,
+      ruleIntro:
+        "How this list was selected — the manual's rule, word for word:",
+      columns: {
+        position: "Draw order",
+        unit: "Service unit",
+        upt: "Boardings observed (UPT)",
+        pmt: "Passenger miles observed (PMT)",
+        recorded: "Recorded",
+      },
+      notMeasured: "Not yet measured",
+      measuredLine: (by: string, at: string) => `${by}, ${at}`,
+      drawnLine: (by: string, at: string, version: string) =>
+        `Drawn by ${by} at ${at} using ${version}.`,
+    },
+
+    measure: {
+      heading: "Record a measurement",
+      intro:
+        "Enter what the ride checker observed on one selected unit: the boardings counted and the passenger miles measured. Every drawn unit must be measured — the progress meter below tracks how far along the sample is.",
+      unitLabel: "Which selected unit was measured?",
+      unitUnselected: "Choose a selected unit",
+      allMeasured:
+        "Every drawn unit has a recorded observation. Draw the next period when its service list is ready.",
+      uptLabel: "Boardings observed (UPT)",
+      uptHint:
+        "A whole number of boardings the checker counted on this unit.",
+      pmtLabel: "Passenger miles observed (PMT)",
+      pmtHint:
+        "The passenger miles measured on this unit, like 128.4. Entered by hand from the ride check — the estimate will say so.",
+      dayTypeLabel: "What type of service day was it? (optional)",
+      dayTypeUnselected: "Not recorded",
+      dayTypeHint:
+        "Weekday, Saturday, or Sunday. Only needed if you later want estimates broken out by type of service day.",
+      dateLabel: "When was the ride check performed? (optional)",
+      notesLabel: "Notes (optional)",
+      submit: "Record this measurement",
+      validationHeading:
+        "The measurement was not recorded. Fix the following and try again:",
+      unitRequired: "Pick which selected unit was measured.",
+      uptInvalid: "Boardings observed needs a whole number, 0 or more.",
+      pmtInvalid:
+        "Passenger miles observed must be a plain number, like 128.4.",
+      recorded: (unitId: string) =>
+        `Measurement recorded for ${unitId}. The progress meter below is updated from the record.`,
+      progressHeading: "Sample progress",
+      /** API-served workflow counts, shown beside the meter. */
+      progressLine: (measured: string, required: string) =>
+        `${measured} of ${required} required units measured.`,
+      meterLabel: (planLabel: string) => `Measured units for ${planLabel}`,
+      perDrawLine: (period: string, measured: string, selected: string) =>
+        `${period}: ${measured} of ${selected} drawn units measured`,
+      /** The API's no-undersampling citation is rendered verbatim below. */
+      underTargetIntro:
+        "The sample is below its required size. Why an estimate cannot be made yet, in the API's own words:",
+      /** The API's oversampling citation is rendered verbatim below. */
+      oversampledIntro:
+        "More units are measured than the plan requires. The rule that makes that acceptable, in the API's own words:",
+    },
+
+    estimate: {
+      heading: "Run the estimate",
+      intro:
+        "When every required unit is measured, Headway's deterministic calculation expands the sample to an annual passenger-mile estimate: your 100% boarding count \u00d7 the sample's average passenger trip length. This page only asks for the input — the arithmetic is the calculation's, never the browser's.",
+      notAllowed:
+        "Only a report preparer or above can run the estimate. The plan, worksheets, and progress stay readable here, and measurements can still be recorded by a data steward.",
+      expansionLabel: "Annual 100% boarding count (UPT)",
+      expansionHint:
+        "The averaging option's expansion factor is your complete unlinked-passenger-trips count for the year (NTD Sampling Manual \u00a783.01) \u2014 the 100% count the option requires. Use the agency's computed UPT figure, exactly as reported; the estimate's caveats say Headway does not cross-check it in v0.",
+      submit: "Run the estimate",
+      /** The always-visible reason line AT the button (house pattern). */
+      reasonLabel: "Why the estimate button is off",
+      reasonBase:
+        "The estimate is off because this is a Base-option plan: Base-option estimation (Sampling Manual Section 70) is deferred in this version of Headway. The plan's draws and measurements stay on file for when it lands.",
+      reasonUnderTarget: (measured: string, required: string) =>
+        `The estimate is off because only ${measured} of ${required} required units are measured. The manual does not allow estimating from an under-target sample \u2014 the rule is stated above the meter, in the API's own words.`,
+      reasonExpansionMissing:
+        "The estimate is off until you enter the annual 100% boarding count \u2014 the averaging option cannot expand a sample without it.",
+      expansionInvalid:
+        "The annual 100% boarding count must be a plain number, like 12750000.",
+      done: "The estimate is computed. The receipt is below.",
+
+      receipt: {
+        label: (planLabel: string) => `Estimate receipt for ${planLabel}`,
+        /** The provenance tag — a sampled ESTIMATE, never computed PMT. */
+        estimateTag: "Sampled estimate",
+        estimateLine: (value: string) =>
+          `${value} passenger miles (annual, sampled estimate).`,
+        distinctNote:
+          "This is a sampled estimate with estimation provenance. It is not a computed passenger-miles figure, it is never shown as one, and it is not stored among Headway's computed figures.",
+        methodIntro:
+          "The calculation's own provenance label, word for word:",
+        componentsHeading: "How the estimate was put together",
+        expansionTerm:
+          "100% boarding count (the expansion factor, \u00a783.01)",
+        aptlTerm:
+          "Sample average passenger trip length (sample APTL, \u00a783.05)",
+        sampleUptTerm: "Sample total boardings (UPT)",
+        samplePmtTerm: "Sample total passenger miles (PMT)",
+        unitsTerm: "Units measured, of required",
+        unitsValue: (measured: string, required: string) =>
+          `${measured} of ${required}`,
+        oversampleTerm: "Measured beyond the required size",
+        oversampleValue: (count: string) =>
+          `${count} unit(s) \u2014 acceptable only because the extra units were drawn randomly (see the caveats below)`,
+        expansionRuleIntro:
+          "The expansion-factor rule (\u00a783.01), word for word:",
+        ratioRuleIntro:
+          "How the sample APTL must be formed \u2014 a ratio of totals, never an average of per-unit ratios (\u00a783.05), word for word:",
+        multiplyRuleIntro:
+          "How the annual estimate is formed (\u00a783.07), word for word:",
+        byDayHeading: "Estimates by type of service day",
+        byDayBlockLabel: (scope: string) => `${scope} estimate`,
+        citationsHeading: "Citations from the calculation",
+        caveatsHeading: "Read this before using the estimate",
+      },
+    },
+
+    /** The quote lookup failing is stated, never papered over. */
+    ruleMissing:
+      "The verified manual quote for this rule is not on file. Regenerate the quotes (npm run extract:quotes) \u2014 the rule must ship with this screen.",
   },
 } as const;

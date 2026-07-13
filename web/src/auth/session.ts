@@ -80,3 +80,22 @@ export function canCertify(session: Session | null): boolean {
 export function canEnterSafetyEvents(session: Session | null): boolean {
   return session !== null && ROLE_RANK[session.role] >= ROLE_RANK.data_steward;
 }
+
+/**
+ * Mirrors the API (handoff 0012): creating sampling plans, drawing period
+ * samples, and recording measurements require data_steward or above.
+ * Reading plans stays open to every signed-in role.
+ */
+export function canManageSampling(session: Session | null): boolean {
+  return session !== null && ROLE_RANK[session.role] >= ROLE_RANK.data_steward;
+}
+
+/**
+ * Mirrors the API (handoff 0012): generating the §83 estimate requires
+ * report_preparer or above (services/api routers/sampling.py).
+ */
+export function canRunSamplingEstimate(session: Session | null): boolean {
+  return (
+    session !== null && ROLE_RANK[session.role] >= ROLE_RANK.report_preparer
+  );
+}
