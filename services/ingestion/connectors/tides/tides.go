@@ -6,15 +6,32 @@
 // so a re-scan is idempotent (content-addressing already dedupes re-produces
 // of the same bytes).
 //
+// Partial-copy guard (2026-07-13 hardening pass): a file is ingested only
+// after it has been observed with an identical size AND mtime on two
+// consecutive scans — i.e. it sat unchanged for a full scan interval. A file
+// still being copied into the drop directory grows between scans and is
+// skipped (logged, never ingested) until it settles, so a partially-copied
+// export can never be landed as a complete record (silent truncation).
+// Agencies SHOULD additionally write-then-rename: write the export under a
+// non-matching name (e.g. .tmp) and rename() it to its final
+// passenger_events*.csv name only when complete — rename is atomic on the
+// same filesystem, so the scanner only ever sees complete files.
+//
 // The CSV header sanity check (required TIDES columns present; row-level
 // semantics per the TIDES spec are the Data Engineer's concern, not
 // ingestion's) is used ONLY to set parse_status. A malformed file is still
 // landed and produced as malformed — never dropped (Guardrail 7).
 //
-// The envelope source is configurable (TIDES_SOURCE): real feeds use the
-// default "tides"; simulator drops MUST use "tides_simulated" so simulated
-// data stays permanently distinguishable in provenance (handoff 0005 binding
-// rule).
+// The envelope source is REQUIRED and has no default (2026-07-13 hardening
+// pass — fail closed): real feeds set TIDES_SOURCE=tides (or a vendor
+// label); simulator drops MUST set TIDES_SOURCE=tides_simulated so simulated
+// data stays permanently distinguishable in provenance (Shared Constraint 2,
+// full provenance; handoff 0005 binding rule). As a second, structural line
+// of defense the scanner REFUSES any file whose rows carry the simulator
+// marker ("sim:"-prefixed field, which tools/tides-simulator always writes)
+// when the configured source label is not a *_simulated label: the file is
+// moved to rejected/ and loudly logged, never landed — simulated data must
+// never be able to masquerade as real.
 //
 // TIDES passenger_events schema verified against TIDES-transit/TIDES
 // spec/passenger_events.schema.json (commit
@@ -51,8 +68,7 @@ import (
 // Connector identity recorded on every envelope (contracts/topics.v0.md).
 const (
 	ConnectorName    = "headway-tides"
-	ConnectorVersion = "0.1.0"
-	DefaultSource    = "tides"
+	ConnectorVersion = "0.2.0"
 	ContentType      = "text/csv"
 	Topic            = "raw.tides.passenger_events"
 
@@ -60,6 +76,27 @@ const (
 	FilePattern = "passenger_events*.csv"
 	// ProcessedDir is the subdirectory processed files are moved into.
 	ProcessedDir = "processed"
+	// RejectedDir is the subdirectory refused files are moved into
+	// (oversize, or simulator-marked content under a non-simulated source
+	// label). Refused files are preserved for human inspection — moved,
+	// logged loudly, never deleted and never silently skipped.
+	RejectedDir = "rejected"
+
+	// SimulatedSourceSuffix marks a source label as carrying simulated
+	// data (e.g. "tides_simulated") — the handoff-0005 binding rule.
+	SimulatedSourceSuffix = "_simulated"
+	// SimMarkerPrefix is the structural row marker every Headway simulator
+	// writes into its identifiers (tools/tides-simulator:
+	// passenger_event_id "sim:<date>:<trip>:<n>").
+	SimMarkerPrefix = "sim:"
+
+	// DefaultMaxFileBytes caps how large a dropped file may be before the
+	// scanner refuses it (moved to rejected/, logged). Generous: a day of
+	// event-level APC data is tens of MiB. Override per Scanner.
+	DefaultMaxFileBytes = 256 << 20 // 256 MiB
+
+	// DefaultScanInterval is Run's rescan cadence when none is configured.
+	DefaultScanInterval = 30 * time.Second
 )
 
 // RequiredColumns are the required fields of the TIDES passenger_events
@@ -81,12 +118,33 @@ func ObjectKey(recordID string) string {
 	return fmt.Sprintf("raw/tides/%s.csv", recordID)
 }
 
+// fileState is one scan's observation of a candidate file, used by the
+// partial-copy stability guard.
+type fileState struct {
+	size  int64
+	mtime time.Time
+}
+
+func (a fileState) equal(b fileState) bool {
+	return a.size == b.size && a.mtime.Equal(b.mtime)
+}
+
 // Scanner scans one drop directory for TIDES passenger_events CSV files,
-// lands each, produces its envelope, and moves the file to processed/.
+// lands each stable file, produces its envelope, and moves the file to
+// processed/.
 type Scanner struct {
 	Dir      string
-	Source   string // envelope source; empty means DefaultSource ("tides")
+	Source   string // envelope source; REQUIRED, no default (fail closed)
 	AgencyID string // optional
+
+	// MaxFileBytes caps the size of a dropped file; <= 0 means
+	// DefaultMaxFileBytes. Oversize files are moved to rejected/ and
+	// logged — never read into memory, never silently skipped.
+	MaxFileBytes int64
+	// Interval is Run's rescan cadence; <= 0 means DefaultScanInterval.
+	// It is also the settle time of the partial-copy guard: a file must
+	// be unchanged for one full interval before it is ingested.
+	Interval time.Duration
 
 	Store    ObjectStore
 	Producer producer.Producer
@@ -94,6 +152,10 @@ type Scanner struct {
 
 	// Clock is injectable for tests; defaults to time.Now.
 	Clock func() time.Time
+
+	// pending tracks candidate files' (size, mtime) from the previous
+	// scan for the stability guard.
+	pending map[string]fileState
 }
 
 func (s *Scanner) clock() time.Time {
@@ -103,38 +165,137 @@ func (s *Scanner) clock() time.Time {
 	return time.Now()
 }
 
-func (s *Scanner) source() string {
-	if s.Source != "" {
-		return s.Source
+func (s *Scanner) maxFileBytes() int64 {
+	if s.MaxFileBytes > 0 {
+		return s.MaxFileBytes
 	}
-	return DefaultSource
+	return DefaultMaxFileBytes
 }
 
-// ScanOnce processes every passenger_events*.csv currently in Dir, in
-// filename order. Each file is landed, produced, then moved to processed/;
+// checkSource refuses to run without an explicit source label. There is no
+// default: a connector that guessed "tides" here could ingest simulated
+// drops as real agency data (Shared Constraint 2, full provenance).
+func (s *Scanner) checkSource() error {
+	if strings.TrimSpace(s.Source) != "" {
+		return nil
+	}
+	return errors.New(
+		"tides: no source label configured. Set TIDES_SOURCE to say what " +
+			"this drop directory carries: TIDES_SOURCE=tides (or your " +
+			"vendor's label) for a real agency feed, or " +
+			"TIDES_SOURCE=tides_simulated for simulator output. The " +
+			"connector refuses to guess, because simulated data must never " +
+			"enter provenance under a real source label (Shared Constraint " +
+			"2: full provenance)")
+}
+
+// sourceIsSimulated reports whether the configured source label declares
+// simulated data (the *_simulated convention, handoff 0005).
+func (s *Scanner) sourceIsSimulated() bool {
+	return strings.HasSuffix(s.Source, SimulatedSourceSuffix)
+}
+
+// Run scans Dir every Interval until ctx is cancelled. Per-file failures
+// are logged by ScanOnce and retried on later scans (failed files stay in
+// the drop directory); a missing source label is a configuration refusal
+// and returns immediately.
+func (s *Scanner) Run(ctx context.Context) error {
+	if err := s.checkSource(); err != nil {
+		return err
+	}
+	interval := s.Interval
+	if interval <= 0 {
+		interval = DefaultScanInterval
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		if err := s.ScanOnce(ctx); err != nil && ctx.Err() == nil {
+			s.Log.Error("tides drop-dir scan had failures (will rescan)",
+				"connector", ConnectorName, "dir", s.Dir, "error", err)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
+}
+
+// ScanOnce examines every passenger_events*.csv currently in Dir, in
+// filename order. A file is ingested only once it is STABLE — same size and
+// mtime as on the previous scan (partial-copy guard; see the package
+// comment). Each stable file is landed, produced, then moved to processed/;
 // a per-file failure is logged and reported but does not stop the other
 // files. Landing precedes producing: a consumer must never see an envelope
 // whose object does not exist. A header sanity-check failure sets
 // parse_status malformed but the bytes are still landed and produced.
 func (s *Scanner) ScanOnce(ctx context.Context) error {
+	if err := s.checkSource(); err != nil {
+		return err
+	}
 	matches, err := filepath.Glob(filepath.Join(s.Dir, FilePattern))
 	if err != nil {
 		return fmt.Errorf("tides: scan %s: %w", s.Dir, err)
 	}
 	sort.Strings(matches)
+	if s.pending == nil {
+		s.pending = make(map[string]fileState)
+	}
 
 	var errs []error
+	seen := make(map[string]bool, len(matches))
 	for _, path := range matches {
+		seen[path] = true
+		info, err := os.Stat(path)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("tides: stat %s: %w", path, err))
+			continue
+		}
+
+		// Size cap: refuse before reading anything into memory. An
+		// oversize file only grows, so there is no point waiting for
+		// stability.
+		if info.Size() > s.maxFileBytes() {
+			delete(s.pending, path)
+			err := s.rejectFile(path, fmt.Sprintf(
+				"file is %d bytes, over the %d-byte limit (DROP_MAX_FILE_BYTES)",
+				info.Size(), s.maxFileBytes()))
+			errs = append(errs, err)
+			continue
+		}
+
+		// Partial-copy stability guard: ingest only after the file has
+		// been seen unchanged (size AND mtime) across two consecutive
+		// scans — one full scan interval of quiet.
+		cur := fileState{size: info.Size(), mtime: info.ModTime()}
+		prev, known := s.pending[path]
+		if !known || !prev.equal(cur) {
+			s.pending[path] = cur
+			s.Log.Info("file not yet stable; waiting one scan interval before ingest (partial-copy guard)",
+				"connector", ConnectorName, "file", filepath.Base(path),
+				"bytes", cur.size, "seen_before", known)
+			continue
+		}
+
 		if err := s.processFile(ctx, path); err != nil {
 			s.Log.Error("tides file failed (left in place for re-scan)",
 				"connector", ConnectorName, "path", path, "error", err)
 			errs = append(errs, err)
+		} else {
+			delete(s.pending, path)
+		}
+	}
+	// Forget files that vanished between scans.
+	for path := range s.pending {
+		if !seen[path] {
+			delete(s.pending, path)
 		}
 	}
 	return errors.Join(errs...)
 }
 
-// processFile lands one file, produces its envelope, and moves it to
+// processFile lands one stable file, produces its envelope, and moves it to
 // processed/. The move happens only after a successful produce, so a failed
 // file stays in the drop directory for the next scan (idempotent by
 // content-addressed record_id).
@@ -143,7 +304,31 @@ func (s *Scanner) processFile(ctx context.Context, path string) error {
 	if err != nil {
 		return fmt.Errorf("tides: read %s: %w", path, err)
 	}
+	if int64(len(body)) > s.maxFileBytes() {
+		// Grew past the cap between stat and read.
+		return s.rejectFile(path, fmt.Sprintf(
+			"file is %d bytes, over the %d-byte limit (DROP_MAX_FILE_BYTES)",
+			len(body), s.maxFileBytes()))
+	}
 	fetchedAt := s.clock()
+
+	// Provenance enforcement (Shared Constraint 2 — full provenance:
+	// "simulated data is permanently distinguishable in provenance"): the
+	// Headway simulators structurally mark every row with a "sim:" id
+	// prefix. Simulator-marked content arriving under a source label that
+	// does not declare simulation is a provenance violation — hard-refuse
+	// the file, loudly, before anything is landed or produced.
+	if !s.sourceIsSimulated() {
+		if n := simMarkedRowCount(body); n > 0 {
+			return s.rejectFile(path, fmt.Sprintf(
+				"%d row(s) carry the simulator marker %q but the configured "+
+					"source label %q does not declare simulated data; "+
+					"simulated data must never be ingested as real "+
+					"(Shared Constraint 2: full provenance). If this file "+
+					"really is simulator output, re-drop it with "+
+					"TIDES_SOURCE=tides_simulated", n, SimMarkerPrefix, s.Source))
+		}
+	}
 
 	recordID := envelope.RecordID(body)
 	key := ObjectKey(recordID)
@@ -161,7 +346,7 @@ func (s *Scanner) processFile(ctx context.Context, path string) error {
 	}
 
 	env, err := envelope.NewObjectRef(body, key, envelope.Params{
-		Source:           s.source(),
+		Source:           s.Source,
 		Connector:        ConnectorName,
 		ConnectorVersion: ConnectorVersion,
 		AgencyID:         s.AgencyID,
@@ -181,7 +366,7 @@ func (s *Scanner) processFile(ctx context.Context, path string) error {
 		return fmt.Errorf("tides: %w", err)
 	}
 
-	if err := s.moveToProcessed(path); err != nil {
+	if err := s.moveTo(path, ProcessedDir); err != nil {
 		return err
 	}
 
@@ -189,29 +374,64 @@ func (s *Scanner) processFile(ctx context.Context, path string) error {
 		// DQ hook (walking skeleton): landed and surfaced loudly.
 		s.Log.Error("malformed passenger_events file landed (never dropped)",
 			"connector", ConnectorName, "record_id", recordID,
-			"object_key", key, "topic", Topic, "source", s.source(),
+			"object_key", key, "topic", Topic, "source", s.Source,
 			"file", filepath.Base(path), "parse_error", parseError)
 	} else {
 		s.Log.Info("passenger_events file landed and produced",
 			"connector", ConnectorName, "record_id", recordID,
-			"object_key", key, "topic", Topic, "source", s.source(),
+			"object_key", key, "topic", Topic, "source", s.Source,
 			"file", filepath.Base(path), "bytes", len(body))
 	}
 	return nil
 }
 
-// moveToProcessed relocates a produced file into Dir/processed/ so the next
-// scan does not pick it up again.
-func (s *Scanner) moveToProcessed(path string) error {
-	dir := filepath.Join(s.Dir, ProcessedDir)
+// rejectFile moves a refused file to Dir/rejected/, logs the refusal
+// loudly, and returns the refusal as an error so the scan reports it. The
+// file is preserved for human inspection — refused, never deleted, never
+// silent.
+func (s *Scanner) rejectFile(path, reason string) error {
+	moveErr := s.moveTo(path, RejectedDir)
+	s.Log.Error("REFUSED passenger_events file (moved to rejected/, never silently skipped)",
+		"connector", ConnectorName, "file", filepath.Base(path),
+		"reason", reason, "move_error", moveErr)
+	if moveErr != nil {
+		return fmt.Errorf("tides: refused %s (%s) but could not move it to %s/: %w",
+			path, reason, RejectedDir, moveErr)
+	}
+	return fmt.Errorf("tides: refused %s: %s (moved to %s/)", path, reason, RejectedDir)
+}
+
+// moveTo relocates a file into Dir/<subdir>/ so the next scan does not pick
+// it up again.
+func (s *Scanner) moveTo(path, subdir string) error {
+	dir := filepath.Join(s.Dir, subdir)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("tides: create %s: %w", dir, err)
 	}
 	dest := filepath.Join(dir, filepath.Base(path))
 	if err := os.Rename(path, dest); err != nil {
-		return fmt.Errorf("tides: move %s to processed: %w", path, err)
+		return fmt.Errorf("tides: move %s to %s: %w", path, subdir, err)
 	}
 	return nil
+}
+
+// simMarkedRowCount counts lines containing a field that begins with the
+// simulator marker "sim:". It deliberately uses a plain byte scan rather
+// than a CSV parser: the check must hold for malformed files too (those are
+// otherwise still landed as parse_status=malformed), and a marker hidden by
+// broken quoting must still refuse.
+func simMarkedRowCount(body []byte) int {
+	count := 0
+	for _, line := range bytes.Split(body, []byte("\n")) {
+		for _, field := range bytes.Split(line, []byte(",")) {
+			trimmed := bytes.TrimLeft(field, " \t\"")
+			if bytes.HasPrefix(trimmed, []byte(SimMarkerPrefix)) {
+				count++
+				break
+			}
+		}
+	}
+	return count
 }
 
 // checkHeader parses only the first CSV record and verifies every required

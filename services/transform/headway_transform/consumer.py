@@ -41,6 +41,17 @@ TOPIC_DR_TRIPS = "raw.dr.trips"
 ObjectFetcher = Callable[[str], bytes]
 
 
+class ObjectTooLargeError(Exception):
+    """An object_ref payload exceeded the configured fetch size cap.
+
+    Raised by the process-boundary fetcher (__main__.py, 2026-07-13
+    hardening pass: object fetches are stream-counted against
+    HEADWAY_MAX_OBJECT_BYTES instead of buffering without bound). run_loop
+    quarantines it as a blocking transform_failure dq.issues row whose
+    description carries this exception's message — which names the limit.
+    """
+
+
 class MessageSource(Protocol):
     """Minimal message-source interface the loop consumes.
 
@@ -299,7 +310,7 @@ def run_loop(
         try:
             process_message(writer, topic, value, object_fetcher)
             writer.connection.commit()
-        except Exception:  # noqa: BLE001 — quarantine path, never a bare pass
+        except Exception as exc:  # noqa: BLE001 — quarantine path, never a bare pass
             logger.exception("message on %s failed; quarantining", topic)
             writer.connection.rollback()
             try:
@@ -310,8 +321,9 @@ def run_loop(
                             severity=SEVERITY_BLOCKING,
                             title=f"Unhandled failure processing a message on {topic}",
                             description=(
-                                "Processing raised an unexpected exception "
-                                "(see service logs for the stack trace); the "
+                                "Processing raised "
+                                f"{type(exc).__name__}: {exc} "
+                                "(full stack trace in the service logs); the "
                                 "transaction was rolled back and the message "
                                 "quarantined as this issue. Kafka retains the "
                                 "message bytes for replay."

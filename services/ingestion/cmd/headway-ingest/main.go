@@ -9,13 +9,19 @@
 //	GTFS_RT_TRIP_UPDATES_URL       poll this trip-updates feed (optional)
 //	GTFS_RT_ALERTS_URL             poll this alerts feed (optional)
 //	GTFS_STATIC_URL                fetch this GTFS static zip once (optional)
-//	TIDES_DROP_DIR                 scan this directory once for TIDES passenger_events*.csv (optional)
-//	TIDES_SOURCE                   envelope source for TIDES drops, default "tides";
-//	                               simulator drops MUST set "tides_simulated" (handoff 0005)
-//	DR_DROP_DIR                    scan this directory once for demand_response_trips*.csv (optional, handoff 0013)
-//	DR_SOURCE                      envelope source for DR drops, default "dr";
-//	                               simulator drops MUST set "dr_simulated" (handoff 0013)
-//	POLL_INTERVAL                  Go duration, default 30s
+//	GTFS_STATIC_MAX_BYTES          cap on the fetched zip size in bytes (optional, default 256 MiB)
+//	TIDES_DROP_DIR                 scan this directory every POLL_INTERVAL for TIDES passenger_events*.csv (optional)
+//	TIDES_SOURCE                   envelope source for TIDES drops — REQUIRED with TIDES_DROP_DIR,
+//	                               no default (fail closed); simulator drops MUST set
+//	                               "tides_simulated" (handoff 0005, Shared Constraint 2)
+//	DR_DROP_DIR                    scan this directory every POLL_INTERVAL for demand_response_trips*.csv (optional, handoff 0013)
+//	DR_SOURCE                      envelope source for DR drops — REQUIRED with DR_DROP_DIR,
+//	                               no default (fail closed); simulator drops MUST set
+//	                               "dr_simulated" (handoff 0013, Shared Constraint 2)
+//	DROP_MAX_FILE_BYTES            cap on a dropped file's size in bytes (optional, default 256 MiB);
+//	                               oversize files are moved to <drop dir>/rejected/ and logged
+//	POLL_INTERVAL                  Go duration, default 30s (GTFS-RT polls AND drop-dir rescans;
+//	                               also the file-drop partial-copy settle time)
 //	AGENCY_ID                      optional envelope agency_id
 //	S3_ENDPOINT                    MinIO/S3 endpoint host:port (required with GTFS_STATIC_URL, TIDES_DROP_DIR or DR_DROP_DIR)
 //	S3_ACCESS_KEY, S3_SECRET_KEY   credentials (from the secret store; never logged)
@@ -30,6 +36,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -124,10 +131,15 @@ func run(log *slog.Logger) error {
 		if err != nil {
 			return err
 		}
+		staticMaxBytes, err := bytesFromEnv("GTFS_STATIC_MAX_BYTES")
+		if err != nil {
+			return err
+		}
 		store := gtfsstatic.NewMinioStore(client, bucket)
 		fetcher := &gtfsstatic.Fetcher{
 			URL:      staticURL,
 			AgencyID: agencyID,
+			MaxBytes: staticMaxBytes,
 			HTTP:     &http.Client{Timeout: 5 * time.Minute},
 			Store:    store,
 			Producer: kafka,
@@ -144,50 +156,83 @@ func run(log *slog.Logger) error {
 		}()
 	}
 
+	dropMaxBytes, err := bytesFromEnv("DROP_MAX_FILE_BYTES")
+	if err != nil {
+		return err
+	}
+
 	if dropDir := os.Getenv("TIDES_DROP_DIR"); dropDir != "" {
+		// Fail closed: the source label is what makes simulated data
+		// permanently distinguishable in provenance (Shared Constraint 2),
+		// so it is never guessed or defaulted.
+		source := strings.TrimSpace(os.Getenv("TIDES_SOURCE"))
+		if source == "" {
+			return fmt.Errorf("TIDES_DROP_DIR is set but TIDES_SOURCE is not. " +
+				"Headway needs to know what this drop directory carries and " +
+				"refuses to guess: set TIDES_SOURCE=tides (or your vendor's " +
+				"label) for a real agency feed, or TIDES_SOURCE=tides_simulated " +
+				"for simulator output — simulated data must never be recorded " +
+				"as real (Shared Constraint 2: full provenance)")
+		}
 		client, bucket, err := minioFromEnv("TIDES_DROP_DIR")
 		if err != nil {
 			return err
 		}
 		scanner := &tides.Scanner{
-			Dir:      dropDir,
-			Source:   os.Getenv("TIDES_SOURCE"), // empty → tides.DefaultSource
-			AgencyID: agencyID,
-			Store:    tides.NewMinioStore(client, bucket),
-			Producer: kafka,
-			Log:      log,
+			Dir:          dropDir,
+			Source:       source,
+			AgencyID:     agencyID,
+			MaxFileBytes: dropMaxBytes,
+			Interval:     interval,
+			Store:        tides.NewMinioStore(client, bucket),
+			Producer:     kafka,
+			Log:          log,
 		}
 		started++
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			log.Info("tides drop-dir scan started", "dir", dropDir)
-			if err := scanner.ScanOnce(ctx); err != nil && ctx.Err() == nil {
-				log.Error("tides drop-dir scan failed", "error", err)
+			log.Info("tides drop-dir scanner started",
+				"dir", dropDir, "source", source, "interval", interval.String())
+			if err := scanner.Run(ctx); err != nil && ctx.Err() == nil {
+				log.Error("tides drop-dir scanner stopped", "error", err)
 			}
 		}()
 	}
 
 	if dropDir := os.Getenv("DR_DROP_DIR"); dropDir != "" {
+		// Fail closed: same provenance rule as TIDES_SOURCE above.
+		source := strings.TrimSpace(os.Getenv("DR_SOURCE"))
+		if source == "" {
+			return fmt.Errorf("DR_DROP_DIR is set but DR_SOURCE is not. " +
+				"Headway needs to know what this drop directory carries and " +
+				"refuses to guess: set DR_SOURCE=dr (or your vendor's label) " +
+				"for a real dispatch feed, or DR_SOURCE=dr_simulated for " +
+				"simulator output — simulated data must never be recorded " +
+				"as real (Shared Constraint 2: full provenance)")
+		}
 		client, bucket, err := minioFromEnv("DR_DROP_DIR")
 		if err != nil {
 			return err
 		}
 		scanner := &dr.Scanner{
-			Dir:      dropDir,
-			Source:   os.Getenv("DR_SOURCE"), // empty → dr.DefaultSource
-			AgencyID: agencyID,
-			Store:    dr.NewMinioStore(client, bucket),
-			Producer: kafka,
-			Log:      log,
+			Dir:          dropDir,
+			Source:       source,
+			AgencyID:     agencyID,
+			MaxFileBytes: dropMaxBytes,
+			Interval:     interval,
+			Store:        dr.NewMinioStore(client, bucket),
+			Producer:     kafka,
+			Log:          log,
 		}
 		started++
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			log.Info("dr drop-dir scan started", "dir", dropDir)
-			if err := scanner.ScanOnce(ctx); err != nil && ctx.Err() == nil {
-				log.Error("dr drop-dir scan failed", "error", err)
+			log.Info("dr drop-dir scanner started",
+				"dir", dropDir, "source", source, "interval", interval.String())
+			if err := scanner.Run(ctx); err != nil && ctx.Err() == nil {
+				log.Error("dr drop-dir scanner stopped", "error", err)
 			}
 		}()
 	}
@@ -202,6 +247,20 @@ func run(log *slog.Logger) error {
 	wg.Wait()
 	log.Info("headway-ingest stopped cleanly")
 	return nil
+}
+
+// bytesFromEnv parses an optional byte-count env var (plain integer bytes).
+// Returns 0 (meaning "use the connector's default cap") when unset.
+func bytesFromEnv(name string) (int64, error) {
+	v := os.Getenv(name)
+	if v == "" {
+		return 0, nil
+	}
+	n, err := strconv.ParseInt(v, 10, 64)
+	if err != nil || n <= 0 {
+		return 0, fmt.Errorf("%s must be a positive integer byte count, got %q", name, v)
+	}
+	return n, nil
 }
 
 // minioFromEnv builds the shared S3/MinIO client and target bucket from the

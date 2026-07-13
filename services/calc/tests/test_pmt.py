@@ -148,6 +148,64 @@ def test_duplicate_stop_sequence_is_geometry_incomplete():
     assert result.detail.invalid_trip_reasons == {"geometry_incomplete": 1}
 
 
+def test_non_finite_shape_dist_rejected_defensively():
+    """2026-07-13 hardening pass (Batch A): the transform-side review found
+    non-finite shape_dist values can be accepted upstream; the calc must
+    reject them defensively (math.isfinite). StopTime's own validation
+    already refuses NaN (NaN >= 0 is False) but ACCEPTS +inf — which, before
+    this guard, priced a segment at infinity and produced a non-finite
+    figure. A non-finite value is never a usable shape delta:
+
+    - with stop coordinates, the segment falls to the FLAGGED haversine
+      fallback (exactly like a negative delta) — the figure stays finite;
+    - without coordinates, the trip is invalid with the established
+      vocabulary ('geometry_incomplete') and is excluded, never priced.
+    """
+    # NaN: already structurally refused at the type boundary.
+    with pytest.raises(ValueError, match="shape_dist_traveled"):
+        stop("trip-1", "S1", 1, sdt=float("nan"))
+
+    # (a) inf delta endpoint WITH coordinates -> haversine fallback, finite.
+    stops_with_coords = [
+        stop("trip-1", "S1", 1, 42.00, -71.0, sdt=0.0),
+        stop("trip-1", "S2", 2, 42.01, -71.0, sdt=float("inf")),
+    ]
+    result = compute_pmt(
+        simple_trip_events(),
+        ["trip-1"],
+        stops_with_coords,
+        shape_dist_unit_miles=Decimal("1"),
+    )
+    assert result.blocking_issues == ()
+    assert result.value is not None and result.value.is_finite()
+    assert result.value == Decimal("1.38")  # the haversine-priced profile
+    assert result.detail.distance_source_segments == {
+        "shape_dist_traveled": 0,
+        "haversine": 1,
+    }
+    assert "haversine_distance_fallback" in [
+        i.issue_type for i in result.infos
+    ]
+
+    # (b) inf delta endpoint WITHOUT coordinates -> invalid trip, excluded.
+    stops_no_coords = [
+        stop("trip-2", "S1", 1, None, None, sdt=0.0),
+        stop("trip-2", "S2", 2, None, None, sdt=float("inf")),
+    ]
+    result = compute_pmt(
+        simple_trip_events("trip-2"),
+        [],
+        stops_no_coords,
+        shape_dist_unit_miles=Decimal("1"),
+    )
+    assert result.detail.invalid_trip_reasons == {"geometry_incomplete": 1}
+    (warning,) = result.warnings
+    assert warning.issue_type == "pmt_invalid_trip_excluded"
+    assert "geometry_incomplete" in warning.description
+    assert result.value == Decimal("0.00")
+    assert result.value.is_finite()
+
+
 def test_event_sequence_outside_schedule_is_unplaceable():
     stops = [stop("trip-1", "S1", 1), stop("trip-1", "S2", 2)]
     events = simple_trip_events() + [ev("3", "trip-1", 9, "b", 1, 2)]

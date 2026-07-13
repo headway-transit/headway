@@ -31,9 +31,13 @@ from .model import (
     DQFinding,
     LineageEdge,
 )
+from .row_guard import field_problems, iter_rows
 
 TRANSFORM_NAME = "normalize_tides_passenger_events"
-TRANSFORM_VERSION = "0.1.0"
+# 0.1.1: per-row parse quarantine (2026-07-13 hardening pass) — a crafted
+# row (oversized field / NUL byte / stray quote) becomes ONE
+# malformed_passenger_event finding; the rest of the file still normalizes.
+TRANSFORM_VERSION = "0.1.1"
 
 TOPIC = "raw.tides.passenger_events"
 OUTPUT_KIND = "canonical.passenger_events"
@@ -165,8 +169,22 @@ def normalize(
         )
 
     row_count = 0
-    for index, row in enumerate(csv.DictReader(io.StringIO(text, newline=""))):
+    reader = csv.DictReader(io.StringIO(text, newline=""))
+    for index, row, parse_error in iter_rows(reader):
         row_count += 1
+
+        # Per-row parse quarantine (2026-07-13 hardening pass): a csv-level
+        # error (e.g. field over the size limit) or a structurally hostile
+        # field (NUL byte; an unterminated quote's absorbed-line merge) is
+        # ONE quarantined row — it can no longer abort the whole file.
+        if parse_error is not None:
+            findings.append(_malformed(index, [f"CSV parse error: {parse_error}"]))
+            continue
+        guard = field_problems(row)
+        if guard:
+            findings.append(_malformed(index, guard))
+            continue
+
         problems: list[str] = []
 
         missing = [name for name in REQUIRED_FIELDS if not _cell(row, name)]

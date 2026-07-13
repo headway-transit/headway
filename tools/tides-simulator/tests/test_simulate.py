@@ -206,3 +206,24 @@ def test_run_end_to_end_with_fake_connection(tmp_path, capsys):
     printed = capsys.readouterr().out
     assert "SIMULATED" in printed
     assert "tides_simulated" in printed
+
+
+def test_every_row_carries_the_structural_sim_marker():
+    """Every passenger_event_id is 'sim:'-prefixed — the STRUCTURAL
+    simulated-data marker (2026-07-13 hardening pass): the TIDES connector
+    hard-refuses sim-marked rows arriving under a non-simulated source
+    label (Shared Constraint 2, full provenance), so this prefix is
+    load-bearing, not cosmetic. It must survive every code path, including
+    defect injection.
+    """
+    rows = generate_events(
+        make_trips(6),
+        SERVICE_DATE,
+        seed=11,
+        missing_trip_share=0.2,
+        imbalance_share=0.2,
+        negative_load_share=0.2,
+    )
+    assert rows
+    for row in rows:
+        assert row["passenger_event_id"].startswith("sim:"), row["passenger_event_id"]

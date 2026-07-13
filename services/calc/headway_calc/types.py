@@ -630,8 +630,10 @@ class DrVrmDetail(DrServiceDetail):
     accounting (handoff 0013):
 
     - ``distance_sources`` — revenue spans priced by whole-span odometer
-      delta ('span_odometer') vs summed per-trip onboard distances plus
-      measurable empty legs ('onboard_sum').
+      delta ('span_odometer') vs the onboard-sum path ('onboard_sum'); on
+      that path (dr_vrm_v0 0.1.1) each non-TX MERGED onboard window priced
+      by its boundary odometer delta additionally counts as
+      'window_odometer'.
     - ``unmeasured_empty_legs`` — inter-passenger empty-travel legs (revenue
       per Exhibit 36) with no odometer pair: contributed 0 and were warned —
       a DOCUMENTED UNDERCOUNT, never an interpolated distance.
@@ -641,12 +643,19 @@ class DrVrmDetail(DrServiceDetail):
       more than one booking priced by SUMMING per-booking distances (no
       boundary odometer pair): a possible OVERCOUNT of shared segments,
       warned (p. 129 counts vehicle miles with a passenger onboard once).
+    - ``shared_overlap_windows_summed`` (dr_vrm_v0 0.1.1) — non-TX merged
+      onboard windows holding more than one overlapping booking priced by
+      SUMMING per-booking distances (no boundary odometer pair): a possible
+      OVERCOUNT of the shared segment, warned
+      ('dr_shared_distance_summed'). Defaults to 0 so the retained 0.1.0
+      path (which never merges windows) constructs the same detail shape.
     """
 
     distance_sources: dict[str, int]
     unmeasured_empty_legs: int
     missing_onboard_distances: int
     tx_summed_overlap_intervals: int
+    shared_overlap_windows_summed: int = 0
 
     def to_dict(self) -> dict:
         detail = super().to_dict()
@@ -656,6 +665,7 @@ class DrVrmDetail(DrServiceDetail):
         detail["unmeasured_empty_legs"] = self.unmeasured_empty_legs
         detail["missing_onboard_distances"] = self.missing_onboard_distances
         detail["tx_summed_overlap_intervals"] = self.tx_summed_overlap_intervals
+        detail["shared_overlap_windows_summed"] = self.shared_overlap_windows_summed
         return detail
 
 

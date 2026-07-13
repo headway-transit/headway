@@ -41,10 +41,12 @@ npm run extract:quotes  # regenerate src/regulatory/quotes.json from the tracker
 
 "The FTA rule inside the number" (handoff 0007, pillar 1):
 `scripts/extract-quotes.mjs` copies the VERBATIM FTA manual quotes from
-`services/calc/REGULATORY_TRACKER.md`'s "Verified definitions" sections —
-plus the "Verified — Safety & Security reporting" section (→ `sscls_v0`,
-handoff 0010) and the "Verified — Monthly Ridership form MR-20" section
-(→ `voms_v0`) — into a static, versioned JSON keyed by `calc_name`. Quotes
+every `## Verified …` section of `services/calc/REGULATORY_TRACKER.md`
+("Verified definitions", S&S, MR-20, PMT, Sampling Manual, Demand Response —
+swept by that heading convention since the 2026-07-13 convergence; the
+section→calc mapping lives in the script's `calcNamesForHeading`, and a
+heading naming its calc inline, e.g. "calc upt_v0", maps with zero config)
+into a static, versioned JSON keyed by `calc_name`. Quotes
 are never paraphrased or generated; the only in-quote cleanup is unwrapping
 the tracker's own `**` markdown emphasis, and text after a bullet's `NOTE:`
 (tracker meta-commentary ABOUT the manual's wording) is never quoted. The
@@ -215,32 +217,38 @@ ADR-0001 review rather than silently assumed acceptable.
 
 ## Verification status
 
+Refreshed 2026-07-13 (Batch D of the hardening pass — the previous entry's
+10 files / 51 tests and 3-calc quotes.json had gone stale across the S&S,
+PMT+sampling, and DR waves).
+
 `npm run build` (includes `tsc -b` type-check) — clean:
 
 ```
 vite v8.1.4 building client environment for production...
-✓ 1301 modules transformed.
-dist/index.html                   0.45 kB │ gzip:   0.29 kB
-dist/assets/index-CATADfQP.css    8.73 kB │ gzip:   2.19 kB
-dist/assets/index-IFM_iTuE.js   326.19 kB │ gzip: 102.45 kB
-✓ built in 208ms
+✓ 1318 modules transformed.
+dist/index.html                   1.22 kB │ gzip:   0.64 kB
+dist/assets/index-DdnanWU7.css   23.99 kB │ gzip:   4.61 kB
+dist/assets/index-iiZvbLRJ.js   481.09 kB │ gzip: 139.62 kB
+✓ built in 247ms
 ```
 
-`npm test -- --run`:
+`npm test -- --run` (every view test asserts zero axe violations):
 
 ```
  RUN  v4.1.10 /home/daniel/headway/web
- Test Files  10 passed (10)
-      Tests  51 passed (51)
+ Test Files  20 passed (20)
+      Tests  116 passed (116)
 ```
 
-`node scripts/extract-quotes.mjs`:
+`node scripts/extract-quotes.mjs` — all 12 calcs in the tracker's table
+carry verified quotes:
 
 ```
-extract-quotes: wrote …/web/src/regulatory/quotes.json (upt_v0: 8, vrh_v0: 10, vrm_v0: 10)
+extract-quotes: wrote …/web/src/regulatory/quotes.json (dr_pmt_v0: 12, dr_upt_v0: 12, dr_voms_v0: 12, dr_vrh_v0: 12, dr_vrm_v0: 12, pmt_v0: 19, sampling_v0: 19, sscls_v0: 39, upt_v0: 8, voms_v0: 4, vrh_v0: 10, vrm_v0: 10)
 ```
 
-`npm run check:contrast`: all 19 token pairs PASS (see table above).
+`npm run check:contrast`: all 49 token pairs (light + dark + chart/series)
+PASS — "All token pairs meet WCAG 2.1 AA."
 
 **PENDING — live end-to-end against a running API.** Docker is unavailable in
 this environment, so the UI has only been exercised against the exported

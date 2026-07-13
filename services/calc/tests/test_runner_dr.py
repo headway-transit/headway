@@ -58,19 +58,20 @@ def test_dr_figures_persist_under_mode_and_tos_scopes(dr_rows, clean_position_ro
         "dr_pmt_v0", "dr_upt_v0", "dr_voms_v0", "dr_vrh_v0", "dr_vrm_v0",
     ]
     expected_values = {
-        "dr_vrh_v0": ("vrh", "hours", "4.25"),
-        "dr_vrm_v0": ("vrm", "miles", "38.50"),
-        "dr_upt_v0": ("upt", "unlinked_passenger_trips", "14"),
-        "dr_voms_v0": ("voms", "vehicles", "3"),
-        "dr_pmt_v0": ("pmt", "passenger_miles", "62.50"),
+        "dr_vrh_v0": ("vrh", "hours", "4.25", "0.1.0"),
+        "dr_vrm_v0": ("vrm", "miles", "38.50", "0.1.1"),
+        "dr_upt_v0": ("upt", "unlinked_passenger_trips", "14", "0.1.0"),
+        "dr_voms_v0": ("voms", "vehicles", "3", "0.1.1"),
+        "dr_pmt_v0": ("pmt", "passenger_miles", "62.50", "0.1.0"),
     }
-    for calc_name, (metric, unit, value) in expected_values.items():
+    for calc_name, (metric, unit, value, version) in expected_values.items():
         outcome = mode_outcomes[calc_name]
         assert outcome.metric == metric
         assert outcome.unit == unit
         assert outcome.value == value
         assert outcome.persisted, calc_name
-        assert outcome.calc_version == "0.1.0"
+        # dr_vrm_v0/dr_voms_v0 minted 0.1.1 in the 2026-07-13 hardening pass.
+        assert outcome.calc_version == version, calc_name
         # Every DR figure over simulated rows routed its info finding.
         assert len(outcome.routed_info_ids) == 1, calc_name
 

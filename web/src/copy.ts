@@ -8,6 +8,34 @@
  * errors and the UI shows them verbatim.
  */
 
+/**
+ * THE shared NTD mode-code label map (deduped 2026-07-13 — was two drifting
+ * copies). Both NTD-code namespaces reference it: copy.report.mr20.modeLabels
+ * uses it as-is; copy.sampling.modeLabels overrides VP to the Sampling
+ * Manual's own Table 41.01 vocabulary ("Commuter vanpool"). Lookup-only in
+ * both places (the selects enumerate API-served vocabularies, never this
+ * map), so extra codes are harmless; unknown codes fall back to the raw
+ * code, honestly. NOT for copy.safety.modeLabels — that is a different
+ * namespace entirely (the transform's lowercase GTFS route_type→mode
+ * vocabulary, not NTD codes).
+ */
+const ntdModeLabels = {
+  MB: "Bus (MB)",
+  RB: "Bus rapid transit (RB)",
+  CB: "Commuter bus (CB)",
+  TB: "Trolleybus (TB)",
+  DR: "Demand response (DR)",
+  VP: "Vanpool (VP)",
+  LR: "Light rail (LR)",
+  HR: "Heavy rail (HR)",
+  CR: "Commuter rail (CR)",
+  SR: "Streetcar rail (SR)",
+  YR: "Hybrid rail (YR)",
+  MR: "Monorail (MR)",
+  AG: "Automated guideway (AG)",
+  FB: "Ferryboat (FB)",
+} as Record<string, string>;
+
 export const copy = {
   appName: "Headway",
   skipToContent: "Skip to main content",
@@ -473,21 +501,9 @@ export const copy = {
         mode: "Mode",
       },
       fleetRow: "Fleet (all modes)",
-      /** NTD mode codes; unknown codes fall back to the raw code, honestly. */
-      modeLabels: {
-        MB: "Bus (MB)",
-        RB: "Bus rapid transit (RB)",
-        CB: "Commuter bus (CB)",
-        DR: "Demand response (DR)",
-        LR: "Light rail (LR)",
-        HR: "Heavy rail (HR)",
-        CR: "Commuter rail (CR)",
-        SR: "Streetcar rail (SR)",
-        YR: "Hybrid rail (YR)",
-        FB: "Ferryboat (FB)",
-        TB: "Trolleybus (TB)",
-        VP: "Vanpool (VP)",
-      } as Record<string, string>,
+      /** NTD mode codes — the shared ntdModeLabels map (top of this file);
+       *  unknown codes fall back to the raw code, honestly. */
+      modeLabels: ntdModeLabels,
       /** Plain-language labels for cell flags; unknown flags shown raw. */
       flagLabels: {
         pending_d2: "Pending D-2",
@@ -725,6 +741,9 @@ export const copy = {
      * route_type→mode map, services/transform gtfs_static.py — the SAME
      * vocabulary the sscls_v0 classifier's rail test uses). Plain labels;
      * an unknown code falls back to the raw code, honestly.
+     *
+     * Deliberately SEPARATE from the shared ntdModeLabels map (top of this
+     * file): these are lowercase transform-vocabulary codes, not NTD codes.
      */
     modeLabels: {
       bus: "Bus",
@@ -1017,17 +1036,14 @@ export const copy = {
     optionsError:
       "Headway could not load the sampling vocabulary from the server. The plan wizard needs it, so planning is unavailable — the error above says what the server reported.",
 
-    /** NTD mode codes the Sampling Manual's Table 41.01 covers. */
+    /** The shared ntdModeLabels map (top of this file) with ONE override:
+     *  the Sampling Manual's Table 41.01 calls VP "Commuter vanpool" (its
+     *  ready-to-use plans cover commuter vanpools only — §41.05(a)), so this
+     *  page speaks that manual's vocabulary. The API serves which modes the
+     *  table covers; this map only labels the served codes. */
     modeLabels: {
-      MB: "Bus (MB)",
-      TB: "Trolleybus (TB)",
-      DR: "Demand response (DR)",
+      ...ntdModeLabels,
       VP: "Commuter vanpool (VP)",
-      CR: "Commuter rail (CR)",
-      LR: "Light rail (LR)",
-      HR: "Heavy rail (HR)",
-      MR: "Monorail (MR)",
-      AG: "Automated guideway (AG)",
     } as Record<string, string>,
     unitLabels: {
       vehicle_days: "Vehicle-days",

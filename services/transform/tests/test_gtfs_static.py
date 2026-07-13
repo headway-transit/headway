@@ -93,7 +93,7 @@ def test_routes_and_trips_normalized_with_edges() -> None:
     assert sorted(e.output_id for e in st_edges) == ["T1:1", "T1:2"]
     for edge in edges:
         assert edge.transform_name == TRANSFORM_NAME == "normalize_gtfs_static"
-        assert edge.transform_version == TRANSFORM_VERSION == "0.3.0"
+        assert edge.transform_version == TRANSFORM_VERSION == "0.3.1"
         assert edge.input_kind == "raw.records"
         assert edge.input_id == RECORD_ID
 

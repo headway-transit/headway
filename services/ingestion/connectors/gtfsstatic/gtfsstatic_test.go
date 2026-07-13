@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -161,5 +162,28 @@ func TestStoreFailureBlocksProduce(t *testing.T) {
 	// No envelope may reference an object that was never landed.
 	if got := len(fakeProd.Messages()); got != 0 {
 		t.Fatalf("envelope produced despite failed landing: %d messages", got)
+	}
+}
+
+func TestOversizeResponseRefused(t *testing.T) {
+	// Hardening pass 2026-07-13: the fetch must never buffer an unbounded
+	// body. An over-limit response is refused loudly — nothing landed,
+	// nothing produced, never a truncated record.
+	zipBytes := validZip(t)
+	f, fakeProd, fakeStore, _ := newTestFetcher(t, zipBytes)
+	f.MaxBytes = int64(len(zipBytes)) - 1 // tiny cap for test speed
+
+	err := f.FetchOnce(context.Background())
+	if err == nil {
+		t.Fatal("oversize response must be refused")
+	}
+	if !strings.Contains(err.Error(), "exceeds") || !strings.Contains(err.Error(), "limit") {
+		t.Errorf("refusal must name the limit, got: %v", err)
+	}
+	if got := len(fakeProd.Messages()); got != 0 {
+		t.Fatalf("oversize response produced %d messages", got)
+	}
+	if _, ok := fakeStore.Get(ObjectKey(envelope.RecordID(zipBytes))); ok {
+		t.Fatal("oversize response was landed")
 	}
 }

@@ -1,5 +1,5 @@
-"""Hypothesis property tests for the dr_*_v0 calcs CALC_VERSION 0.1.0
-(handoff 0013).
+"""Hypothesis property tests for the dr_*_v0 calcs (handoff 0013;
+dr_vrm_v0/dr_voms_v0 0.1.1 after the 2026-07-13 hardening pass).
 
 Invariants over generated dispatch days:
 

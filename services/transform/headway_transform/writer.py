@@ -18,7 +18,14 @@ matching the handoff-0001 schema exactly:
 - canonical.dr_trips inserts (handoff 0013 / migration 0021), ON CONFLICT
   DO NOTHING on the unique key (dr_trip_id, pickup_timestamp,
   source_record_id) for the same replay reason;
-- lineage.edges and dq.issues inserts (never conflated, never skipped).
+- lineage.edges inserts, ON CONFLICT DO NOTHING on the full natural key
+  (output_kind, output_id, transform_name, transform_version, input_kind,
+  input_id) — unique per migration 0023, so a replay adds zero duplicate
+  edges (2026-07-13 hardening pass);
+- dq.issues inserts carrying the transform-scoped dedupe_key (migration
+  0023, UNIQUE WHERE NOT NULL + ON CONFLICT DO NOTHING): a replay's
+  byte-identical findings write nothing new, while human-/AI-created
+  issues (dedupe_key NULL, written elsewhere) are never deduplicated.
 
 Transaction boundaries belong to the caller (the consumer commits per
 message); this class only executes statements.
@@ -138,12 +145,15 @@ INSERT INTO lineage.edges
     (output_kind, output_id, transform_name, transform_version,
      input_kind, input_id)
 VALUES (%s, %s, %s, %s, %s, %s)
+ON CONFLICT (output_kind, output_id, transform_name, transform_version,
+             input_kind, input_id) DO NOTHING
 """.strip()
 
 INSERT_DQ_ISSUE_SQL = """
 INSERT INTO dq.issues
-    (issue_type, severity, title, description, source_record_ids)
-VALUES (%s, %s, %s, %s, %s)
+    (issue_type, severity, title, description, source_record_ids, dedupe_key)
+VALUES (%s, %s, %s, %s, %s, %s)
+ON CONFLICT (dedupe_key) WHERE dedupe_key IS NOT NULL DO NOTHING
 """.strip()
 
 
@@ -323,5 +333,6 @@ class DbWriter:
                     finding.title,
                     finding.description,
                     finding.source_record_ids,
+                    finding.transform_dedupe_key(),
                 ),
             )

@@ -579,7 +579,11 @@ class FakeConn:
 
         if q.startswith("INSERT INTO sampling.draws"):
             (plan_id, period_label, service_units, selected_units, seed,
-             oversample_units, drawer_version, drawn_by) = params
+             seed_source, oversample_units, drawer_version, drawn_by) = params
+            # Migration 0022's CHECK constraint, modeled honestly.
+            assert seed_source in ("client", "generated"), (
+                f"sampling.draws.seed_source CHECK violated: {seed_source!r}"
+            )
             draw = {
                 "draw_id": str(uuid.uuid4()),
                 "plan_id": str(plan_id),
@@ -587,6 +591,7 @@ class FakeConn:
                 "service_units": list(service_units),
                 "selected_units": list(selected_units),
                 "seed": seed,
+                "seed_source": seed_source,
                 "oversample_units": oversample_units,
                 "drawer_version": drawer_version,
                 "drawn_by": drawn_by,
@@ -605,7 +610,7 @@ class FakeConn:
             )
             columns = (
                 "draw_id", "plan_id", "period_label", "service_units",
-                "selected_units", "seed", "oversample_units",
+                "selected_units", "seed", "seed_source", "oversample_units",
                 "drawer_version", "drawn_by", "drawn_at",
             )
             return FakeCursor([tuple(d[c] for c in columns) for d in rows])
@@ -943,7 +948,10 @@ class FakeConn:
 
     def add_sampling_draw(self, plan_id, *, period_label="2026-Q1",
                           service_units=None, selected_units=None,
-                          seed="seeded-fixture-seed", oversample_units=0):
+                          seed="seeded-fixture-seed", seed_source="generated",
+                          oversample_units=0):
+        # seed_source=None seeds a pre-migration-0022 row (provenance
+        # honestly unknown; the column is nullable for exactly that case).
         draw = {
             "draw_id": str(uuid.uuid4()),
             "plan_id": str(plan_id),
@@ -951,6 +959,7 @@ class FakeConn:
             "service_units": list(service_units or []),
             "selected_units": list(selected_units or []),
             "seed": seed,
+            "seed_source": seed_source,
             "oversample_units": oversample_units,
             "drawer_version": "sampling_v0 0.1.0",
             "drawn_by": "stella",

@@ -1,7 +1,7 @@
 // Extracts the VERBATIM FTA manual quotes from
-// services/calc/REGULATORY_TRACKER.md ("Verified definitions" sections, plus
-// the "Verified — Safety & Security reporting" section for the S&S
-// classifier) into src/regulatory/quotes.json, keyed by calc_name.
+// services/calc/REGULATORY_TRACKER.md (every "## Verified …" section —
+// "Verified definitions", S&S, MR-20, PMT, Sampling Manual, Demand Response)
+// into src/regulatory/quotes.json, keyed by calc_name.
 //
 // The tracker is the NTD/Compliance Engineer's durable memory: every quote in
 // it was verified against the published FTA NTD Policy Manual, with a page
@@ -12,7 +12,7 @@
 // space — the only transformation applied.
 //
 // FAIL LOUDLY: the script exits non-zero (and therefore fails any build that
-// runs it) if a "Verified definitions" section is missing, cannot be mapped
+// runs it) if no "## Verified …" section is found, if one cannot be mapped
 // to calc names, or if any calc_name in the tracker's table ends up with no
 // quotes. Shipping silence instead of the rule is not an option.
 //
@@ -34,11 +34,16 @@ const trackerPath = join(
 const outPath = join(here, "..", "src", "regulatory", "quotes.json");
 
 /**
- * Section-heading → calc_name mapping. The UPT section names its calc in the
- * heading ("calc upt_v0"); the VRM/VRH/deadhead/layover section covers both
- * position-derived calcs. A "Verified definitions" heading this map does not
- * recognize is a hard error — a new section must be mapped deliberately,
- * never guessed.
+ * Section-heading → calc_name mapping — the ONE list a quote section needs
+ * an entry in (its sibling, the old isQuoteSection allowlist, converged into
+ * the generic "## Verified" sweep below; 2026-07-13 hardening pass).
+ *
+ * The GENERIC parser comes first: a heading that names its calc(s) inline
+ * ("calc upt_v0", the UPT section's convention) maps with ZERO configuration
+ * — future "## Verified …" sections that follow it need no edit here. The
+ * explicit mappings below cover today's headings that predate that
+ * convention. A "## Verified" heading that matches neither is a hard error —
+ * a new section is mapped deliberately, never guessed.
  */
 function calcNamesForHeading(heading) {
   const named = [...heading.matchAll(/calc\s+([a-z0-9_]+)/gi)].map(
@@ -98,20 +103,16 @@ if (tableCalcNames.size === 0) {
   fail(`no calc rows found in the tracker table (${trackerPath})`);
 }
 
-// Slice the file into quote-bearing sections: every "## Verified
-// definitions …" section, plus the S&S section by its exact heading (other
-// "## Verified — …" sections, e.g. MR-20, carry no calc quotes and are
-// deliberately NOT sliced — a new quote-bearing section is added here on
-// purpose, never guessed).
+// Slice the file into quote-bearing sections: every "## Verified …" section
+// (the tracker's own convention — a heading starting "## Verified" carries
+// verified quotes; verified against today's tracker, this sweeps exactly the
+// seven quote sections and none of "## Divergence analysis", "## Mode
+// scoping", or "## Open verification items"). This replaced a heading
+// allowlist that had to be grown in lockstep with calcNamesForHeading; the
+// mapping there is now the single per-section list, and it still fails hard
+// on any swept heading it cannot map.
 function isQuoteSection(line) {
-  return (
-    line.startsWith("## Verified definitions") ||
-    line.startsWith("## Verified — Safety & Security reporting") ||
-    line.startsWith("## Verified — Monthly Ridership form MR-20") ||
-    line.startsWith("## Verified — Passenger Miles Traveled") ||
-    line.startsWith("## Verified — NTD Sampling Manual") ||
-    line.startsWith("## Verified — Demand Response / on-demand reporting")
-  );
+  return line.startsWith("## Verified");
 }
 const sections = [];
 let current = null;
@@ -127,7 +128,7 @@ for (const line of lines) {
 }
 if (current) sections.push(current);
 if (sections.length === 0) {
-  fail(`no "## Verified definitions" section found in ${trackerPath}`);
+  fail(`no "## Verified …" section found in ${trackerPath}`);
 }
 
 const quotesByCalc = {};
@@ -141,14 +142,14 @@ for (const section of sections) {
     );
   }
 
-  // The manual's name, from the section's "Source: **…**" line. The DR
-  // section's Source line is unbolded in the tracker (the calc role's file —
-  // never edited from web/), so a plain "Source: <manual>, printed pp. …"
-  // line is the deliberate fallback shape; any other shape still fails.
+  // The manual's name, from the section's first "Source: **…**" line (every
+  // top-level section bolds its manual name — the tracker's convention; the
+  // last unbolded holdout, the DR section, was bolded 2026-07-13 and the
+  // fallback shape this used to accept retired with it). Sub-source lines
+  // deeper in a section (the S&S addenda) are unbolded and deliberately not
+  // matched: the section's manual name is the citation's.
   const bodyText = section.body.join("\n");
-  const sourceMatch =
-    /Source:\s+\*\*([^*]+)\*\*/.exec(bodyText) ??
-    /^Source:\s+(.+?),\s*printed pp\./m.exec(bodyText);
+  const sourceMatch = /Source:\s+\*\*([^*]+)\*\*/.exec(bodyText);
   if (!sourceMatch) {
     fail(`section "${section.heading}" has no "Source: **…**" line`);
   }
@@ -189,6 +190,11 @@ for (const section of sections) {
     // ABOUT the manual's wording, not manual text — quoted words inside it
     // (e.g. a spelling that greps to zero hits) must never ship as verified
     // quotes, so the quotable text stops there.
+    // TRAP (2026-07-13 review): this guard truncates at the FIRST "NOTE:" —
+    // a future VERBATIM manual quote that itself contains "NOTE:" would be
+    // silently cut short here. If the manual ever hands the tracker such a
+    // quote, this guard needs a smarter boundary (e.g. only a "NOTE:" outside
+    // the double quotation marks) before that bullet lands.
     const quotable = bullet.split("NOTE:")[0];
     // Every double-quoted segment in the bullet is a verbatim manual quote;
     // the inner text is copied EXACTLY — the only in-quote cleanup is

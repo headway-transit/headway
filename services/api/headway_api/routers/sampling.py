@@ -100,6 +100,41 @@ _NOT_COMPUTED_PMT = (
     "(computed.metric_values is untouched by this endpoint)."
 )
 
+#: Seed provenance (hardening pass 2026-07-13, migration 0022): a draw's
+#: seed may be client-supplied, and the federal-evidence record must say so
+#: — the drawer's DRAW_METHOD text conditions its §63.03(b)(1) randomness
+#: claim on a cryptographically random seed, a premise Headway can only
+#: vouch for when Headway generated the seed itself.
+SEED_SOURCE_GENERATED = "generated"
+SEED_SOURCE_CLIENT = "client"
+
+_SEED_PROVENANCE_NOTES = {
+    SEED_SOURCE_GENERATED: (
+        "Seed provenance: seed_source='generated' — Headway generated this "
+        "draw's seed from a cryptographic randomness source "
+        "(secrets.token_hex) and recorded it on the draw, so the seeded "
+        "ordering above is random (§63.03(b)(1)) as well as reproducible."
+    ),
+    SEED_SOURCE_CLIENT: (
+        "Seed provenance: seed_source='client' — this draw's seed was "
+        "SUPPLIED BY THE CALLER and recorded on the draw. The selection is "
+        "reproducible from the recorded seed, but Headway cannot vouch that "
+        "a caller-supplied seed came from a random source: the §63.03(b)(1) "
+        "randomness of this draw rests on how the caller produced the seed. "
+        "Keep the caller's seed-generation evidence with the plan's "
+        "sampling documentation."
+    ),
+}
+
+
+def _too_long(field_plain: str, limit: int, actual: int) -> ValueError:
+    """One plain-language shape for every over-length refusal (hardening
+    pass 2026-07-13: request fields bound for TEXT columns get sane caps)."""
+    return ValueError(
+        f"{field_plain} is {actual:,} characters long, and Headway accepts "
+        f"at most {limit:,} here. Please shorten it."
+    )
+
 
 # --- SQL ---------------------------------------------------------------------
 
@@ -133,14 +168,15 @@ _ACTIVATE_PLAN = (
 _INSERT_DRAW = (
     "INSERT INTO sampling.draws "
     "(plan_id, period_label, service_units, selected_units, seed, "
-    "oversample_units, drawer_version, drawn_by) "
-    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s) "
+    "seed_source, oversample_units, drawer_version, drawn_by) "
+    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) "
     "RETURNING draw_id, drawn_at"
 )
 
 _SELECT_DRAWS = (
     "SELECT draw_id, plan_id, period_label, service_units, selected_units, "
-    "seed, oversample_units, drawer_version, drawn_by, drawn_at "
+    "seed, seed_source, oversample_units, drawer_version, drawn_by, "
+    "drawn_at "
     "FROM sampling.draws WHERE plan_id = %s ORDER BY drawn_at, draw_id"
 )
 
@@ -233,6 +269,15 @@ class PlanCreate(BaseModel):
         description="Sampling frequency: quarterly, monthly, or weekly."
     )
 
+    @field_validator("type_of_service")
+    @classmethod
+    def _tos_bounded(cls, v: str) -> str:
+        # The only PlanCreate free-text field: mode/unit/option/frequency
+        # are validated against the calc selector's closed vocabulary.
+        if len(v) > 50:
+            raise _too_long("The type of service", 50, len(v))
+        return v
+
 
 class PlanRecord(BaseModel):
     plan_id: str
@@ -283,9 +328,35 @@ class DrawRequest(BaseModel):
             "Random seed for the draw. Leave blank to let Headway generate "
             "one from a cryptographic randomness source. Either way the "
             "seed is RECORDED on the draw so the selection can be "
-            "reproduced and audited."
+            "reproduced and audited — along with seed_source ('generated' "
+            "or 'client'), because Headway can only vouch for the "
+            "randomness of a seed it generated itself."
         ),
     )
+
+    @field_validator("period_label")
+    @classmethod
+    def _period_label_bounded(cls, v: str) -> str:
+        if len(v) > 100:
+            raise _too_long("The period label", 100, len(v))
+        return v
+
+    @field_validator("seed")
+    @classmethod
+    def _seed_bounded(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and len(v) > 200:
+            raise _too_long("The seed", 200, len(v))
+        return v
+
+    @field_validator("service_units")
+    @classmethod
+    def _unit_ids_bounded(cls, v: list[str]) -> list[str]:
+        for unit in v:
+            if len(unit) > 500:
+                raise _too_long(
+                    f"Service unit id '{unit[:40]}…'", 500, len(unit)
+                )
+        return v
     oversample_units: int = Field(
         default=0,
         ge=0,
@@ -305,6 +376,11 @@ class DrawRecord(BaseModel):
     frame_size: int
     selected_units: list[str]
     seed: str
+    #: 'generated' (Headway's CSPRNG) or 'client' (caller-supplied seed) —
+    #: migration 0022. None only on draws recorded before seed provenance
+    #: was captured (pre-0022 rows are append-only and cannot be backfilled
+    #: honestly).
+    seed_source: Optional[str]
     required_per_period: int
     oversample_units: int
     drawer_version: str
@@ -351,9 +427,27 @@ class MeasurementCreate(BaseModel):
     )
     notes: Optional[str] = None
 
+    @field_validator("unit_id")
+    @classmethod
+    def _unit_id_bounded(cls, v: str) -> str:
+        if len(v) > 500:
+            raise _too_long("The service unit id", 500, len(v))
+        return v
+
+    @field_validator("notes")
+    @classmethod
+    def _notes_bounded(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and len(v) > 10_000:
+            raise _too_long("The notes field", 10_000, len(v))
+        return v
+
     @field_validator("observed_pmt")
     @classmethod
     def _pmt_is_a_nonnegative_decimal(cls, v: str) -> str:
+        if len(v) > 50:
+            raise _too_long(
+                "The passenger-miles value", 50, len(v)
+            )
         try:
             value = Decimal(v)
         except InvalidOperation:
@@ -412,6 +506,13 @@ class MeasurementSupersedeRequest(MeasurementCreate):
         ),
     )
 
+    @field_validator("reason")
+    @classmethod
+    def _reason_bounded(cls, v: str) -> str:
+        if len(v) > 5_000:
+            raise _too_long("The correction reason", 5_000, len(v))
+        return v
+
 
 class MeasurementSuperseded(BaseModel):
     original_measurement_id: str
@@ -462,6 +563,8 @@ class EstimateRequest(BaseModel):
     @field_validator("annual_upt_100pct")
     @classmethod
     def _upt_is_a_decimal(cls, v: str) -> str:
+        if len(v) > 50:
+            raise _too_long("The 100% UPT count", 50, len(v))
         try:
             Decimal(v)
         except InvalidOperation:
@@ -469,6 +572,19 @@ class EstimateRequest(BaseModel):
                 f"'{v}' is not a number Headway understands. Please enter "
                 f"the 100% UPT count as a plain number, for example 250000."
             )
+        return v
+
+    @field_validator("upt_100pct_by_day_type")
+    @classmethod
+    def _by_day_values_bounded(
+        cls, v: Optional[dict[str, str]]
+    ) -> Optional[dict[str, str]]:
+        if v is not None:
+            for day, count in v.items():
+                if len(count) > 50:
+                    raise _too_long(
+                        f"The 100% UPT count for {day}", 50, len(count)
+                    )
         return v
 
 
@@ -581,10 +697,11 @@ def _draws_for_plan(db, plan_id: str) -> list[dict]:
             "service_units": list(r[3]),
             "selected_units": list(r[4]),
             "seed": r[5],
-            "oversample_units": r[6],
-            "drawer_version": r[7],
-            "drawn_by": r[8],
-            "drawn_at": r[9],
+            "seed_source": r[6],
+            "oversample_units": r[7],
+            "drawer_version": r[8],
+            "drawn_by": r[9],
+            "drawn_at": r[10],
         }
         for r in rows
     ]
@@ -781,6 +898,7 @@ def list_draws(
             frame_size=len(d["service_units"]),
             selected_units=d["selected_units"],
             seed=d["seed"],
+            seed_source=d["seed_source"],
             required_per_period=plan.required_per_period,
             oversample_units=d["oversample_units"],
             drawer_version=d["drawer_version"],
@@ -834,7 +952,15 @@ def draw_period_sample(
                 f"never be attributed to two different service units."
             ),
         )
-    seed = body.seed if body.seed is not None else secrets.token_hex(16)
+    # Seed provenance (migration 0022): 'client' when the caller supplied
+    # the seed, 'generated' when Headway's CSPRNG produced it — recorded on
+    # the draw, audited, and reflected in the method text, because the
+    # §63.03(b)(1) randomness claim is only Headway's to make for a seed
+    # Headway generated.
+    if body.seed is not None:
+        seed, seed_source = body.seed, SEED_SOURCE_CLIENT
+    else:
+        seed, seed_source = secrets.token_hex(16), SEED_SOURCE_GENERATED
     sample_size = plan.required_per_period + body.oversample_units
     try:
         draw = sampling_calc.draw_sample(
@@ -848,8 +974,8 @@ def draw_period_sample(
             _INSERT_DRAW,
             (
                 plan_id, body.period_label, list(body.service_units),
-                list(draw.selected_units), seed, body.oversample_units,
-                drawer_version, identity.username,
+                list(draw.selected_units), seed, seed_source,
+                body.oversample_units, drawer_version, identity.username,
             ),
         ).fetchone()
         if row is None:
@@ -873,6 +999,7 @@ def draw_period_sample(
                 "sample_size": draw.sample_size,
                 "oversample_units": body.oversample_units,
                 "seed": seed,
+                "seed_source": seed_source,
                 "drawer_version": drawer_version,
             },
         )
@@ -884,13 +1011,18 @@ def draw_period_sample(
             frame_size=draw.frame_size,
             selected_units=list(draw.selected_units),
             seed=seed,
+            seed_source=seed_source,
             required_per_period=plan.required_per_period,
             oversample_units=body.oversample_units,
             drawer_version=drawer_version,
             drawn_by=identity.username,
             drawn_at=drawn_at,
         ),
-        method=draw.method,
+        # The drawer's DRAW_METHOD conditions its randomness claim on a
+        # cryptographically random seed; the appended provenance note says
+        # whether that premise holds for THIS draw (per seed_source) —
+        # never an unconditional cryptographic-randomness assertion.
+        method=f"{draw.method} {_SEED_PROVENANCE_NOTES[seed_source]}",
         oversampling_note=(
             _OVERSAMPLING_CITATION if body.oversample_units > 0 else None
         ),

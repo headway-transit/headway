@@ -34,8 +34,10 @@ factored up per p. 146.
 
 Distance-source precedence per segment (handoff 0011, binding):
 
-1. GTFS ``shape_dist_traveled`` deltas, when both endpoints carry a value,
-   the delta is non-negative, AND the caller supplies the feed's
+1. GTFS ``shape_dist_traveled`` deltas, when both endpoints carry a FINITE
+   value (``math.isfinite`` — a non-finite value that slipped past upstream
+   validation is rejected defensively, never priced), the delta is
+   non-negative, AND the caller supplies the feed's
    miles-per-unit conversion (``shape_dist_unit_miles``) — the GTFS spec
    leaves shape_dist units FEED-DEFINED (they must only be consistent with
    shapes.txt), so a unit is an explicit input, never guessed; without it,
@@ -94,6 +96,7 @@ randomness. Time comes exclusively from the input events.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from decimal import ROUND_HALF_EVEN, Decimal
 from typing import Iterable
@@ -147,7 +150,9 @@ _REAL_SOURCE = "tides"
 #:   imbalance_threshold × boardings;
 #: - 'negative_load'         — p. 151: the running load drops below zero;
 #: - 'geometry_incomplete'   — duplicate stop_sequences, or a segment under
-#:   nonzero load with no usable distance source (precedence above).
+#:   nonzero load with no usable distance source (precedence above; a
+#:   non-finite shape_dist delta or leg is NOT usable — rejected
+#:   defensively via math.isfinite, never priced into the figure).
 INVALID_REASONS = (
     "geometry_unavailable",
     "null_event_count",
@@ -249,6 +254,15 @@ def _trip_reasons_and_miles(
             unit_factor is not None
             and here.shape_dist_traveled is not None
             and there.shape_dist_traveled is not None
+            # Defensive non-finite rejection (2026-07-13 hardening pass): an
+            # inf/NaN shape_dist_traveled that slipped through upstream
+            # validation must never price a segment — a non-finite value is
+            # NOT a usable shape delta, so the segment falls through to the
+            # haversine fallback exactly like a negative delta, and with no
+            # coordinates the trip is invalid ('geometry_incomplete', the
+            # established vocabulary) — never a non-finite figure.
+            and math.isfinite(here.shape_dist_traveled)
+            and math.isfinite(there.shape_dist_traveled)
             and there.shape_dist_traveled >= here.shape_dist_traveled
         ):
             leg = (there.shape_dist_traveled - here.shape_dist_traveled) * unit_factor
@@ -263,9 +277,11 @@ def _trip_reasons_and_miles(
                 here.latitude, here.longitude, there.latitude, there.longitude
             )
             haversine_segments += 1
-        if leg is None:
+        if leg is None or not math.isfinite(leg):
             return ["geometry_incomplete"], 0.0, 0, 0
         miles += load * leg
+    if not math.isfinite(miles):  # belt-and-suspenders: never a non-finite figure
+        return ["geometry_incomplete"], 0.0, 0, 0
     return [], miles, shape_segments, haversine_segments
 
 

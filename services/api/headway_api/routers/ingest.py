@@ -68,7 +68,52 @@ TOPIC = "raw.tides.passenger_events"  # contracts/topics.v0.md
 CONTENT_TYPE = "text/csv"
 
 # 32 MiB body cap (handoff 0006, design point 5). Above this is a 413.
+# Enforced INCREMENTALLY over request.stream() (hardening pass 2026-07-13):
+# the request is aborted the moment the running total exceeds the cap, so
+# an oversized push can never buffer more than 32 MiB in this process.
 MAX_BODY_BYTES = 32 * 1024 * 1024
+
+
+def _body_too_large() -> HTTPException:
+    """The one 413 message, byte-identical wherever the cap trips (the
+    pre-streaming message contract, kept exactly)."""
+    return HTTPException(
+        status_code=413,
+        detail=(
+            "This file is larger than the 32 MiB ingest limit. Please "
+            "split it into smaller files and push each one separately."
+        ),
+    )
+
+
+async def read_body_capped(request: Request) -> bytes:
+    """Read the request body incrementally, refusing with 413 the moment the
+    running total exceeds MAX_BODY_BYTES — never materializing more than the
+    cap (the reviewed DoS class: ``await request.body()`` buffered the whole
+    push BEFORE the size check).
+
+    A Content-Length header already over the cap is refused before reading
+    any bytes at all; the incremental count still governs (a chunked or
+    lying client hits the same 413 as it streams)."""
+    declared = request.headers.get("content-length")
+    if declared is not None:
+        try:
+            if int(declared) > MAX_BODY_BYTES:
+                raise _body_too_large()
+        except ValueError:
+            # An unparseable Content-Length proves nothing either way; the
+            # incremental count below still enforces the cap.
+            pass
+    received = 0
+    chunks: list[bytes] = []
+    async for chunk in request.stream():
+        received += len(chunk)
+        if received > MAX_BODY_BYTES:
+            # Refuse before keeping the overflowing chunk: the buffered
+            # total never exceeds the cap.
+            raise _body_too_large()
+        chunks.append(chunk)
+    return b"".join(chunks)
 
 # Required TIDES passenger_events columns — the same header sanity check as
 # the file-drop connector (tides.go RequiredColumns, verified against
@@ -273,11 +318,14 @@ async def _ingest_csv_file(
     key_for: Callable[[str], str],
     header_check: Callable[[bytes], Optional[str]],
     parse_error_prefix: str,
+    csv_label: str,
 ) -> IngestResponse:
     """The shared connector discipline of both CSV ingest endpoints:
     content-address, store BEFORE produce, envelope per the v0 contract with
     the KEY's bound source_label, audit. Parameterized only by the topic,
-    object-key layout, and header sanity check — behavior is otherwise
+    object-key layout, header sanity check, and the plain-language name of
+    the expected CSV (``csv_label``, used in the empty-body 422 so the DR
+    route never tells a caller to send a TIDES file) — behavior is otherwise
     byte-identical between the TIDES and DR paths."""
     # Per-key token bucket (60 req/min default). In-process — the documented
     # single-instance limitation (machine_auth.RateLimiter docstring).
@@ -311,21 +359,15 @@ async def _ingest_csv_file(
             ),
         )
 
-    body = await request.body()
-    if len(body) > MAX_BODY_BYTES:
-        raise HTTPException(
-            status_code=413,
-            detail=(
-                "This file is larger than the 32 MiB ingest limit. Please "
-                "split it into smaller files and push each one separately."
-            ),
-        )
+    # Incremental read with the 32 MiB cap enforced as bytes arrive — an
+    # oversized push is refused mid-stream, never buffered whole first.
+    body = await read_body_capped(request)
     if not body:
         raise HTTPException(
             status_code=422,
             detail=(
-                "The request body is empty. Send the TIDES passenger_events "
-                "CSV file as the raw request body."
+                f"The request body is empty. Send the {csv_label} "
+                f"CSV file as the raw request body."
             ),
         )
 
@@ -404,6 +446,7 @@ async def ingest_passenger_events(
         key_for=object_key,
         header_check=check_tides_header,
         parse_error_prefix="tides passenger_events header check failed",
+        csv_label="TIDES passenger_events",
     )
 
 
@@ -431,4 +474,5 @@ async def ingest_dr_trips(
         key_for=dr_object_key,
         header_check=check_dr_header,
         parse_error_prefix="demand_response_trip header check failed",
+        csv_label="demand_response_trips",
     )

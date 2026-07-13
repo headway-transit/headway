@@ -27,7 +27,12 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         description=(
             "Run vrm_v0/vrh_v0/upt_v0/pmt_v0 over one half-open period "
             "[period-start, period-end) (UTC) against the database named by "
-            "HEADWAY_DATABASE_URL, and print the RunReport as JSON."
+            "HEADWAY_DATABASE_URL, and print the RunReport as JSON. "
+            "--per-mode additionally runs voms_v0 and one mode-scoped "
+            "result per metric per mode; a period holding canonical.dr_trips "
+            "rows additionally runs the five Demand Response calcs "
+            "(dr_vrh_v0/dr_vrm_v0/dr_upt_v0/dr_voms_v0/dr_pmt_v0) on every "
+            "path, persisted under scope 'mode:DR' + 'mode:DR:tos:<tos>'."
         ),
     )
     parser.add_argument(

@@ -27,6 +27,15 @@ simulated records surfaces it (`simulated_source_data` info finding) — a
 certifiable figure silently containing simulated records is exactly the
 contradiction the DQ trail exists to expose.
 
+Since the 2026-07-13 hardening pass this rule is ENFORCED, not
+conventional: every generated `dr_trip_id` carries the structural `sim:`
+prefix (a pinned regression test keeps it there), the DR connector has NO
+default source label (`DR_SOURCE` is required; it refuses to start
+without one), and a file whose rows carry the `sim:` marker arriving
+under a non-`*_simulated` source label is hard-refused — moved to the
+drop dir's `rejected/`, loudly logged, never landed (Shared Constraint 2:
+full provenance).
+
 ## Usage
 
 ```

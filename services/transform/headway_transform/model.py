@@ -9,6 +9,7 @@ DQFinding — swallowing it is a guardrail violation (fail loudly).
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass, field
 
 
@@ -51,3 +52,33 @@ class DQFinding:
             raise ValueError(
                 f"severity {self.severity!r} not in {_ALLOWED_SEVERITIES}"
             )
+
+    def transform_dedupe_key(self) -> str | None:
+        """Stable replay-dedupe key for TRANSFORM-emitted findings.
+
+        At-least-once Kafka delivery replays messages; normalization is
+        deterministic, so a replay re-emits byte-identical findings. This
+        key (dq.issues.dedupe_key, migration 0023: UNIQUE WHERE NOT NULL +
+        ON CONFLICT DO NOTHING) makes those replays write nothing new.
+
+        Scope is deliberately narrow — the "transform:" prefix plus the
+        hash of the finding's full identity (type, severity, title,
+        description, sorted source records). Human- and AI-created
+        dq.issues rows never pass through this writer and keep dedupe_key
+        NULL, so they are NEVER deduplicated against anything. A finding
+        with no source-record anchor returns None (no stable subject
+        identity — not deduped, duplicates preferred over losing one).
+        """
+        if not self.source_record_ids:
+            return None
+        preimage = "\x1f".join(
+            [
+                self.issue_type,
+                self.severity,
+                self.title,
+                self.description,
+                *sorted(self.source_record_ids),
+            ]
+        )
+        digest = hashlib.sha256(preimage.encode("utf-8")).hexdigest()
+        return f"transform:{digest}"

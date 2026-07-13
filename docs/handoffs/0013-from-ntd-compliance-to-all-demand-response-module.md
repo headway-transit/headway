@@ -300,3 +300,13 @@ the session scratchpad.
   badge + flags meaning on every DR figure (all DR rows are
   simulator-sourced today); a dedicated DR page with its own banner does
   not exist yet — that surface belongs to the deferred ops-analytics tier.
+
+## Platform Architect ratification — `raw.dr.trips` topic (2026-07-13)
+
+Reviewed per `contracts/topics.v0.md`'s governance line ("Adding a topic requires a contracts change (Platform Architect governance)"), which the build agent satisfied mechanically but could not self-ratify:
+
+- Naming follows the registry convention (`raw.<source>.<content>`); payload encoding `object_ref` matches the TIDES file-payload precedent; envelope contract unchanged.
+- The simulated-source binding rule (`source = "dr_simulated"`, never `"dr"`) replicates the handoff 0005 rule verbatim — correct.
+- One genuinely new precedent, accepted deliberately: `demand_response_trip` is the first **Headway-owned** payload spec in the registry (GTFS/TIDES semantics are external). ADR-0006 defines the wire contract as the published integration surface, which a versioned in-repo schema satisfies; the registry note correctly points regulatory field meanings at the tracker rather than restating them. Future Headway-owned payload specs should follow this exact shape (schema + prose doc + tracker pointers).
+
+**RATIFIED.** No changes required.

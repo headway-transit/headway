@@ -117,6 +117,57 @@ def test_create_validation_is_plain_language(client, fake_db):
     assert fake_db.safety_events == {}
 
 
+def test_create_free_text_fields_have_plain_language_bounds(client, fake_db):
+    """Hardening pass 2026-07-13: every free-text field bound for an
+    unbounded TEXT column gets a sane cap with a plain-language 422 —
+    nothing is saved on refusal."""
+    headers = auth_header(fake_db, "stella")
+
+    long_narrative = client.post(
+        "/safety/events",
+        json={**VALID_EVENT, "narrative": "x" * 20_001},
+        headers=headers,
+    )
+    assert long_narrative.status_code == 422
+    assert "20,000" in str(long_narrative.json())
+    assert "Please shorten it" in str(long_narrative.json())
+
+    long_location = client.post(
+        "/safety/events",
+        json={**VALID_EVENT, "location": "x" * 1_001},
+        headers=headers,
+    )
+    assert long_location.status_code == 422
+    assert "1,000" in str(long_location.json())
+
+    long_mode = client.post(
+        "/safety/events",
+        json={**VALID_EVENT, "mode": "x" * 51},
+        headers=headers,
+    )
+    assert long_mode.status_code == 422
+    assert "at most 50" in str(long_mode.json())
+    assert fake_db.safety_events == {}
+
+    # The supersede reason is bounded too (it lands in audit detail).
+    original = fake_db.add_safety_event()
+    long_reason = client.post(
+        f"/safety/events/{original['event_id']}/supersede",
+        json={**VALID_EVENT, "reason": "x" * 5_001},
+        headers=headers,
+    )
+    assert long_reason.status_code == 422
+    assert "5,000" in str(long_reason.json())
+
+    # A narrative at exactly the cap is accepted (the bound, not less).
+    at_cap = client.post(
+        "/safety/events",
+        json={**VALID_EVENT, "narrative": "x" * 20_000},
+        headers=headers,
+    )
+    assert at_cap.status_code == 201
+
+
 def test_create_cyber_major_via_scenario_g(client, fake_db):
     response = client.post(
         "/safety/events",
@@ -426,6 +477,33 @@ def test_deadlines_null_operated_mode_buckets_as_unknown(client, fake_db):
         "/safety/deadlines?month=2026-06", headers=auth_header(fake_db, "vera")
     ).json()
     assert [row["mode"] for row in body["ss50"]] == ["bus", "unknown"]
+
+
+def test_month_bucketing_convention_is_surfaced_utc(client, fake_db):
+    """Hardening pass 2026-07-13: ss50 already declared the UTC month
+    convention on its package; /safety/deadlines and /safety/events now
+    surface the SAME declaration (plus a plain-language note on the
+    deadlines copy) so an API consumer can never mistake the buckets for
+    local-time months."""
+    fake_db.operated_modes = ["bus"]
+    _seed_events(fake_db)
+    headers = auth_header(fake_db, "vera")
+
+    deadlines = client.get("/safety/deadlines?month=2026-06", headers=headers)
+    assert deadlines.status_code == 200
+    body = deadlines.json()
+    # The exact string headway_calc.ss50.build_ss50_summary declares.
+    assert body["period_convention"] == (
+        "half-open [period_start, period_end), UTC, on occurred_at"
+    )
+    assert "Coordinated Universal Time (UTC)" in body["period_note"]
+    assert "time zone" in body["period_note"]
+
+    events = client.get("/safety/events?month=2026-06", headers=headers)
+    assert events.status_code == 200
+    assert events.json(), "seeded June events expected"
+    for record in events.json():
+        assert record["period_convention"] == body["period_convention"]
 
 
 def test_deadlines_refuse_bad_month_and_require_auth(client, fake_db):

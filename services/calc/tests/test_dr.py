@@ -17,9 +17,11 @@ from headway_calc.dr import (
     compute_dr_upt,
     compute_dr_upt_by_tos,
     compute_dr_voms,
+    compute_dr_voms_v0_1_0,
     compute_dr_vrh,
     compute_dr_vrh_by_tos,
     compute_dr_vrm,
+    compute_dr_vrm_v0_1_0,
     partition_by_tos,
 )
 from headway_calc.types import DrTrip
@@ -49,10 +51,11 @@ def make_trip(
     dropoff_odo=None,
     interruption="none",
     source="dr",
+    service_date=DAY,
 ):
     return DrTrip(
         pickup_timestamp=pickup,
-        service_date=DAY,
+        service_date=service_date,
         dr_trip_id=trip_id,
         vehicle_id=vehicle,
         tos=tos,
@@ -306,6 +309,130 @@ def test_voms_same_vehicle_never_double_counted():
         make_trip("t-2", _ts(10), _ts(11)),
     ]
     assert compute_dr_voms(trips).value == Decimal("1")
+
+
+# --- 2026-07-13 hardening-pass regressions (Batch A) --------------------------
+# The correctness review's two CONFIRMED dr_voms triggers and the dr_vrm
+# shared-ride double-count, pinned exactly as reproduced
+# (docs/reviews/2026-07-13-hardening-pass.md). Each also pins the retained
+# 0.1.0 behavior so the superseded bug stays reproducible, never re-shippable.
+
+
+def test_voms_touching_spans_same_vehicle_counts_once_at_lunch_boundary():
+    """Reviewer trigger (a): the SAME vehicle's spans [08:00, 12:00] and
+    [12:00, 14:00] touch at exactly 12:00 (lunch-break boundary). Under the
+    documented closed-interval convention the instant belongs to BOTH
+    spans, but the tracker quote counts 'the largest number of VEHICLES in
+    revenue service at any one time' — one vehicle is one vehicle: VOMS 1."""
+    trips = [
+        make_trip("t-am", _ts(8), _ts(12), interruption="lunch"),
+        make_trip("t-pm", _ts(12), _ts(14)),
+    ]
+    result = compute_dr_voms(trips)
+    assert result.value == Decimal("1")
+    assert result.detail.unique_vehicles == 1
+    assert result.detail.peak_vehicles == 1
+    # Two revenue spans really do coexist at 12:00 — the dedup is real.
+    assert compute_dr_vrh(trips).detail.revenue_spans == 2
+    # The superseded 0.1.0 sweep counted intervals: 2 (pinned, runnable).
+    assert compute_dr_voms_v0_1_0(trips).value == Decimal("2")
+
+
+def test_voms_midnight_crossing_across_vehicle_days_counts_once():
+    """Reviewer trigger (b): a midnight-crossing trip on service_date D
+    (23:00 -> 01:30) overlaps the SAME vehicle's D+1 pickup at 01:00. The
+    (vehicle_id, service_date) grouping (dr.py _account) yields TWO
+    vehicle-days whose revenue intervals coexist in real time — the
+    grouping must not defeat cross-date dedup: VOMS 1."""
+    d = date(2026, 7, 14)
+    d1 = date(2026, 7, 15)
+    trips = [
+        make_trip(
+            "t-night",
+            datetime(2026, 7, 14, 23, 0, tzinfo=timezone.utc),
+            datetime(2026, 7, 15, 1, 30, tzinfo=timezone.utc),
+            service_date=d,
+        ),
+        make_trip(
+            "t-early",
+            datetime(2026, 7, 15, 1, 0, tzinfo=timezone.utc),
+            datetime(2026, 7, 15, 2, 0, tzinfo=timezone.utc),
+            service_date=d1,
+        ),
+    ]
+    result = compute_dr_voms(trips)
+    assert result.value == Decimal("1")
+    # The vehicle-day grouping itself is intact — dedup happens at the sweep.
+    assert result.detail.vehicle_days == 2
+    assert result.detail.unique_vehicles == 1
+    # The superseded 0.1.0 sweep counted the overlapping intervals: 2.
+    assert compute_dr_voms_v0_1_0(trips).value == Decimal("2")
+
+
+def test_vrm_do_shared_ride_overlap_priced_once_via_window_odometer():
+    """The dr_vrm 0.1.1 fix proper: two DO passengers share the same
+    10-mile window (boundary odometer readings present). The span-level
+    odometer is unavailable (an odometer-less later booking ends the span),
+    forcing the onboard-sum path — where 0.1.0 summed per booking. Merged,
+    the window prices ONCE by its boundary odometer delta: 10 miles, plus
+    the later booking's 5 -> 15.00, never 25.00."""
+    trips = [
+        make_trip(
+            "t-p1", _ts(9), _ts(9, 30), onboard="10",
+            pickup_odo="100", dropoff_odo="110",
+        ),
+        make_trip(
+            "t-p2", _ts(9), _ts(9, 30), onboard="10",
+            pickup_odo="100", dropoff_odo="110",
+        ),
+        make_trip("t-late", _ts(10), _ts(10, 30), onboard="5"),
+    ]
+    result = compute_dr_vrm(trips)
+    assert result.value == Decimal("15.00")
+    assert result.detail.distance_sources.get("window_odometer") == 1
+    assert result.detail.shared_overlap_windows_summed == 0
+    # The 9:30 -> 10:00 empty leg has no odometer pair: warned undercount.
+    assert [w.issue_type for w in result.warnings] == ["dr_distance_unmeasured"]
+    # The superseded 0.1.0 summed per booking: 10 + 10 + 5 = 25.00 (pinned).
+    assert compute_dr_vrm_v0_1_0(trips).value == Decimal("25.00")
+
+
+def test_vrm_do_shared_ride_overlap_never_summed_silently():
+    """The reviewer's exact DO scenario: two passengers, the SAME window,
+    10 measured onboard miles each, NO odometer readings anywhere. The
+    vehicle traveled the window once; 0.1.0 priced 20.00 SILENTLY. 0.1.1
+    still cannot measure the merged window (no boundary odometer — a
+    distance is never guessed), so the per-booking sum stands, but NEVER
+    silently: the dr_shared_distance_summed warning (previously gated to
+    TX as dr_tx_shared_distance_summed) states the possible overcount."""
+    trips = [
+        make_trip("t-p1", _ts(9), _ts(9, 30), onboard="10"),
+        make_trip("t-p2", _ts(9), _ts(9, 30), onboard="10"),
+    ]
+    result = compute_dr_vrm(trips)
+    assert result.value == Decimal("20.00")
+    assert result.detail.shared_overlap_windows_summed == 1
+    (warning,) = result.warnings
+    assert warning.issue_type == "dr_shared_distance_summed"
+    assert "OVERCOUNT" in warning.description
+    assert set(warning.source_record_ids) == {"rec-t-p1", "rec-t-p2"}
+    # The superseded 0.1.0: same 20.00 with NO finding — the silent
+    # double-count, pinned runnable.
+    legacy = compute_dr_vrm_v0_1_0(trips)
+    assert legacy.value == Decimal("20.00")
+    assert legacy.warnings == ()
+
+
+def test_vrh_unaffected_by_shared_ride_overlap():
+    """Verified for the hardening pass: dr_vrh prices INTERVAL DURATIONS
+    (span end - start), never per-booking sums, so overlapping shared-ride
+    bookings cannot double-count hours — no vrh version bump needed."""
+    shared = [
+        make_trip("t-p1", _ts(9), _ts(9, 30), onboard="10"),
+        make_trip("t-p2", _ts(9), _ts(9, 30), onboard="10"),
+    ]
+    single = [make_trip("t-p1", _ts(9), _ts(9, 30), onboard="10")]
+    assert compute_dr_vrh(shared).value == compute_dr_vrh(single).value == Decimal("0.50")
 
 
 # --- simulated-source rule --------------------------------------------------------

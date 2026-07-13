@@ -63,6 +63,44 @@ _SS50_CITATION = (
     "'Verified — Safety & Security reporting')"
 )
 
+#: The month-bucketing convention this router shares with the S&S-50
+#: generator — the SAME string headway_calc.ss50.build_ss50_summary declares
+#: on its package, surfaced here so API consumers see it too (hardening
+#: pass 2026-07-13: the UTC convention was declared by ss50 but invisible
+#: on /safety/deadlines and /safety/events).
+PERIOD_CONVENTION = "half-open [period_start, period_end), UTC, on occurred_at"
+
+_PERIOD_NOTE = (
+    "Months are bucketed by when the event occurred in Coordinated "
+    "Universal Time (UTC), not local time: an event late on the last "
+    "evening of a month local time may fall into the next month's bucket. "
+    "Enter event times with their time zone and Headway places them "
+    "consistently."
+)
+
+
+#: Sane caps for SafetyEventCreate's free-text fields (each lands in an
+#: unbounded TEXT column — migration 0017): plain-language 422 instead of
+#: accepting an arbitrarily large payload. Narrative is generous (a full
+#: incident account); the rest are labels.
+_TEXT_LIMITS = {
+    "mode": ("The mode", 50),
+    "type_of_service": ("The type of service", 50),
+    "narrative": ("The narrative", 20_000),
+    "location": ("The location", 1_000),
+}
+
+
+def _too_long(field_plain: str, limit: int, actual: int) -> ValueError:
+    """One plain-language shape for every over-length refusal (hardening
+    pass 2026-07-13: request fields bound for TEXT columns get sane caps)."""
+    return ValueError(
+        f"{field_plain} is {actual:,} characters long, and Headway accepts "
+        f"at most {limit:,} here. Please shorten it — if you need to keep "
+        f"more detail, attach it to the agency's own incident file and "
+        f"reference it."
+    )
+
 
 class SafetyEventCreate(BaseModel):
     """One safety event as entered by agency staff. Field descriptions are
@@ -202,6 +240,14 @@ class SafetyEventCreate(BaseModel):
         ),
     )
 
+    @field_validator("mode", "type_of_service", "narrative", "location")
+    @classmethod
+    def _free_text_bounded(cls, v: Optional[str], info) -> Optional[str]:
+        plain, limit = _TEXT_LIMITS[info.field_name]
+        if v is not None and len(v) > limit:
+            raise _too_long(plain, limit, len(v))
+        return v
+
     @field_validator("occurred_at")
     @classmethod
     def _occurred_at_needs_timezone(cls, v: dt.datetime) -> dt.datetime:
@@ -315,6 +361,16 @@ class SafetyEventRecord(BaseModel):
     thresholds_met: Optional[list[str]]
     classifier_version: Optional[str]
     classified_at: Optional[dt.datetime]
+    #: How the ?month= filter buckets this event — the ss50 declaration,
+    #: surfaced on every record (the list response shape is an array, so
+    #: the convention travels per record rather than as an envelope field).
+    period_convention: str = Field(
+        default=PERIOD_CONVENTION,
+        description=(
+            "How the month filter buckets events: " + PERIOD_CONVENTION
+            + ". " + _PERIOD_NOTE
+        ),
+    )
 
 
 class Ss40Deadline(BaseModel):
@@ -335,6 +391,11 @@ class Ss50Deadline(BaseModel):
 
 class DeadlinesResponse(BaseModel):
     month: str
+    #: The ss50-declared month-bucketing convention, plus its plain-language
+    #: reading (period_note) — surfaced so a deadlines consumer sees the
+    #: same convention the S&S-50 package itself declares.
+    period_convention: str
+    period_note: str
     ss40: list[Ss40Deadline]
     ss40_citation: str
     ss40_note: str
@@ -593,6 +654,13 @@ class SupersedeRequest(SafetyEventCreate):
         ),
     )
 
+    @field_validator("reason")
+    @classmethod
+    def _reason_bounded(cls, v: str) -> str:
+        if len(v) > 5_000:
+            raise _too_long("The correction reason", 5_000, len(v))
+        return v
+
 
 @router.post(
     "/safety/events/{event_id}/supersede",
@@ -735,6 +803,8 @@ def get_deadlines(
 
     return DeadlinesResponse(
         month=month,
+        period_convention=PERIOD_CONVENTION,
+        period_note=_PERIOD_NOTE,
         ss40=ss40,
         ss40_citation=_SS40_CITATION,
         ss40_note=(

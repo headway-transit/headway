@@ -37,8 +37,8 @@ import type { Detail } from "../detail";
 import { detailValueToString, ratioToPercentString } from "../format";
 import { drCallouts, parseDrScope } from "../regulatory/drRules";
 import { quoteContaining, quotesForCalc } from "../regulatory/quotes";
-import type { RegulatoryQuote } from "../regulatory/quotes";
 import { DrScopeBadge } from "./DrScopeBadge";
+import { QuoteFigure } from "./QuoteFigure";
 import { SimulatedBadge } from "./SimulatedBadge";
 
 function metricLabel(code: string): string {
@@ -104,20 +104,6 @@ function CoverageMeter({ percent, meterValue, label }: CoverageMeterProps) {
 
 export interface ReceiptProps {
   value: MetricValue;
-}
-
-/** One verbatim quote as a blockquote + cite (the fta-quote pattern). */
-function QuoteFigure({ quote }: { quote: RegulatoryQuote }) {
-  return (
-    <figure className="fta-quote">
-      <blockquote>
-        <p>{quote.quote}</p>
-      </blockquote>
-      <figcaption>
-        <cite>{quote.citation}</cite>
-      </figcaption>
-    </figure>
-  );
 }
 
 export function Receipt({ value }: ReceiptProps) {
@@ -215,14 +201,11 @@ export function Receipt({ value }: ReceiptProps) {
           return (
             <div className="dr-callout" key={callout.key}>
               <p>{copy.dr.calloutIntro[callout.key]}</p>
-              {quote ? (
-                <QuoteFigure quote={quote} />
-              ) : (
-                // FAIL LOUDLY: the callout's rule is missing — state it.
-                <p className="alert">
-                  {copy.receipt.ruleMissing(value.calc_name)}
-                </p>
-              )}
+              {/* FAIL LOUDLY: a callout whose rule is missing states it. */}
+              <QuoteFigure
+                quote={quote}
+                missingMessage={copy.receipt.ruleMissing(value.calc_name)}
+              />
             </div>
           );
         })}
@@ -230,7 +213,11 @@ export function Receipt({ value }: ReceiptProps) {
           <>
             <p>{copy.receipt.ruleIntro(value.calc_name)}</p>
             {quotes.map((q) => (
-              <QuoteFigure quote={q} key={`${q.citation}:${q.quote}`} />
+              <QuoteFigure
+                quote={q}
+                missingMessage={copy.receipt.ruleMissing(value.calc_name)}
+                key={`${q.citation}:${q.quote}`}
+              />
             ))}
           </>
         ) : (

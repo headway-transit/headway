@@ -94,7 +94,7 @@ def test_happy_path_row_edge_and_source_carried() -> None:
     for edge in edges:
         assert edge.output_kind == "canonical.dr_trips"
         assert edge.transform_name == TRANSFORM_NAME == "normalize_dr_trips"
-        assert edge.transform_version == TRANSFORM_VERSION == "0.1.0"
+        assert edge.transform_version == TRANSFORM_VERSION == "0.1.1"
         assert edge.input_kind == "raw.records"
         assert edge.input_id == RECORD_ID
 

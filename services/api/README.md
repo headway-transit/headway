@@ -23,7 +23,8 @@ preserved end to end; floating point never touches a figure).
 | POST | `/machine/keys` | `certifying_official` (v0 admin) | Issues a machine API key. The full key appears ONCE in this response with an explicit warning; only its SHA-256 hash is stored. Audited. |
 | GET | `/machine/keys` | `certifying_official` | Lists keys: prefix, name, scopes, source label, created/revoked — never hashes, never key material. |
 | DELETE | `/machine/keys/{id}` | `certifying_official` | Revokes a key (sets `revoked_at`; rows are never deleted — audit history). Audited. |
-| POST | `/ingest/tides/passenger-events` | machine key, scope `ingest:tides` | Push a TIDES passenger_events CSV (≤ 32 MiB) over HTTPS. Content-addressed (sha256 → `record_id`), stored to MinIO, produced as a v0 envelope to `raw.tides.passenger_events` — store before produce. 202 `{record_id, parse_status}`; malformed is still landed + produced, flagged. Audited per request. |
+| POST | `/ingest/tides/passenger-events` | machine key, scope `ingest:tides` | Push a TIDES passenger_events CSV (≤ 32 MiB — enforced incrementally as bytes arrive, 413 the moment the cap is passed) over HTTPS. Content-addressed (sha256 → `record_id`), stored to MinIO, produced as a v0 envelope to `raw.tides.passenger_events` — store before produce. 202 `{record_id, parse_status}`; malformed is still landed + produced, flagged. Audited per request. |
+| POST | `/ingest/dr/trips` | machine key, scope `ingest:dr` | Push a demand_response_trips CSV (handoff 0013; wire contract `contracts/demand-response-trip.v0.schema.json`) — the SAME connector discipline as the TIDES path (shared helper): ≤ 32 MiB streaming cap, content-addressed, store before produce to `raw.dr.trips`, envelope `source` = the key's bound source_label, malformed still landed + flagged, audited. |
 | GET | `/machine/metrics` | machine key, scope `read:metrics` | Machine read of computed values: same filters and row shape as `GET /metrics/values` (same query function — the two cannot drift). `value` a string, `detail` verbatim. Each row's lineage: feed its `metric_value_id` to `GET /metrics/values/{id}/lineage` — the same key works there. Rate-limited per key; every read audited, actor `key:<prefix>`. |
 | GET | `/settings` | any signed-in role | The per-agency policy settings (migration 0014 seeds them), each with its plain-language description, basis, and who last changed it. |
 | PUT | `/settings/{key}` | `certifying_official` only | Change one policy setting. Value validated against the setting's `value_type` (decimal parsed via `Decimal` — never float; 422 in plain language); old→new audited; unknown key 404 (settings are seeded, never client-creatable). |
@@ -34,12 +35,12 @@ preserved end to end; floating point never touches a figure).
 | POST | `/safety/events` | `data_steward` or above | Enter one Safety & Security event (handoff 0010; migration 0017). Plain-language validation; runs the deterministic classifier (`headway_calc.sscls`, sscls_v0) SYNCHRONOUSLY and returns classification + thresholds_met + a plain-language explanation with the tracker citation per threshold. Event, classification, and audit record commit in ONE transaction. |
 | GET | `/safety/events` | any signed-in role | Events with each one's LATEST classification; filters: `classification` (major/non_major/not_reportable), `month` (YYYY-MM, UTC half-open on `occurred_at`), `mode`. `property_damage_usd` is a string (exact NUMERIC). |
 | POST | `/safety/events/{id}/supersede` | `data_steward` or above | Append-only correction: the full corrected event is entered as a NEW row (classified like any entry), and the original gets its one permitted update — the `superseded_by` link (migration 0017 trigger enforces this). Requires a `reason` (audited). 404 unknown; 409 if already corrected. |
-| GET | `/safety/deadlines` | any signed-in role | Computed due dates, quote-cited: S&S-40 per open (unsuperseded) major event — `occurred_at` + 30 days (Exhibit 2, p. 4); S&S-50 per mode for the month (`?month=YYYY-MM`, default current UTC month) — due end of the following month (Exhibit 3), INCLUDING zero-event rows for every operated mode (derived like the handoff-0009 per-mode calc path). |
+| GET | `/safety/deadlines` | any signed-in role | Computed due dates, quote-cited: S&S-40 per open (unsuperseded) major event — `occurred_at` + 30 days (Exhibit 2, p. 4); S&S-50 per mode for the month (`?month=YYYY-MM`, default current UTC month) — due end of the following month (Exhibit 3), INCLUDING zero-event rows for every operated mode (derived like the handoff-0009 per-mode calc path). Carries `period_convention` (the ss50-declared UTC month bucketing) + a plain-language `period_note`; `GET /safety/events` records carry the same `period_convention`. |
 | GET | `/sampling/options` | any signed-in role | The sampling plan wizard's vocabulary (modes, units per mode per Table 41.01, options, frequencies), the §41.01/§41.03 eligibility guidance strings, and the ≥3-year documentation-retention note (2026 manual p. 150). All from `headway_calc.sampling` constants. |
 | GET | `/sampling/requirements` | any signed-in role | One ready-to-use table cell, verbatim + cited (`mode`,`unit`,`efficiency_option`,`frequency`) — the wizard's live preview. Reads every encoded cell incl. the reference-only grouped-APTL columns. Plain-language 422 for combinations outside the tables. |
 | POST | `/sampling/plans` | `data_steward` or above | Create a sampling plan (handoff 0012; migration 0020). Required per-period + annual sizes come from the calc selector (sampling_v0) with its version recorded — this API never encodes a regulatory number. `aptl` and `base` only (grouped deferred, honest scope). Audited. |
 | GET | `/sampling/plans` (+ `/{id}`, `/{id}/draws`, `/{id}/measurements`) | any signed-in role | Plans (filter `report_year`, `mode`), a plan, its draws (seed, frame, selection all recorded), its measurements (`observed_pmt` a string; `include_superseded=true` for full history). |
-| POST | `/sampling/plans/{id}/draws` | `data_steward` or above | One random-selection act per period at the plan's frequency: caller supplies the period's full expected service-unit list (§63.07); the seeded calc drawer selects WITHOUT replacement (§63.03); seed recorded (generated via CSPRNG when not supplied). Optional random `oversample_units`, flagged with the p. 149 citation. 409 for a repeated period; 422 for reused unit ids across periods, duplicate ids, or an undersized frame. Audited. |
+| POST | `/sampling/plans/{id}/draws` | `data_steward` or above | One random-selection act per period at the plan's frequency: caller supplies the period's full expected service-unit list (§63.07); the seeded calc drawer selects WITHOUT replacement (§63.03); seed recorded (generated via CSPRNG when not supplied) **with its provenance** — `seed_source` `'generated'`/`'client'` on the row, in the audit detail, and conditioning the method text's randomness claim (migration 0022; Headway only vouches for the randomness of seeds it generated). Optional random `oversample_units`, flagged with the p. 149 citation. 409 for a repeated period; 422 for reused unit ids across periods, duplicate ids, or an undersized frame. Audited. |
 | POST | `/sampling/plans/{id}/measurements` | `data_steward` or above | Manual ride-check entry for ONE drawn unit (observed UPT, PMT; optional Weekday/Saturday/Sunday label + service date). Refuses units outside the drawn sample (hand-picked extras are not random sampling). 409 if the unit already has an active observation — corrections supersede. Audited. |
 | POST | `/sampling/measurements/{id}/supersede` | `data_steward` or above | Append-only correction (the migration-0017 pattern): corrected observation entered as a NEW row, original gets its one permitted `superseded_by` update (link-then-insert under the one-active-per-unit index; deferrable FK). Requires a `reason` (audited). |
 | GET | `/sampling/plans/{id}/progress` | any signed-in role | Measured vs required, per draw and overall, with the drawn-but-unmeasured worksheet, the undersampling citation (p. 149: follow the technique exactly), and the retention note. |
@@ -363,7 +364,33 @@ python3 -m pytest tests/ -q
 
 ## Verification status
 
-- `pytest tests/ -q`: **179 passed** (2026-07-12, Python 3.12, this repo) —
+- `pytest tests/ -q`: **196 passed** (2026-07-13, Python 3.12, this repo) —
+  the hardening-pass Batch C increment
+  (docs/reviews/2026-07-13-hardening-pass.md): the pre-existing 188 tests
+  unchanged (one renamed: the DR empty-body test now also asserts the
+  message names the DR CSV) plus 8 new — streamed-oversized-body 413 with
+  the exact pre-streaming message, the incremental reader proven to abort
+  mid-stream at the cap (33 of 48 offered MiB chunks consumed, never
+  buffering past 32 MiB), oversized Content-Length refused before reading
+  any bytes, plain-language length bounds on safety free-text fields
+  (narrative 20,000 / location 1,000 / mode + TOS 50 / reason 5,000 —
+  at-cap accepted, over-cap 422 saving nothing) and on sampling draw
+  fields (period_label 100 / seed 200 / unit ids 500), seed provenance
+  (`seed_source='generated'` and `'client'` recorded on the draw row,
+  audit detail, list endpoint, and the per-source method text), and the
+  UTC month convention surfaced on /safety/deadlines
+  (`period_convention` + plain-language `period_note`) and on every
+  /safety/events record. `openapi.json` regenerated: OpenAPI 3.1.0,
+  **31 paths** (the DR route `/ingest/dr/trips` was missing from the
+  previous export; `seed_source`, `period_convention`, `period_note`
+  now in the schemas). Migration **0022** (`sampling.draws.seed_source`,
+  nullable — pre-0022 draws honestly unknown, append-only, never
+  backfilled) applied to the live TimescaleDB via `db/migrate.py` and
+  psql-verified; live checks (running API restarted with preserved env):
+  streamed oversized POST → 413, `/openapi.json` serving 31 paths, and
+  the demo routes still answering — evidence in
+  docs/reviews/2026-07-13-hardening-pass.md, "Batch C".
+- Earlier record — `pytest tests/ -q`: **179 passed** (2026-07-12, Python 3.12, this repo) —
   the pre-0012 suite unchanged plus 25 sampling tests (handoff 0012):
   wizard options/requirements lookups (verbatim cells + citations), plan
   creation with selector-recorded sizes and the grouped-option refusal,
@@ -444,7 +471,9 @@ python3 -m pytest tests/ -q
   failure never failing the 200, null minutes delivered as null, and
   event-type matching in both directions between certification-only and
   dq-only subscriptions).
-- `openapi.json` generated: OpenAPI 3.1.0, 18 paths.
+- `openapi.json` generated: OpenAPI 3.1.0, **31 paths** (2026-07-13
+  regeneration — the 18-path note here was stale; the export is now
+  drift-gated in CI, `.github/workflows/ci.yml`).
 - **PENDING**: live verification against real PostgreSQL/TimescaleDB,
   MinIO, and Kafka (migrations 0001–0016 applied, psycopg connection,
   `uvicorn` boot, a real ingest → envelope consumed). The authoring

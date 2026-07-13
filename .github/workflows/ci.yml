@@ -120,6 +120,44 @@ jobs:
         working-directory: services/ai
         run: python -m headway_ai.regression
 
+  drift-gates:
+    # Hardening pass 2026-07-13 (docs/reviews/2026-07-13-hardening-pass.md):
+    # the two generated artifacts that pass caught stale must now match
+    # their sources on every run — services/api/openapi.json (the DR route
+    # was missing from the committed spec) and web/src/regulatory/quotes.json
+    # (the verbatim regulatory quotes the UI serves, extracted from
+    # services/calc/REGULATORY_TRACKER.md). Each gate regenerates the
+    # artifact and fails on any diff against the committed file.
+    name: drift gates (openapi.json, quotes.json)
+    needs: changes
+    if: needs.changes.outputs.python == 'true' || needs.changes.outputs.web == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: services/api/pyproject.toml
+      - name: install API service (the exporter imports the app factory)
+        # headway-calc is a sibling path package, not on PyPI — install it
+        # alongside so api's `headway-calc>=0.5` resolves.
+        run: python -m pip install -e services/calc -e services/api
+      - name: openapi.json matches the app (regenerate + diff)
+        working-directory: services/api
+        run: |
+          python3 scripts/export_openapi.py
+          git diff --exit-code openapi.json
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+      - name: quotes.json matches the regulatory tracker (regenerate + diff)
+        # extract-quotes.mjs is a dependency-free node script reading
+        # services/calc/REGULATORY_TRACKER.md — no npm ci needed.
+        run: |
+          node web/scripts/extract-quotes.mjs
+          git diff --exit-code web/src/regulatory/quotes.json
+
   db-static:
     name: python / db migrations (static)
     needs: changes

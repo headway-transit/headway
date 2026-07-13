@@ -21,7 +21,8 @@ code cannot drift from the checked-in contract without failing loudly).
   for undecodable payloads / malformed entities. Event-time policy: entity
   timestamp, else header timestamp (noted as an info DQ finding), else the
   entity is a DQ finding — a time is never guessed.
-- `headway_transform/gtfs_static.py` — `normalize_gtfs_static` v0.2.0:
+- `headway_transform/gtfs_static.py` — `normalize_gtfs_static` v0.3.1
+  (0.3.1: decompression budget + per-row parse quarantine, 2026-07-13):
   GTFS zip `routes.txt`/`trips.txt` → `CanonicalRoute`/`CanonicalTrip` +
   edges. `route_type` → mode map cited to gtfs.org; unmapped values → mode
   `'unknown'` + DQ finding, never a guess. v0.2.0 (handoff 0003) parses
@@ -30,7 +31,8 @@ code cannot drift from the checked-in contract without failing loudly).
   **no** DQ finding; existing rows backfill on the next static-feed replay
   via the upsert path.
 - `headway_transform/tides_passenger_events.py` —
-  `normalize_tides_passenger_events` v0.1.0 (handoff 0005, slice 2 UPT):
+  `normalize_tides_passenger_events` v0.1.1 (handoff 0005, slice 2 UPT;
+  0.1.1: per-row parse quarantine, 2026-07-13):
   TIDES `passenger_events` CSV → `CanonicalPassengerEvent` rows (migration
   0012, column-for-column; `trip_id` from TIDES `trip_id_performed`) + one
   lineage edge per row
@@ -49,8 +51,9 @@ code cannot drift from the checked-in contract without failing loudly).
   `tides_simulated`) is carried verbatim onto every row — simulated data
   stays permanently distinguishable in provenance (handoff 0005 binding
   rule).
-- `headway_transform/dr_trips.py` — `normalize_dr_trips` v0.1.0 (handoff
-  0013, Demand Response module): `demand_response_trips` CSV (wire
+- `headway_transform/dr_trips.py` — `normalize_dr_trips` v0.1.1 (handoff
+  0013, Demand Response module; 0.1.1: per-row parse quarantine,
+  2026-07-13): `demand_response_trips` CSV (wire
   contract: `contracts/demand-response-trip.v0.schema.json`) →
   `CanonicalDrTrip` rows (migration 0021, column-for-column) + one lineage
   edge per row
@@ -64,14 +67,27 @@ code cannot drift from the checked-in contract without failing loudly).
   downstream, never a fabricated 0. The envelope `source` (`dr` |
   `dr_simulated` | a vendor label bound to the pushing machine key) is
   carried verbatim onto every row.
+- `headway_transform/row_guard.py` — per-row CSV parse guards shared by the
+  CSV/GTFS normalizers (2026-07-13 hardening pass): mid-iteration
+  `csv.Error` capture (oversized field), NUL-byte rejection at field level
+  BEFORE anything reaches Postgres, and stray/unterminated-quote absorption
+  detection with the absorbed span counted in the finding. One hostile row
+  is ONE quarantine finding; the rest of the file still lands.
 - `headway_transform/writer.py` — injectable DB-API writer; SQL matches the
   handoff-0001 schema exactly, plus `canonical.trips.block_id` (migration
   0011, handoff 0003) in the trip upsert and `canonical.passenger_events`
   inserts (migration 0012, handoff 0005; `ON CONFLICT (passenger_event_id,
   event_timestamp, source_record_id) DO NOTHING`) (`raw.records`,
   `canonical.*`, `lineage.edges`, `dq.issues`; vehicle positions
-  `ON CONFLICT (vehicle_id, "time", source_record_id) DO NOTHING`). No
-  `tenant_id` anywhere (ADR-0004).
+  `ON CONFLICT (vehicle_id, "time", source_record_id) DO NOTHING`).
+  Replay idempotency now covers lineage and DQ too (migration 0023,
+  2026-07-13 hardening pass): `lineage.edges` inserts conflict-DO-NOTHING
+  on the full six-column natural key, and transform-emitted `dq.issues`
+  rows carry a `dedupe_key` (`transform:` + sha256 of the finding's full
+  identity; UNIQUE WHERE NOT NULL) so a redelivered message writes zero
+  duplicate edges/findings — while human-/AI-/calc-created issues keep
+  `dedupe_key` NULL and are never deduplicated. No `tenant_id` anywhere
+  (ADR-0004).
 - `headway_transform/consumer.py` — loop skeleton behind a tiny
   `MessageSource` interface (`poll() -> (topic, key, value) | None`) so the
   Kafka client is swappable and unit-testable with a fake. Per-message
@@ -83,7 +99,11 @@ code cannot drift from the checked-in contract without failing loudly).
 - `headway_transform/kafka_source.py` — the real source over
   **kafka-python-ng** (lazy import; `kafka` extra), manual offset commit
   after the DB commit → at-least-once, idempotent via content-addressed
-  record_ids + ON CONFLICT DO NOTHING.
+  record_ids + ON CONFLICT DO NOTHING on `raw.records`, every
+  `canonical.*` unique key, the `lineage.edges` natural key, and the
+  transform `dq.issues` dedupe_key (migration 0023 — before 2026-07-13
+  this claim was NOT true for lineage/DQ; a replay duplicated edges and
+  findings. Live-verified fixed: see Verification status).
 
 ## Running tests
 
@@ -92,6 +112,34 @@ cd services/transform && python3 -m pytest tests/ -q
 ```
 
 ## Verification status
+
+- **2026-07-13 (hardening pass, Batch B — intake robustness + replay
+  idempotency):** `python3 -m pytest tests/ -q` → **83 passed in 0.23s**
+  (was 66 before this batch; Python 3.12.3, venv `/home/daniel/venv`).
+  New coverage (`tests/test_hardening.py` + writer/model additions): the
+  reviewers' three reproduced hostile-CSV inputs — oversized field
+  (mid-iteration `csv.Error` captured per row), NUL cell (rejected at
+  field level before Postgres), stray/unterminated quote (absorption
+  detected and counted) — each against the DR, TIDES and GTFS-static
+  normalizers, with remaining good rows still landing; GTFS zip
+  decompression budget (per-member and whole-archive, small limits
+  injected, blocking `transform_failure` finding naming the limit, feed
+  aborted with zero rows); capped object fetch (`read_capped` +
+  `ObjectTooLargeError` → `transform_failure` finding naming the limit);
+  `run_loop`'s quarantine finding now carrying the actual exception
+  message; lineage/dq ON CONFLICT SQL and the transform-scoped
+  `dedupe_key` (stable, `transform:`-prefixed, None without a
+  source-record anchor). Transform versions bumped: `normalize_dr_trips` /
+  `normalize_tides_passenger_events` 0.1.1, `normalize_gtfs_static` 0.3.1.
+  **Live-verified the same day** (evidence with output in
+  `docs/reviews/2026-07-13-hardening-pass.md`, Batch B): migration 0023
+  applied to the live TimescaleDB (672,073 duplicate lineage-edge rows
+  measured pre-migration, 0 after; unique indexes psql-verified from a
+  separate connection), then a REAL `raw.dr.trips` message (produced by
+  the live connector from a simulator drop) delivered twice through
+  `process_message` + `DbWriter` into the live database: first delivery
+  13 canonical rows / 13 edges / 3 findings / 1 raw record, second
+  delivery **zero new rows in all four tables**.
 
 - **2026-07-12 (handoff 0011 — GTFS stop geometry):** `python3 -m pytest
   tests/ -q` → **58 passed** (49 pre-0011 green with the widened

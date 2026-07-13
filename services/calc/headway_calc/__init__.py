@@ -12,16 +12,31 @@ inclusion per 0.3.0/handoff 0003, exclusion unit refined to the gapped trip
 plus its adjacent layover intervals); compute_upt is CALC_VERSION 0.1.0
 (Unlinked Passenger Trips over TIDES passenger events, handoff 0005 — the
 p. 146 missing-trip rule with a REAL FTA 2% threshold); compute_voms is
-CALC_VERSION 0.1.0 (monthly VOMS day-level proxy, handoff 0009).
+CALC_VERSION 0.1.0 (monthly VOMS day-level proxy, handoff 0009);
+compute_pmt is CALC_VERSION 0.1.0 (Passenger Miles Traveled — running load
+by stop_sequence × stop-to-stop segment distance over canonical.stop_times,
+handoff 0011; shares upt_v0's p. 146/p. 151 thresholds; the Exhibit 44
+average-trip-length estimator lives beside it in headway_calc.pmt as a
+labeled ESTIMATE, never conflated with computed PMT).
 compute_vrh_v0_3, compute_vrh_v0_2 and compute_vrm_v0_1/compute_vrh_v0_1 are
 the retained earlier versions, kept runnable so historical submissions
 recompute bit-for-bit. The Demand Response calcs (handoff 0013 —
-compute_dr_vrh/vrm/upt/voms/pmt at 0.1.0, headway_calc.dr) run over
+compute_dr_vrh/upt/pmt at 0.1.0 and compute_dr_vrm/compute_dr_voms at 0.1.1
+after the 2026-07-13 hardening pass, with compute_dr_vrm_v0_1_0/
+compute_dr_voms_v0_1_0 retained runnable — headway_calc.dr) run over
 canonical.dr_trips with Exhibit 36 span semantics and TX onboard-only
 accounting, persisting under scope 'mode:DR' (+ 'mode:DR:tos:<tos>') only. The compute_*_by_mode paths (handoff 0009) run the
 UNCHANGED calc versions over per-mode input subsets (input selection, not a
 semantics change — REGULATORY_TRACKER.md, "Mode scoping");
 build_mr20_package assembles the NOT-REPORTABLE MR-20 preview package.
+
+NOTE: headway_calc.sampling (NTD Sampling Manual plan support, handoff 0012)
+and headway_calc.sscls (the S&S major-event classifier, handoff 0010) stay
+MODULE-SCOPED on purpose — they never write computed.metric_values (sampling
+produces labeled SAMPLED ESTIMATES and plan/draw facilities; sscls writes
+safety.event_classifications), so they are not part of this package-level
+metric-calculation surface. Import them directly (headway_calc.sampling /
+headway_calc.sscls).
 """
 
 from headway_calc.dq import route_blocking_issues, route_findings
@@ -32,22 +47,27 @@ from headway_calc.dr import (
     compute_dr_upt_by_tos,
     compute_dr_voms,
     compute_dr_voms_by_tos,
+    compute_dr_voms_v0_1_0,
     compute_dr_vrh,
     compute_dr_vrh_by_tos,
     compute_dr_vrm,
     compute_dr_vrm_by_tos,
+    compute_dr_vrm_v0_1_0,
 )
 from headway_calc.mode import (
+    compute_pmt_by_mode,
     compute_upt_by_mode,
     compute_voms_by_mode,
     compute_vrh_by_mode,
     compute_vrm_by_mode,
     unknown_mode_finding,
 )
+from headway_calc.pmt import compute_pmt
 from headway_calc.reader import (
     load_dr_trips,
     load_operated_trip_ids,
     load_passenger_events,
+    load_trip_geometries,
     load_vehicle_positions,
 )
 from headway_calc.types import (
@@ -57,6 +77,8 @@ from headway_calc.types import (
     DrTrip,
     Finding,
     PassengerEvent,
+    PmtDetail,
+    StopTime,
     UptDetail,
     VehiclePosition,
     VomsDetail,
@@ -87,6 +109,8 @@ __all__ = [
     "DrTrip",
     "Finding",
     "PassengerEvent",
+    "PmtDetail",
+    "StopTime",
     "UptDetail",
     "VehiclePosition",
     "VomsDetail",
@@ -96,10 +120,14 @@ __all__ = [
     "compute_dr_upt_by_tos",
     "compute_dr_voms",
     "compute_dr_voms_by_tos",
+    "compute_dr_voms_v0_1_0",
     "compute_dr_vrh",
     "compute_dr_vrh_by_tos",
     "compute_dr_vrm",
     "compute_dr_vrm_by_tos",
+    "compute_dr_vrm_v0_1_0",
+    "compute_pmt",
+    "compute_pmt_by_mode",
     "compute_upt",
     "compute_upt_by_mode",
     "compute_voms",
@@ -115,6 +143,7 @@ __all__ = [
     "load_dr_trips",
     "load_operated_trip_ids",
     "load_passenger_events",
+    "load_trip_geometries",
     "load_vehicle_positions",
     "route_blocking_issues",
     "route_findings",

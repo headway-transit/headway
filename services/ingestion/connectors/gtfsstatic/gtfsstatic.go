@@ -26,10 +26,15 @@ import (
 // Connector identity recorded on every envelope (contracts/topics.v0.md).
 const (
 	ConnectorName    = "headway-gtfs-static"
-	ConnectorVersion = "0.1.0"
+	ConnectorVersion = "0.1.1"
 	Source           = "gtfs_static"
 	ContentType      = "application/zip"
 	Topic            = "raw.gtfs_static.feed"
+
+	// DefaultMaxFetchBytes caps how much of the HTTP response body is
+	// buffered (2026-07-13 hardening pass — an unbounded read is a DoS
+	// vector). Generous: national-scale GTFS zips are tens of MiB.
+	DefaultMaxFetchBytes = 256 << 20 // 256 MiB
 )
 
 // ObjectKey returns the content-addressed object-store key for a feed zip.
@@ -41,6 +46,11 @@ func ObjectKey(recordID string) string {
 type Fetcher struct {
 	URL      string
 	AgencyID string // optional
+
+	// MaxBytes caps the response body size; <= 0 means
+	// DefaultMaxFetchBytes. An oversize response is a loud refusal
+	// (error + log), never a truncated record.
+	MaxBytes int64
 
 	HTTP     *http.Client
 	Store    ObjectStore
@@ -82,9 +92,24 @@ func (f *Fetcher) FetchOnce(ctx context.Context) error {
 	defer resp.Body.Close()
 	fetchedAt := f.clock()
 
-	body, err := io.ReadAll(resp.Body)
+	// Cap the buffered body (hardening pass 2026-07-13): read at most
+	// limit+1 bytes so an over-limit response is detected and refused
+	// loudly instead of buffering without bound (DoS) or silently
+	// truncating (a partial feed must never become a record).
+	limit := f.MaxBytes
+	if limit <= 0 {
+		limit = DefaultMaxFetchBytes
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
 	if err != nil {
 		return fmt.Errorf("gtfsstatic: read body: %w", err)
+	}
+	if int64(len(body)) > limit {
+		return fmt.Errorf(
+			"gtfsstatic: fetch %s: response exceeds the %d-byte limit "+
+				"(GTFS_STATIC_MAX_BYTES); refusing to buffer an unbounded "+
+				"body — raise the limit explicitly if this feed is really "+
+				"that large", f.URL, limit)
 	}
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("gtfsstatic: fetch %s: HTTP %d", f.URL, resp.StatusCode)

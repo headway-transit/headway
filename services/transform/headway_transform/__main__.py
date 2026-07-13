@@ -3,7 +3,8 @@
 Wires the real adapters from environment variables and runs the consumer
 loop forever. This module is the ONLY place env vars are read; every library
 module keeps taking injected dependencies (consumer.py's MessageSource /
-DbWriter / ObjectFetcher seams), so unit tests never touch it.
+DbWriter / ObjectFetcher seams), so unit tests never exercise the wiring
+(the pure read_capped helper is the one unit-tested piece here).
 
 Environment:
   KAFKA_BROKERS   (required) bootstrap servers, e.g. kafka:9092
@@ -19,6 +20,12 @@ Environment:
                   ingest seam. When unset, the consumer quarantines
                   object_ref messages as blocking 'object_ref_unavailable'
                   dq.issues rows (loud, never dropped).
+  HEADWAY_MAX_OBJECT_BYTES (optional) cap on a fetched object_ref payload,
+                  default 268435456 (256 MiB). Fetches are stream-counted
+                  and ABORTED over the cap (2026-07-13 hardening pass:
+                  never buffer an unbounded body); the aborted message is
+                  quarantined as a blocking transform_failure dq.issues row
+                  naming the limit.
   IDLE_SLEEP_SECONDS (optional) sleep between empty polls, default 1.
 
 Fail-loudly policy: missing required config is a refusal at startup, never a
@@ -38,6 +45,7 @@ from .consumer import (
     TOPIC_GTFS_STATIC_FEED,
     TOPIC_TIDES_PASSENGER_EVENTS,
     ObjectFetcher,
+    ObjectTooLargeError,
     run_loop,
 )
 from .kafka_source import KafkaMessageSource
@@ -51,6 +59,33 @@ TOPICS = [
     TOPIC_TIDES_PASSENGER_EVENTS,
     TOPIC_DR_TRIPS,
 ]
+
+#: Default cap on a fetched object_ref payload (2026-07-13 hardening pass).
+#: Generous — the largest real payload so far (MBTA GTFS zip) is ~90 MiB.
+DEFAULT_MAX_OBJECT_BYTES = 256 * 1024 * 1024
+
+
+def read_capped(chunks, max_bytes: int, object_ref: str) -> bytes:
+    """Assemble streamed chunks, aborting loudly over max_bytes.
+
+    Stream-counted so an oversize (or hostile) object is refused after at
+    most max_bytes of buffering — never read to completion first. The
+    ObjectTooLargeError message names the limit; run_loop turns it into a
+    blocking transform_failure dq.issues finding carrying that message.
+    """
+    parts: list[bytes] = []
+    total = 0
+    for chunk in chunks:
+        total += len(chunk)
+        if total > max_bytes:
+            raise ObjectTooLargeError(
+                f"object {object_ref!r} exceeds the {max_bytes}-byte fetch "
+                "limit (HEADWAY_MAX_OBJECT_BYTES); fetch aborted after "
+                f"{total} bytes — raise the limit explicitly if this "
+                "payload is legitimately that large"
+            )
+        parts.append(chunk)
+    return b"".join(parts)
 
 
 def object_fetcher_from_env() -> Optional[ObjectFetcher]:
@@ -77,11 +112,14 @@ def object_fetcher_from_env() -> Optional[ObjectFetcher]:
         secure=os.environ.get("S3_USE_SSL", "").lower() == "true",
     )
     bucket = os.environ.get("S3_BUCKET", "headway-raw")
+    max_bytes = int(
+        os.environ.get("HEADWAY_MAX_OBJECT_BYTES", str(DEFAULT_MAX_OBJECT_BYTES))
+    )
 
     def fetch(object_ref: str) -> bytes:
         response = client.get_object(bucket, object_ref)
         try:
-            return response.read()
+            return read_capped(response.stream(64 * 1024), max_bytes, object_ref)
         finally:
             response.close()
             response.release_conn()

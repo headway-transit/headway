@@ -12,9 +12,9 @@ from __future__ import annotations
 
 import json
 from decimal import Decimal
-from pathlib import Path
 
 import pytest
+from conftest import SAMPLING_GOLDEN_DIR
 
 from headway_calc.sampling import (
     SAMPLING_ESTIMATION_METHOD,
@@ -27,10 +27,11 @@ from headway_calc.sampling import (
     sample_aptl,
 )
 
-EXPECTED = json.loads(
-    (Path(__file__).resolve().parents[3] / "tests" / "golden" / "sampling_v0" / "expected.json")
-    .read_text()
-)
+#: Module-level ONLY for the parametrize decorators below (pytest builds
+#: parameter sets at collection time, before fixtures exist); everything
+#: else uses the conftest `sampling_golden_expected` fixture over the same
+#: SAMPLING_GOLDEN_DIR file.
+EXPECTED = json.loads((SAMPLING_GOLDEN_DIR / "expected.json").read_text())
 
 
 def _observations(rows) -> list[UnitObservation]:
@@ -48,14 +49,16 @@ def _observations(rows) -> list[UnitObservation]:
 # --- 1. every table cell pinned -------------------------------------------------
 
 
-def test_every_encoded_cell_is_pinned_and_no_pin_is_orphaned():
+def test_every_encoded_cell_is_pinned_and_no_pin_is_orphaned(
+    sampling_golden_expected,
+):
     """The expected.json cell set and the module's cell set are IDENTICAL —
     a new/changed/removed cell must show up here as a diff."""
     encoded = {
         "|".join(key): [per_period, annual]
         for key, (per_period, annual) in all_table_cells().items()
     }
-    assert encoded == EXPECTED["table_cells"]
+    assert encoded == sampling_golden_expected["table_cells"]
 
 
 @pytest.mark.parametrize(
@@ -114,8 +117,8 @@ def test_mode_level_spotchecks(case):
 # --- 2. §83 APTL hand-worked example --------------------------------------------
 
 
-def test_golden_aptl_ratio_of_totals():
-    case = EXPECTED["aptl_example"]
+def test_golden_aptl_ratio_of_totals(sampling_golden_expected):
+    case = sampling_golden_expected["aptl_example"]
     obs = _observations(case["observations"])
     assert sample_aptl(obs) == Decimal(case["sample_aptl"])
     # The banned average-of-ratios over the defined units differs — the
@@ -125,8 +128,8 @@ def test_golden_aptl_ratio_of_totals():
     )
 
 
-def test_golden_annual_estimate():
-    case = EXPECTED["aptl_example"]
+def test_golden_annual_estimate(sampling_golden_expected):
+    case = sampling_golden_expected["aptl_example"]
     estimate = estimate_annual_pmt(
         _observations(case["observations"]), case["annual_upt_100pct"]
     )
@@ -141,8 +144,8 @@ def test_golden_annual_estimate():
     assert "ESTIMATE" in estimate.method
 
 
-def test_golden_by_service_day_estimates():
-    case = EXPECTED["by_service_day_example"]
+def test_golden_by_service_day_estimates(sampling_golden_expected):
+    case = sampling_golden_expected["by_service_day_example"]
     estimates = estimate_pmt_by_service_day(
         _observations(case["observations"]),
         {k: Decimal(v) for k, v in case["upt_100pct_by_day_type"].items()},
@@ -165,11 +168,11 @@ def test_golden_by_service_day_estimates():
 # --- 3. draw reproducibility anchor ----------------------------------------------
 
 
-def test_golden_draw_pinned_forever():
+def test_golden_draw_pinned_forever(sampling_golden_expected):
     """The drawer's permanent regression anchor (BASIS.md §3): recorded
     seeds must reproduce their historical draws bit-for-bit forever, so any
     procedure change MUST fail here and mint a new drawer version."""
-    case = EXPECTED["draw_example"]
+    case = sampling_golden_expected["draw_example"]
     draw = draw_sample(case["frame"], case["sample_size"], case["seed"])
     assert list(draw.selected_units) == case["selected_units"]
     assert draw.seed == case["seed"]

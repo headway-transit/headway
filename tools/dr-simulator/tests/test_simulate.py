@@ -234,3 +234,22 @@ def test_cli_run_prints_simulated_reminder(tmp_path, capsys):
     out = capsys.readouterr().out
     assert "SIMULATED data" in out
     assert "dr_simulated" in out
+
+
+def test_every_row_carries_the_structural_sim_marker():
+    """Every dr_trip_id is 'sim:'-prefixed — the STRUCTURAL simulated-data
+    marker (2026-07-13 hardening pass): the DR connector hard-refuses
+    sim-marked rows arriving under a non-simulated source label (Shared
+    Constraint 2, full provenance), so this prefix is load-bearing, not
+    cosmetic. It must survive every code path, including defect injection.
+    """
+    rows = _gen(
+        seed=11,
+        missing_distance_share=0.1,
+        negative_duration_share=0.1,
+        ada_sponsored_conflict_share=0.1,
+        missing_sponsor_share=0.1,
+    )
+    assert rows
+    for row in rows:
+        assert row["dr_trip_id"].startswith("sim:"), row["dr_trip_id"]

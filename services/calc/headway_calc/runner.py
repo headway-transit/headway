@@ -4,10 +4,16 @@ Orchestration only: resolve the policy thresholds (explicit argument >
 app.settings row > code default — headway_calc.settings, migration 0014; see
 run_period's docstring), load canonical.vehicle_positions
 (headway_calc.reader, block_id joined per handoff 0003) plus
-canonical.passenger_events and the operated trip_ids (handoff 0005), run the
-v0 calculations (compute_vrm at
-0.2.0, compute_vrh at 0.4.0, compute_upt at 0.1.0 — the default paths,
-handoffs 0002/0004/0005), route
+canonical.passenger_events, the operated trip_ids (handoff 0005), the
+event-trip stop geometry (handoff 0011) and canonical.dr_trips (handoff
+0013), run the v0 calculations (the default path: compute_vrm at 0.2.0,
+compute_vrh at 0.4.0, compute_upt at 0.1.0, compute_pmt at 0.1.0 — handoffs
+0002/0004/0005/0011; with per_mode=True additionally compute_voms at 0.1.0
+plus one mode-scoped result per metric per mode, handoff 0009; whenever the
+period holds dr_trips rows, additionally the five Demand Response calcs —
+compute_dr_vrh/compute_dr_upt/compute_dr_pmt at 0.1.0 and compute_dr_vrm/
+compute_dr_voms at 0.1.1, handoff 0013 + the 2026-07-13 hardening pass —
+under scope 'mode:DR' + 'mode:DR:tos:<tos>'), route
 EVERY finding to dq.issues with its own severity
 (headway_calc.dq: infos stay info, warnings stay warnings, blocking stays
 blocking), then

@@ -108,7 +108,23 @@ from headway_calc.types import (
     Finding,
 )
 
-CALC_VERSION = "0.1.0"
+#: Per-calc versions. dr_vrm_v0 and dr_voms_v0 minted 0.1.1 in the
+#: 2026-07-13 hardening pass (see the REGULATORY_TRACKER.md rows and the
+#: dated superseding notes on their 0.1.0 rows): the non-TX onboard-sum
+#: path now merges overlapping shared-ride onboard windows before pricing,
+#: and the VOMS sweep counts distinct VEHICLES covering an instant, never
+#: concurrent intervals. The superseded 0.1.0 behaviors stay runnable
+#: (:func:`compute_dr_vrm_v0_1_0` / :func:`compute_dr_voms_v0_1_0`) so
+#: figures persisted under 0.1.0 recompute bit for bit (the tracker rule:
+#: shipped versions are never deleted or rewritten).
+VRH_CALC_VERSION = "0.1.0"
+VRM_CALC_VERSION = "0.1.1"
+UPT_CALC_VERSION = "0.1.0"
+VOMS_CALC_VERSION = "0.1.1"
+PMT_CALC_VERSION = "0.1.0"
+VRM_CALC_VERSION_0_1_0 = "0.1.0"
+VOMS_CALC_VERSION_0_1_0 = "0.1.0"
+
 VRH_CALC_NAME = "dr_vrh_v0"
 VRM_CALC_NAME = "dr_vrm_v0"
 UPT_CALC_NAME = "dr_upt_v0"
@@ -579,7 +595,7 @@ def compute_dr_vrh(trips: Iterable[DrTrip]) -> CalcResult:
         value=_hours(total_seconds),
         unit=UNIT_HOURS,
         calc_name=VRH_CALC_NAME,
-        calc_version=CALC_VERSION,
+        calc_version=VRH_CALC_VERSION,
         input_record_ids=tuple(input_ids),
         blocking_issues=(),
         warnings=tuple(warnings),
@@ -603,8 +619,69 @@ def _trip_onboard_distance(trip: DrTrip) -> tuple[Decimal | None, str | None]:
     return None, None
 
 
+def _merge_onboard_windows(trips: Iterable[DrTrip]) -> list[list[DrTrip]]:
+    """Merge a non-TX interval's booking [pickup, dropoff] windows into
+    maximal overlapping-or-touching groups (pickup-sorted input; the same
+    merge rule as the TX interval builder).
+
+    Vehicle miles are VEHICLE miles (p. 128 as quoted in the tracker:
+    "the ... miles vehicles travel while in revenue service"): bookings
+    sharing the vehicle over the same window must be priced ONCE, so
+    pricing operates per merged window, never per booking across an
+    overlap (the dr_vrm_v0 0.1.1 correction — the 0.1.0 per-booking sum
+    double-counted shared rides on the onboard-sum path)."""
+    windows: list[list[DrTrip]] = []
+    window_end: datetime | None = None
+    for trip in trips:
+        if windows and window_end is not None and trip.pickup_timestamp <= window_end:
+            windows[-1].append(trip)
+            if trip.dropoff_timestamp > window_end:
+                window_end = trip.dropoff_timestamp
+        else:
+            windows.append([trip])
+            window_end = trip.dropoff_timestamp
+    return windows
+
+
+def _price_onboard_window(
+    window: list[DrTrip],
+) -> tuple[Decimal, str | None, int, bool]:
+    """Price ONE merged onboard window: (miles, source, missing, summed).
+
+    Precedence: the window's boundary odometer delta (first-pickup reading
+    → last-dropoff reading, non-decreasing) — exact even when the window
+    holds overlapping shared-ride bookings (``source = 'window_odometer'``);
+    else the per-booking onboard sum: a booking with no measurable distance
+    contributes 0 and is counted in ``missing`` (documented undercount,
+    never a guess), and ``summed`` is True when more than one booking was
+    summed — the shared segment may then be counted more than once (the
+    caller warns; never silent)."""
+    first = min(window, key=lambda t: (t.pickup_timestamp, t.dr_trip_id))
+    last = max(window, key=lambda t: (t.dropoff_timestamp, t.dr_trip_id))
+    if (
+        first.pickup_odometer_miles is not None
+        and last.dropoff_odometer_miles is not None
+        and last.dropoff_odometer_miles >= first.pickup_odometer_miles
+    ):
+        return (
+            last.dropoff_odometer_miles - first.pickup_odometer_miles,
+            "window_odometer",
+            0,
+            False,
+        )
+    miles = Decimal(0)
+    missing = 0
+    for trip in window:
+        distance, _source = _trip_onboard_distance(trip)
+        if distance is None:
+            missing += 1
+        else:
+            miles += distance
+    return miles, None, missing, len(window) > 1
+
+
 def compute_dr_vrm(trips: Iterable[DrTrip]) -> CalcResult:
-    """dr_vrm_v0 0.1.0 — DR Vehicle Revenue Miles (Exhibit 36 semantics).
+    """dr_vrm_v0 0.1.1 — DR Vehicle Revenue Miles (Exhibit 36 semantics).
 
     Distance-source precedence per revenue interval:
 
@@ -613,13 +690,20 @@ def compute_dr_vrm(trips: Iterable[DrTrip]) -> CalcResult:
        inside the span (onboard segments AND the Exhibit-36 empty
        inter-passenger travel), and excludes interruption legs by
        construction (spans break there).
-    2. **Onboard sum** — per-booking onboard distances (odometer pair, else
-       onboard_miles) plus every measurable empty inter-passenger leg
-       (previous last-dropoff reading → next pickup reading). An empty leg
-       with no odometer pair contributes 0 + a warning (documented
-       UNDERCOUNT of revenue miles — Exhibit 36 prices that leg as revenue);
-       a booking with no measurable distance contributes 0 + the same
-       warning. Never an interpolated number.
+    2. **Onboard sum over MERGED windows** (the 0.1.1 correction — 0.1.0
+       summed per booking and double-counted overlapping shared rides):
+       the interval's booking windows are merged into
+       overlapping-or-touching groups first (vehicle miles are VEHICLE
+       miles — passengers sharing the vehicle do not multiply its miles).
+       Each merged window prices by its boundary odometer delta when
+       available; else by the per-booking sum — with a booking lacking any
+       measurable distance contributing 0 + a warning (documented
+       UNDERCOUNT — Exhibit 36 prices the leg as revenue) and a
+       multi-booking sum warned as `dr_shared_distance_summed` (possible
+       OVERCOUNT of the shared segment; 0.1.0 gated this warning to TX).
+       Empty inter-passenger legs are the gaps BETWEEN merged windows,
+       measurable only via an odometer pair across the gap (else warned).
+       Never an interpolated number.
 
     TX intervals are passenger-onboard only (no empty legs). A TX interval
     holding several overlapping bookings uses the boundary odometer delta
@@ -628,7 +712,225 @@ def compute_dr_vrm(trips: Iterable[DrTrip]) -> CalcResult:
     with a passenger onboard once).
 
     Value: Decimal miles, one final 0.01 quantization. Never blocks; every
-    gap is a finding with its direction stated.
+    gap is a finding with its direction stated. 0.1.0 stays runnable as
+    :func:`compute_dr_vrm_v0_1_0` (tracker superseding note, 2026-07-13).
+    """
+    ordered = _sorted_trips(trips)
+    counted, warnings, counters = _account(ordered)
+
+    total_miles = Decimal(0)
+    distance_sources: dict[str, int] = {}
+    unmeasured_empty_legs = 0
+    missing_onboard = 0
+    tx_summed_overlaps = 0
+    shared_overlaps_summed = 0
+    input_ids: dict[str, None] = {}
+
+    for day in counted:
+        day_unmeasured_legs = 0
+        day_missing_onboard = 0
+        day_tx_overlap = 0
+        day_shared_overlap = 0
+        for interval in day.intervals:
+            first = min(
+                interval.trips, key=lambda t: (t.pickup_timestamp, t.dr_trip_id)
+            )
+            last = max(
+                interval.trips, key=lambda t: (t.dropoff_timestamp, t.dr_trip_id)
+            )
+            if (
+                first.pickup_odometer_miles is not None
+                and last.dropoff_odometer_miles is not None
+                and last.dropoff_odometer_miles >= first.pickup_odometer_miles
+            ):
+                total_miles += (
+                    last.dropoff_odometer_miles - first.pickup_odometer_miles
+                )
+                distance_sources["span_odometer"] = (
+                    distance_sources.get("span_odometer", 0) + 1
+                )
+                continue
+
+            distance_sources["onboard_sum"] = (
+                distance_sources.get("onboard_sum", 0) + 1
+            )
+            if day.tos in ONBOARD_ONLY_TOS:
+                # TX: the interval IS one merged passenger-onboard window
+                # (built that way); no empty legs exist by construction.
+                if len(interval.trips) > 1:
+                    day_tx_overlap += 1
+                for trip in interval.trips:
+                    distance, _source = _trip_onboard_distance(trip)
+                    if distance is None:
+                        day_missing_onboard += 1
+                    else:
+                        total_miles += distance
+                continue
+
+            # Non-TX onboard sum (0.1.1): merge overlapping onboard windows
+            # BEFORE pricing, then price the gaps between them as the empty
+            # inter-passenger legs (Exhibit 36: revenue yes/yes).
+            windows = _merge_onboard_windows(interval.trips)
+            for window in windows:
+                miles, source, missing, summed_overlap = _price_onboard_window(
+                    window
+                )
+                total_miles += miles
+                day_missing_onboard += missing
+                if source == "window_odometer":
+                    distance_sources["window_odometer"] = (
+                        distance_sources.get("window_odometer", 0) + 1
+                    )
+                if summed_overlap:
+                    day_shared_overlap += 1
+            for prev_window, next_window in zip(windows, windows[1:]):
+                prev_last = max(
+                    prev_window,
+                    key=lambda t: (t.dropoff_timestamp, t.dr_trip_id),
+                )
+                next_first = next_window[0]
+                if (
+                    prev_last.dropoff_odometer_miles is not None
+                    and next_first.pickup_odometer_miles is not None
+                    and next_first.pickup_odometer_miles
+                    >= prev_last.dropoff_odometer_miles
+                ):
+                    total_miles += (
+                        next_first.pickup_odometer_miles
+                        - prev_last.dropoff_odometer_miles
+                    )
+                else:
+                    day_unmeasured_legs += 1
+
+        if day_unmeasured_legs or day_missing_onboard:
+            warnings.append(
+                Finding(
+                    issue_type="dr_distance_unmeasured",
+                    severity=SEVERITY_WARNING,
+                    title=(
+                        f"Vehicle {day.vehicle_id} on {day.service_date}: "
+                        f"{day_missing_onboard} booking(s) and "
+                        f"{day_unmeasured_legs} empty leg(s) without a "
+                        f"measurable distance"
+                    ),
+                    description=(
+                        f"Vehicle {day.vehicle_id!r} on {day.service_date}: "
+                        f"{day_missing_onboard} booking(s) carry no odometer "
+                        f"pair and no onboard_miles, and "
+                        f"{day_unmeasured_legs} empty inter-passenger leg(s) "
+                        f"have no odometer pair across the gap. Exhibit 36 "
+                        f"(as quoted in the tracker's DR section) prices "
+                        f"empty travel between a dropoff and the next pickup "
+                        f"as REVENUE miles, so these legs belong in the "
+                        f"figure — they contributed 0 instead: the figure "
+                        f"UNDERSTATES revenue miles for this vehicle-day. A "
+                        f"distance is never interpolated; supply odometer "
+                        f"readings or onboard distances to close the gap."
+                    ),
+                    source_record_ids=_record_ids(day.trips),
+                )
+            )
+        if day_tx_overlap:
+            warnings.append(
+                Finding(
+                    issue_type="dr_tx_shared_distance_summed",
+                    severity=SEVERITY_WARNING,
+                    title=(
+                        f"Vehicle {day.vehicle_id} on {day.service_date}: "
+                        f"{day_tx_overlap} shared TX interval(s) priced by "
+                        f"summing per-booking distances"
+                    ),
+                    description=(
+                        f"Vehicle {day.vehicle_id!r} on {day.service_date} "
+                        f"(TX): {day_tx_overlap} merged passenger-onboard "
+                        f"interval(s) hold overlapping bookings but no "
+                        f"boundary odometer pair, so per-booking onboard "
+                        f"distances were SUMMED. The p. 129 TX rule (quoted "
+                        f"in the tracker's DR section) counts vehicle miles "
+                        f"with a passenger onboard ONCE, so the sum may "
+                        f"OVERCOUNT the shared segment. Supply odometer "
+                        f"readings for the exact interval measure."
+                    ),
+                    source_record_ids=_record_ids(day.trips),
+                )
+            )
+        if day_shared_overlap:
+            warnings.append(
+                Finding(
+                    issue_type="dr_shared_distance_summed",
+                    severity=SEVERITY_WARNING,
+                    title=(
+                        f"Vehicle {day.vehicle_id} on {day.service_date}: "
+                        f"{day_shared_overlap} shared-ride onboard window(s) "
+                        f"priced by summing per-booking distances"
+                    ),
+                    description=(
+                        f"Vehicle {day.vehicle_id!r} on {day.service_date} "
+                        f"({day.tos}): {day_shared_overlap} merged "
+                        f"passenger-onboard window(s) hold overlapping "
+                        f"bookings but carry no boundary odometer pair, so "
+                        f"per-booking onboard distances were SUMMED. VRM "
+                        f"counts the miles the VEHICLE travels in revenue "
+                        f"service (p. 128 as quoted in the tracker) — "
+                        f"passengers sharing the vehicle do not multiply its "
+                        f"miles — so the sum may OVERCOUNT the shared "
+                        f"segment. Supply odometer readings for the exact "
+                        f"window measure."
+                    ),
+                    source_record_ids=_record_ids(day.trips),
+                )
+            )
+        unmeasured_empty_legs += day_unmeasured_legs
+        missing_onboard += day_missing_onboard
+        tx_summed_overlaps += day_tx_overlap
+        shared_overlaps_summed += day_shared_overlap
+        for record_id in _record_ids(day.trips):
+            input_ids.setdefault(record_id, None)
+
+    base = _service_detail(counters)
+    detail = DrVrmDetail(
+        vehicle_days=base.vehicle_days,
+        vehicle_days_counted=base.vehicle_days_counted,
+        vehicle_days_excluded=base.vehicle_days_excluded,
+        trips_counted=base.trips_counted,
+        no_show_trips=base.no_show_trips,
+        revenue_spans=base.revenue_spans,
+        interruption_breaks=base.interruption_breaks,
+        tos_mix=base.tos_mix,
+        source_mix=base.source_mix,
+        distance_sources=distance_sources,
+        unmeasured_empty_legs=unmeasured_empty_legs,
+        missing_onboard_distances=missing_onboard,
+        tx_summed_overlap_intervals=tx_summed_overlaps,
+        shared_overlap_windows_summed=shared_overlaps_summed,
+    )
+
+    return CalcResult(
+        value=total_miles.quantize(_MILES_QUANTUM, rounding=ROUND_HALF_EVEN),
+        unit=UNIT_MILES,
+        calc_name=VRM_CALC_NAME,
+        calc_version=VRM_CALC_VERSION,
+        input_record_ids=tuple(input_ids),
+        blocking_issues=(),
+        warnings=tuple(warnings),
+        infos=tuple(_simulated_source_info(ordered, counters["source_mix"])),
+        detail=detail,
+    )
+
+
+def compute_dr_vrm_v0_1_0(trips: Iterable[DrTrip]) -> CalcResult:
+    """dr_vrm_v0 0.1.0 — RETAINED RUNNABLE, SUPERSEDED by 0.1.1.
+
+    The tracker's dated superseding note (2026-07-13, hardening pass)
+    records the confirmed defect this version carries: on the onboard-sum
+    path, non-TX vehicle-days price OVERLAPPING shared-ride onboard windows
+    by summing per-booking distances — two passengers sharing the same
+    10-mile window price 20 vehicle-miles, SILENTLY (no finding). 0.1.1
+    merges overlapping onboard windows before pricing and warns wherever a
+    merged window cannot be measured exactly. This function exists only so
+    figures persisted under calc_version 0.1.0 stay reproducible bit for
+    bit (the tracker rule: shipped versions are never deleted or
+    rewritten); never run it for new figures.
     """
     ordered = _sorted_trips(trips)
     counted, warnings, counters = _account(ordered)
@@ -676,7 +978,8 @@ def compute_dr_vrm(trips: Iterable[DrTrip]) -> CalcResult:
                 else:
                     total_miles += distance
             if day.tos not in ONBOARD_ONLY_TOS:
-                # Empty inter-passenger legs (Exhibit 36: revenue yes/yes):
+                # The superseded per-booking sum: overlapping windows are
+                # NOT merged (the pinned 0.1.0 double-count). Empty legs:
                 # previous running last-dropoff → next pickup, measurable
                 # only via an odometer pair across the gap.
                 running_end = interval.trips[0].dropoff_timestamp
@@ -778,7 +1081,7 @@ def compute_dr_vrm(trips: Iterable[DrTrip]) -> CalcResult:
         value=total_miles.quantize(_MILES_QUANTUM, rounding=ROUND_HALF_EVEN),
         unit=UNIT_MILES,
         calc_name=VRM_CALC_NAME,
-        calc_version=CALC_VERSION,
+        calc_version=VRM_CALC_VERSION_0_1_0,
         input_record_ids=tuple(input_ids),
         blocking_issues=(),
         warnings=tuple(warnings),
@@ -875,7 +1178,7 @@ def compute_dr_upt(trips: Iterable[DrTrip]) -> CalcResult:
         value=Decimal(upt),
         unit=UNIT_UPT,
         calc_name=UPT_CALC_NAME,
-        calc_version=CALC_VERSION,
+        calc_version=UPT_CALC_VERSION,
         input_record_ids=tuple(input_ids),
         blocking_issues=(),
         warnings=tuple(warnings),
@@ -885,15 +1188,15 @@ def compute_dr_upt(trips: Iterable[DrTrip]) -> CalcResult:
 
 
 def compute_dr_voms(trips: Iterable[DrTrip]) -> CalcResult:
-    """dr_voms_v0 0.1.0 — DR Vehicles Operated in Maximum Service.
+    """dr_voms_v0 0.1.1 — DR Vehicles Operated in Maximum Service.
 
     "The largest number of vehicles in revenue service at any one time
     during the reporting year (INCLUDES atypical service)" (Exhibits 38 +
     40, quoted in the tracker's DR section): TRUE SIMULTANEITY — the maximum
-    over time of the count of vehicles whose revenue interval covers the
-    instant. Every day counts: the atypical-day exclusion that voms_v0
-    documents for non-DR modes is deliberately NOT applied (the definitions
-    are opposite; do not reuse voms_v0 for DR).
+    over time of the count of DISTINCT VEHICLES whose revenue interval
+    covers the instant. Every day counts: the atypical-day exclusion that
+    voms_v0 documents for non-DR modes is deliberately NOT applied (the
+    definitions are opposite; do not reuse voms_v0 for DR).
 
     Intervals are the same revenue intervals dr_vrh_v0 prices: non-TX spans
     (a no-show visit inside a span keeps the vehicle in revenue service) and
@@ -901,9 +1204,98 @@ def compute_dr_voms(trips: Iterable[DrTrip]) -> CalcResult:
     intervals are CLOSED — a vehicle ending an interval at the same instant
     another starts counts as simultaneous at that instant.
 
+    The 0.1.1 correction (tracker superseding note, 2026-07-13): the sweep
+    counts VEHICLES, never concurrent intervals — a vehicle covered by
+    several intervals at one instant (two spans touching at a break
+    boundary under the closed-interval convention, or overlapping intervals
+    from ADJACENT vehicle-days, e.g. a midnight-crossing trip on service
+    date D overlapping D+1's first pickup) counts ONCE. The definition
+    counts "vehicles in revenue service", and one vehicle is one vehicle.
+    0.1.0 (retained runnable as :func:`compute_dr_voms_v0_1_0`) could
+    double-count exactly those shapes.
+
     ``peak_start`` is the FIRST instant attaining the maximum (deterministic
     tie-break); lineage covers the trips of the intervals in service at that
     instant. Empty input yields value 0 (an observed maximum, never a guess).
+    """
+    ordered = _sorted_trips(trips)
+    counted, warnings, counters = _account(ordered)
+
+    events: list[tuple[datetime, int, str]] = []  # (time, +1 first, vehicle)
+    for day in counted:
+        for interval in day.intervals:
+            events.append((interval.start, 0, day.vehicle_id))
+            events.append((interval.end, 1, day.vehicle_id))
+    # Starts (0) before ends (1) at equal instants: closed intervals.
+    events.sort(key=lambda e: (e[0], e[1], e[2]))
+
+    # Sweep over DISTINCT vehicles: per vehicle, the count of its intervals
+    # covering the current instant; the concurrency counter moves only on
+    # 0 -> 1 (vehicle enters revenue service) and 1 -> 0 (vehicle leaves).
+    covering_by_vehicle: dict[str, int] = {}
+    concurrent = 0
+    peak = 0
+    peak_start: datetime | None = None
+    for time, kind, vehicle in events:
+        if kind == 0:
+            covering_by_vehicle[vehicle] = covering_by_vehicle.get(vehicle, 0) + 1
+            if covering_by_vehicle[vehicle] == 1:
+                concurrent += 1
+                if concurrent > peak:
+                    peak = concurrent
+                    peak_start = time
+        else:
+            covering_by_vehicle[vehicle] -= 1
+            if covering_by_vehicle[vehicle] == 0:
+                del covering_by_vehicle[vehicle]
+                concurrent -= 1
+
+    input_ids: dict[str, None] = {}
+    if peak_start is not None:
+        for day in counted:
+            for interval in day.intervals:
+                if interval.start <= peak_start <= interval.end:
+                    for record_id in _record_ids(interval.trips):
+                        input_ids.setdefault(record_id, None)
+
+    detail = DrVomsDetail(
+        unique_vehicles=len({day.vehicle_id for day in counted}),
+        peak_vehicles=peak,
+        peak_start=None if peak_start is None else peak_start.isoformat(),
+        vehicle_days=counters["vehicle_days_counted"],
+        includes_atypical_days=True,
+        tos_mix=counters["tos_mix"],
+        source_mix=counters["source_mix"],
+    )
+
+    return CalcResult(
+        value=Decimal(peak),
+        unit=UNIT_VEHICLES,
+        calc_name=VOMS_CALC_NAME,
+        calc_version=VOMS_CALC_VERSION,
+        input_record_ids=tuple(input_ids),
+        blocking_issues=(),
+        warnings=tuple(warnings),
+        infos=tuple(_simulated_source_info(ordered, counters["source_mix"])),
+        detail=detail,
+    )
+
+
+def compute_dr_voms_v0_1_0(trips: Iterable[DrTrip]) -> CalcResult:
+    """dr_voms_v0 0.1.0 — RETAINED RUNNABLE, SUPERSEDED by 0.1.1.
+
+    The tracker's dated superseding note (2026-07-13, hardening pass)
+    records the confirmed defect this version carries: the sweep counts
+    concurrent INTERVALS, not distinct vehicles, so the SAME vehicle is
+    double-counted where two of its revenue intervals touch at one instant
+    (a span break boundary under the closed-interval convention) or overlap
+    across adjacent vehicle-days (a midnight-crossing trip on service date
+    D overlapping D+1's first pickup — the (vehicle_id, service_date)
+    grouping yields two vehicle-days whose intervals coexist in real time).
+    The Exhibit 38/40 definition counts "the largest number of VEHICLES in
+    revenue service at any one time". This function exists only so figures
+    persisted under calc_version 0.1.0 stay reproducible bit for bit; never
+    run it for new figures.
     """
     ordered = _sorted_trips(trips)
     counted, warnings, counters = _account(ordered)
@@ -950,7 +1342,7 @@ def compute_dr_voms(trips: Iterable[DrTrip]) -> CalcResult:
         value=Decimal(peak),
         unit=UNIT_VEHICLES,
         calc_name=VOMS_CALC_NAME,
-        calc_version=CALC_VERSION,
+        calc_version=VOMS_CALC_VERSION_0_1_0,
         input_record_ids=tuple(input_ids),
         blocking_issues=(),
         warnings=tuple(warnings),
@@ -1034,7 +1426,7 @@ def compute_dr_pmt(trips: Iterable[DrTrip]) -> CalcResult:
         value=value,
         unit=UNIT_PMT,
         calc_name=PMT_CALC_NAME,
-        calc_version=CALC_VERSION,
+        calc_version=PMT_CALC_VERSION,
         input_record_ids=tuple(input_ids),
         blocking_issues=(),
         warnings=tuple(warnings),

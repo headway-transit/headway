@@ -139,9 +139,14 @@ def test_dr_scope_cannot_push_tides(client, fake_db, dr_key, fake_producer):
     assert fake_producer.produced == []
 
 
-def test_empty_body_is_422(client, dr_key, fake_store):
+def test_empty_body_is_422_naming_the_dr_csv(client, dr_key, fake_store):
+    """The empty-body message names THIS route's CSV (hardening pass
+    2026-07-13: the shared helper used to tell DR callers to send a TIDES
+    file)."""
     r = _post(client, dr_key, body=b"")
     assert r.status_code == 422
+    assert "demand_response_trips" in r.json()["detail"]
+    assert "TIDES" not in r.json()["detail"]
     assert fake_store.objects == {}
 
 

@@ -35,12 +35,48 @@ from .model import (
     DQFinding,
     LineageEdge,
 )
+from .row_guard import field_problems, iter_rows
 
 TRANSFORM_NAME = "normalize_gtfs_static"
 # 0.2.0: parses trips.txt block_id (handoff 0003, block-aware VRH).
 # 0.3.0: parses stops.txt + stop_times.txt (handoff 0011, PMT geometry). New
 # version so lineage edges distinguish rows normalized with stop support.
-TRANSFORM_VERSION = "0.3.0"
+# 0.3.1: decompression-size budget (zip-bomb guard) + per-row parse
+# quarantine (2026-07-13 hardening pass).
+TRANSFORM_VERSION = "0.3.1"
+
+# Decompressed-size budget (2026-07-13 hardening pass): a zip member's
+# compressed size says nothing about its decompressed size — a crafted
+# archive (decompression bomb) could exhaust memory/disk. The budget is
+# stream-counted while reading; exceeding it ABORTS the feed with a
+# blocking transform_failure finding naming the limit — never a silent
+# truncation. Generous defaults: the largest real member seen so far
+# (MBTA stop_times.txt, ~3.1M rows) is well under 512 MiB decompressed.
+MAX_MEMBER_BYTES = 512 * 1024 * 1024  # per zip member, decompressed
+MAX_TOTAL_BYTES = 2 * 1024 * 1024 * 1024  # whole archive, decompressed
+_CHUNK_BYTES = 64 * 1024
+
+
+class DecompressionBudgetExceeded(Exception):
+    """A zip member blew the decompressed-size budget (bomb guard)."""
+
+    def __init__(self, member: str, kind: str, limit_bytes: int) -> None:
+        self.member = member
+        self.kind = kind
+        self.limit_bytes = limit_bytes
+        super().__init__(
+            f"zip member {member!r} exceeded the {kind} decompressed-size "
+            f"limit of {limit_bytes} bytes while streaming"
+        )
+
+
+class _Budget:
+    """Stream-counted decompression budget across an archive's members."""
+
+    def __init__(self, member_limit: int, total_limit: int) -> None:
+        self.member_limit = member_limit
+        self.total_limit = total_limit
+        self.total_used = 0
 
 INPUT_KIND = "raw.records"
 ROUTES_OUTPUT_KIND = "canonical.routes"
@@ -113,11 +149,35 @@ class CanonicalStopTime:
     shape_dist_traveled: float | None  # DOUBLE PRECISION — NULL preserved
 
 
-def _read_csv(zf: zipfile.ZipFile, name: str) -> list[dict[str, str]]:
+def _read_member(zf: zipfile.ZipFile, name: str, budget: _Budget) -> bytes:
+    """Stream one zip member under the decompression budget (see above)."""
+    used = 0
+    buf = io.BytesIO()
     with zf.open(name) as fh:
-        # utf-8-sig: GTFS files commonly carry a BOM.
-        text = io.TextIOWrapper(fh, encoding="utf-8-sig", newline="")
-        return list(csv.DictReader(text))
+        while True:
+            chunk = fh.read(_CHUNK_BYTES)
+            if not chunk:
+                break
+            used += len(chunk)
+            budget.total_used += len(chunk)
+            if used > budget.member_limit:
+                raise DecompressionBudgetExceeded(
+                    name, "per-member", budget.member_limit
+                )
+            if budget.total_used > budget.total_limit:
+                raise DecompressionBudgetExceeded(
+                    name, "whole-archive", budget.total_limit
+                )
+            buf.write(chunk)
+    return buf.getvalue()
+
+
+def _read_csv(
+    zf: zipfile.ZipFile, name: str, budget: _Budget
+) -> csv.DictReader:
+    # utf-8-sig: GTFS files commonly carry a BOM.
+    text = _read_member(zf, name, budget).decode("utf-8-sig")
+    return csv.DictReader(io.StringIO(text, newline=""))
 
 
 def _parse_gtfs_time(raw: str) -> int:
@@ -142,7 +202,11 @@ _COORD_REQUIRED_LOCATION_TYPES = ("", "0", "1", "2")
 
 
 def normalize(
-    zip_bytes: bytes, record_id: str
+    zip_bytes: bytes,
+    record_id: str,
+    *,
+    max_member_bytes: int = MAX_MEMBER_BYTES,
+    max_total_bytes: int = MAX_TOTAL_BYTES,
 ) -> tuple[
     list[CanonicalRoute],
     list[CanonicalTrip],
@@ -157,6 +221,9 @@ def normalize(
     Returns (routes, trips, stops, stop_times, lineage_edges, dq_findings).
     Every emitted row has exactly one lineage edge (input = the feed's
     record_id); every file or row that cannot be normalized is a DQFinding.
+    A feed whose members exceed the decompression budget (zip-bomb guard)
+    is ABORTED: zero rows, one blocking transform_failure finding naming
+    the limit.
     """
     routes: list[CanonicalRoute] = []
     trips: list[CanonicalTrip] = []
@@ -182,6 +249,48 @@ def normalize(
         )
         return routes, trips, stops, stop_times, edges, findings
 
+    budget = _Budget(max_member_bytes, max_total_bytes)
+    try:
+        _normalize_members(
+            zf, record_id, budget,
+            routes, trips, stops, stop_times, edges, findings,
+        )
+    except DecompressionBudgetExceeded as exc:
+        findings.append(
+            DQFinding(
+                issue_type="transform_failure",
+                severity=SEVERITY_BLOCKING,
+                title="GTFS static feed exceeds the decompression size budget",
+                description=(
+                    f"Record {record_id}: {exc}. Normalization ABORTED — no "
+                    "rows from this feed were written (raw record retained). "
+                    "The budget guards against decompression bombs; if this "
+                    "is a legitimate oversized feed, raise the limit "
+                    "explicitly in the transform configuration."
+                ),
+                source_record_ids=[record_id],
+            )
+        )
+        return [], [], [], [], [], findings
+    return routes, trips, stops, stop_times, edges, findings
+
+
+def _normalize_members(
+    zf: zipfile.ZipFile,
+    record_id: str,
+    budget: _Budget,
+    routes: list[CanonicalRoute],
+    trips: list[CanonicalTrip],
+    stops: list[CanonicalStop],
+    stop_times: list[CanonicalStopTime],
+    edges: list[LineageEdge],
+    findings: list[DQFinding],
+) -> None:
+    """Parse the archive's members into the caller's accumulators.
+
+    Raises DecompressionBudgetExceeded (handled by normalize) when a member
+    blows the streamed decompression budget.
+    """
     with zf:
         names = set(zf.namelist())
 
@@ -193,6 +302,22 @@ def normalize(
                 transform_version=TRANSFORM_VERSION,
                 input_kind=INPUT_KIND,
                 input_id=record_id,
+            )
+
+        def _row_defect(file_name: str, index: int, problems: list[str]) -> DQFinding:
+            # Per-row parse quarantine (2026-07-13 hardening pass): one
+            # hostile row (oversized field / NUL byte / stray quote) is ONE
+            # finding — it can no longer abort the whole feed's batch.
+            return DQFinding(
+                issue_type="malformed_entity",
+                severity=SEVERITY_WARNING,
+                title=f"{file_name} row could not be parsed",
+                description=(
+                    f"Record {record_id}, {file_name} row {index}: "
+                    + "; ".join(problems)
+                    + ". Row quarantined, not dropped silently."
+                ),
+                source_record_ids=[record_id],
             )
 
         # --- routes.txt -------------------------------------------------
@@ -211,7 +336,15 @@ def normalize(
                 )
             )
         else:
-            for index, row in enumerate(_read_csv(zf, "routes.txt")):
+            for index, row, parse_error in iter_rows(_read_csv(zf, "routes.txt", budget)):
+                defects = (
+                    [f"CSV parse error: {parse_error}"]
+                    if parse_error is not None
+                    else field_problems(row)
+                )
+                if defects:
+                    findings.append(_row_defect("routes.txt", index, defects))
+                    continue
                 route_id = (row.get("route_id") or "").strip()
                 if not route_id:
                     findings.append(
@@ -282,7 +415,15 @@ def normalize(
                 )
             )
         else:
-            for index, row in enumerate(_read_csv(zf, "trips.txt")):
+            for index, row, parse_error in iter_rows(_read_csv(zf, "trips.txt", budget)):
+                defects = (
+                    [f"CSV parse error: {parse_error}"]
+                    if parse_error is not None
+                    else field_problems(row)
+                )
+                if defects:
+                    findings.append(_row_defect("trips.txt", index, defects))
+                    continue
                 trip_id = (row.get("trip_id") or "").strip()
                 route_id = (row.get("route_id") or "").strip()
                 service_id = (row.get("service_id") or "").strip()
@@ -371,7 +512,15 @@ def normalize(
                 )
             )
         else:
-            for index, row in enumerate(_read_csv(zf, "stops.txt")):
+            for index, row, parse_error in iter_rows(_read_csv(zf, "stops.txt", budget)):
+                defects = (
+                    [f"CSV parse error: {parse_error}"]
+                    if parse_error is not None
+                    else field_problems(row)
+                )
+                if defects:
+                    findings.append(_row_defect("stops.txt", index, defects))
+                    continue
                 stop_id = (row.get("stop_id") or "").strip()
                 if not stop_id:
                     findings.append(
@@ -480,7 +629,15 @@ def normalize(
                 )
             )
         else:
-            for index, row in enumerate(_read_csv(zf, "stop_times.txt")):
+            for index, row, parse_error in iter_rows(_read_csv(zf, "stop_times.txt", budget)):
+                defects = (
+                    [f"CSV parse error: {parse_error}"]
+                    if parse_error is not None
+                    else field_problems(row)
+                )
+                if defects:
+                    findings.append(_row_defect("stop_times.txt", index, defects))
+                    continue
                 trip_id = (row.get("trip_id") or "").strip()
                 stop_id = (row.get("stop_id") or "").strip()
                 raw_sequence = (row.get("stop_sequence") or "").strip()
@@ -595,5 +752,3 @@ def normalize(
                         f"{trip_id}:{sequence}",
                     )
                 )
-
-    return routes, trips, stops, stop_times, edges, findings

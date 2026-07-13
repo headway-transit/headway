@@ -74,6 +74,7 @@ import {
   canRunSamplingEstimate,
   useSession,
 } from "../auth/session";
+import { QuoteFigure } from "../components/QuoteFigure";
 import { copy } from "../copy";
 import { quoteContaining } from "../regulatory/quotes";
 import type { RegulatoryQuote } from "../regulatory/quotes";
@@ -115,21 +116,10 @@ function planLabel(plan: SamplingPlanRecord): string {
   );
 }
 
-/** A verbatim manual quote + citation, or the stated absence — never blank. */
+/** A verbatim manual quote + citation, or the stated absence — never blank
+ *  (the shared QuoteFigure, bound to this page's missing-rule copy). */
 function ManualQuote({ quote }: { quote: RegulatoryQuote | null }) {
-  if (!quote) {
-    return <p className="alert">{s.ruleMissing}</p>;
-  }
-  return (
-    <figure className="fta-quote">
-      <blockquote>
-        <p>{quote.quote}</p>
-      </blockquote>
-      <figcaption>
-        <cite>{quote.citation}</cite>
-      </figcaption>
-    </figure>
-  );
+  return <QuoteFigure quote={quote} missingMessage={s.ruleMissing} />;
 }
 
 // ------------------------------------------------------------ plan receipt

@@ -221,6 +221,74 @@ def test_draw_oversample_is_flagged_random(client, fake_db):
     assert "only when the extra units are selected randomly" in body["oversampling_note"]
 
 
+def test_generated_seed_draw_records_seed_source_generated(client, fake_db):
+    """Seed provenance (hardening pass 2026-07-13, migration 0022): a draw
+    whose seed Headway generated records seed_source='generated' — on the
+    row, in the audit detail, and in the method text's provenance note."""
+    plan = _make_plan(client, fake_db)["plan"]
+    units = [f"2026-Q1/day-{i:03d}" for i in range(1, 41)]
+    body = _draw(client, fake_db, plan["plan_id"], units).json()
+
+    assert body["draw"]["seed_source"] == "generated"
+    (row,) = fake_db.sampling_draws
+    assert row["seed_source"] == "generated"
+    assert _last_audit_detail(fake_db)["seed_source"] == "generated"
+    assert "seed_source='generated'" in body["method"]
+    assert "cryptographic randomness source" in body["method"]
+    # ...and the recorded draw serves it back on the list endpoint.
+    (listed,) = client.get(
+        f"/sampling/plans/{plan['plan_id']}/draws",
+        headers=auth_header(fake_db, "vera"),
+    ).json()
+    assert listed["seed_source"] == "generated"
+
+
+def test_client_seed_draw_records_seed_source_client(client, fake_db):
+    """A caller-supplied seed records seed_source='client', and the method
+    text no longer asserts cryptographic randomness for it — the randomness
+    claim is explicitly the caller's to evidence."""
+    plan = _make_plan(client, fake_db)["plan"]
+    units = [f"2026-Q1/day-{i:03d}" for i in range(1, 41)]
+    body = _draw(
+        client, fake_db, plan["plan_id"], units, seed="caller-chosen-seed-1"
+    ).json()
+
+    assert body["draw"]["seed_source"] == "client"
+    assert body["draw"]["seed"] == "caller-chosen-seed-1"
+    (row,) = fake_db.sampling_draws
+    assert row["seed_source"] == "client"
+    assert _last_audit_detail(fake_db)["seed_source"] == "client"
+    assert "seed_source='client'" in body["method"]
+    assert "SUPPLIED BY THE CALLER" in body["method"]
+    assert "cannot vouch" in body["method"]
+    assert "rests on how the caller produced the seed" in body["method"]
+
+
+def test_draw_free_text_fields_have_plain_language_bounds(client, fake_db):
+    """Hardening pass 2026-07-13: TEXT-bound draw fields get sane caps."""
+    plan = _make_plan(client, fake_db)["plan"]
+    units = [f"2026-Q1/day-{i:03d}" for i in range(1, 41)]
+
+    long_label = _draw(
+        client, fake_db, plan["plan_id"], units, period="P" * 101
+    )
+    assert long_label.status_code == 422
+    assert "at most 100" in str(long_label.json())
+
+    long_seed = _draw(
+        client, fake_db, plan["plan_id"], units, seed="s" * 201
+    )
+    assert long_seed.status_code == 422
+    assert "at most 200" in str(long_seed.json())
+
+    long_unit = _draw(
+        client, fake_db, plan["plan_id"], units + ["u" * 501]
+    )
+    assert long_unit.status_code == 422
+    assert "at most 500" in str(long_unit.json())
+    assert fake_db.sampling_draws == []
+
+
 def test_draw_refuses_second_draw_for_same_period(client, fake_db):
     plan = _make_plan(client, fake_db)["plan"]
     units = [f"2026-Q1/day-{i:03d}" for i in range(1, 41)]

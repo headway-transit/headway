@@ -621,6 +621,28 @@
         }
       }
     },
+    "/ingest/dr/trips": {
+      "post": {
+        "tags": [
+          "ingest"
+        ],
+        "summary": "Ingest Dr Trips",
+        "description": "Authenticated push of one demand_response_trips CSV file (handoff\n0013): the demand_response_trip v0 wire contract as the raw request\nbody. Same connector discipline as the TIDES path \u2014 content-addressed,\nstore-before-produce, envelope source = the key's bound source_label\n(a simulator key is bound to 'dr_simulated'; a client-supplied source is\nignored).",
+        "operationId": "ingest_dr_trips_ingest_dr_trips_post",
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IngestResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/webhooks": {
       "get": {
         "tags": [
@@ -2003,6 +2025,14 @@
             "type": "string",
             "title": "Month"
           },
+          "period_convention": {
+            "type": "string",
+            "title": "Period Convention"
+          },
+          "period_note": {
+            "type": "string",
+            "title": "Period Note"
+          },
           "ss40": {
             "items": {
               "$ref": "#/components/schemas/Ss40Deadline"
@@ -2033,6 +2063,8 @@
         "type": "object",
         "required": [
           "month",
+          "period_convention",
+          "period_note",
           "ss40",
           "ss40_citation",
           "ss40_note",
@@ -2245,6 +2277,17 @@
             "type": "string",
             "title": "Seed"
           },
+          "seed_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seed Source"
+          },
           "required_per_period": {
             "type": "integer",
             "title": "Required Per Period"
@@ -2275,6 +2318,7 @@
           "frame_size",
           "selected_units",
           "seed",
+          "seed_source",
           "required_per_period",
           "oversample_units",
           "drawer_version",
@@ -2311,7 +2355,7 @@
               }
             ],
             "title": "Seed",
-            "description": "Random seed for the draw. Leave blank to let Headway generate one from a cryptographic randomness source. Either way the seed is RECORDED on the draw so the selection can be reproduced and audited."
+            "description": "Random seed for the draw. Leave blank to let Headway generate one from a cryptographic randomness source. Either way the seed is RECORDED on the draw so the selection can be reproduced and audited \u2014 along with seed_source ('generated' or 'client'), because Headway can only vouch for the randomness of a seed it generated itself."
           },
           "oversample_units": {
             "type": "integer",
@@ -3966,6 +4010,12 @@
               }
             ],
             "title": "Classified At"
+          },
+          "period_convention": {
+            "type": "string",
+            "title": "Period Convention",
+            "description": "How the month filter buckets events: half-open [period_start, period_end), UTC, on occurred_at. Months are bucketed by when the event occurred in Coordinated Universal Time (UTC), not local time: an event late on the last evening of a month local time may fall into the next month's bucket. Enter event times with their time zone and Headway places them consistently.",
+            "default": "half-open [period_start, period_end), UTC, on occurred_at"
           }
         },
         "type": "object",

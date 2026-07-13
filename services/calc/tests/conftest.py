@@ -29,6 +29,9 @@ MODE_GOLDEN_DIR = Path(__file__).resolve().parents[3] / "tests" / "golden" / "mo
 MR20_GOLDEN_DIR = Path(__file__).resolve().parents[3] / "tests" / "golden" / "mr20"
 PMT_GOLDEN_DIR = Path(__file__).resolve().parents[3] / "tests" / "golden" / "pmt_v0"
 DR_GOLDEN_DIR = Path(__file__).resolve().parents[3] / "tests" / "golden" / "dr_v0"
+SAMPLING_GOLDEN_DIR = (
+    Path(__file__).resolve().parents[3] / "tests" / "golden" / "sampling_v0"
+)
 
 
 def load_positions(raw: dict) -> list[VehiclePosition]:
@@ -139,6 +142,17 @@ def dr_golden_expected() -> dict:
     """Expectations for the dr_*_v0 calcs 0.1.0 over the DR fixture — see
     tests/golden/dr_v0/BASIS.md."""
     return json.loads((DR_GOLDEN_DIR / "expected.json").read_text())
+
+
+@pytest.fixture(scope="session")
+def sampling_golden_expected() -> dict:
+    """Expectations for sampling_v0 0.1.0 (handoff 0012): every encoded
+    Table 43.01/43.03/43.05/43.07 cell pinned one-for-one, the hand-worked
+    §83 APTL/ratio-of-totals examples and the sample-draw reproducibility
+    anchor — see tests/golden/sampling_v0/BASIS.md. (The parametrized cell
+    tests also read this file at COLLECTION time via
+    conftest.SAMPLING_GOLDEN_DIR — a fixture cannot feed parametrize.)"""
+    return json.loads((SAMPLING_GOLDEN_DIR / "expected.json").read_text())
 
 
 @pytest.fixture(scope="session")

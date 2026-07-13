@@ -47,6 +47,7 @@ import type {
   ThresholdExplanation,
 } from "../api/types";
 import { canEnterSafetyEvents, useSession } from "../auth/session";
+import { QuoteFigure } from "../components/QuoteFigure";
 import { SeverityIcon } from "../components/SeverityIcon";
 import { copy } from "../copy";
 import { quoteContaining } from "../regulatory/quotes";
@@ -145,20 +146,11 @@ function UrgencyBadge({ days }: { days: number }) {
   );
 }
 
-/** A verbatim manual quote + citation, or the stated absence — never blank. */
+/** A verbatim manual quote + citation, or the stated absence — never blank
+ *  (the shared QuoteFigure, bound to this page's missing-rule copy). */
 function ManualQuote({ quote }: { quote: RegulatoryQuote | null }) {
-  if (!quote) {
-    return <p className="alert">{copy.safety.deadlines.ruleMissing}</p>;
-  }
   return (
-    <figure className="fta-quote">
-      <blockquote>
-        <p>{quote.quote}</p>
-      </blockquote>
-      <figcaption>
-        <cite>{quote.citation}</cite>
-      </figcaption>
-    </figure>
+    <QuoteFigure quote={quote} missingMessage={copy.safety.deadlines.ruleMissing} />
   );
 }
 
@@ -282,24 +274,17 @@ function ClassificationChip({ classification }: { classification: string }) {
 function TokenQuote({ token }: { token: string }) {
   const snippet = THRESHOLD_QUOTE_SNIPPETS[token];
   const quote = snippet ? quoteContaining("sscls_v0", snippet) : null;
-  if (!quote) {
-    // A token without its verified quote states the gap — never a
-    // paraphrase in the rule's place.
-    return (
-      <p className="threshold-quote-missing">
-        {copy.safety.classification.quoteMissing(token)}
-      </p>
-    );
-  }
+  // variant="gap" — the MUTED stated absence, deliberately not an alert:
+  // some tokens (safetyRules.ts — today only non_major_fire) have NO
+  // verbatim quote in the tracker BY DESIGN, so they'd otherwise raise a
+  // loud alert on every single receipt that meets them. The gap is still
+  // stated in words — never a paraphrase in the rule's place, never blank.
   return (
-    <figure className="fta-quote">
-      <blockquote>
-        <p>{quote.quote}</p>
-      </blockquote>
-      <figcaption>
-        <cite>{quote.citation}</cite>
-      </figcaption>
-    </figure>
+    <QuoteFigure
+      quote={quote}
+      missingMessage={copy.safety.classification.quoteMissing(token)}
+      variant="gap"
+    />
   );
 }
 

@@ -211,6 +211,10 @@ def test_insert_lineage_edges(fake_connection) -> None:
     DbWriter(fake_connection).insert_lineage_edges([edge])
     [(sql, params)] = fake_connection.executed
     assert "INSERT INTO lineage.edges" in sql
+    # Replay idempotency (migration 0023): the full natural key is the
+    # conflict target — a redelivered message adds zero duplicate edges.
+    assert "ON CONFLICT (output_kind, output_id, transform_name" in sql
+    assert "DO NOTHING" in sql
     assert params == (
         edge.output_kind,
         edge.output_id,
@@ -232,4 +236,44 @@ def test_insert_dq_issues(fake_connection) -> None:
     DbWriter(fake_connection).insert_dq_issues([finding])
     [(sql, params)] = fake_connection.executed
     assert "INSERT INTO dq.issues" in sql
-    assert params == ("malformed_entity", "warning", "t", "d", ["ef" * 32])
+    # Replay idempotency (migration 0023): transform findings carry a
+    # dedupe_key; the partial unique index is the conflict target.
+    assert "ON CONFLICT (dedupe_key) WHERE dedupe_key IS NOT NULL DO NOTHING" in sql
+    key = finding.transform_dedupe_key()
+    assert params == ("malformed_entity", "warning", "t", "d", ["ef" * 32], key)
+
+
+def test_transform_dedupe_key_is_stable_and_scoped() -> None:
+    kwargs = dict(
+        issue_type="malformed_dr_trip",
+        severity="warning",
+        title="t",
+        description="d, row 3",
+        source_record_ids=["ef" * 32],
+    )
+    a, b = DQFinding(**kwargs), DQFinding(**kwargs)
+    # Deterministic: a replay's byte-identical finding gets the same key.
+    assert a.transform_dedupe_key() == b.transform_dedupe_key()
+    # Scoped: recognizably transform-origin, never colliding with keys any
+    # other origin might someday mint.
+    assert a.transform_dedupe_key().startswith("transform:")
+    # Different identity -> different key.
+    other = DQFinding(**{**kwargs, "description": "d, row 4"})
+    assert other.transform_dedupe_key() != a.transform_dedupe_key()
+
+
+def test_finding_without_source_records_never_deduped(fake_connection) -> None:
+    # No source-record anchor = no stable subject identity: dedupe_key is
+    # NULL, so the partial unique index never collapses two such findings
+    # (human-/AI-created rows also stay NULL — never deduplicated).
+    finding = DQFinding(
+        issue_type="transform_failure",
+        severity="blocking",
+        title="t",
+        description="d",
+        source_record_ids=[],
+    )
+    assert finding.transform_dedupe_key() is None
+    DbWriter(fake_connection).insert_dq_issues([finding])
+    [(_, params)] = fake_connection.executed
+    assert params[-1] is None

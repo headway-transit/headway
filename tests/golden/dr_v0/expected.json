@@ -1,24 +1,90 @@
 {
-  "description": "Expectations for the dr_*_v0 calcs CALC_VERSION 0.1.0 over fixture.json, hand-worked in BASIS.md. Classifications per the tracker's 'Verified — Demand Response / on-demand reporting' quotes. Synthetic, NOT FTA-certified; regression anchor only.",
+  "description": "Expectations for the dr_*_v0 calcs over fixture.json (dr_vrh_v0/dr_upt_v0/dr_pmt_v0 0.1.0; dr_vrm_v0/dr_voms_v0 0.1.1 after the 2026-07-13 hardening pass \u2014 tracker superseding notes), hand-worked in BASIS.md. Classifications per the tracker's 'Verified \u2014 Demand Response / on-demand reporting' quotes. Synthetic, NOT FTA-certified; regression anchor only.",
   "exhibit36_rows": [
-    {"activity": "idle_at_dispatching_point", "actual": false, "revenue": false, "miles_not_applicable": false},
-    {"activity": "depart_dispatch_to_pick_up_passenger", "actual": true, "revenue": false, "miles_not_applicable": false},
-    {"activity": "wait_for_passenger_at_pickup", "actual": true, "revenue": true, "miles_not_applicable": true},
-    {"activity": "empty_travel_between_dropoff_and_next_pickup", "actual": true, "revenue": true, "miles_not_applicable": false},
-    {"activity": "lunch_travel_or_eating", "actual": false, "revenue": false, "miles_not_applicable": false},
-    {"activity": "return_to_dispatch_empty", "actual": true, "revenue": false, "miles_not_applicable": false},
-    {"activity": "no_show_trip", "actual": true, "revenue": true, "miles_not_applicable": false},
-    {"activity": "fueling", "actual": false, "revenue": false, "miles_not_applicable": false}
+    {
+      "activity": "idle_at_dispatching_point",
+      "actual": false,
+      "revenue": false,
+      "miles_not_applicable": false
+    },
+    {
+      "activity": "depart_dispatch_to_pick_up_passenger",
+      "actual": true,
+      "revenue": false,
+      "miles_not_applicable": false
+    },
+    {
+      "activity": "wait_for_passenger_at_pickup",
+      "actual": true,
+      "revenue": true,
+      "miles_not_applicable": true
+    },
+    {
+      "activity": "empty_travel_between_dropoff_and_next_pickup",
+      "actual": true,
+      "revenue": true,
+      "miles_not_applicable": false
+    },
+    {
+      "activity": "lunch_travel_or_eating",
+      "actual": false,
+      "revenue": false,
+      "miles_not_applicable": false
+    },
+    {
+      "activity": "return_to_dispatch_empty",
+      "actual": true,
+      "revenue": false,
+      "miles_not_applicable": false
+    },
+    {
+      "activity": "no_show_trip",
+      "actual": true,
+      "revenue": true,
+      "miles_not_applicable": false
+    },
+    {
+      "activity": "fueling",
+      "actual": false,
+      "revenue": false,
+      "miles_not_applicable": false
+    }
   ],
   "exhibit36_scenarios": {
-    "idle_at_dispatching_point": {"vrh": "0.50", "vrm": "5.00"},
-    "depart_dispatch_to_pick_up_passenger": {"vrh": "0.50", "vrm": "5.00"},
-    "wait_for_passenger_at_pickup": {"vrh": "0.10", "vrm": "0.00", "upt": "0"},
-    "empty_travel_between_dropoff_and_next_pickup": {"vrh": "0.83", "vrm": "10.00"},
-    "lunch_travel_or_eating": {"vrh": "0.67", "vrm": "8.00"},
-    "return_to_dispatch_empty": {"vrh": "0.67", "vrm": "8.00"},
-    "no_show_trip": {"vrh": "0.58", "vrm": "6.00", "upt": "1"},
-    "fueling": {"vrh": "0.67", "vrm": "8.00"}
+    "idle_at_dispatching_point": {
+      "vrh": "0.50",
+      "vrm": "5.00"
+    },
+    "depart_dispatch_to_pick_up_passenger": {
+      "vrh": "0.50",
+      "vrm": "5.00"
+    },
+    "wait_for_passenger_at_pickup": {
+      "vrh": "0.10",
+      "vrm": "0.00",
+      "upt": "0"
+    },
+    "empty_travel_between_dropoff_and_next_pickup": {
+      "vrh": "0.83",
+      "vrm": "10.00"
+    },
+    "lunch_travel_or_eating": {
+      "vrh": "0.67",
+      "vrm": "8.00"
+    },
+    "return_to_dispatch_empty": {
+      "vrh": "0.67",
+      "vrm": "8.00"
+    },
+    "no_show_trip": {
+      "vrh": "0.58",
+      "vrm": "6.00",
+      "upt": "1"
+    },
+    "fueling": {
+      "vrh": "0.67",
+      "vrm": "8.00"
+    }
   },
   "dispatch_day": {
     "dr_vrh": {
@@ -33,21 +99,40 @@
         "trips_counted": 12,
         "no_show_trips": 2,
         "revenue_spans": 6,
-        "interruption_breaks": {"fuel": 1, "lunch": 1},
-        "tos_mix": {"DO": 8, "TX": 4},
-        "source_mix": {"dr_simulated": 12}
+        "interruption_breaks": {
+          "fuel": 1,
+          "lunch": 1
+        },
+        "tos_mix": {
+          "DO": 8,
+          "TX": 4
+        },
+        "source_mix": {
+          "dr_simulated": 12
+        }
       },
       "input_record_ids": [
-        "rec-dr-01", "rec-dr-02", "rec-dr-03", "rec-dr-04", "rec-dr-05",
-        "rec-dr-06", "rec-dr-07", "rec-dr-08", "rec-dr-09", "rec-dr-10",
-        "rec-dr-11", "rec-dr-12"
+        "rec-dr-01",
+        "rec-dr-02",
+        "rec-dr-03",
+        "rec-dr-04",
+        "rec-dr-05",
+        "rec-dr-06",
+        "rec-dr-07",
+        "rec-dr-08",
+        "rec-dr-09",
+        "rec-dr-10",
+        "rec-dr-11",
+        "rec-dr-12"
       ],
       "warning_issue_types": [],
-      "info_issue_types": ["simulated_source_data"]
+      "info_issue_types": [
+        "simulated_source_data"
+      ]
     },
     "dr_vrm": {
       "calc_name": "dr_vrm_v0",
-      "calc_version": "0.1.0",
+      "calc_version": "0.1.1",
       "unit": "miles",
       "value": "38.50",
       "detail": {
@@ -57,22 +142,41 @@
         "trips_counted": 12,
         "no_show_trips": 2,
         "revenue_spans": 6,
-        "interruption_breaks": {"fuel": 1, "lunch": 1},
-        "tos_mix": {"DO": 8, "TX": 4},
-        "source_mix": {"dr_simulated": 12},
-        "distance_sources": {"onboard_sum": 2, "span_odometer": 4},
+        "interruption_breaks": {
+          "fuel": 1,
+          "lunch": 1
+        },
+        "tos_mix": {
+          "DO": 8,
+          "TX": 4
+        },
+        "source_mix": {
+          "dr_simulated": 12
+        },
+        "distance_sources": {
+          "onboard_sum": 2,
+          "span_odometer": 4
+        },
         "unmeasured_empty_legs": 1,
         "missing_onboard_distances": 1,
-        "tx_summed_overlap_intervals": 0
+        "tx_summed_overlap_intervals": 0,
+        "shared_overlap_windows_summed": 0
       },
-      "warning_issue_types": ["dr_distance_unmeasured"],
+      "warning_issue_types": [
+        "dr_distance_unmeasured"
+      ],
       "warnings": [
         {
           "issue_type": "dr_distance_unmeasured",
-          "source_record_ids": ["rec-dr-07", "rec-dr-08"]
+          "source_record_ids": [
+            "rec-dr-07",
+            "rec-dr-08"
+          ]
         }
       ],
-      "info_issue_types": ["simulated_source_data"]
+      "info_issue_types": [
+        "simulated_source_data"
+      ]
     },
     "dr_upt": {
       "calc_name": "dr_upt_v0",
@@ -85,28 +189,47 @@
         "attendants_companions": 1,
         "ada_related_upt": 3,
         "sponsored_upt": 3,
-        "sponsored_by_sponsor": {"Medicaid NEMT": 3},
+        "sponsored_by_sponsor": {
+          "Medicaid NEMT": 3
+        },
         "ada_sponsored_conflicts": 1,
         "no_show_trips": 2,
         "trips_counted": 12,
-        "tos_mix": {"DO": 8, "TX": 4},
-        "source_mix": {"dr_simulated": 12}
+        "tos_mix": {
+          "DO": 8,
+          "TX": 4
+        },
+        "source_mix": {
+          "dr_simulated": 12
+        }
       },
       "input_record_ids": [
-        "rec-dr-01", "rec-dr-02", "rec-dr-03", "rec-dr-05", "rec-dr-06",
-        "rec-dr-07", "rec-dr-08", "rec-dr-09", "rec-dr-10", "rec-dr-11"
+        "rec-dr-01",
+        "rec-dr-02",
+        "rec-dr-03",
+        "rec-dr-05",
+        "rec-dr-06",
+        "rec-dr-07",
+        "rec-dr-08",
+        "rec-dr-09",
+        "rec-dr-10",
+        "rec-dr-11"
       ],
       "warnings": [
         {
           "issue_type": "dr_ada_sponsored_conflict",
-          "source_record_ids": ["rec-dr-06"]
+          "source_record_ids": [
+            "rec-dr-06"
+          ]
         }
       ],
-      "info_issue_types": ["simulated_source_data"]
+      "info_issue_types": [
+        "simulated_source_data"
+      ]
     },
     "dr_voms": {
       "calc_name": "dr_voms_v0",
-      "calc_version": "0.1.0",
+      "calc_version": "0.1.1",
       "unit": "vehicles",
       "value": "3",
       "detail": {
@@ -115,14 +238,27 @@
         "peak_start": "2026-07-14T09:00:00+00:00",
         "vehicle_days": 3,
         "includes_atypical_days": true,
-        "tos_mix": {"DO": 8, "TX": 4},
-        "source_mix": {"dr_simulated": 12}
+        "tos_mix": {
+          "DO": 8,
+          "TX": 4
+        },
+        "source_mix": {
+          "dr_simulated": 12
+        }
       },
       "input_record_ids": [
-        "rec-dr-01", "rec-dr-02", "rec-dr-03", "rec-dr-04",
-        "rec-dr-07", "rec-dr-08", "rec-dr-09", "rec-dr-10"
+        "rec-dr-01",
+        "rec-dr-02",
+        "rec-dr-03",
+        "rec-dr-04",
+        "rec-dr-07",
+        "rec-dr-08",
+        "rec-dr-09",
+        "rec-dr-10"
       ],
-      "info_issue_types": ["simulated_source_data"]
+      "info_issue_types": [
+        "simulated_source_data"
+      ]
     },
     "dr_pmt": {
       "calc_name": "dr_pmt_v0",
@@ -135,21 +271,40 @@
         "trips_excluded_missing_distance": 1,
         "persons_counted": 13,
         "no_show_trips": 2,
-        "distance_sources": {"odometer_pair": 7, "onboard_miles": 2},
-        "tos_mix": {"DO": 8, "TX": 4},
-        "source_mix": {"dr_simulated": 12}
+        "distance_sources": {
+          "odometer_pair": 7,
+          "onboard_miles": 2
+        },
+        "tos_mix": {
+          "DO": 8,
+          "TX": 4
+        },
+        "source_mix": {
+          "dr_simulated": 12
+        }
       },
       "input_record_ids": [
-        "rec-dr-01", "rec-dr-02", "rec-dr-03", "rec-dr-05", "rec-dr-06",
-        "rec-dr-08", "rec-dr-09", "rec-dr-10", "rec-dr-11"
+        "rec-dr-01",
+        "rec-dr-02",
+        "rec-dr-03",
+        "rec-dr-05",
+        "rec-dr-06",
+        "rec-dr-08",
+        "rec-dr-09",
+        "rec-dr-10",
+        "rec-dr-11"
       ],
       "warnings": [
         {
           "issue_type": "dr_onboard_distance_missing",
-          "source_record_ids": ["rec-dr-07"]
+          "source_record_ids": [
+            "rec-dr-07"
+          ]
         }
       ],
-      "info_issue_types": ["simulated_source_data"]
+      "info_issue_types": [
+        "simulated_source_data"
+      ]
     },
     "by_tos": {
       "DO": {
@@ -176,9 +331,18 @@
       "peak_start": "2026-07-15T09:00:00+00:00",
       "vehicle_days": 6,
       "includes_atypical_days": true,
-      "tos_mix": {"DO": 6},
-      "source_mix": {"dr": 6}
+      "tos_mix": {
+        "DO": 6
+      },
+      "source_mix": {
+        "dr": 6
+      }
     },
-    "input_record_ids": ["rec-hv-1", "rec-hv-2", "rec-hv-3", "rec-hv-4"]
+    "input_record_ids": [
+      "rec-hv-1",
+      "rec-hv-2",
+      "rec-hv-3",
+      "rec-hv-4"
+    ]
   }
 }

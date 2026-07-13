@@ -139,9 +139,94 @@ def test_body_over_32_mib_is_413(client, ingest_key, fake_store, fake_producer):
     assert fake_producer.produced == []
 
 
+def test_streamed_oversized_body_is_413(
+    client, ingest_key, fake_store, fake_producer
+):
+    """The reviewed DoS class (hardening pass 2026-07-13): a chunked upload
+    with no Content-Length is refused with the exact pre-streaming 413 —
+    nothing stored, nothing produced. (The mid-stream abort itself is
+    proven by test_read_body_capped_aborts_mid_stream below; the TestClient
+    transport buffers the outgoing generator, so it cannot observe where
+    the server stopped reading.)"""
+    chunk = b"x" * (1024 * 1024)  # 1 MiB
+
+    def oversized_stream():
+        for _ in range(48):  # 48 MiB on offer — 16 MiB past the cap
+            yield chunk
+
+    r = client.post(
+        "/ingest/tides/passenger-events",
+        content=oversized_stream(),  # chunked: no Content-Length header
+        headers=machine_header(ingest_key),
+    )
+    assert r.status_code == 413
+    assert "32 MiB" in r.json()["detail"]  # the exact pre-streaming message
+    assert fake_store.objects == {}
+    assert fake_producer.produced == []
+
+
+def test_read_body_capped_aborts_mid_stream_never_buffering_past_the_cap():
+    """The incremental reader must stop the moment the running total passes
+    32 MiB — with 48 MiB on offer it may consume at most 33 chunks (32 MiB
+    kept + the one overflowing chunk refused), and must never keep more
+    than the cap in memory."""
+    import asyncio
+
+    from fastapi import HTTPException
+    from starlette.requests import Request
+
+    chunk = b"x" * (1024 * 1024)  # 1 MiB
+    served = 0
+
+    async def receive():
+        nonlocal served
+        served += 1
+        return {
+            "type": "http.request",
+            "body": chunk,
+            "more_body": served < 48,  # 48 MiB available in total
+        }
+
+    request = Request(
+        {"type": "http", "method": "POST", "headers": []}, receive
+    )
+    with pytest.raises(HTTPException) as excinfo:
+        asyncio.run(ingest.read_body_capped(request))
+    assert excinfo.value.status_code == 413
+    assert "32 MiB" in excinfo.value.detail
+    # Aborted at the cap: never drained the remaining 15 MiB.
+    assert served == 33
+
+
+def test_content_length_over_cap_is_413_before_reading_any_bytes(
+    client, ingest_key, fake_store, fake_producer
+):
+    """A Content-Length already over the cap is refused up front; the body
+    stream is never consumed."""
+
+    def must_not_be_read():
+        raise AssertionError("body was streamed despite oversized Content-Length")
+        yield b""  # pragma: no cover — makes this a generator
+
+    r = client.post(
+        "/ingest/tides/passenger-events",
+        content=must_not_be_read(),
+        headers={
+            **machine_header(ingest_key),
+            "Content-Length": str(64 * 1024 * 1024),
+        },
+    )
+    assert r.status_code == 413
+    assert "32 MiB" in r.json()["detail"]
+    assert fake_store.objects == {}
+    assert fake_producer.produced == []
+
+
 def test_empty_body_is_422(client, ingest_key, fake_store):
     r = _post(client, ingest_key, body=b"")
     assert r.status_code == 422
+    # The message names THIS route's CSV (the DR route names its own).
+    assert "TIDES passenger_events" in r.json()["detail"]
     assert fake_store.objects == {}
 
 

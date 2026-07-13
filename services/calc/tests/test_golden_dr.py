@@ -1,5 +1,6 @@
-"""Golden-dataset regression tests for the dr_*_v0 calcs CALC_VERSION 0.1.0
-(handoff 0013).
+"""Golden-dataset regression tests for the dr_*_v0 calcs (handoff 0013;
+dr_vrh_v0/dr_upt_v0/dr_pmt_v0 0.1.0, dr_vrm_v0/dr_voms_v0 0.1.1 after the
+2026-07-13 hardening pass — see the tracker's superseding notes).
 
 Fixture: tests/golden/dr_v0/fixture.json; expectations: expected.json,
 hand-worked in BASIS.md — synthetic, NOT FTA-certified; regression anchors
@@ -106,7 +107,9 @@ def test_golden_dispatch_day_all_five_calcs(dr_golden_fixture, dr_golden_expecte
         exp = dr_golden_expected["dispatch_day"][key]
         result = compute(trips)
         assert result.calc_name == exp["calc_name"], key
-        assert result.calc_version == exp["calc_version"] == "0.1.0", key
+        # Versions pinned by the golden itself: dr_vrm_v0/dr_voms_v0 0.1.1
+        # (2026-07-13 hardening pass), the other three 0.1.0.
+        assert result.calc_version == exp["calc_version"], key
         assert result.unit == exp["unit"], key
         assert result.value == Decimal(exp["value"]), key
         assert result.detail.to_dict() == exp["detail"], key
