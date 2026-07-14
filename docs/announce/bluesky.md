@@ -33,7 +33,7 @@ github.com/headway-transit/headway
 ## Posting notes
 - Account creation is manual (email required). For API posting later: create an app password in Bluesky settings; the atproto HTTP API (`com.atproto.repo.createRecord`) posts with handle + app password. Never store the app password in the repo.
 
-## Update thread — 2026-07-14 (week-one progress)
+## Update thread — 2026-07-14 (week-one progress) — POSTED 2026-07-14
 
 **1/**
 One week since launch, Headway now computes the rest of the NTD picture: Safety & Security event reporting, Passenger Miles Traveled, FTA-compliant sampling plans, and demand-response (paratransit) service — every number still carrying its federal citation inside it.
