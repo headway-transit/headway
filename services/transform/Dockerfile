@@ -23,10 +23,20 @@ COPY --from=build /wheels /tmp/wheels
 RUN pip install --no-cache-dir --no-index --find-links=/tmp/wheels \
       "headway-transform[kafka,db,s3]" \
     && rm -rf /tmp/wheels
-# The wire contract ships inside the image so the validator cannot drift
-# from what this build was certified against.
-COPY contracts/raw-record-envelope.v0.schema.json /app/contracts/
+# The wire contracts ship inside the image so the validators cannot drift
+# from what this build was certified against: the envelope schema, plus the
+# adapter-mapping and demand_response_trip schemas the vendor adapter
+# runtime loads at import (handoff 0015).
+COPY contracts/raw-record-envelope.v0.schema.json \
+     contracts/adapter-mapping.v0.schema.json \
+     contracts/demand-response-trip.v0.schema.json /app/contracts/
 ENV HEADWAY_CONTRACTS_DIR=/app/contracts
+# The registered vendor adapters (mapping specs + their sample fixtures —
+# registration REQUIRES fixtures) ship with the image so raw.vendor.files
+# messages resolve out of the box; mount/override HEADWAY_ADAPTERS_DIR to
+# add agency-local adapters.
+COPY adapters /app/adapters
+ENV HEADWAY_ADAPTERS_DIR=/app/adapters
 USER nonroot
 # Runtime config via env: KAFKA_BROKERS (required), PG*/DATABASE_URL
 # (required), S3_* (optional — without it object_ref payloads quarantine as

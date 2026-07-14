@@ -83,6 +83,31 @@ code cannot drift from the checked-in contract without failing loudly).
   downstream, never a fabricated 0. The envelope `source` (`dr` |
   `dr_simulated` | a vendor label bound to the pushing machine key) is
   carried verbatim onto every row.
+- `headway_transform/adapters/` — the vendor adapter framework runtime v0
+  (handoff 0015). PLACEMENT DECISION (design point 2 said "Go or
+  transform-side Python — implementer chooses"): transform-side Python,
+  because both v0 target contracts land in the Python normalizers here — the
+  adapter engine REUSES `tides_passenger_events`/`dr_trips` (the verified
+  contract validation, canonical row construction, and idempotent writer
+  paths) instead of duplicating contract semantics in Go. Modules:
+  `spec.py` (mapping.v0.yaml loading, machine-validated against
+  `contracts/adapter-mapping.v0.schema.json` + semantic checks: resolvable
+  IANA timezone, `<vendor>_<product>` label rules with the mandatory
+  `_simulated` suffix for synthetic provenance), `registry.py` (fail-closed
+  label registry — registration REQUIRES sample fixtures; duplicate/broken
+  specs refuse the whole registry at startup), `engine.py` (dialect-aware
+  parsing via `row_guard`, filters with reasons, coercions/constants/derived
+  fields/exact-Decimal unit conversions, declared-timezone handling that
+  quarantines DST-ambiguous/nonexistent wall times, the target contract's
+  validation — JSON Schema for DR plus the contract normalizers per-row —
+  and one adapter lineage edge per canonical row carrying
+  `adapter:<source_label>` + the spec's content hash), `harness.py` (the
+  core of `adapters/validate`: full row accounting, pinned expected counts,
+  deterministic round-trip). The consumer routes `raw.vendor.files` through
+  the registry: an UNREGISTERED envelope source label is refused with a
+  blocking `unregistered_adapter_source` dq.issues row (raw record retained,
+  zero canonical writes — fail closed, never guessed). Reference adapter +
+  contributor docs: `adapters/` at the repo root.
 - `headway_transform/row_guard.py` — per-row CSV parse guards shared by the
   CSV/GTFS normalizers (2026-07-13 hardening pass): mid-iteration
   `csv.Error` capture (oversized field), NUL-byte rejection at field level
@@ -110,8 +135,11 @@ code cannot drift from the checked-in contract without failing loudly).
   failures are logged AND written as `dq.issues` rows (rollback + quarantine
   commit); the loop continues — a poison message never kills it and is never
   dropped without a trace. Routes `raw.gtfs_rt.vehicle_positions`,
-  `raw.gtfs_static.feed` and `raw.tides.passenger_events` (the latter two
-  fetch `object_ref` payloads through the injected object fetcher).
+  `raw.gtfs_rt.trip_updates`, `raw.gtfs_static.feed`,
+  `raw.tides.passenger_events`, `raw.dr.trips` and `raw.vendor.files`
+  (file-carrying topics fetch `object_ref` payloads through the injected
+  object fetcher; vendor files resolve their envelope source label against
+  the injected adapter registry, fail closed).
 - `headway_transform/kafka_source.py` — the real source over
   **kafka-python-ng** (lazy import; `kafka` extra), manual offset commit
   after the DB commit → at-least-once, idempotent via content-addressed
@@ -129,6 +157,37 @@ cd services/transform && python3 -m pytest tests/ -q
 
 ## Verification status
 
+- **2026-07-13 (vendor adapter framework v0, handoff 0015):**
+  `python3 -m pytest tests/ -q` → **131 passed** (was 102). New:
+  `tests/test_adapters.py` (29 tests — spec machine-validation refusals
+  incl. unresolvable timezone / synthetic-without-`_simulated` /
+  label≠vendor_product / vendor-manual-shaped provenance; registry
+  fail-closed rules (no fixture, duplicate label, broken spec); the full
+  reference-adapter fixtures with reason-level assertions (DST
+  nonexistent/ambiguous quarantines, enum/boolean/integer/decimal coercion
+  refusals, JSON-Schema and normalizer cross-field contract rejections,
+  row_guard absorption); dual normalizer+adapter lineage edges; determinism;
+  consumer fail-closed refusals for unregistered labels and missing
+  registry; registered-label flow to canonical for BOTH target contracts;
+  harness green-on-reference / red-on-drift). Harness:
+  `python3 adapters/validate` → ALL CHECKS PASSED over both registered
+  reference adapters. **Live end-to-end run against the running compose
+  stack** (evidence in handoff 0015 "Outputs — framework evidence"):
+  reference fixtures dropped → `headway-vendor-file` connector →
+  `raw.vendor.files` → this consumer (`KAFKA_TOPICS=raw.vendor.files`,
+  side group) → psql-verified from a separate connection: 2 raw vendor
+  records, 2 `canonical.passenger_events` + 3 `canonical.dr_trips` rows, 5
+  normalizer + 5 adapter lineage edges, 14 reasoned quarantine findings + 2
+  filter findings; byte-identical redelivery of both files re-produced and
+  re-consumed → ZERO new rows in every table; a live unregistered label
+  (`tripspark_streets`) was refused with a blocking
+  `unregistered_adapter_source` dq.issues row, raw record retained, zero
+  canonical writes. Operational finding from the live run: a SIGKILLed
+  consumer can leave its in-flight transaction as an orphaned backend
+  holding the content-addressed `raw.records` insert, blocking replays
+  until the server notices — stop the consumer with SIGTERM/SIGINT
+  (`__main__` shuts down cleanly), and terminate stray
+  idle-in-transaction backends before re-running.
 - **2026-07-13 (ops analytics wave, handoff 0014 — trip_updates +
   agencies):** `python3 -m pytest tests/ -q` → **102 passed** (was 83).
   New: `tests/test_trip_updates.py` (12 tests — stop-time events with one

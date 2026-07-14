@@ -10,6 +10,8 @@ This directory is the **single connector boundary** (ADR-0006): every connector 
 | `topics.v0.md` | Topic naming convention and the v0 topic registry. |
 | `demand-response-trip.v0.schema.json` | One demand-response trip (booking) record as exported by a dispatch platform — the payload row format of `raw.dr.trips` files (handoff 0013). |
 | `demand-response-trip.v0.md` | Field semantics, regulatory pointers, and the worked Via-style CSV export mapping example for `demand_response_trip` v0. |
+| `adapter-mapping.v0.schema.json` | The machine-validated format of vendor adapter mapping specs (`adapters/<vendor>/<product>/mapping.v0.yaml`, handoff 0015) — declarative vendor-export → open-contract mappings. |
+| `adapter-mapping.v0.md` | Field semantics of the mapping-spec format, the declared-timezone and provenance rules (agency-sample-only, never vendor documentation), and the runtime guarantees. |
 
 ## Invariants (binding on every connector)
 

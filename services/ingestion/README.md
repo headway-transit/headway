@@ -27,7 +27,7 @@ Invariants (Ingestion Engineer guardrails):
   default; simulator-marked content under a real label is hard-refused
   (Shared Constraint 2). See "File-drop robustness" below.
 
-## File-drop robustness (TIDES + DR connectors, 2026-07-13 hardening pass)
+## File-drop robustness (TIDES + DR + vendor-file connectors, 2026-07-13 hardening pass)
 
 **Partial-copy stability guard.** The reviewers confirmed that a file still
 being copied into the drop directory could be ingested mid-copy — silent
@@ -74,6 +74,7 @@ not repeat forever.
 | `connectors/gtfsstatic/` | GTFS static zip fetcher (→ `raw.gtfs_static.feed`, `object_ref` payload; bytes landed at `raw/gtfs_static/<record_id>.zip` via an `ObjectStore` interface: MinIO impl + fake) |
 | `connectors/tides/` | TIDES passenger_events file-drop scanner (periodic scan of `TIDES_DROP_DIR` every `POLL_INTERVAL` for `passenger_events*.csv` → `raw.tides.passenger_events`, `object_ref` payload; bytes landed at `raw/tides/<record_id>.csv`; partial-copy stability guard + size cap + simulated-source enforcement per "File-drop robustness" above; processed files moved to `processed/`, refused files to `rejected/`; header sanity check against the required TIDES columns sets `parse_status` only) |
 | `connectors/dr/` | Demand-response trips file-drop scanner (handoff 0013; periodic scan of `DR_DROP_DIR` every `POLL_INTERVAL` for `demand_response_trips*.csv` → `raw.dr.trips`, `object_ref` payload; bytes landed at `raw/dr/<record_id>.csv`; same robustness guards as the TIDES scanner; processed files moved to `processed/`, refused files to `rejected/`; header sanity check against the required `demand_response_trip` v0 columns — `contracts/demand-response-trip.v0.schema.json` — sets `parse_status` only) |
+| `connectors/vendorfile/` | Generic vendor-export file-drop scanner for the adapter framework (handoff 0015; periodic scan of `VENDOR_DROP_DIR` every `POLL_INTERVAL` for `*.csv` → `raw.vendor.files`, `object_ref` payload; ORIGINAL vendor bytes landed content-addressed at `raw/vendor/<record_id>.csv`; same robustness guards as the TIDES/DR scanners; deliberately NO header/content check — `parse_status` is always `ok`, because only the registered mapping spec (`adapters/<vendor>/<product>/mapping.v0.yaml`) knows the vendor format; all interpretation, per-row quarantine and the fail-closed unregistered-label refusal happen in the transform adapter runtime) |
 | `cmd/headway-ingest/` | The service binary: env config, connector startup, SIGINT/SIGTERM clean shutdown, `log/slog` JSON logging |
 
 GTFS / GTFS-Realtime payload *semantics* are defined by the specs at
@@ -102,10 +103,12 @@ provenance permanently distinguishes them (handoff 0005 binding rule).
 | `TIDES_SOURCE` | Envelope `source` for TIDES drops — **REQUIRED with `TIDES_DROP_DIR`, no default** (fail closed); simulator drops MUST use `tides_simulated` |
 | `DR_DROP_DIR` | Scan this directory every `POLL_INTERVAL` for `demand_response_trips*.csv` drops (optional, handoff 0013) |
 | `DR_SOURCE` | Envelope `source` for DR drops — **REQUIRED with `DR_DROP_DIR`, no default** (fail closed); simulator drops MUST use `dr_simulated` |
+| `VENDOR_DROP_DIR` | Scan this directory every `POLL_INTERVAL` for vendor-export `*.csv` drops (optional, handoff 0015) |
+| `VENDOR_SOURCE` | Envelope `source` for vendor drops — **REQUIRED with `VENDOR_DROP_DIR`, no default** (fail closed). Must be the REGISTERED adapter mapping-spec label `<vendor>_<product>` (see `adapters/README.md`), or `<vendor>_<product>_simulated` for synthetic data; the transform runtime refuses unregistered labels with a blocking DQ issue |
 | `DROP_MAX_FILE_BYTES` | Cap on a dropped file, plain bytes; default 268435456 (256 MiB). Oversize files are moved to `rejected/` and logged |
 | `POLL_INTERVAL` | Go duration for GTFS-RT polling AND drop-dir rescans, default `30s`; also the file-drop partial-copy settle time |
 | `AGENCY_ID` | Optional envelope `agency_id` (multi-feed disambiguation only) |
-| `S3_ENDPOINT` | MinIO/S3 endpoint `host:port` (required with `GTFS_STATIC_URL`, `TIDES_DROP_DIR` or `DR_DROP_DIR`) |
+| `S3_ENDPOINT` | MinIO/S3 endpoint `host:port` (required with `GTFS_STATIC_URL`, `TIDES_DROP_DIR`, `DR_DROP_DIR` or `VENDOR_DROP_DIR`) |
 | `S3_ACCESS_KEY` / `S3_SECRET_KEY` | Object-store credentials (inject from the secret store; never logged) |
 | `S3_BUCKET` | Raw bucket, default `headway-raw` |
 | `S3_USE_SSL` | `true` for TLS; default `false` (on-prem MinIO) |

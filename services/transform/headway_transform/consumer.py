@@ -30,6 +30,7 @@ from . import (
     tides_passenger_events,
     trip_updates,
 )
+from .adapters import AdapterRegistry, run_adapter
 from .envelope import Envelope, EnvelopeValidationError, parse_envelope
 from .model import SEVERITY_BLOCKING, SEVERITY_WARNING, DQFinding
 from .writer import DbWriter
@@ -41,6 +42,7 @@ TOPIC_GTFS_RT_TRIP_UPDATES = "raw.gtfs_rt.trip_updates"
 TOPIC_GTFS_STATIC_FEED = "raw.gtfs_static.feed"
 TOPIC_TIDES_PASSENGER_EVENTS = "raw.tides.passenger_events"
 TOPIC_DR_TRIPS = "raw.dr.trips"
+TOPIC_VENDOR_FILES = "raw.vendor.files"
 
 # Fetches object-store bytes for payload_encoding='object_ref' envelopes
 # (GTFS static zips, TIDES passenger_events CSVs). Injected; the consumer
@@ -255,11 +257,125 @@ def _handle_dr_trips(
     writer.insert_dq_issues(findings)
 
 
+def _fetch_file_payload(
+    writer: DbWriter,
+    envelope: Envelope,
+    object_fetcher: Optional[ObjectFetcher],
+    what: str,
+) -> Optional[bytes]:
+    """Payload bytes for a file-carrying envelope (object_ref or base64).
+
+    Returns None after writing the blocking 'object_ref_unavailable' finding
+    when no fetcher is configured — loud degraded mode, never a drop.
+    """
+    if envelope.payload_encoding != "object_ref":
+        return envelope.decode_payload()
+    if object_fetcher is None:
+        writer.insert_dq_issues(
+            [
+                DQFinding(
+                    issue_type="object_ref_unavailable",
+                    severity=SEVERITY_BLOCKING,
+                    title=f"{what} payload could not be fetched",
+                    description=(
+                        f"Record {envelope.record_id} references object "
+                        f"{envelope.payload!r} but no object fetcher is "
+                        "configured; file not normalized (raw record "
+                        "retained, nothing dropped)."
+                    ),
+                    source_record_ids=[envelope.record_id],
+                )
+            ]
+        )
+        return None
+    return object_fetcher(envelope.payload)
+
+
+def _handle_vendor_file(
+    writer: DbWriter,
+    envelope: Envelope,
+    object_fetcher: Optional[ObjectFetcher],
+    adapter_registry: Optional[AdapterRegistry],
+) -> None:
+    """Route a raw.vendor.files message through its registered adapter.
+
+    Fail-closed source labels (handoff 0015): the envelope source must match
+    a REGISTERED mapping spec. An unregistered label — or a consumer running
+    without a registry — refuses the file with a blocking DQ issue; the raw
+    record is retained (already landed), zero canonical rows are written, and
+    nothing is guessed.
+    """
+    if adapter_registry is None:
+        writer.insert_dq_issues(
+            [
+                DQFinding(
+                    issue_type="adapter_registry_unavailable",
+                    severity=SEVERITY_BLOCKING,
+                    title="Vendor file arrived but no adapter registry is configured",
+                    description=(
+                        f"Record {envelope.record_id} (source "
+                        f"{envelope.source!r}) arrived on raw.vendor.files "
+                        "but this consumer has no adapter registry (set "
+                        "HEADWAY_ADAPTERS_DIR to the adapters/ directory). "
+                        "File refused, raw record retained — fail closed, "
+                        "never guessed."
+                    ),
+                    source_record_ids=[envelope.record_id],
+                )
+            ]
+        )
+        return
+
+    spec = adapter_registry.lookup(envelope.source)
+    if spec is None:
+        logger.warning(
+            "unregistered vendor source label %r; refusing", envelope.source
+        )
+        writer.insert_dq_issues(
+            [
+                DQFinding(
+                    issue_type="unregistered_adapter_source",
+                    severity=SEVERITY_BLOCKING,
+                    title=(
+                        f"Vendor file source label {envelope.source!r} is not "
+                        "a registered adapter"
+                    ),
+                    description=(
+                        f"Record {envelope.record_id} carries source "
+                        f"{envelope.source!r}, which matches no registered "
+                        "mapping spec (registered: "
+                        + (", ".join(adapter_registry.labels()) or "<none>")
+                        + "). File REFUSED — raw record retained, zero "
+                        "canonical rows written. Register a mapping spec "
+                        "(adapters/README.md) or fix the connector's source "
+                        "label; an unregistered label is never mapped by "
+                        "guesswork (fail closed)."
+                    ),
+                    source_record_ids=[envelope.record_id],
+                )
+            ]
+        )
+        return
+
+    file_bytes = _fetch_file_payload(
+        writer, envelope, object_fetcher, f"Vendor file ({envelope.source})"
+    )
+    if file_bytes is None:
+        return
+
+    result = run_adapter(spec, file_bytes, envelope.record_id, envelope.source)
+    writer.insert_passenger_events(result.passenger_events)
+    writer.insert_dr_trips(result.dr_trips)
+    writer.insert_lineage_edges(result.edges)
+    writer.insert_dq_issues(result.findings)
+
+
 def process_message(
     writer: DbWriter,
     topic: str,
     value: bytes,
     object_fetcher: Optional[ObjectFetcher] = None,
+    adapter_registry: Optional[AdapterRegistry] = None,
 ) -> None:
     """Process one message: validate, land raw record, route, normalize, write.
 
@@ -287,6 +403,8 @@ def process_message(
         _handle_tides_passenger_events(writer, envelope, object_fetcher)
     elif topic == TOPIC_DR_TRIPS:
         _handle_dr_trips(writer, envelope, object_fetcher)
+    elif topic == TOPIC_VENDOR_FILES:
+        _handle_vendor_file(writer, envelope, object_fetcher, adapter_registry)
     else:
         logger.warning("no normalizer for topic %s", topic)
         writer.insert_dq_issues(
@@ -311,6 +429,7 @@ def run_loop(
     writer: DbWriter,
     object_fetcher: Optional[ObjectFetcher] = None,
     max_messages: Optional[int] = None,
+    adapter_registry: Optional[AdapterRegistry] = None,
 ) -> int:
     """Consume messages until the source yields None (or max_messages).
 
@@ -325,7 +444,7 @@ def run_loop(
             break
         topic, _key, value = polled
         try:
-            process_message(writer, topic, value, object_fetcher)
+            process_message(writer, topic, value, object_fetcher, adapter_registry)
             writer.connection.commit()
         except Exception as exc:  # noqa: BLE001 — quarantine path, never a bare pass
             logger.exception("message on %s failed; quarantining", topic)

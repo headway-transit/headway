@@ -9,6 +9,18 @@ DbWriter / ObjectFetcher seams), so unit tests never exercise the wiring
 Environment:
   KAFKA_BROKERS   (required) bootstrap servers, e.g. kafka:9092
   KAFKA_GROUP_ID  (optional) consumer group, default headway-transform
+  KAFKA_TOPICS    (optional) comma-separated subset of the known topics to
+                  subscribe (default: all). Operational knob only — e.g. a
+                  side consumer that processes ONLY raw.vendor.files without
+                  replaying the full GTFS-RT backlog. Unknown topic names are
+                  a startup refusal, never silently ignored.
+  HEADWAY_ADAPTERS_DIR (optional) the adapters/ directory holding registered
+                  vendor mapping specs (handoff 0015). Default: the repo
+                  checkout's adapters/ when present. When no registry can be
+                  loaded, raw.vendor.files messages are refused as blocking
+                  'adapter_registry_unavailable' dq.issues rows (fail closed,
+                  loud, never guessed); a directory that exists but fails to
+                  load (broken spec, duplicate label) is a startup refusal.
   DATABASE_URL    (optional) psycopg/libpq conninfo; when unset, the
                   standard libpq PG* variables are used (PGHOST, PGPORT,
                   PGUSER, PGPASSWORD, PGDATABASE) — preferred, because
@@ -37,14 +49,17 @@ from __future__ import annotations
 import logging
 import os
 import time
+from pathlib import Path
 from typing import Optional
 
+from .adapters import AdapterRegistry
 from .consumer import (
     TOPIC_DR_TRIPS,
     TOPIC_GTFS_RT_TRIP_UPDATES,
     TOPIC_GTFS_RT_VEHICLE_POSITIONS,
     TOPIC_GTFS_STATIC_FEED,
     TOPIC_TIDES_PASSENGER_EVENTS,
+    TOPIC_VENDOR_FILES,
     ObjectFetcher,
     ObjectTooLargeError,
     run_loop,
@@ -60,7 +75,11 @@ TOPICS = [
     TOPIC_GTFS_STATIC_FEED,
     TOPIC_TIDES_PASSENGER_EVENTS,
     TOPIC_DR_TRIPS,
+    TOPIC_VENDOR_FILES,
 ]
+
+#: Repo-checkout default for the vendor adapter registry (handoff 0015).
+_DEFAULT_ADAPTERS_DIR = Path(__file__).resolve().parents[3] / "adapters"
 
 #: Default cap on a fetched object_ref payload (2026-07-13 hardening pass).
 #: Generous — the largest real payload so far (MBTA GTFS zip) is ~90 MiB.
@@ -129,6 +148,53 @@ def object_fetcher_from_env() -> Optional[ObjectFetcher]:
     return fetch
 
 
+def topics_from_env() -> list[str]:
+    """The topic subscription: all known topics, or the KAFKA_TOPICS subset.
+
+    An unknown name in KAFKA_TOPICS is a startup refusal — a typo silently
+    subscribing nothing would be a silent drop of a whole feed.
+    """
+    raw = os.environ.get("KAFKA_TOPICS", "").strip()
+    if not raw:
+        return list(TOPICS)
+    requested = [t.strip() for t in raw.split(",") if t.strip()]
+    unknown = [t for t in requested if t not in TOPICS]
+    if unknown:
+        raise SystemExit(
+            f"KAFKA_TOPICS names unknown topic(s) {unknown}; known topics: "
+            f"{TOPICS}. Refusing to start with a partial/typo'd subscription."
+        )
+    return requested
+
+
+def adapter_registry_from_env() -> Optional[AdapterRegistry]:
+    """Load the vendor adapter registry, or None (loud degraded mode).
+
+    Missing directory and unset env -> None: the consumer then refuses every
+    raw.vendor.files message with a blocking 'adapter_registry_unavailable'
+    dq.issues row — fail closed, never guessed. An EXPLICITLY configured or
+    present-but-broken directory is a startup refusal (RegistryError
+    propagates): a broken spec must never silently unregister a label.
+    """
+    configured = os.environ.get("HEADWAY_ADAPTERS_DIR")
+    adapters_dir = Path(configured) if configured else _DEFAULT_ADAPTERS_DIR
+    if not configured and not adapters_dir.is_dir():
+        logger.warning(
+            "no adapters directory at %s: raw.vendor.files messages will be "
+            "refused as blocking dq.issues (set HEADWAY_ADAPTERS_DIR).",
+            adapters_dir,
+        )
+        return None
+    registry = AdapterRegistry.load(adapters_dir)
+    logger.info(
+        "adapter registry loaded from %s: %d label(s): %s",
+        adapters_dir,
+        len(registry),
+        ", ".join(registry.labels()),
+    )
+    return registry
+
+
 def main() -> int:
     logging.basicConfig(
         level=os.environ.get("LOG_LEVEL", "INFO"),
@@ -155,21 +221,25 @@ def main() -> int:
     # explicitly, so the default (non-autocommit) transaction mode is correct.
     connection = psycopg.connect(os.environ.get("DATABASE_URL", ""))
     writer = DbWriter(connection)
+    topics = topics_from_env()
     source = KafkaMessageSource(
-        TOPICS,
+        topics,
         bootstrap_servers=brokers,
         group_id=os.environ.get("KAFKA_GROUP_ID", "headway-transform"),
     )
     fetcher = object_fetcher_from_env()
+    adapter_registry = adapter_registry_from_env()
     idle_sleep = float(os.environ.get("IDLE_SLEEP_SECONDS", "1"))
 
-    logger.info("consuming %s from %s", TOPICS, brokers)
+    logger.info("consuming %s from %s", topics, brokers)
     try:
         # run_loop exits on an empty poll; wrap it to run forever. Kafka
         # offsets are committed AFTER the DB commits (at-least-once; replays
         # are idempotent via content-addressed record_ids + ON CONFLICT).
         while True:
-            processed = run_loop(source, writer, fetcher)
+            processed = run_loop(
+                source, writer, fetcher, adapter_registry=adapter_registry
+            )
             if processed:
                 source.commit()
             else:

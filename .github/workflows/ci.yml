@@ -36,6 +36,7 @@ jobs:
       python: ${{ steps.filter.outputs.python }}
       web: ${{ steps.filter.outputs.web }}
       integration: ${{ steps.filter.outputs.integration }}
+      adapters: ${{ steps.filter.outputs.adapters }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -67,6 +68,7 @@ jobs:
             echo "python=$(hit '^services/(calc|transform|api|ai)/|^db/|^scripts/license|^\.github/workflows/')"
             echo "web=$(hit '^web/|^scripts/license|^\.github/workflows/')"
             echo "integration=$(hit '^services/api/|^db/|^tests/integration/|^\.github/workflows/')"
+            echo "adapters=$(hit '^adapters/|^contracts/|^services/transform/|^\.github/workflows/')"
           } >> "$GITHUB_OUTPUT"
 
   go-ingestion:
@@ -119,6 +121,29 @@ jobs:
         if: matrix.service == 'ai'
         working-directory: services/ai
         run: python -m headway_ai.regression
+
+  adapter-harness:
+    # Vendor adapter framework (handoff 0015): every registered mapping spec
+    # under adapters/ must be machine-valid against
+    # contracts/adapter-mapping.v0.schema.json, carry sample fixtures, map
+    # every fixture row (or quarantine it with a reason), pass the target
+    # contract's validation, and round-trip deterministically. A registered
+    # adapter with a red harness fails the build.
+    name: adapters / validation harness
+    needs: changes
+    if: needs.changes.outputs.adapters == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: services/transform/pyproject.toml
+      - name: install the transform service (the adapter runtime)
+        run: python -m pip install -e services/transform
+      - name: run the harness over all registered adapters
+        run: python3 adapters/validate
 
   drift-gates:
     # Hardening pass 2026-07-13 (docs/reviews/2026-07-13-hardening-pass.md):
@@ -362,7 +387,8 @@ jobs:
               ["deploy/compose/compose.yaml",
                "deploy/compose/prometheus/prometheus.yml"]
               + glob.glob(".github/workflows/*.yml")
-              + glob.glob(".github/workflows/*.yaml"))
+              + glob.glob(".github/workflows/*.yaml")
+              + glob.glob("adapters/**/mapping.v0.yaml", recursive=True))
           failed = False
           for path in targets:
               try:

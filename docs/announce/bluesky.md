@@ -32,3 +32,20 @@ github.com/headway-transit/headway
 
 ## Posting notes
 - Account creation is manual (email required). For API posting later: create an app password in Bluesky settings; the atproto HTTP API (`com.atproto.repo.createRecord`) posts with handle + app password. Never store the app password in the repo.
+
+## Update thread — 2026-07-14 (week-one progress)
+
+**1/**
+One week since launch, Headway now computes the rest of the NTD picture: Safety & Security event reporting, Passenger Miles Traveled, FTA-compliant sampling plans, and demand-response (paratransit) service — every number still carrying its federal citation inside it.
+
+**2/**
+And the platform named Headway finally measures headway: on-time performance and headway adherence from live GTFS-RT. First real result: 54% OTP on a major transit feed — published with the receipts, because an honest number you can trace beats a pretty one you can't.
+
+**3/**
+Also new: a sizing guide with measured numbers (not vendor optimism), and an installer that asks "Where will people use Headway from?" in plain English. No tunnels, no container expertise required. Built for the small agencies that need it most.
+
+github.com/headway-transit/headway
+
+## Posting notes (update threads)
+- Keep each post ≤300 chars; post 3 carries the repo link.
+- Never name partner agencies or vendors without their explicit OK — shipped, public capabilities only.

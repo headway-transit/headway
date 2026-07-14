@@ -1,0 +1,64 @@
+#!/usr/bin/env python3
+"""adapters/validate — the vendor-adapter validation harness CLI (handoff 0015).
+
+Usage:
+    python3 adapters/validate                 # validate ALL registered adapters
+    python3 adapters/validate path/to/mapping.v0.yaml [...]   # specific specs
+
+For every mapping spec it proves:
+  1. the spec is machine-valid against contracts/adapter-mapping.v0.schema.json
+     (+ semantic checks: resolvable timezone, label rules, provenance rules);
+  2. every mapped fixture record passes the TARGET CONTRACT's validation;
+  3. every fixture row is mapped, filtered (with the declared reason), or
+     explicitly quarantined with a reason — counts pinned by the committed
+     <fixture>.expected.json;
+  4. the round-trip is deterministic (two runs are byte-identical).
+
+Exit status is nonzero on ANY failure. CI runs this over all registered
+adapters (.github/workflows/ci.yml, job "adapters / validation harness").
+
+Requires the transform service package (pip install -e services/transform);
+when run from a repo checkout it bootstraps sys.path itself.
+"""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+_ADAPTERS_DIR = _REPO_ROOT / "adapters"
+
+# Repo-checkout bootstrap: prefer an installed headway_transform, fall back
+# to the sibling source tree.
+try:
+    import headway_transform  # noqa: F401
+except ImportError:  # pragma: no cover - environment-dependent
+    sys.path.insert(0, str(_REPO_ROOT / "services" / "transform"))
+
+from headway_transform.adapters.harness import (  # noqa: E402
+    HarnessReport,
+    validate_adapter,
+    validate_all,
+)
+
+
+def main(argv: list[str]) -> int:
+    if argv:
+        report = HarnessReport()
+        for arg in argv:
+            validate_adapter(Path(arg), report)
+    else:
+        report = validate_all(_ADAPTERS_DIR)
+
+    for line in report.lines:
+        print(line)
+    if report.ok:
+        print("adapters/validate: ALL CHECKS PASSED")
+        return 0
+    print("adapters/validate: FAILURES FOUND (see FAIL lines above)")
+    return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

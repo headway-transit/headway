@@ -1,0 +1,77 @@
+# Reference adapter: "Acme Transit Suite — RideLog" (INVENTED vendor format)
+# -> TIDES passenger_events. This spec + its fixtures exercise every
+# mapping-spec feature and are the validation harness's own test bed.
+# Template for real adapters: adapters/README.md (note the BINDING provenance
+# rules — real specs are verified against an agency-provided anonymized
+# sample, never vendor documentation).
+mapping_spec_version: 0
+vendor: acme
+product: ridelog
+# Synthetic fixtures => the _simulated suffix is REQUIRED (handoff 0005 rule:
+# simulated data stays permanently distinguishable in provenance).
+source_label: acme_ridelog_simulated
+target_contract: tides_passenger_events
+
+source_format:
+  kind: csv
+  # RideLog exports carry a UTF-8 byte-order mark.
+  encoding: utf-8-sig
+  csv:
+    delimiter: ";"
+    quotechar: "'"
+    # Two banner lines precede the header row.
+    skip_leading_rows: 2
+
+# RideLog device clocks are agency-local wall time. Declared, never guessed:
+# DST-ambiguous and nonexistent wall times quarantine their rows.
+timezone: America/Chicago
+
+filters:
+  - column: RecType
+    op: equals
+    value: CNT
+    reason: >-
+      RideLog heartbeat (HB) and operator sign-on (LOG) device records carry
+      no passenger activity and are outside the passenger_events contract's
+      scope; only passenger count (CNT) records map.
+
+fields:
+  passenger_event_id:
+    derived: concat
+    sources: [UnitNo, Seq]
+    separator: ":"
+  service_date:
+    derived: local_date_of
+    of: event_timestamp
+  event_timestamp:
+    from: LocalTime
+    coerce: datetime
+    format: "%m/%d/%Y %H:%M:%S"
+  trip_stop_sequence:
+    from: StopSeq
+    coerce: integer
+  event_type:
+    from: Dir
+    coerce: enum_map
+    values:
+      "B": "Passenger boarded"
+      "A": "Passenger alighted"
+  vehicle_id:
+    from: UnitNo
+  event_count:
+    from: Cnt
+    coerce: integer
+
+provenance:
+  verified_against:
+    # Reference adapter ONLY: the fixtures are invented. A real adapter
+    # replaces this with the sample block (date / providing_agency /
+    # anonymization) referencing the agency's OWN anonymized export.
+    synthetic: true
+  verification_date: "2026-07-13"
+  notes: >-
+    The "Acme Transit Suite" vendor and its RideLog export format are
+    invented for this repository to exercise every mapping-spec feature
+    (dialect quirks, coercions, enum maps, constants, derived fields,
+    declared-timezone DST handling, filters, and every quarantine path).
+    No real vendor product or agency data is referenced.

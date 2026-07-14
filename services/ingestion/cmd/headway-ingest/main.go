@@ -18,6 +18,12 @@
 //	DR_SOURCE                      envelope source for DR drops — REQUIRED with DR_DROP_DIR,
 //	                               no default (fail closed); simulator drops MUST set
 //	                               "dr_simulated" (handoff 0013, Shared Constraint 2)
+//	VENDOR_DROP_DIR                scan this directory every POLL_INTERVAL for vendor-export *.csv files (optional, handoff 0015)
+//	VENDOR_SOURCE                  envelope source for vendor drops — REQUIRED with VENDOR_DROP_DIR,
+//	                               no default (fail closed). Must be the REGISTERED adapter
+//	                               mapping-spec label `<vendor>_<product>` (adapters/), or
+//	                               `<vendor>_<product>_simulated` for synthetic data; the
+//	                               transform runtime refuses unregistered labels
 //	DROP_MAX_FILE_BYTES            cap on a dropped file's size in bytes (optional, default 256 MiB);
 //	                               oversize files are moved to <drop dir>/rejected/ and logged
 //	POLL_INTERVAL                  Go duration, default 30s (GTFS-RT polls AND drop-dir rescans;
@@ -49,6 +55,7 @@ import (
 	"github.com/headway-transit/headway/services/ingestion/connectors/gtfsrt"
 	"github.com/headway-transit/headway/services/ingestion/connectors/gtfsstatic"
 	"github.com/headway-transit/headway/services/ingestion/connectors/tides"
+	"github.com/headway-transit/headway/services/ingestion/connectors/vendorfile"
 	"github.com/headway-transit/headway/services/ingestion/internal/producer"
 )
 
@@ -237,8 +244,47 @@ func run(log *slog.Logger) error {
 		}()
 	}
 
+	if dropDir := os.Getenv("VENDOR_DROP_DIR"); dropDir != "" {
+		// Fail closed: the label is the adapter-registry key AND the
+		// provenance rule from TIDES_SOURCE/DR_SOURCE above.
+		source := strings.TrimSpace(os.Getenv("VENDOR_SOURCE"))
+		if source == "" {
+			return fmt.Errorf("VENDOR_DROP_DIR is set but VENDOR_SOURCE is not. " +
+				"Headway needs to know which REGISTERED adapter this drop " +
+				"directory carries and refuses to guess: set VENDOR_SOURCE to " +
+				"the mapping-spec label `<vendor>_<product>` (see adapters/), " +
+				"or `<vendor>_<product>_simulated` for synthetic data — an " +
+				"unlabeled feed could be mapped by the wrong spec or record " +
+				"simulated data as real (Shared Constraint 2: full provenance)")
+		}
+		client, bucket, err := minioFromEnv("VENDOR_DROP_DIR")
+		if err != nil {
+			return err
+		}
+		scanner := &vendorfile.Scanner{
+			Dir:          dropDir,
+			Source:       source,
+			AgencyID:     agencyID,
+			MaxFileBytes: dropMaxBytes,
+			Interval:     interval,
+			Store:        vendorfile.NewMinioStore(client, bucket),
+			Producer:     kafka,
+			Log:          log,
+		}
+		started++
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			log.Info("vendor drop-dir scanner started",
+				"dir", dropDir, "source", source, "interval", interval.String())
+			if err := scanner.Run(ctx); err != nil && ctx.Err() == nil {
+				log.Error("vendor drop-dir scanner stopped", "error", err)
+			}
+		}()
+	}
+
 	if started == 0 {
-		return fmt.Errorf("no connectors configured: set GTFS_RT_*_URL, GTFS_STATIC_URL, TIDES_DROP_DIR, and/or DR_DROP_DIR")
+		return fmt.Errorf("no connectors configured: set GTFS_RT_*_URL, GTFS_STATIC_URL, TIDES_DROP_DIR, DR_DROP_DIR, and/or VENDOR_DROP_DIR")
 	}
 
 	log.Info("headway-ingest running", "connectors", started)

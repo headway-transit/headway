@@ -1,0 +1,109 @@
+# Reference adapter: "Acme Transit Suite — ParaVan" (INVENTED vendor format)
+# -> demand_response_trip v0 (contracts/demand-response-trip.v0.schema.json).
+# Companion to ../ridelog (one reference spec per target contract). Template
+# rules: adapters/README.md.
+mapping_spec_version: 0
+vendor: acme
+product: paravan
+source_label: acme_paravan_simulated
+target_contract: demand_response_trip
+
+source_format:
+  kind: csv
+  # ParaVan exports are Windows-1252 (legacy dispatch workstation).
+  encoding: cp1252
+  csv:
+    delimiter: "|"
+    quotechar: "\""
+    skip_leading_rows: 0
+
+timezone: America/Denver
+
+filters:
+  - column: Status
+    op: in
+    values: ["C", "NS"]
+    reason: >-
+      Cancelled (X) bookings never dispatched a vehicle and are outside the
+      demand_response_trip contract's scope; completed (C) and no-show (NS)
+      bookings map.
+
+fields:
+  dr_trip_id:
+    from: BookingRef
+  service_date:
+    from: RunDate
+    coerce: date
+  vehicle_id:
+    from: Van
+  mode:
+    const: "DR"
+  tos:
+    from: SvcType
+    coerce: enum_map
+    values:
+      "D": "DO"
+      "P": "PT"
+  pickup_timestamp:
+    from: PUTime
+    coerce: datetime
+    format: "%d/%m/%Y %H:%M"
+  dropoff_timestamp:
+    from: DOTime
+    coerce: datetime
+    format: "%d/%m/%Y %H:%M"
+  pickup_lat:
+    from: PULat
+    coerce: number
+  pickup_lon:
+    from: PULon
+    coerce: number
+  onboard_miles:
+    from: TripKm
+    coerce: decimal
+    unit: {from: kilometers, to: miles}
+  distance_source:
+    const: "odometer"
+  pickup_odometer_miles:
+    from: OdoStartKm
+    coerce: decimal
+    unit: {from: kilometers, to: miles}
+  dropoff_odometer_miles:
+    from: OdoEndKm
+    coerce: decimal
+    unit: {from: kilometers, to: miles}
+  riders:
+    from: Pax
+    coerce: integer
+  attendants_companions:
+    from: Escorts
+    coerce: integer
+  ada_related:
+    from: ADA
+    coerce: boolean
+    true_values: ["Y", "YES"]
+    false_values: ["N", "NO"]
+  sponsored:
+    from: Spon
+    coerce: boolean
+    true_values: ["Y"]
+    false_values: ["N"]
+  sponsor:
+    from: SponsorCode
+  no_show:
+    from: Status
+    coerce: enum_map
+    values:
+      "C": false
+      "NS": true
+  driver_shift_id:
+    from: Driver
+
+provenance:
+  verified_against:
+    synthetic: true
+  verification_date: "2026-07-13"
+  notes: >-
+    The "Acme Transit Suite" vendor and its ParaVan export format are
+    invented for this repository (see ../ridelog/mapping.v0.yaml). No real
+    vendor product or agency data is referenced.

@@ -13,6 +13,8 @@ dependencies = [
     "jsonschema>=4.21",
     # GTFS-Realtime FeedMessage protobuf bindings (Apache-2.0).
     "gtfs-realtime-bindings>=1.0.0",
+    # Vendor adapter mapping specs are YAML (handoff 0015; MIT license).
+    "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]
