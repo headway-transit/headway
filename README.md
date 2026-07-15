@@ -24,11 +24,15 @@ What makes it different is one design decision applied everywhere: **radical pro
 
 | The Receipt — regulation inside the number | The certification cockpit |
 | --- | --- |
-| ![A computed metric opened into its receipt: coverage meter, documented exclusions, and the FTA rule quoted with page citation](docs/images/receipt.png) | ![The certify screen: each figure as a full receipt with its own consent checkbox and blockers panel](docs/images/certify.png) |
+| ![A demand-response VRH figure opened into its receipt: mode and type-of-service badges, the simulated-data flag, the data-completeness detail, and the FTA taxi revenue rule quoted verbatim with its page citation](docs/images/receipt.png) | ![The certify screen for one month: each figure as a full receipt with its own consent checkbox — ticking a figure means you read its receipt and intend to put your name on it](docs/images/certify.png) |
 
 | Dashboards (colorblind-validated palettes) | The lineage walk |
 | --- | --- |
-| ![Dashboard with UPT, VRM/VRH small multiples, coverage-over-time with threshold line](docs/images/dashboard.png) | ![The lineage graph from a reported figure through its calculation to raw records](docs/images/lineage.png) |
+| ![Dashboard with VRM/VRH small multiples, coverage-over-time with threshold line, open data-quality issues, and the operations section: on-time performance and headway adherence cards, each badged as an operations metric that is never an NTD reported figure](docs/images/dashboard.png) | ![The lineage walk from a certified figure through the exact calculation version that ran to its raw records, with breadcrumbs back to the metrics table](docs/images/lineage.png) |
+
+| The what-if sandbox | Version & period comparison |
+| --- | --- |
+| ![The settings sandbox after a completed on-time-performance window preview: a modeling-preview-changes-nothing banner, today's audited settings beside the proposed values, and the figure under each with the exact difference](docs/images/sandbox.png) | ![The compare surface: the same VRH calculation across two periods side by side with the exact delta against the baseline, and a detail matrix where a missing figure is stated as missing, never invented](docs/images/compare.png) |
 
 ## Quickstart
 
