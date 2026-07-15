@@ -194,9 +194,17 @@ describe("/safety", () => {
     const events = await screen.findByRole("region", {
       name: "Recorded events",
     });
-    expect(within(events).getByText("Major event")).toBeInTheDocument();
-    expect(within(events).getByText("Non-major event")).toBeInTheDocument();
-    expect(within(events).getByText("Not reportable")).toBeInTheDocument();
+    // (getAll: the classification SUMMARY CARDS above the list — handoff
+    // 0017 #2 — carry the same labels as the per-event chips.)
+    expect(
+      within(events).getAllByText("Major event").length,
+    ).toBeGreaterThan(0);
+    expect(
+      within(events).getAllByText("Non-major event").length,
+    ).toBeGreaterThan(0);
+    expect(
+      within(events).getAllByText("Not reportable").length,
+    ).toBeGreaterThan(0);
 
     // The damage estimate renders VERBATIM (trailing zeros preserved).
     expect(within(events).getByText("$18000.00")).toBeInTheDocument();
@@ -330,7 +338,8 @@ describe("/safety", () => {
     await expectNoAxeViolations();
   });
 
-  it("records an event, sends the contract body (damage stays a string; rail answers omitted for a bus), and shows the returned verdict as a receipt with the verbatim quote + citation", async () => {
+  // Long test (many typed fields): give it headroom under full-suite load.
+  it("records an event, sends the contract body (damage stays a string; rail answers omitted for a bus), and shows the returned verdict as a receipt with the verbatim quote + citation", { timeout: 15000 }, async () => {
     signInAs("data_steward");
     const calls = mockSafety({
       "POST /safety/events": { status: 201, body: safetyMajorCreated },
@@ -371,8 +380,9 @@ describe("/safety", () => {
     );
     await user.click(screen.getByRole("button", { name: "Record this event" }));
 
-    // Success is announced with the classifier's verdict.
-    expect(await screen.findByRole("status")).toHaveTextContent(
+    // Success is confirmed in the shell's toast region (handoff 0017 #4)
+    // with the classifier's verdict.
+    expect(await screen.findByRole("log")).toHaveTextContent(
       "The event is recorded. The classifier's verdict: Major event.",
     );
 
@@ -464,7 +474,7 @@ describe("/safety", () => {
     );
     await user.click(screen.getByRole("button", { name: "Record this event" }));
 
-    expect(await screen.findByRole("status")).toHaveTextContent(
+    expect(await screen.findByRole("log")).toHaveTextContent(
       "The classifier's verdict: Non-major event.",
     );
     const receipt = screen.getByRole("region", {
@@ -580,7 +590,7 @@ describe("/safety", () => {
       screen.getByRole("button", { name: "Record the correction" }),
     );
 
-    expect(await screen.findByRole("status")).toHaveTextContent(
+    expect(await screen.findByRole("log")).toHaveTextContent(
       "The correction is recorded and the original is marked as corrected — both stay in the record.",
     );
     const post = calls.find((c) => c.method === "POST");
@@ -659,5 +669,64 @@ describe("/safety", () => {
     expect(
       screen.queryByRole("region", { name: /^Classification receipt/ }),
     ).not.toBeInTheDocument();
+  });
+
+  it("filters deadlines by urgency and events by classification through summary-card toggles (nothing leaves the record)", async () => {
+    signInAs("viewer");
+    mockSafety();
+    const user = userEvent.setup();
+    renderApp("/safety");
+
+    // Deadlines panel (handoff 0017 #2): urgency cards over the API-served
+    // due dates — 1 overdue (ss40 -2d), 1 due within 7 days (ss40 +3d),
+    // 1 due later (the ss50 month line, +19d).
+    const deadlines = await screen.findByRole("region", {
+      name: "Reporting deadlines",
+    });
+    const overdueCard = within(deadlines).getByRole("button", {
+      name: /Overdue/,
+    });
+    expect(overdueCard).toHaveTextContent("1");
+    expect(
+      within(deadlines).getByRole("button", { name: /Due within 7 days/ }),
+    ).toHaveTextContent("1");
+    expect(
+      within(deadlines).getByRole("button", { name: /Due later/ }),
+    ).toHaveTextContent("1");
+
+    await user.click(overdueCard);
+    expect(overdueCard).toHaveAttribute("aria-pressed", "true");
+    // Only the overdue S&S-40 stays listed; the held-back count is stated
+    // ("out of view here, never off the calendar").
+    expect(within(deadlines).getByText(/Overdue by 2 days/)).toBeInTheDocument();
+    expect(
+      within(deadlines).queryByText(/Due in 3 days/),
+    ).not.toBeInTheDocument();
+    expect(
+      within(deadlines).getByText(/2 deadlines are outside the pressed urgency filter/),
+    ).toBeInTheDocument();
+    await user.click(overdueCard);
+    expect(within(deadlines).getByText(/Due in 3 days/)).toBeInTheDocument();
+
+    // Events list (handoff 0017 #2): classification cards = filter toggles.
+    const events = screen.getByRole("region", { name: "Recorded events" });
+    const majorCard = within(events).getByRole("button", {
+      name: /Major event.*press to show only these/,
+    });
+    expect(majorCard).toHaveTextContent("1");
+    await user.click(majorCard);
+    expect(majorCard).toHaveAttribute("aria-pressed", "true");
+    // Only the major event's article remains; the filter states the count
+    // and that nothing leaves the record.
+    expect(within(events).getAllByRole("article")).toHaveLength(1);
+    expect(
+      within(events).getByText(/Showing 1 of 3 recorded events/),
+    ).toBeInTheDocument();
+    await user.click(
+      within(events).getByRole("button", { name: "Show all events" }),
+    );
+    expect(within(events).getAllByRole("article")).toHaveLength(3);
+
+    await expectNoAxeViolations();
   });
 });

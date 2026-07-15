@@ -1,9 +1,14 @@
 import { Fragment, useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { ApiError, listMetricValues } from "../api/client";
+import {
+  ApiError,
+  downloadMetricValuesExport,
+  listMetricValues,
+} from "../api/client";
 import type { MetricValue } from "../api/types";
 import { canCertify, useSession } from "../auth/session";
 import { DrScopeBadge } from "../components/DrScopeBadge";
+import { ExportButtons } from "../components/ExportButtons";
 import { OpsBadge } from "../components/OpsBadge";
 import { Receipt } from "../components/Receipt";
 import { SimulatedBadge } from "../components/SimulatedBadge";
@@ -88,116 +93,124 @@ export function MetricsView() {
       {values && values.length > 0 && (
         /* role/tabIndex: a horizontally scrollable region must be
            keyboard-reachable and named (axe: scrollable-region-focusable) */
-        <div
-          className="table-wrap"
-          role="region"
-          aria-label={copy.metrics.heading}
-          tabIndex={0}
-        >
-          <table>
-            <caption>{copy.metrics.tableCaption}</caption>
-            <thead>
-              <tr>
-                <th scope="col">{copy.metrics.columns.metric}</th>
-                <th scope="col">{copy.metrics.columns.unit}</th>
-                <th scope="col">{copy.metrics.columns.period}</th>
-                <th scope="col">{copy.metrics.columns.value}</th>
-                <th scope="col">{copy.metrics.columns.calc}</th>
-                <th scope="col">{copy.metrics.columns.status}</th>
-                <th scope="col">{copy.metrics.columns.details}</th>
-                <th scope="col">{copy.metrics.columns.provenance}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {values.map((v) => {
-                // Every figure opens a Receipt (handoff 0007 pillar 1:
-                // "every displayed figure is interactive") — even a
-                // detail-less one still has its story, its FTA rule, its
-                // flags, and its walk to raw records.
-                const detailsOpen = openDetails.has(v.metric_value_id);
-                return (
-                  <Fragment key={v.metric_value_id}>
-                    <tr>
-                      <th scope="row">
-                        {metricLabel(v.metric)}
-                        {/* The DR mode/TOS badge (handoff 0013): DR-scoped
-                            rows must never look like fleet rows. */}
-                        {parseDrScope(v.scope) && (
-                          <>
-                            {" "}
-                            <DrScopeBadge scope={v.scope} />
-                          </>
-                        )}
-                        {/* The ops badge (handoff 0014): an operations
-                            metric never looks like an NTD figure. */}
-                        {isOps(v) && (
-                          <>
-                            {" "}
-                            <OpsBadge />
-                          </>
-                        )}
-                        {isSimulated(v.detail) && (
-                          <>
-                            {" "}
-                            <SimulatedBadge />
-                          </>
-                        )}
-                      </th>
-                      <td>{unitLabel(v.unit)}</td>
-                      <td>{periodLabel(v)}</td>
-                      {/* The figure, verbatim as the API served it. Never
-                          parsed, rounded, or reformatted client-side. */}
-                      <td className="figure">{v.value}</td>
-                      <td>
-                        {v.calc_name} {v.calc_version}
-                        {isPreVerification(v) && (
-                          <>
-                            {" "}
-                            <span className="tag pre-verification">
-                              {copy.metrics.preVerificationTag}
-                            </span>
-                          </>
-                        )}
-                      </td>
-                      <td>
-                        <span className={`tag ${v.certification_status}`}>
-                          {v.certification_status}
-                        </span>
-                      </td>
-                      <td>
-                        <button
-                          type="button"
-                          aria-expanded={detailsOpen}
-                          onClick={() => toggleDetails(v.metric_value_id)}
-                        >
-                          {copy.metrics.columns.details}
-                          <span className="visually-hidden">
-                            {` — ${metricLabel(v.metric)}, ${periodLabel(v)}`}
-                          </span>
-                        </button>
-                      </td>
-                      <td>
-                        <Link to={`/metrics/${v.metric_value_id}/lineage`}>
-                          {copy.metrics.explainLink}
-                          <span className="visually-hidden">
-                            {` — ${metricLabel(v.metric)}, ${periodLabel(v)}`}
-                          </span>
-                        </Link>
-                      </td>
-                    </tr>
-                    {detailsOpen && (
+        <>
+          <div
+            className="table-wrap"
+            role="region"
+            aria-label={copy.metrics.heading}
+            tabIndex={0}
+          >
+            <table>
+              <caption>{copy.metrics.tableCaption}</caption>
+              <thead>
+                <tr>
+                  <th scope="col">{copy.metrics.columns.metric}</th>
+                  <th scope="col">{copy.metrics.columns.unit}</th>
+                  <th scope="col">{copy.metrics.columns.period}</th>
+                  <th scope="col">{copy.metrics.columns.value}</th>
+                  <th scope="col">{copy.metrics.columns.calc}</th>
+                  <th scope="col">{copy.metrics.columns.status}</th>
+                  <th scope="col">{copy.metrics.columns.details}</th>
+                  <th scope="col">{copy.metrics.columns.provenance}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {values.map((v) => {
+                  // Every figure opens a Receipt (handoff 0007 pillar 1:
+                  // "every displayed figure is interactive") — even a
+                  // detail-less one still has its story, its FTA rule, its
+                  // flags, and its walk to raw records.
+                  const detailsOpen = openDetails.has(v.metric_value_id);
+                  return (
+                    <Fragment key={v.metric_value_id}>
                       <tr>
-                        <td colSpan={8}>
-                          <Receipt value={v} />
+                        <th scope="row">
+                          {metricLabel(v.metric)}
+                          {/* The DR mode/TOS badge (handoff 0013): DR-scoped
+                              rows must never look like fleet rows. */}
+                          {parseDrScope(v.scope) && (
+                            <>
+                              {" "}
+                              <DrScopeBadge scope={v.scope} />
+                            </>
+                          )}
+                          {/* The ops badge (handoff 0014): an operations
+                              metric never looks like an NTD figure. */}
+                          {isOps(v) && (
+                            <>
+                              {" "}
+                              <OpsBadge />
+                            </>
+                          )}
+                          {isSimulated(v.detail) && (
+                            <>
+                              {" "}
+                              <SimulatedBadge />
+                            </>
+                          )}
+                        </th>
+                        <td>{unitLabel(v.unit)}</td>
+                        <td>{periodLabel(v)}</td>
+                        {/* The figure, verbatim as the API served it. Never
+                            parsed, rounded, or reformatted client-side. */}
+                        <td className="figure">{v.value}</td>
+                        <td>
+                          {v.calc_name} {v.calc_version}
+                          {isPreVerification(v) && (
+                            <>
+                              {" "}
+                              <span className="tag pre-verification">
+                                {copy.metrics.preVerificationTag}
+                              </span>
+                            </>
+                          )}
+                        </td>
+                        <td>
+                          <span className={`tag ${v.certification_status}`}>
+                            {v.certification_status}
+                          </span>
+                        </td>
+                        <td>
+                          <button
+                            type="button"
+                            aria-expanded={detailsOpen}
+                            onClick={() => toggleDetails(v.metric_value_id)}
+                          >
+                            {copy.metrics.columns.details}
+                            <span className="visually-hidden">
+                              {` — ${metricLabel(v.metric)}, ${periodLabel(v)}`}
+                            </span>
+                          </button>
+                        </td>
+                        <td>
+                          <Link to={`/metrics/${v.metric_value_id}/lineage`}>
+                            {copy.metrics.explainLink}
+                            <span className="visually-hidden">
+                              {` — ${metricLabel(v.metric)}, ${periodLabel(v)}`}
+                            </span>
+                          </Link>
                         </td>
                       </tr>
-                    )}
-                  </Fragment>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+                      {detailsOpen && (
+                        <tr>
+                          <td colSpan={8}>
+                            <Receipt value={v} />
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          {/* The server export of exactly these rows (handoff 0017, design
+              point 5): CSV/XLSX from one API row assembly, figures verbatim. */}
+          <ExportButtons
+            label={copy.metrics.exportLabel}
+            download={(format) => downloadMetricValuesExport(format)}
+          />
+        </>
       )}
     </>
   );

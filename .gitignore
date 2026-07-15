@@ -60,3 +60,7 @@ ds-bundle/
 # Proprietary vendor docs stay local (docs/reference/vendor/README.md)
 docs/reference/vendor/*
 !docs/reference/vendor/README.md
+
+# Third-party UI reference imagery stays local (docs/reference/ui-inspiration/README.md)
+docs/reference/ui-inspiration/*
+!docs/reference/ui-inspiration/README.md

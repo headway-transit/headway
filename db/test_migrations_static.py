@@ -639,3 +639,31 @@ def test_agencies_feed_declared_timezone():
     assert re.search(r"CREATE TABLE\s+canonical\.agencies\b", sql_0026)
     assert re.search(r"timezone\s+TEXT NOT NULL", sql_0026)
     assert re.search(r"agency_id TEXT PRIMARY KEY", sql_0026)
+
+
+def test_branding_chrome_seeded_with_pair_guardrail():
+    # Handoff 0017 design point 7 / migration 0027: themed nav chrome keys.
+    # Seeded 'unset' (neutral Headway by default, never client-creatable),
+    # all 'text', descriptions carrying the PAIRWISE guardrail promise (the
+    # chrome pairs render on each other, not on the app's light surfaces)
+    # and the all-three-or-neutral application rule.
+    sql_0027 = (MIGRATIONS_DIR / "0027_branding_chrome.sql").read_text(
+        encoding="utf-8"
+    )
+    for key in (
+        "brand_chrome_header_bg",
+        "brand_chrome_header_fg",
+        "brand_chrome_accent",
+    ):
+        assert re.search(
+            rf"'{key}',\s*'unset',\s*'text',", sql_0027
+        ), f"0027 must seed {key} = 'unset' as a 'text' setting"
+    assert "4.5:1" in sql_0027 and "WCAG" in sql_0027, (
+        "0027 must cite the WCAG AA 4.5:1 line the pair guardrail enforces"
+    )
+    assert "all three" in sql_0027, (
+        "0027 must state the all-three-set-or-neutral application rule"
+    )
+    assert "dark" in sql_0027, (
+        "0027 must restate the standing dark-mode limitation, not hide it"
+    )

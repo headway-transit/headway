@@ -50,7 +50,15 @@ export interface RecordedCall {
 
 export interface MockedResponse {
   status: number;
-  body: unknown;
+  /** JSON body (the default). Omit when `rawBody` carries the response. */
+  body?: unknown;
+  /**
+   * Raw response body for download endpoints (CSV/XLSX exports): served
+   * byte for byte instead of JSON.stringify(body). Pair with `headers`
+   * (e.g. Content-Type, Content-Disposition).
+   */
+  rawBody?: string;
+  headers?: Record<string, string>;
 }
 
 export type RouteHandler =
@@ -107,9 +115,15 @@ export function mockApi(routes: Record<string, RouteHandler>): RecordedCall[] {
         throw new Error(`Unexpected fetch in test: ${method} ${url}`);
       }
       const result = typeof handler === "function" ? handler(call) : handler;
+      if (result.rawBody !== undefined) {
+        return new Response(result.rawBody, {
+          status: result.status,
+          headers: result.headers ?? {},
+        });
+      }
       return new Response(JSON.stringify(result.body), {
         status: result.status,
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...result.headers },
       });
     },
   );

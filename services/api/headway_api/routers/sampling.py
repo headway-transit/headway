@@ -44,11 +44,12 @@ import uuid
 from decimal import Decimal, InvalidOperation
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, Field, field_validator
 
 from headway_calc import sampling as sampling_calc
 
+from .. import exports
 from ..audit import write_event
 from ..auth import Identity
 from ..authz import require_at_least, require_authenticated
@@ -1315,6 +1316,47 @@ def get_progress(
         undersampling_citation=_UNDERSAMPLING_CITATION,
         oversampling_citation=_OVERSAMPLING_CITATION,
         retention_note=sampling_calc.RETENTION_NOTE,
+    )
+
+
+@router.get(
+    "/sampling/plans/{plan_id}/worksheet",
+    response_class=Response,
+    responses={
+        200: {
+            "description": (
+                "The plan's measurement worksheet as a CSV or XLSX "
+                "download: one row per selected unit per draw with its "
+                "measured state; the plan's requirement, the undersampled/"
+                "estimate-ready state and the §63.11 retention note lead "
+                "the CSV and form the XLSX's first sheet."
+            ),
+            "content": {exports.CSV_MEDIA_TYPE: {}, exports.XLSX_MEDIA_TYPE: {}},
+        },
+        404: {"description": "No sampling plan with that id exists."},
+    },
+)
+def export_worksheet(
+    plan_id: str,
+    format: str = Query(default="xlsx", pattern=exports.FORMAT_PATTERN),
+    identity: Identity = Depends(require_authenticated),
+    db=Depends(get_db),
+) -> Response:
+    """Download the ride-check worksheet (handoff 0017, design point 5):
+    the same plan/draw/measurement records GET /sampling/plans/{id}/progress
+    summarizes, one row per selected unit. One row assembly feeds both
+    formats (XLSX values byte-equal to CSV values, pinned by test)."""
+    plan = _plan_or_404(db, plan_id)
+    draws = _draws_for_plan(db, plan_id)
+    active = _active_measurements(_measurements_for_plan(db, plan_id))
+    grid = exports.sampling_worksheet_grid(
+        plan,
+        draws,
+        {m.unit_id for m in active},
+        sampling_calc.RETENTION_NOTE,
+    )
+    return exports.export_response(
+        grid, format, f"headway-sampling-worksheet-{plan_id}"
     )
 
 

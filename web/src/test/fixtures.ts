@@ -1,8 +1,11 @@
 import type {
+  CompareResponse,
   DqIssue,
   LineageNode,
   MetricValue,
   Mr20Package,
+  SandboxPreviewResponse,
+  Setting,
   SafetyClassificationResult,
   SafetyEventCreated,
   SafetyEventRecord,
@@ -1686,4 +1689,395 @@ export const samplingEstimate: SamplingEstimateResponse = {
   ],
   "retention_note": "Keep every sampling record — the plan, the recorded seed, the drawn service-unit lists, and each unit's observed UPT and PMT — for at least 3 years (2026 NTD Policy Manual, Full Reporting, p. 150; verified 2026-07-12, REGULATORY_TRACKER.md 'Verified — Passenger Miles Traveled'). Headway keeps them indefinitely: sampling records are append-only and are corrected by superseding, never by editing.",
   "audit_event_id": 73
+};
+
+// ---- comparison (handoff 0017, design point 1) ----
+//
+// Shaped EXACTLY like services/api routers/metrics.py's CompareResponse
+// (reconciled against the regenerated openapi.json, 2026-07-14). Values
+// are decimal STRINGS verbatim; deltas are the SERVER's exact Decimal
+// strings — the UI never subtracts.
+
+const COMPARE_DELTA_NOTE =
+  "Deltas are comparison affordances, not reported figures: each is the " +
+  "exact decimal difference of two figures the calculation library " +
+  "persisted, computed without rounding and never stored anywhere.";
+
+const COMPARE_DIRECTION_NOTE =
+  "Direction metadata comes from the calculation library's metric " +
+  "registry. Only 'coverage' (higher_is_better) is registered today; no " +
+  "other metric defines better/worse, so their deltas are sign-neutral.";
+
+const COMPARE_MIXED_NOTE =
+  "This comparison mixes certified and uncertified figures. Each cell " +
+  "carries its own certification_status — label both sides " +
+  "(handoff 0017, design point 1).";
+
+/** vrh_v0 0.3.0 vs 0.4.0 over one period (the handoff-0004 comparison
+ *  shape): mixed certification statuses, one simulated cell. */
+export const compareVersionsResponse: CompareResponse = {
+  metric: "vrh",
+  unit: "hours",
+  comparands: [
+    {
+      key: "2026-06-01..2026-07-01@vrh_v0:0.3.0",
+      period_start: "2026-06-01",
+      period_end: "2026-07-01",
+      calc_name: "vrh_v0",
+      calc_version: "0.3.0",
+      baseline: true,
+    },
+    {
+      key: "2026-06-01..2026-07-01@vrh_v0:0.4.0",
+      period_start: "2026-06-01",
+      period_end: "2026-07-01",
+      calc_name: "vrh_v0",
+      calc_version: "0.4.0",
+      baseline: false,
+    },
+  ],
+  scopes: ["agency", "mode:bus"],
+  rows: [
+    {
+      scope: "agency",
+      cells: [
+        {
+          comparand_index: 0,
+          value: {
+            metric_value_id: "mv-cmp-vrh-030",
+            metric: "vrh",
+            unit: "hours",
+            period_start: "2026-06-01",
+            period_end: "2026-07-01",
+            scope: "agency",
+            value: "8203.40",
+            calc_name: "vrh_v0",
+            calc_version: "0.3.0",
+            computed_at: "2026-07-02T06:00:00Z",
+            certification_status: "certified",
+            detail: { coverage: "0.9126", total_groups: 2313, excluded_groups: 202 },
+          },
+          missing_reason: null,
+          delta_vs_baseline: null,
+          delta_vs_previous: null,
+        },
+        {
+          comparand_index: 1,
+          value: {
+            metric_value_id: "mv-cmp-vrh-040",
+            metric: "vrh",
+            unit: "hours",
+            period_start: "2026-06-01",
+            period_end: "2026-07-01",
+            scope: "agency",
+            value: "9758.55",
+            calc_name: "vrh_v0",
+            calc_version: "0.4.0",
+            computed_at: "2026-07-02T07:00:00Z",
+            certification_status: "uncertified",
+            detail: { coverage: "0.9126" },
+          },
+          missing_reason: null,
+          delta_vs_baseline: "1555.15",
+          delta_vs_previous: "1555.15",
+        },
+      ],
+    },
+    {
+      scope: "mode:bus",
+      cells: [
+        {
+          comparand_index: 0,
+          value: {
+            metric_value_id: "mv-cmp-vrh-030-bus",
+            metric: "vrh",
+            unit: "hours",
+            period_start: "2026-06-01",
+            period_end: "2026-07-01",
+            scope: "mode:bus",
+            value: "6100.00",
+            calc_name: "vrh_v0",
+            calc_version: "0.3.0",
+            computed_at: "2026-07-02T06:00:00Z",
+            certification_status: "certified",
+            detail: { source_mix: { tides: 4000, tides_simulated: 100 } },
+          },
+          missing_reason: null,
+          delta_vs_baseline: null,
+          delta_vs_previous: null,
+        },
+        {
+          comparand_index: 1,
+          value: null,
+          missing_reason:
+            "The 0.4.0 run refused this mode: trip coverage 0.41 is below the coverage threshold 0.95.",
+          delta_vs_baseline: null,
+          delta_vs_previous: null,
+        },
+      ],
+    },
+  ],
+  directions: { vrh: null, coverage: "higher_is_better" },
+  direction_note: COMPARE_DIRECTION_NOTE,
+  delta_note: COMPARE_DELTA_NOTE,
+  mixed_certification: true,
+  mixed_certification_note: COMPARE_MIXED_NOTE,
+};
+
+/** A registry-DIRECTED metric (coverage — the only one today): deltas may
+ *  be judged better/worse, always with the word. Down = worse here. */
+export const compareCoverageResponse: CompareResponse = {
+  metric: "coverage",
+  unit: "ratio",
+  comparands: [
+    {
+      key: "2026-05-01..2026-06-01@vrm_v0:0.4.0",
+      period_start: "2026-05-01",
+      period_end: "2026-06-01",
+      calc_name: "vrm_v0",
+      calc_version: "0.4.0",
+      baseline: true,
+    },
+    {
+      key: "2026-06-01..2026-07-01@vrm_v0:0.4.0",
+      period_start: "2026-06-01",
+      period_end: "2026-07-01",
+      calc_name: "vrm_v0",
+      calc_version: "0.4.0",
+      baseline: false,
+    },
+  ],
+  scopes: ["agency"],
+  rows: [
+    {
+      scope: "agency",
+      cells: [
+        {
+          comparand_index: 0,
+          value: {
+            metric_value_id: "mv-cov-1",
+            metric: "coverage",
+            unit: "ratio",
+            period_start: "2026-05-01",
+            period_end: "2026-06-01",
+            scope: "agency",
+            value: "0.9126",
+            calc_name: "vrm_v0",
+            calc_version: "0.4.0",
+            computed_at: "2026-06-02T06:00:00Z",
+            certification_status: "uncertified",
+          },
+          missing_reason: null,
+          delta_vs_baseline: null,
+          delta_vs_previous: null,
+        },
+        {
+          comparand_index: 1,
+          value: {
+            metric_value_id: "mv-cov-2",
+            metric: "coverage",
+            unit: "ratio",
+            period_start: "2026-06-01",
+            period_end: "2026-07-01",
+            scope: "agency",
+            value: "0.8990",
+            calc_name: "vrm_v0",
+            calc_version: "0.4.0",
+            computed_at: "2026-07-02T06:00:00Z",
+            certification_status: "uncertified",
+          },
+          missing_reason: null,
+          delta_vs_baseline: "-0.0136",
+          delta_vs_previous: "-0.0136",
+        },
+      ],
+    },
+  ],
+  directions: { coverage: "higher_is_better" },
+  direction_note: COMPARE_DIRECTION_NOTE,
+  delta_note: COMPARE_DELTA_NOTE,
+  mixed_certification: false,
+  mixed_certification_note: null,
+};
+
+/** The /compare vocabulary source: two calc versions of one period plus an
+ *  adjacent period, so both comparison modes have >= 2 options. */
+export const compareVocabularyValues: MetricValue[] = [
+  {
+    metric_value_id: "mv-voc-1",
+    metric: "vrh",
+    unit: "hours",
+    period_start: "2026-06-01",
+    period_end: "2026-07-01",
+    scope: "agency",
+    value: "8203.40",
+    calc_name: "vrh_v0",
+    calc_version: "0.3.0",
+    computed_at: "2026-07-02T06:00:00Z",
+    certification_status: "certified",
+  },
+  {
+    metric_value_id: "mv-voc-2",
+    metric: "vrh",
+    unit: "hours",
+    period_start: "2026-06-01",
+    period_end: "2026-07-01",
+    scope: "agency",
+    value: "9758.55",
+    calc_name: "vrh_v0",
+    calc_version: "0.4.0",
+    computed_at: "2026-07-02T07:00:00Z",
+    certification_status: "uncertified",
+  },
+  {
+    metric_value_id: "mv-voc-3",
+    metric: "vrh",
+    unit: "hours",
+    period_start: "2026-05-01",
+    period_end: "2026-06-01",
+    scope: "agency",
+    value: "8100.00",
+    calc_name: "vrh_v0",
+    calc_version: "0.4.0",
+    computed_at: "2026-06-02T07:00:00Z",
+    certification_status: "uncertified",
+  },
+];
+
+// ---- settings sandbox (handoff 0017, design point 6) ----
+
+export const sandboxSettings: Setting[] = [
+  {
+    setting_key: "coverage_threshold",
+    setting_value: "0.95",
+    value_type: "decimal",
+    description:
+      "The share of clean telemetry groups a calculation run must reach before its figure can be persisted; below this the run refuses. ENGINEERING PLACEHOLDER, not an FTA number.",
+    updated_by: "migration-0014",
+    updated_at: "2026-07-10T00:00:00Z",
+  },
+  {
+    setting_key: "layover_max_seconds",
+    setting_value: "1800",
+    value_type: "integer",
+    description:
+      "Maximum seconds of between-trip time within one vehicle block counted as layover in Vehicle Revenue Hours.",
+    updated_by: "migration-0014",
+    updated_at: "2026-07-10T00:00:00Z",
+  },
+  {
+    setting_key: "otp_early_tolerance_seconds",
+    setting_value: "60",
+    value_type: "integer",
+    description:
+      "OPERATIONS metric knob: seconds BEFORE the scheduled time a stop passage may occur and still count as on time in otp_v0.",
+    updated_by: "migration-0024",
+    updated_at: "2026-07-13T00:00:00Z",
+  },
+  {
+    setting_key: "agency_display_name",
+    setting_value: "Headway",
+    value_type: "string",
+    description: "Shown in the app header. NOT a sandbox knob.",
+    updated_by: "migration-0015",
+    updated_at: "2026-07-11T00:00:00Z",
+  },
+];
+
+/** Shaped EXACTLY like services/api routers/sandbox.py's
+ *  SandboxPreviewResponse (reconciled 2026-07-14): one NTD figure moves,
+ *  one variant honestly refuses with its would-be findings listed. */
+export const sandboxPreviewResponse: SandboxPreviewResponse = {
+  banner:
+    "MODELING PREVIEW — changes nothing. These figures were computed on the fly for this response only: no figure, data-quality issue, or setting was created or changed, nothing here is stored anywhere, and nothing here can ever be certified or reported. To actually change a policy knob, use the audited settings flow (PUT /settings/{key} — certifying official only).",
+  persisted: false,
+  period_start: "2026-06-01",
+  period_end: "2026-07-01",
+  period_convention:
+    "Periods are half-open [start, end): the end date is excluded.",
+  proposed: { coverage_threshold: "0.90" },
+  settings_flow_note:
+    "Applying a knob is a separate, audited act: PUT /settings/{key} (certifying official only; the old and new values land in the audit trail). The next real calculation run then reads the changed setting.",
+  ntd: {
+    baseline_thresholds: {
+      coverage_threshold: "0.95",
+      gap_threshold_seconds: "300",
+      layover_max_seconds: "1800",
+      missing_trip_threshold: "0.02",
+    },
+    baseline_threshold_sources: {
+      coverage_threshold: "app.settings row (updated by migration-0014)",
+      gap_threshold_seconds: "code default",
+      layover_max_seconds: "app.settings row (updated by migration-0014)",
+      missing_trip_threshold: "code default",
+    },
+    proposed_thresholds: {
+      coverage_threshold: "0.90",
+      gap_threshold_seconds: "300",
+      layover_max_seconds: "1800",
+      missing_trip_threshold: "0.02",
+    },
+    inputs: { vehicle_positions: 1340211, trips: 112034 },
+    metrics: [
+      {
+        metric: "vrh",
+        calc_name: "vrh_v0",
+        calc_version: "0.4.0",
+        unit: "hours",
+        scope: "agency",
+        category: "ntd",
+        baseline: {
+          value: null,
+          blocked: true,
+          findings: [
+            {
+              issue_type: "coverage_below_threshold",
+              title:
+                "Trip coverage 0.9126 is below the coverage threshold 0.95 — the run refused to emit a figure.",
+              description: "Refusal, not a guess.",
+              severity: "blocking",
+            },
+          ],
+          detail: null,
+        },
+        proposed: {
+          value: "9758.55",
+          blocked: false,
+          findings: [
+            {
+              issue_type: "telemetry_gap_excluded",
+              title: "202 gapped vehicle-trip groups excluded and documented.",
+              description: "Documented exclusions.",
+              severity: "warning",
+            },
+          ],
+          detail: { coverage: "0.9126" },
+        },
+        delta: null,
+      },
+      {
+        metric: "vrm",
+        calc_name: "vrm_v0",
+        calc_version: "0.4.0",
+        unit: "miles",
+        scope: "agency",
+        category: "ntd",
+        baseline: {
+          value: "64200.00",
+          blocked: false,
+          findings: [],
+          detail: { coverage: "0.9126" },
+        },
+        proposed: {
+          value: "64871.22",
+          blocked: false,
+          findings: [],
+          detail: { coverage: "0.9126" },
+        },
+        delta: "671.22",
+      },
+    ],
+    derivation: null,
+  },
+  ops: null,
 };

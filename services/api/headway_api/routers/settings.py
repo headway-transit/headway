@@ -37,7 +37,15 @@ from pydantic import BaseModel, Field
 from ..audit import write_event
 from ..auth import Identity
 from ..authz import require_authenticated, require_certifying_official
-from ..branding import BRAND_COLOR_KEYS, LOGO_META_KEY, brand_color_problem
+from ..branding import (
+    BRAND_COLOR_KEYS,
+    CHROME_KEYS,
+    CHROME_UNSET,
+    LOGO_META_KEY,
+    brand_color_problem,
+    chrome_pair_problem,
+    chrome_value_problem,
+)
 from ..db import get_db
 
 router = APIRouter(tags=["settings"])
@@ -136,6 +144,35 @@ def validate_value(value: str, value_type: str, setting_key: str) -> None:
             # Hex-format or WCAG AA contrast refusal — the message names the
             # failing surface and the measured ratio (branding.py).
             raise HTTPException(status_code=422, detail=problem)
+    if setting_key in CHROME_KEYS:
+        problem = chrome_value_problem(value)
+        if problem is not None:
+            raise HTTPException(status_code=422, detail=problem)
+        # The PAIR check (chrome colors render on each other, not on the
+        # app's light surfaces) needs the other chrome values — it runs in
+        # update_setting, against the values that would result.
+
+
+def validate_chrome_change(db, setting_key: str, value: str) -> None:
+    """Branding v2 pair guardrail (handoff 0017, design point 7): compute
+    the WCAG AA contrast of every chrome pair AS IT WOULD BE after this
+    change and refuse (plain-language 422 naming the pair and the measured
+    ratio) any pair under 4.5:1. Pairs with an 'unset' side are skipped —
+    an incomplete theme never applies, so it cannot render unreadably."""
+    prospective: dict[str, str] = {}
+    for key in CHROME_KEYS:
+        if key == setting_key:
+            prospective[key] = value
+            continue
+        row = db.execute(
+            _SELECT_SETTINGS + " WHERE setting_key = %s", (key,)
+        ).fetchone()
+        # A database seeded before migration 0027 has no sibling rows; an
+        # absent sibling is an unset one (the theme cannot apply anyway).
+        prospective[key] = row[1] if row is not None else CHROME_UNSET
+    problem = chrome_pair_problem(prospective)
+    if problem is not None:
+        raise HTTPException(status_code=422, detail=problem)
 
 
 @router.get("/settings", response_model=list[Setting])
@@ -174,6 +211,10 @@ def update_setting(
         )
     current = _setting_from_row(row)
     validate_value(body.value, current.value_type, setting_key)
+    if setting_key in CHROME_KEYS:
+        # The pairwise chrome guardrail needs the sibling values (branding
+        # v2, handoff 0017): checked against the values that would result.
+        validate_chrome_change(db, setting_key, body.value)
 
     with db.transaction():
         updated = db.execute(

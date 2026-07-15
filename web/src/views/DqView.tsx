@@ -4,7 +4,9 @@ import { ApiError, listDqIssues, resolveDqIssue } from "../api/client";
 import type { DqIssue } from "../api/types";
 import { canResolveDqIssues, useSession } from "../auth/session";
 import { SeverityIcon } from "../components/SeverityIcon";
+import { SummaryCards } from "../components/SummaryCards";
 import { copy } from "../copy";
+import { pushToast } from "../toasts";
 
 /**
  * The data-quality issue queue. Fail-loudly is the point: every issue is
@@ -28,7 +30,6 @@ export function DqView() {
   const session = useSession();
   const [issues, setIssues] = useState<DqIssue[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [announcement, setAnnouncement] = useState<string | null>(null);
   /** null = no filter (all). */
   const [severityFilter, setSeverityFilter] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
@@ -59,7 +60,8 @@ export function DqView() {
         prev?.map((i) => (i.issue_id === updated.issue_id ? updated : i)) ??
         null,
     );
-    setAnnouncement(copy.dq.resolveSuccess(updated.title));
+    // The shell-wide confirmation pattern (handoff 0017 #4).
+    pushToast(copy.dq.resolveSuccess(updated.title));
   };
 
   const mayResolve = canResolveDqIssues(session);
@@ -78,6 +80,10 @@ export function DqView() {
       (statusFilter === null || i.status === statusFilter),
   );
   const filtersActive = severityFilter !== null || statusFilter !== null;
+  // Render cap (2026-07-14 live finding: 35,456 live issues hung the tab).
+  // STATED, never silent: the counts cover the whole queue, the cap line
+  // says exactly how many cards are drawn, and filtering narrows the list.
+  const shown = filtered.slice(0, DQ_RENDER_CAP);
 
   return (
     <>
@@ -88,46 +94,67 @@ export function DqView() {
           {error}
         </div>
       )}
-      {announcement && (
-        <div role="status" className="status">
-          {announcement}
-        </div>
-      )}
       {!issues && !error && <p>{copy.loading}</p>}
       {issues && issues.length === 0 && <p>{copy.dq.empty}</p>}
       {issues && issues.length > 0 && (
         <>
           <section aria-label={copy.dq.summaryHeading} className="dq-summary">
             <h2>{copy.dq.summaryHeading}</h2>
-            <ul className="dq-chips">
-              <li className="chip severity blocking">
-                <SeverityIcon severity="blocking" />
-                {copy.dq.summaryBlockingOpen(formatCount(countBy("blocking")))}
-              </li>
-              <li className="chip severity warning">
-                <SeverityIcon severity="warning" />
-                {copy.dq.summaryWarningsOpen(formatCount(countBy("warning")))}
-              </li>
-              <li className="chip severity info">
-                <SeverityIcon severity="info" />
-                {copy.dq.summaryInfoOpen(formatCount(countBy("info")))}
-              </li>
-              <li className="chip resolved">
-                {copy.dq.summaryResolved(formatCount(resolvedCount))}
-              </li>
-              {totalEffortMinutes > 0 && (
+            {/* Summary cards ARE the filter toggles (handoff 0017 #2):
+                count + colored top border + label, aria-pressed. The three
+                severity cards toggle the severity filter; the Resolved card
+                toggles the status filter to resolved. Counts always cover
+                the whole queue — filtering hides nothing from them. */}
+            <SummaryCards
+              label={copy.dq.severityFilterLabel}
+              cards={[
+                {
+                  key: "blocking",
+                  label: copy.dq.cardLabels.blocking,
+                  count: formatCount(countBy("blocking")),
+                  tone: "danger",
+                  pressed: severityFilter === "blocking",
+                  icon: <SeverityIcon severity="blocking" />,
+                },
+                {
+                  key: "warning",
+                  label: copy.dq.cardLabels.warning,
+                  count: formatCount(countBy("warning")),
+                  tone: "warning",
+                  pressed: severityFilter === "warning",
+                  icon: <SeverityIcon severity="warning" />,
+                },
+                {
+                  key: "info",
+                  label: copy.dq.cardLabels.info,
+                  count: formatCount(countBy("info")),
+                  tone: "info",
+                  pressed: severityFilter === "info",
+                  icon: <SeverityIcon severity="info" />,
+                },
+                {
+                  key: "resolved",
+                  label: copy.dq.cardLabels.resolved,
+                  count: formatCount(resolvedCount),
+                  tone: "success",
+                  pressed: statusFilter === "resolved",
+                },
+              ]}
+              onToggle={(key, pressed) => {
+                if (key === "resolved") {
+                  setStatusFilter(pressed ? "resolved" : null);
+                } else {
+                  setSeverityFilter(pressed ? key : null);
+                }
+              }}
+            />
+            {totalEffortMinutes > 0 && (
+              <ul className="dq-chips">
                 <li className="chip effort">
                   {copy.dq.summaryEffort(effortHours)}
                 </li>
-              )}
-            </ul>
-            <FilterBar
-              label={copy.dq.severityFilterLabel}
-              allLabel={copy.dq.filterAllSeverities}
-              options={copy.dq.severityLabels}
-              value={severityFilter}
-              onChange={setSeverityFilter}
-            />
+              </ul>
+            )}
             <FilterBar
               label={copy.dq.statusFilterLabel}
               allLabel={copy.dq.filterAllStatuses}
@@ -158,16 +185,26 @@ export function DqView() {
               </button>
             </div>
           ) : (
-            <ul className="issue-list">
-              {filtered.map((issue) => (
-                <IssueCard
-                  key={issue.issue_id}
-                  issue={issue}
-                  mayResolve={mayResolve}
-                  onResolved={handleResolved}
-                />
-              ))}
-            </ul>
+            <>
+              {filtered.length > DQ_RENDER_CAP && (
+                <p className="banner">
+                  {copy.dq.renderCap(
+                    formatCount(DQ_RENDER_CAP),
+                    formatCount(filtered.length),
+                  )}
+                </p>
+              )}
+              <ul className="issue-list">
+                {shown.map((issue) => (
+                  <IssueCard
+                    key={issue.issue_id}
+                    issue={issue}
+                    mayResolve={mayResolve}
+                    onResolved={handleResolved}
+                  />
+                ))}
+              </ul>
+            </>
           )}
         </>
       )}
@@ -183,6 +220,9 @@ export function DqView() {
 function formatCount(count: number): string {
   return count.toLocaleString("en-US");
 }
+
+/** How many issue CARDS are drawn at once (the counts cover everything). */
+const DQ_RENDER_CAP = 200;
 
 interface FilterBarProps {
   label: string;

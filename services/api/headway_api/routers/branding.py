@@ -33,7 +33,15 @@ from pydantic import BaseModel
 from ..audit import write_event
 from ..auth import Identity
 from ..authz import require_certifying_official
-from ..branding import LOGO_META_KEY, LOGO_META_UNSET
+from ..branding import (
+    CHROME_ACCENT_KEY,
+    CHROME_HEADER_BG_KEY,
+    CHROME_HEADER_FG_KEY,
+    CHROME_KEYS,
+    CHROME_UNSET,
+    LOGO_META_KEY,
+    LOGO_META_UNSET,
+)
 from ..db import get_db
 from ..machine_auth import enforce_rate_limit
 
@@ -60,7 +68,21 @@ BRANDING_DEFAULTS = {
     "brand_color_primary": "#1a5fb4",
     "brand_color_accent": "#0b57d0",
     LOGO_META_KEY: LOGO_META_UNSET,
+    # Themed chrome, branding v2 (migration 0027): 'unset' = neutral chrome.
+    CHROME_HEADER_BG_KEY: CHROME_UNSET,
+    CHROME_HEADER_FG_KEY: CHROME_UNSET,
+    CHROME_ACCENT_KEY: CHROME_UNSET,
 }
+
+#: The one dark-mode statement (handoff 0008's known standing limitation,
+#: unchanged by branding v2): served with the bundle so the shell can state
+#: it rather than silently dropping a theme.
+CHROME_DARK_MODE_NOTE = (
+    "The chrome theme carries one color set, validated for readability "
+    "against itself. A theme is applied only where it renders readably; in "
+    "a display mode it was not validated for (dark mode), the shell keeps "
+    "the neutral Headway chrome and says so — stated, never silent."
+)
 
 _SELECT_SETTING_VALUE = (
     "SELECT setting_key, setting_value, value_type, description, "
@@ -89,6 +111,16 @@ class LogoUploadResponse(BaseModel):
     audit_event_id: int
 
 
+class ChromeTheme(BaseModel):
+    """Themed nav chrome (branding v2, handoff 0017): the pairs here have
+    already passed the server-side WCAG AA pair guardrail at write time
+    (header_fg on header_bg >= 4.5:1, accent on header_bg >= 4.5:1)."""
+
+    header_bg: str
+    header_fg: str
+    accent: str
+
+
 class BrandingResponse(BaseModel):
     """What the app shell needs to brand itself. Colors here have already
     passed the WCAG AA contrast guardrail at write time."""
@@ -97,6 +129,11 @@ class BrandingResponse(BaseModel):
     primary: str
     accent: str
     has_logo: bool
+    #: Non-null ONLY when the agency set all three chrome keys (each pair
+    #: contrast-guaranteed at write time). Null = neutral Headway chrome —
+    #: the out-of-the-box state.
+    chrome: Optional[ChromeTheme] = None
+    chrome_note: str = CHROME_DARK_MODE_NOTE
 
 
 def _setting_value(db, key: str) -> str:
@@ -268,9 +305,20 @@ def get_branding(request: Request) -> BrandingResponse:
     client_ip = request.client.host if request.client else "unknown"
     enforce_rate_limit(request.app.state.public_rate_limiter, client_ip)
     db = get_db(request)
+    chrome_values = {key: _setting_value(db, key) for key in CHROME_KEYS}
+    chrome = (
+        ChromeTheme(
+            header_bg=chrome_values[CHROME_HEADER_BG_KEY],
+            header_fg=chrome_values[CHROME_HEADER_FG_KEY],
+            accent=chrome_values[CHROME_ACCENT_KEY],
+        )
+        if all(v != CHROME_UNSET for v in chrome_values.values())
+        else None
+    )
     return BrandingResponse(
         display_name=_setting_value(db, "agency_display_name"),
         primary=_setting_value(db, "brand_color_primary"),
         accent=_setting_value(db, "brand_color_accent"),
         has_logo=_setting_value(db, LOGO_META_KEY) != LOGO_META_UNSET,
+        chrome=chrome,
     )

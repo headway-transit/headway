@@ -129,6 +129,43 @@ def list_issues(
     return [_issue_from_row(r) for r in rows]
 
 
+class DqIssueCounts(BaseModel):
+    """Counts for the /dq summary cards (handoff 0017, design point 2):
+    counted over EXACTLY the rows GET /dq/issues serves under the same
+    filter, so a card total can never disagree with the table below it.
+    Missing severities/statuses appear as explicit zeros."""
+
+    total: int
+    by_severity: dict[str, int]
+    by_status: dict[str, int]
+
+
+#: Severity vocabulary as the calc/AI writers use it (headway_calc.dq).
+KNOWN_SEVERITIES = ("blocking", "warning", "info")
+
+
+@router.get("/dq/issues/counts", response_model=DqIssueCounts)
+def count_issues(
+    status: Optional[str] = Query(default=None),
+    identity: Identity = Depends(require_authenticated),
+    db=Depends(get_db),
+) -> DqIssueCounts:
+    """Severity/status counts over the same rows (and the same optional
+    status filter) as GET /dq/issues — composition of the one issues query,
+    counted in the open, no new tables (handoff 0017)."""
+    issues = list_issues(status=status, identity=identity, db=db)
+    by_severity = {s: 0 for s in KNOWN_SEVERITIES}
+    by_status = {s: 0 for s in VALID_STATUSES}
+    for issue in issues:
+        # An unexpected vocabulary value still counts, honestly, under its
+        # own key — never dropped, never bucketed as something else.
+        by_severity[issue.severity] = by_severity.get(issue.severity, 0) + 1
+        by_status[issue.status] = by_status.get(issue.status, 0) + 1
+    return DqIssueCounts(
+        total=len(issues), by_severity=by_severity, by_status=by_status
+    )
+
+
 @router.post("/dq/issues/{issue_id}/resolve", response_model=ResolveResponse)
 def resolve_issue(
     issue_id: str,

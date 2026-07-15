@@ -224,6 +224,25 @@ export interface Mr20Package {
  * The two colors have already passed the server-side WCAG AA contrast
  * guardrail at write time (headway_api/branding.py).
  */
+/**
+ * Themed nav chrome (branding v2, handoff 0017 design point 7). Typed
+ * against services/api's ChromeTheme EXACTLY (reconciled against the
+ * regenerated openapi.json on 2026-07-14): ONE color set, validated
+ * against itself by the server-side WCAG AA pair guardrail at write time
+ * (header_fg on header_bg >= 4.5:1, accent on header_bg >= 4.5:1). The
+ * shell applies it only in the display mode it was validated for (light);
+ * dark mode keeps the neutral Headway chrome — the served chrome_note
+ * states the rule.
+ */
+export interface BrandingChrome {
+  /** '#rrggbb' — the header bar background. */
+  header_bg: string;
+  /** '#rrggbb' — header text/nav links; server-verified on header_bg. */
+  header_fg: string;
+  /** '#rrggbb' — the active-page accent; server-verified on header_bg. */
+  accent: string;
+}
+
 export interface Branding {
   display_name: string;
   /** '#rrggbb'; server-verified >= 4.5:1 against both light app surfaces. */
@@ -231,6 +250,14 @@ export interface Branding {
   /** '#rrggbb'; server-verified >= 4.5:1 against both light app surfaces. */
   accent: string;
   has_logo: boolean;
+  /**
+   * Branding v2 (handoff 0017): the themed chrome, or null/absent for the
+   * neutral Headway default. Optional so the UI tolerates an API that
+   * predates branding v2.
+   */
+  chrome?: BrandingChrome | null;
+  /** The server's per-mode limitation statement, verbatim. */
+  chrome_note?: string;
 }
 
 /** One row of app.settings (services/api routers/settings.py Setting). */
@@ -726,6 +753,168 @@ export interface SamplingEstimateResponse {
   citations: string[];
   retention_note: string;
   audit_event_id: number;
+}
+
+// ---- /metrics/compare (handoff 0017, design point 1) ----
+//
+// Typed against services/api routers/metrics.py's compare models EXACTLY
+// (Comparand/CompareCell/CompareRow/CompareResponse — reconciled against
+// the regenerated openapi.json on 2026-07-14; the endpoint was built in
+// parallel against the same handoff and landed while this UI was in
+// flight). The endpoint COMPOSES the same reader as GET /metrics/values —
+// it never computes a figure; deltas are exact server-side Decimal
+// differences served as signed strings.
+
+/**
+ * One comparison column, echoed back exactly as parsed from the request
+ * token: '<period_start>..<period_end>' optionally followed by
+ * '@<calc_name>:<calc_version>'. The FIRST comparand is the baseline.
+ */
+export interface CompareComparand {
+  /** The request token, echoed. */
+  key: string;
+  /** ISO date */
+  period_start: string;
+  /** ISO date */
+  period_end: string;
+  /** The pinned calculation, or null when the comparand pinned none. */
+  calc_name?: string | null;
+  calc_version?: string | null;
+  baseline: boolean;
+}
+
+/**
+ * One (scope, comparand) cell: the FULL MetricValue row (verbatim — the
+ * receipt affordance needs metric_value_id; badges need detail/category/
+ * certification_status) or an explicit missing reason, plus the exact
+ * deltas. This UI never subtracts two figures.
+ */
+export interface CompareCell {
+  comparand_index: number;
+  value?: MetricValue | null;
+  /** A missing figure is shown as missing, never invented. */
+  missing_reason?: string | null;
+  /** Exact signed Decimal string vs the baseline cell; null when either
+   *  side is missing or for the baseline column itself. */
+  delta_vs_baseline?: string | null;
+  delta_vs_previous?: string | null;
+}
+
+export interface CompareRow {
+  scope: string;
+  cells: CompareCell[];
+}
+
+/** GET /metrics/compare response. */
+export interface CompareResponse {
+  metric: string;
+  /** The unit shared by every present cell — null when no cell is present. */
+  unit: string | null;
+  comparands: CompareComparand[];
+  /** Row order: 'agency' first, the rest sorted (unless requested). */
+  scopes: string[];
+  rows: CompareRow[];
+  /**
+   * Direction metadata from the CALC LIBRARY's metric registry (handoff
+   * 0017: registry, never per-view; only 'coverage' is registered today,
+   * as 'higher_is_better'). null = sign-neutral: a delta on such a metric
+   * is a difference, not a win.
+   */
+  directions: Record<string, string | null>;
+  /** The registry's own explanation, verbatim. */
+  direction_note: string;
+  /** The server's delta provenance note, verbatim. */
+  delta_note: string;
+  /** True when present cells mix certified and uncertified figures. */
+  mixed_certification: boolean;
+  /** The server's label-both note, verbatim; null when not mixed. */
+  mixed_certification_note: string | null;
+}
+
+// ---- /sandbox/preview (handoff 0017, design point 6) ----
+//
+// Typed against services/api routers/sandbox.py EXACTLY (reconciled against
+// the regenerated openapi.json on 2026-07-14). The preview entry points
+// perform NO writes; `persisted` is a constant false, previews are
+// EPHEMERAL (the handoff's category='ops'-rows alternative was rejected by
+// the backend as the less honest design — documented in the router).
+
+export interface SandboxPreviewRequest {
+  /** ISO date */
+  period_start: string;
+  /** ISO date */
+  period_end: string;
+  /**
+   * Proposed knob values keyed by settings key (>= 1 entry). Values are
+   * STRINGS exactly like the settings surface — decimals parse via
+   * Decimal server-side; floating point never touches a policy number.
+   */
+  proposed: Record<string, string>;
+}
+
+/**
+ * One variant's outcome for one metric: the would-be value (or an honest
+ * refusal — `blocked` with the would-be findings) plus the would-be
+ * calculation detail. Nothing here was written anywhere.
+ */
+export interface PreviewSide {
+  /** Decimal string verbatim, or null when the variant refused. */
+  value: string | null;
+  blocked: boolean;
+  /** Would-be calc findings (Finding.to_dict(): issue_type, title,
+   *  description, severity, source_record_ids). Shown, never hidden. */
+  findings: Record<string, unknown>[];
+  detail: Record<string, unknown> | null;
+}
+
+/** One impact-rail row: baseline (current audited settings) vs proposed. */
+export interface PreviewMetricImpact {
+  metric: string;
+  calc_name: string;
+  calc_version: string;
+  unit: string;
+  scope: string;
+  /** 'ntd' | 'ops' — the honesty boundary carries through previews. */
+  category: string;
+  baseline: PreviewSide;
+  proposed: PreviewSide;
+  /** Exact Decimal difference proposed − baseline, as a string; null when
+   *  either side has no value. */
+  delta: string | null;
+}
+
+/** One knob family's preview (NTD calc-policy knobs, or the OTP ops knobs). */
+export interface PreviewSection {
+  /** The audited settings the baseline ran under, verbatim strings. */
+  baseline_thresholds: Record<string, string>;
+  /** Where each baseline value came from (setting/default), verbatim. */
+  baseline_threshold_sources: Record<string, string>;
+  proposed_thresholds: Record<string, string>;
+  /** Input row counts the preview read (workflow counts). */
+  inputs: Record<string, number>;
+  metrics: PreviewMetricImpact[];
+  derivation?: Record<string, unknown> | null;
+}
+
+export interface SandboxPreviewResponse {
+  /** The server's own changes-nothing statement, verbatim. */
+  banner: string;
+  /** Constant false — previews are ephemeral, pinned by calc test. */
+  persisted: boolean;
+  /** ISO date */
+  period_start: string;
+  /** ISO date */
+  period_end: string;
+  /** The half-open-period convention, stated verbatim. */
+  period_convention: string;
+  /** The proposed knob values, echoed verbatim. */
+  proposed: Record<string, string>;
+  /** The server's pointer at the audited settings flow, verbatim. */
+  settings_flow_note: string;
+  /** Present when any NTD calc-policy knob was proposed. */
+  ntd?: PreviewSection | null;
+  /** Present when any OTP-window ops knob was proposed. */
+  ops?: PreviewSection | null;
 }
 
 // ---- error envelopes (FastAPI) ----

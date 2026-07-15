@@ -35,6 +35,7 @@ import type { FormEvent } from "react";
 import {
   ApiError,
   createSafetyEvent,
+  downloadSs50Export,
   getSafetyDeadlines,
   listSafetyEvents,
   supersedeSafetyEvent,
@@ -47,9 +48,13 @@ import type {
   ThresholdExplanation,
 } from "../api/types";
 import { canEnterSafetyEvents, useSession } from "../auth/session";
+import { Breadcrumbs } from "../components/Breadcrumbs";
+import { ExportButtons } from "../components/ExportButtons";
 import { QuoteFigure } from "../components/QuoteFigure";
 import { SeverityIcon } from "../components/SeverityIcon";
+import { SummaryCards } from "../components/SummaryCards";
 import { copy } from "../copy";
+import { pushToast } from "../toasts";
 import { quoteContaining } from "../regulatory/quotes";
 import type { RegulatoryQuote } from "../regulatory/quotes";
 import {
@@ -168,6 +173,30 @@ function DeadlinesPanel({ deadlines }: { deadlines: SafetyDeadlines }) {
   const ss40Quote = quoteContaining("sscls_v0", SS40_QUOTE_SNIPPET);
   const ss50Quote = quoteContaining("sscls_v0", SS50_QUOTE_SNIPPET);
   const zeroModes = deadlines.ss50.filter((row) => row.zero_event).length;
+  /** Urgency summary cards = filter toggles (handoff 0017 #2). Urgency is
+   *  this page's presentation arithmetic on API-served due dates. */
+  const [urgencyFilter, setUrgencyFilter] = useState<string | null>(null);
+
+  const ss40WithUrgency = deadlines.ss40.map((item) => ({
+    item,
+    urgency: urgencyFor(daysUntil(item.due_date, now)),
+  }));
+  const ss50Urgency =
+    deadlines.ss50.length > 0
+      ? urgencyFor(daysUntil(deadlines.ss50[0].due_date, now))
+      : null;
+  const countOf = (urgency: Urgency) =>
+    ss40WithUrgency.filter((entry) => entry.urgency === urgency).length +
+    (ss50Urgency === urgency ? 1 : 0);
+  const totalDeadlines =
+    ss40WithUrgency.length + (ss50Urgency !== null ? 1 : 0);
+  const ss40Shown = ss40WithUrgency.filter(
+    (entry) => urgencyFilter === null || entry.urgency === urgencyFilter,
+  );
+  const ss50Shown = ss50Urgency !== null &&
+    (urgencyFilter === null || ss50Urgency === urgencyFilter);
+  const hiddenCount =
+    totalDeadlines - ss40Shown.length - (ss50Shown ? 1 : 0);
 
   return (
     <section
@@ -176,6 +205,44 @@ function DeadlinesPanel({ deadlines }: { deadlines: SafetyDeadlines }) {
     >
       <h2>{copy.safety.deadlines.heading}</h2>
       <p>{copy.safety.deadlines.intro}</p>
+
+      {totalDeadlines > 0 && (
+        <>
+          <SummaryCards
+            label={copy.safety.deadlines.summaryLabel}
+            cards={(["overdue", "due-soon", "upcoming"] as Urgency[]).map(
+              (urgency) => ({
+                key: urgency,
+                label: copy.safety.deadlines.urgencyCardLabels[urgency],
+                count: String(countOf(urgency)),
+                tone:
+                  urgency === "overdue"
+                    ? "danger"
+                    : urgency === "due-soon"
+                      ? "warning"
+                      : "info",
+                pressed: urgencyFilter === urgency,
+                icon: (
+                  <SeverityIcon
+                    severity={
+                      urgency === "overdue"
+                        ? "blocking"
+                        : urgency === "due-soon"
+                          ? "warning"
+                          : "info"
+                    }
+                  />
+                ),
+              }),
+            )}
+            onToggle={(key, pressed) => setUrgencyFilter(pressed ? key : null)}
+          />
+          {/* A filtered-out deadline is out of view, never off the calendar. */}
+          {urgencyFilter !== null && hiddenCount > 0 && (
+            <p>{copy.safety.deadlines.filteredNote(String(hiddenCount))}</p>
+          )}
+        </>
+      )}
 
       <h3>{copy.safety.deadlines.ss40Heading}</h3>
       <p>{copy.safety.deadlines.ss40Intro}</p>
@@ -187,7 +254,7 @@ function DeadlinesPanel({ deadlines }: { deadlines: SafetyDeadlines }) {
         <p>{copy.safety.deadlines.ss40None}</p>
       ) : (
         <ul className="deadline-list">
-          {deadlines.ss40.map((item) => (
+          {ss40Shown.map(({ item }) => (
             <li key={item.event_id} className="deadline-item">
               <UrgencyBadge days={daysUntil(item.due_date, now)} />
               <span>
@@ -206,7 +273,7 @@ function DeadlinesPanel({ deadlines }: { deadlines: SafetyDeadlines }) {
       <ManualQuote quote={ss50Quote} />
       {deadlines.ss50.length === 0 ? (
         <p>{copy.safety.deadlines.ss50None}</p>
-      ) : (
+      ) : !ss50Shown ? null : (
         <ul className="deadline-list">
           <li className="deadline-item deadline-month">
             <UrgencyBadge
@@ -242,6 +309,16 @@ function DeadlinesPanel({ deadlines }: { deadlines: SafetyDeadlines }) {
           </li>
         </ul>
       )}
+      {/* The server export of the month's S&S-50 package (handoff 0017,
+          design point 5): the same month this panel's deadlines cover,
+          explicit zero-event rows included. */}
+      <ExportButtons
+        label={copy.safety.deadlines.ss50ExportLabel(
+          monthName(deadlines.month),
+        )}
+        note={copy.safety.deadlines.ss50ExportNote}
+        download={(format) => downloadSs50Export(deadlines.month, format)}
+      />
     </section>
   );
 }
@@ -1107,6 +1184,17 @@ function EventCard({ event, mayEnter, onRecorded }: EventCardProps) {
             aria-label={copy.safety.form.correctionHeading(label)}
             className="correction-form"
           >
+            {/* The supersede-chain breadcrumb (handoff 0017 #4): where this
+                correction sits — the module, the original record, the new
+                record being written. */}
+            <Breadcrumbs
+              label={`${copy.breadcrumbs.label}: ${copy.safety.form.correctionHeading(label)}`}
+              trail={[
+                { label: copy.safety.heading, to: "/safety" },
+                { label, href: `#event-${event.event_id}` },
+                { label: copy.safety.form.correctionHeading(label) },
+              ]}
+            />
             <h4>{copy.safety.form.correctionHeading(label)}</h4>
             <p>{copy.safety.form.correctionIntro}</p>
             <EventForm
@@ -1132,7 +1220,10 @@ export function SafetyView() {
   const [deadlines, setDeadlines] = useState<SafetyDeadlines | null>(null);
   const [eventsError, setEventsError] = useState<string | null>(null);
   const [deadlinesError, setDeadlinesError] = useState<string | null>(null);
-  const [announcement, setAnnouncement] = useState<string | null>(null);
+  /** Classification summary cards = filter toggles (handoff 0017 #2). */
+  const [classificationFilter, setClassificationFilter] = useState<
+    string | null
+  >(null);
   const [lastRecorded, setLastRecorded] = useState<{
     result: SafetyClassificationResult;
     label: string;
@@ -1171,7 +1262,9 @@ export function SafetyView() {
     wasCorrection: boolean,
   ) => {
     setLastRecorded({ result, label });
-    setAnnouncement(
+    // The shell-wide confirmation pattern (handoff 0017 #4): create and
+    // supersede confirmations go through the toast region.
+    pushToast(
       wasCorrection
         ? copy.safety.form.correctionRecorded(
             classificationLabel(result.classification),
@@ -1192,12 +1285,6 @@ export function SafetyView() {
       <p>{copy.safety.intro}</p>
       {/* Honest scope, on every visit — alpha, no e-filing. */}
       <p className="banner">{copy.safety.alphaBanner}</p>
-
-      {announcement && (
-        <div role="status" className="status">
-          {announcement}
-        </div>
-      )}
 
       {deadlinesError && (
         <div role="alert" className="alert">
@@ -1243,16 +1330,75 @@ export function SafetyView() {
         {!events && !eventsError && <p>{copy.safety.events.loading}</p>}
         {events && events.length === 0 && <p>{copy.safety.events.empty}</p>}
         {events && events.length > 0 && (
-          <ul className="event-list">
-            {events.map((event) => (
-              <EventCard
-                key={event.event_id}
-                event={event}
-                mayEnter={mayEnter}
-                onRecorded={handleRecorded}
-              />
-            ))}
-          </ul>
+          <>
+            {/* Classification summary cards = filter toggles (handoff 0017
+                #2). Counts are workflow tallies of UNSUPERSEDED events; an
+                event with no classification on file always stays visible
+                (a gap is never hidden by a filter). */}
+            <SummaryCards
+              label={copy.safety.events.summaryLabel}
+              cards={(["major", "non_major", "not_reportable"] as const).map(
+                (classification) => ({
+                  key: classification,
+                  label: classificationLabel(classification),
+                  count: String(
+                    events.filter(
+                      (event) =>
+                        event.superseded_by === null &&
+                        event.classification === classification,
+                    ).length,
+                  ),
+                  tone:
+                    classification === "major"
+                      ? "danger"
+                      : classification === "non_major"
+                        ? "warning"
+                        : "info",
+                  pressed: classificationFilter === classification,
+                }),
+              )}
+              onToggle={(key, pressed) =>
+                setClassificationFilter(pressed ? key : null)
+              }
+            />
+            {(() => {
+              const shown = events.filter(
+                (event) =>
+                  classificationFilter === null ||
+                  event.classification === null ||
+                  event.classification === classificationFilter,
+              );
+              return (
+                <>
+                  {classificationFilter !== null && (
+                    <p>
+                      {copy.safety.events.showingCount(
+                        String(shown.length),
+                        String(events.length),
+                      )}{" "}
+                      <button
+                        type="button"
+                        className="link-like"
+                        onClick={() => setClassificationFilter(null)}
+                      >
+                        {copy.safety.events.clearFilter}
+                      </button>
+                    </p>
+                  )}
+                  <ul className="event-list">
+                    {shown.map((event) => (
+                      <EventCard
+                        key={event.event_id}
+                        event={event}
+                        mayEnter={mayEnter}
+                        onRecorded={handleRecorded}
+                      />
+                    ))}
+                  </ul>
+                </>
+              );
+            })()}
+          </>
         )}
       </section>
     </>

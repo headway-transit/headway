@@ -12,6 +12,7 @@ import { useSession } from "./auth/session";
 import { Layout } from "./components/Layout";
 import { BrandingView } from "./views/BrandingView";
 import { CertifyView } from "./views/CertifyView";
+import { CompareView } from "./views/CompareView";
 import { DashboardView } from "./views/DashboardView";
 import { DqView } from "./views/DqView";
 import { LineageView } from "./views/LineageView";
@@ -21,6 +22,7 @@ import { MonthlyReportView } from "./views/MonthlyReportView";
 import { PublicDataView } from "./views/PublicDataView";
 import { SafetyView } from "./views/SafetyView";
 import { SamplingView } from "./views/SamplingView";
+import { SandboxView } from "./views/SandboxView";
 
 function RequireAuth() {
   const session = useSession();
@@ -63,6 +65,8 @@ export function AppRoutes() {
           {/* Any authenticated role (handoff 0008, pillar B). */}
           <Route path="/dashboard" element={<DashboardView />} />
           <Route path="/metrics" element={<MetricsView />} />
+          {/* Comparison surface (handoff 0017 #1): any signed-in role. */}
+          <Route path="/compare" element={<CompareView />} />
           <Route path="/metrics/:id/lineage" element={<LineageView />} />
           <Route path="/reports/monthly" element={<MonthlyReportView />} />
           {/* Safety & Security (handoff 0010): any signed-in role reads;
@@ -74,6 +78,10 @@ export function AppRoutes() {
               only — the API enforces the role on every sampling write). */}
           <Route path="/sampling" element={<SamplingView />} />
           <Route path="/dq" element={<DqView />} />
+          {/* Settings sandbox (handoff 0017 #6): a what-if PREVIEW surface
+              that changes nothing — any signed-in role may model; the API
+              enforces whatever role the preview run requires. */}
+          <Route path="/sandbox" element={<SandboxView />} />
           {/* Role-gated in the UI (nav link + in-page notice); the API
               enforces certifying_official on POST /certifications. */}
           <Route path="/certify" element={<CertifyView />} />

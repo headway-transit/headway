@@ -155,6 +155,195 @@
         }
       }
     },
+    "/metrics/values/export": {
+      "get": {
+        "tags": [
+          "metrics"
+        ],
+        "summary": "Export Metric Values",
+        "description": "Download /metrics/values as CSV or XLSX (handoff 0017, design point\n5): ONE row assembly feeds both formats, so the XLSX values are\nbyte-equal to the CSV values cell for cell (pinned by test).",
+        "operationId": "export_metric_values_metrics_values_export_get",
+        "parameters": [
+          {
+            "name": "format",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^(csv|xlsx)$",
+              "default": "xlsx",
+              "title": "Format"
+            }
+          },
+          {
+            "name": "metric",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Metric"
+            }
+          },
+          {
+            "name": "period_start",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Period Start"
+            }
+          },
+          {
+            "name": "period_end",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Period End"
+            }
+          },
+          {
+            "name": "category",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^(ntd|ops)$"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Category"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The same rows GET /metrics/values serves, as a CSV or XLSX download. Figures are the exact served strings (XLSX cells are TEXT \u2014 never spreadsheet numbers); the preview disclaimer (and a simulated-data warning when any row is simulated) leads the CSV and forms the XLSX's first sheet.",
+            "content": {
+              "text/csv; charset=utf-8": {},
+              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {}
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/metrics/compare": {
+      "get": {
+        "tags": [
+          "metrics"
+        ],
+        "summary": "Compare Metric Values",
+        "description": "Compare one metric across 2\u20134 comparands (calc versions of the same\nfigure, or periods) per scope. Serves the calc library's persisted rows\nVERBATIM (composition of the same reader as GET /metrics/values \u2014 this\nendpoint never computes a figure) plus exact-decimal deltas as\ncomparison affordances; direction metadata comes from the calc\nlibrary's metric registry (coverage only today).",
+        "operationId": "compare_metric_values_metrics_compare_get",
+        "parameters": [
+          {
+            "name": "metric",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "The metric to compare, e.g. 'vrh'.",
+              "title": "Metric"
+            },
+            "description": "The metric to compare, e.g. 'vrh'."
+          },
+          {
+            "name": "comparand",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "2\u20134 comparison columns; repeat the parameter. Each comparand is '<period_start>..<period_end>' (ISO dates, the half-open period exactly as computed) optionally followed by '@<calc_name>:<calc_version>' to pin one calculation version \u2014 for example '2026-07-01..2026-08-01' or '2026-07-14..2026-07-16@dr_vrm_v0:0.1.1'. The first comparand is the baseline.",
+              "title": "Comparand"
+            },
+            "description": "2\u20134 comparison columns; repeat the parameter. Each comparand is '<period_start>..<period_end>' (ISO dates, the half-open period exactly as computed) optionally followed by '@<calc_name>:<calc_version>' to pin one calculation version \u2014 for example '2026-07-01..2026-08-01' or '2026-07-14..2026-07-16@dr_vrm_v0:0.1.1'. The first comparand is the baseline."
+          },
+          {
+            "name": "scope",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Row scopes (repeat the parameter), e.g. 'agency' and 'mode:bus'. Omit to include every scope that has at least one figure in any comparand ('agency' first, the rest sorted).",
+              "title": "Scope"
+            },
+            "description": "Row scopes (repeat the parameter), e.g. 'agency' and 'mode:bus'. Omit to include every scope that has at least one figure in any comparand ('agency' first, the rest sorted)."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompareResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/metrics/values/{metric_value_id}/lineage": {
       "get": {
         "tags": [
@@ -275,6 +464,56 @@
                     "$ref": "#/components/schemas/DqIssue"
                   },
                   "title": "Response List Issues Dq Issues Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/dq/issues/counts": {
+      "get": {
+        "tags": [
+          "data-quality"
+        ],
+        "summary": "Count Issues",
+        "description": "Severity/status counts over the same rows (and the same optional\nstatus filter) as GET /dq/issues \u2014 composition of the one issues query,\ncounted in the open, no new tables (handoff 0017).",
+        "operationId": "count_issues_dq_issues_counts_get",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DqIssueCounts"
                 }
               }
             }
@@ -830,6 +1069,112 @@
         }
       }
     },
+    "/reports/mr20/export": {
+      "get": {
+        "tags": [
+          "reports"
+        ],
+        "summary": "Export Mr20 Report",
+        "description": "Download the MR-20 preview package as CSV/XLSX (handoff 0017, design\npoint 5). Same package build as GET /reports/mr20; one row assembly\nfeeds both formats (XLSX values byte-equal to CSV values, pinned by\ntest); XLSX cells are TEXT so figures survive exactly.",
+        "operationId": "export_mr20_report_reports_mr20_export_get",
+        "parameters": [
+          {
+            "name": "month",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Calendar month as YYYY-MM.",
+              "title": "Month"
+            },
+            "description": "Calendar month as YYYY-MM."
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^(csv|xlsx)$",
+              "default": "xlsx",
+              "title": "Format"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The MR-20 preview package as a CSV or XLSX download: one row per (scope, metric) cell, values VERBATIM from the package; the NOT-REPORTABLE banner and every enumerated caveat lead the CSV and form the XLSX's first sheet.",
+            "content": {
+              "text/csv; charset=utf-8": {},
+              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {}
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/reports/ss50/export": {
+      "get": {
+        "tags": [
+          "reports"
+        ],
+        "summary": "Export Ss50 Report",
+        "description": "Download the S&S-50 preview package (headway_calc.ss50, served\nverbatim into a grid) as CSV/XLSX \u2014 handoff 0017, design point 5.",
+        "operationId": "export_ss50_report_reports_ss50_export_get",
+        "parameters": [
+          {
+            "name": "month",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Calendar month as YYYY-MM.",
+              "title": "Month"
+            },
+            "description": "Calendar month as YYYY-MM."
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^(csv|xlsx)$",
+              "default": "xlsx",
+              "title": "Format"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The S&S-50 non-major monthly summary package as a CSV or XLSX download: one row per (mode, type-of-service) cell including explicit zero rows; the NOT-REPORTABLE banner, citations, caveats and the excluded-event accounting lead the CSV and form the XLSX's first sheet.",
+            "content": {
+              "text/csv; charset=utf-8": {},
+              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {}
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/public/metrics/certified": {
       "get": {
         "tags": [
@@ -1047,6 +1392,72 @@
                     "$ref": "#/components/schemas/SafetyEventRecord"
                   },
                   "title": "Response List Events Safety Events Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/safety/events/counts": {
+      "get": {
+        "tags": [
+          "safety"
+        ],
+        "summary": "Count Events",
+        "description": "Classification counts over the same rows (and the same month/mode\nfilters) as GET /safety/events \u2014 composition of the one events query,\ncounted in the open, no new tables (handoff 0017).",
+        "operationId": "count_events_safety_events_counts_get",
+        "parameters": [
+          {
+            "name": "month",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Month"
+            }
+          },
+          {
+            "name": "mode",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Mode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SafetyEventCounts"
                 }
               }
             }
@@ -1711,6 +2122,60 @@
         }
       }
     },
+    "/sampling/plans/{plan_id}/worksheet": {
+      "get": {
+        "tags": [
+          "sampling"
+        ],
+        "summary": "Export Worksheet",
+        "description": "Download the ride-check worksheet (handoff 0017, design point 5):\nthe same plan/draw/measurement records GET /sampling/plans/{id}/progress\nsummarizes, one row per selected unit. One row assembly feeds both\nformats (XLSX values byte-equal to CSV values, pinned by test).",
+        "operationId": "export_worksheet_sampling_plans__plan_id__worksheet_get",
+        "parameters": [
+          {
+            "name": "plan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Plan Id"
+            }
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^(csv|xlsx)$",
+              "default": "xlsx",
+              "title": "Format"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The plan's measurement worksheet as a CSV or XLSX download: one row per selected unit per draw with its measured state; the plan's requirement, the undersampled/estimate-ready state and the \u00a763.11 retention note lead the CSV and form the XLSX's first sheet.",
+            "content": {
+              "text/csv; charset=utf-8": {},
+              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {}
+            }
+          },
+          "404": {
+            "description": "No sampling plan with that id exists."
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/sampling/plans/{plan_id}/estimate": {
       "post": {
         "tags": [
@@ -1763,6 +2228,48 @@
           }
         }
       }
+    },
+    "/sandbox/preview": {
+      "post": {
+        "tags": [
+          "sandbox"
+        ],
+        "summary": "Sandbox Preview",
+        "description": "Preview the figure impact of proposed policy-knob values for one\nperiod \u2014 read-only, ephemeral, never certifiable (module docstring).\nBaseline = the CURRENT audited settings (app.settings, the same\nprecedence a real run uses); proposed = the same computation with only\nthe proposed knobs overridden.",
+        "operationId": "sandbox_preview_sandbox_preview_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SandboxPreviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SandboxPreviewResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1798,6 +2305,21 @@
           "has_logo": {
             "type": "boolean",
             "title": "Has Logo"
+          },
+          "chrome": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ChromeTheme"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "chrome_note": {
+            "type": "string",
+            "title": "Chrome Note",
+            "default": "The chrome theme carries one color set, validated for readability against itself. A theme is applied only where it renders readably; in a display mode it was not validated for (dark mode), the shell keeps the neutral Headway chrome and says so \u2014 stated, never silent."
           }
         },
         "type": "object",
@@ -1875,6 +2397,30 @@
         ],
         "title": "CertificationResponse"
       },
+      "ChromeTheme": {
+        "properties": {
+          "header_bg": {
+            "type": "string",
+            "title": "Header Bg"
+          },
+          "header_fg": {
+            "type": "string",
+            "title": "Header Fg"
+          },
+          "accent": {
+            "type": "string",
+            "title": "Accent"
+          }
+        },
+        "type": "object",
+        "required": [
+          "header_bg",
+          "header_fg",
+          "accent"
+        ],
+        "title": "ChromeTheme",
+        "description": "Themed nav chrome (branding v2, handoff 0017): the pairs here have\nalready passed the server-side WCAG AA pair guardrail at write time\n(header_fg on header_bg >= 4.5:1, accent on header_bg >= 4.5:1)."
+      },
       "ClassificationResult": {
         "properties": {
           "classification": {
@@ -1931,6 +2477,228 @@
           "classifier_version"
         ],
         "title": "ClassificationResult"
+      },
+      "Comparand": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "title": "Key"
+          },
+          "period_start": {
+            "type": "string",
+            "format": "date",
+            "title": "Period Start"
+          },
+          "period_end": {
+            "type": "string",
+            "format": "date",
+            "title": "Period End"
+          },
+          "calc_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Calc Name"
+          },
+          "calc_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Calc Version"
+          },
+          "baseline": {
+            "type": "boolean",
+            "title": "Baseline"
+          }
+        },
+        "type": "object",
+        "required": [
+          "key",
+          "period_start",
+          "period_end",
+          "baseline"
+        ],
+        "title": "Comparand",
+        "description": "One comparison column, echoed back exactly as parsed."
+      },
+      "CompareCell": {
+        "properties": {
+          "comparand_index": {
+            "type": "integer",
+            "title": "Comparand Index"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MetricValue"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "missing_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Missing Reason"
+          },
+          "delta_vs_baseline": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delta Vs Baseline"
+          },
+          "delta_vs_previous": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delta Vs Previous"
+          }
+        },
+        "type": "object",
+        "required": [
+          "comparand_index"
+        ],
+        "title": "CompareCell",
+        "description": "One (scope, comparand) cell: the FULL metric-value row (verbatim \u2014\nthe receipt affordance needs metric_value_id, badges need detail/\ncategory/certification_status) or an explicit missing reason, plus the\nexact deltas."
+      },
+      "CompareResponse": {
+        "properties": {
+          "metric": {
+            "type": "string",
+            "title": "Metric"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit"
+          },
+          "comparands": {
+            "items": {
+              "$ref": "#/components/schemas/Comparand"
+            },
+            "type": "array",
+            "title": "Comparands"
+          },
+          "scopes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Scopes"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/CompareRow"
+            },
+            "type": "array",
+            "title": "Rows"
+          },
+          "directions": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "type": "object",
+            "title": "Directions"
+          },
+          "direction_note": {
+            "type": "string",
+            "title": "Direction Note"
+          },
+          "delta_note": {
+            "type": "string",
+            "title": "Delta Note"
+          },
+          "mixed_certification": {
+            "type": "boolean",
+            "title": "Mixed Certification"
+          },
+          "mixed_certification_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mixed Certification Note"
+          }
+        },
+        "type": "object",
+        "required": [
+          "metric",
+          "unit",
+          "comparands",
+          "scopes",
+          "rows",
+          "directions",
+          "direction_note",
+          "delta_note",
+          "mixed_certification",
+          "mixed_certification_note"
+        ],
+        "title": "CompareResponse"
+      },
+      "CompareRow": {
+        "properties": {
+          "scope": {
+            "type": "string",
+            "title": "Scope"
+          },
+          "cells": {
+            "items": {
+              "$ref": "#/components/schemas/CompareCell"
+            },
+            "type": "array",
+            "title": "Cells"
+          }
+        },
+        "type": "object",
+        "required": [
+          "scope",
+          "cells"
+        ],
+        "title": "CompareRow"
       },
       "CreateKeyRequest": {
         "properties": {
@@ -2218,6 +2986,36 @@
           "resolution_minutes"
         ],
         "title": "DqIssue"
+      },
+      "DqIssueCounts": {
+        "properties": {
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "by_severity": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "By Severity"
+          },
+          "by_status": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "By Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "total",
+          "by_severity",
+          "by_status"
+        ],
+        "title": "DqIssueCounts",
+        "description": "Counts for the /dq summary cards (handoff 0017, design point 2):\ncounted over EXACTLY the rows GET /dq/issues serves under the same\nfilter, so a card total can never disagree with the table below it.\nMissing severities/statuses appear as explicit zeros."
       },
       "DrawCreated": {
         "properties": {
@@ -3442,6 +4240,172 @@
         ],
         "title": "PlanRecord"
       },
+      "PreviewMetricImpact": {
+        "properties": {
+          "metric": {
+            "type": "string",
+            "title": "Metric"
+          },
+          "calc_name": {
+            "type": "string",
+            "title": "Calc Name"
+          },
+          "calc_version": {
+            "type": "string",
+            "title": "Calc Version"
+          },
+          "unit": {
+            "type": "string",
+            "title": "Unit"
+          },
+          "scope": {
+            "type": "string",
+            "title": "Scope"
+          },
+          "category": {
+            "type": "string",
+            "title": "Category"
+          },
+          "baseline": {
+            "$ref": "#/components/schemas/PreviewSide"
+          },
+          "proposed": {
+            "$ref": "#/components/schemas/PreviewSide"
+          },
+          "delta": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delta"
+          }
+        },
+        "type": "object",
+        "required": [
+          "metric",
+          "calc_name",
+          "calc_version",
+          "unit",
+          "scope",
+          "category",
+          "baseline",
+          "proposed",
+          "delta"
+        ],
+        "title": "PreviewMetricImpact"
+      },
+      "PreviewSection": {
+        "properties": {
+          "baseline_thresholds": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Baseline Thresholds"
+          },
+          "baseline_threshold_sources": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Baseline Threshold Sources"
+          },
+          "proposed_thresholds": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Proposed Thresholds"
+          },
+          "inputs": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Inputs"
+          },
+          "metrics": {
+            "items": {
+              "$ref": "#/components/schemas/PreviewMetricImpact"
+            },
+            "type": "array",
+            "title": "Metrics"
+          },
+          "derivation": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Derivation"
+          }
+        },
+        "type": "object",
+        "required": [
+          "baseline_thresholds",
+          "baseline_threshold_sources",
+          "proposed_thresholds",
+          "inputs",
+          "metrics"
+        ],
+        "title": "PreviewSection"
+      },
+      "PreviewSide": {
+        "properties": {
+          "value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          },
+          "blocked": {
+            "type": "boolean",
+            "title": "Blocked"
+          },
+          "findings": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Findings"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "required": [
+          "value",
+          "blocked",
+          "findings",
+          "detail"
+        ],
+        "title": "PreviewSide",
+        "description": "One variant's outcome for one metric: the would-be value (or an\nhonest refusal) plus every would-be finding. Nothing here was written\nanywhere."
+      },
       "PublicMetricValue": {
         "properties": {
           "metric_value_id": {
@@ -3714,6 +4678,38 @@
           "audit_event_id"
         ],
         "title": "RevokeSubscriptionResponse"
+      },
+      "SafetyEventCounts": {
+        "properties": {
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "by_classification": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "By Classification"
+          },
+          "unclassified": {
+            "type": "integer",
+            "title": "Unclassified"
+          },
+          "superseded": {
+            "type": "integer",
+            "title": "Superseded"
+          }
+        },
+        "type": "object",
+        "required": [
+          "total",
+          "by_classification",
+          "unclassified",
+          "superseded"
+        ],
+        "title": "SafetyEventCounts",
+        "description": "Counts for the /safety summary cards (handoff 0017, design point 2):\ncounted over EXACTLY the rows GET /safety/events serves under the same\nfilters, so a card can never disagree with the table. Classification is\neach event's LATEST verdict; an event with no classification row counts\nas 'unclassified' (never guessed); superseded events are counted\nseparately AND inside their classification bucket, exactly as the list\nshows them."
       },
       "SafetyEventCreate": {
         "properties": {
@@ -4130,6 +5126,103 @@
           "audit_event_id"
         ],
         "title": "SafetyEventSuperseded"
+      },
+      "SandboxPreviewRequest": {
+        "properties": {
+          "period_start": {
+            "type": "string",
+            "format": "date",
+            "title": "Period Start"
+          },
+          "period_end": {
+            "type": "string",
+            "format": "date",
+            "title": "Period End"
+          },
+          "proposed": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "minProperties": 1,
+            "title": "Proposed"
+          }
+        },
+        "type": "object",
+        "required": [
+          "period_start",
+          "period_end",
+          "proposed"
+        ],
+        "title": "SandboxPreviewRequest"
+      },
+      "SandboxPreviewResponse": {
+        "properties": {
+          "banner": {
+            "type": "string",
+            "title": "Banner"
+          },
+          "persisted": {
+            "type": "boolean",
+            "title": "Persisted"
+          },
+          "period_start": {
+            "type": "string",
+            "format": "date",
+            "title": "Period Start"
+          },
+          "period_end": {
+            "type": "string",
+            "format": "date",
+            "title": "Period End"
+          },
+          "period_convention": {
+            "type": "string",
+            "title": "Period Convention"
+          },
+          "proposed": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Proposed"
+          },
+          "settings_flow_note": {
+            "type": "string",
+            "title": "Settings Flow Note"
+          },
+          "ntd": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PreviewSection"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "ops": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PreviewSection"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "banner",
+          "persisted",
+          "period_start",
+          "period_end",
+          "period_convention",
+          "proposed",
+          "settings_flow_note"
+        ],
+        "title": "SandboxPreviewResponse"
       },
       "Setting": {
         "properties": {

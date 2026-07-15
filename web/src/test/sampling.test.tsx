@@ -312,8 +312,9 @@ describe("/sampling", () => {
     );
     await user.click(screen.getByRole("button", { name: "Create this plan" }));
 
-    // The announcement carries the size the CALC served, verbatim.
-    expect(await screen.findByRole("status")).toHaveTextContent(
+    // The toast confirmation (handoff 0017 #4) carries the size the CALC
+    // served, verbatim.
+    expect(await screen.findByRole("log")).toHaveTextContent(
       "Required sample size, from the manual's table: 324 units for the year.",
     );
 
@@ -429,7 +430,7 @@ describe("/sampling", () => {
       screen.getByRole("button", { name: "Draw this period's sample" }),
     );
 
-    expect(await screen.findByRole("status")).toHaveTextContent(
+    expect(await screen.findByRole("log")).toHaveTextContent(
       "The sample for 2026-Q1 is drawn: 8 units were selected at random, without replacement.",
     );
 
@@ -493,7 +494,9 @@ describe("/sampling", () => {
     expect(
       screen.getAllByText("31 of 32 required units measured.").length,
     ).toBeGreaterThan(0);
-    expect(screen.getByRole("meter")).toBeInTheDocument();
+    // Two meters now: the in-row plan progress bar (handoff 0017 #3) and
+    // the progress panel's meter — both value+label text, never bar-alone.
+    expect(screen.getAllByRole("meter").length).toBeGreaterThan(1);
     expect(
       screen.getByText("2026-Q4: 7 of 8 drawn units measured"),
     ).toBeInTheDocument();
@@ -535,7 +538,8 @@ describe("/sampling", () => {
     await expectNoAxeViolations();
   });
 
-  it("records the last measurement (observed PMT stays a decimal string), reaches target, and runs the §83 estimate into a receipt with both sides quoted and the sampled-estimate provenance kept distinct", async () => {
+  // Long test (form typing + full estimate receipt): headroom under load.
+  it("records the last measurement (observed PMT stays a decimal string), reaches target, and runs the §83 estimate into a receipt with both sides quoted and the sampled-estimate provenance kept distinct", { timeout: 15000 }, async () => {
     signInAs("report_preparer");
     let detail = {
       progress: samplingProgressUnder,
@@ -593,7 +597,7 @@ describe("/sampling", () => {
       screen.getByRole("button", { name: "Record this measurement" }),
     );
 
-    expect(await screen.findByRole("status")).toHaveTextContent(
+    expect(await screen.findByRole("log")).toHaveTextContent(
       `Measurement recorded for ${PENDING_UNIT}.`,
     );
     // The measurement body: observed UPT a whole count, observed PMT a
@@ -631,7 +635,7 @@ describe("/sampling", () => {
     expect(button).not.toHaveAttribute("aria-disabled");
     await user.click(button);
 
-    expect(await screen.findByRole("status")).toHaveTextContent(
+    expect(await screen.findByRole("log")).toHaveTextContent(
       "The estimate is computed.",
     );
     const estimatePost = calls.find(
@@ -752,5 +756,49 @@ describe("/sampling", () => {
     expect(
       screen.queryByRole("region", { name: /^Estimate receipt/ }),
     ).not.toBeInTheDocument();
+  });
+
+  it("shows an in-row progress bar per plan (text + meter, never bar-alone) with the estimate-ready state visually distinct", async () => {
+    // Under target: the bar rides the API's counts; no ready tag.
+    signInAs("viewer");
+    mockSampling(crPlanRoutes());
+    renderApp("/sampling");
+
+    const rowMeter = await screen.findByRole("meter", {
+      name: /Sampling progress for 2026/,
+    });
+    // Value + label TEXT first (the API's counts verbatim in the sentence).
+    expect(rowMeter.closest(".row-progress")).toHaveTextContent(
+      "31 of 32 required units measured.",
+    );
+    expect(screen.queryByText("Ready to estimate")).not.toBeInTheDocument();
+    await expectNoAxeViolations();
+  });
+
+  it("marks a plan whose sample reached its required size as Ready to estimate", async () => {
+    signInAs("viewer");
+    mockSampling({
+      ...crPlanRoutes(),
+      [`GET /sampling/plans/${samplingPlanCr.plan_id}/progress`]: {
+        status: 200,
+        body: samplingProgressComplete,
+      },
+      [`GET /sampling/plans/${samplingPlanCr.plan_id}/measurements`]: {
+        status: 200,
+        body: [...samplingMeasurementsCr, samplingFinalMeasurement],
+      },
+    });
+    renderApp("/sampling");
+
+    const rowMeter = await screen.findByRole("meter", {
+      name: /Sampling progress for 2026/,
+    });
+    const row = rowMeter.closest(".row-progress") as HTMLElement;
+    expect(row).toHaveTextContent("32 of 32 required units measured.");
+    // The distinct ready state: tag + class — the label carries the
+    // meaning, never color alone.
+    expect(within(row).getByText("Ready to estimate")).toBeInTheDocument();
+    expect(row.className).toContain("ready");
+    await expectNoAxeViolations();
   });
 });

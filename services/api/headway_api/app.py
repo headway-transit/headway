@@ -28,6 +28,7 @@ from .routers import (
     reports,
     safety,
     sampling,
+    sandbox,
     settings as settings_router,
 )
 
@@ -141,4 +142,5 @@ def create_app(
     app.include_router(branding.router)
     app.include_router(safety.router)
     app.include_router(sampling.router)
+    app.include_router(sandbox.router)
     return app

@@ -293,6 +293,9 @@ export function BrandingView() {
               </span>
             </div>
             <p className="preview-note">{copy.branding.previewChartNote}</p>
+            {/* Branding v2 (handoff 0017 #7): the per-mode chrome rule,
+                stated where branding is edited — never silent. */}
+            <p className="preview-note">{copy.branding.chromeDarkNote}</p>
           </div>
         </section>
 

@@ -18,6 +18,10 @@ SEEDED = {
     "brand_color_primary": ("#1a5fb4", "text", "migration:0015"),
     "brand_color_accent": ("#0b57d0", "text", "migration:0015"),
     "brand_logo_meta": ("unset", "text", "migration:0015"),
+    # Themed chrome keys (migration 0027, handoff 0017 design point 7).
+    "brand_chrome_header_bg": ("unset", "text", "migration:0027"),
+    "brand_chrome_header_fg": ("unset", "text", "migration:0027"),
+    "brand_chrome_accent": ("unset", "text", "migration:0027"),
 }
 
 

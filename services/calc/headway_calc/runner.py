@@ -283,6 +283,80 @@ class RunReport:
         return json.dumps(self.to_dict(), indent=2)
 
 
+def _resolve_ntd_thresholds(
+    settings,
+    gap_threshold_seconds: float | None,
+    coverage_threshold: Decimal | float | str | None,
+    layover_max_seconds: float | None,
+    missing_trip_threshold: Decimal | float | str | None,
+    imbalance_threshold: Decimal | float | str | None,
+) -> tuple[float, Decimal, float, Decimal, Decimal, dict[str, str]]:
+    """The one threshold-precedence implementation (run_period's documented
+    rule, shared with preview_period so a preview can never resolve a knob
+    differently from the run it models): explicit argument > app.settings
+    row (``settings``, already loaded — None means the table is absent or
+    was skipped) > code default. Returns the five resolved values plus the
+    per-threshold provenance dict ("explicit" | "settings" | "default")."""
+    sources: dict[str, str] = {}
+
+    if gap_threshold_seconds is not None:
+        threshold = float(gap_threshold_seconds)
+        sources["gap_threshold_seconds"] = "explicit"
+    elif settings is not None:
+        threshold = float(settings.gap_threshold_seconds)
+        sources["gap_threshold_seconds"] = "settings"
+    else:
+        threshold = GAP_THRESHOLD_SECONDS
+        sources["gap_threshold_seconds"] = "default"
+
+    if coverage_threshold is not None:
+        cov_threshold = Decimal(str(coverage_threshold))
+        sources["coverage_threshold"] = "explicit"
+    elif settings is not None:
+        cov_threshold = settings.coverage_threshold
+        sources["coverage_threshold"] = "settings"
+    else:
+        cov_threshold = COVERAGE_THRESHOLD
+        sources["coverage_threshold"] = "default"
+
+    if layover_max_seconds is not None:
+        layover_max = float(layover_max_seconds)
+        sources["layover_max_seconds"] = "explicit"
+    elif settings is not None:
+        layover_max = float(settings.layover_max_seconds)
+        sources["layover_max_seconds"] = "settings"
+    else:
+        layover_max = LAYOVER_MAX_SECONDS
+        sources["layover_max_seconds"] = "default"
+
+    if missing_trip_threshold is not None:
+        missing_threshold = Decimal(str(missing_trip_threshold))
+        sources["missing_trip_threshold"] = "explicit"
+    elif settings is not None:
+        missing_threshold = settings.missing_trip_threshold
+        sources["missing_trip_threshold"] = "settings"
+    else:
+        missing_threshold = MISSING_TRIP_THRESHOLD
+        sources["missing_trip_threshold"] = "default"
+
+    # imbalance_threshold is not an app.settings knob: explicit or default.
+    if imbalance_threshold is not None:
+        imbal_threshold = Decimal(str(imbalance_threshold))
+        sources["imbalance_threshold"] = "explicit"
+    else:
+        imbal_threshold = IMBALANCE_THRESHOLD
+        sources["imbalance_threshold"] = "default"
+
+    return (
+        threshold,
+        cov_threshold,
+        layover_max,
+        missing_threshold,
+        imbal_threshold,
+        sources,
+    )
+
+
 def run_period(
     conn,
     period_start: date,
@@ -373,55 +447,21 @@ def run_period(
     # default (docstring). Reading (and refusing on a broken table) happens
     # BEFORE any canonical row is touched. A SettingsError propagates here.
     settings = load_policy_settings(conn) if read_settings else None
-    sources: dict[str, str] = {}
-
-    if gap_threshold_seconds is not None:
-        threshold = float(gap_threshold_seconds)
-        sources["gap_threshold_seconds"] = "explicit"
-    elif settings is not None:
-        threshold = float(settings.gap_threshold_seconds)
-        sources["gap_threshold_seconds"] = "settings"
-    else:
-        threshold = GAP_THRESHOLD_SECONDS
-        sources["gap_threshold_seconds"] = "default"
-
-    if coverage_threshold is not None:
-        cov_threshold = Decimal(str(coverage_threshold))
-        sources["coverage_threshold"] = "explicit"
-    elif settings is not None:
-        cov_threshold = settings.coverage_threshold
-        sources["coverage_threshold"] = "settings"
-    else:
-        cov_threshold = COVERAGE_THRESHOLD
-        sources["coverage_threshold"] = "default"
-
-    if layover_max_seconds is not None:
-        layover_max = float(layover_max_seconds)
-        sources["layover_max_seconds"] = "explicit"
-    elif settings is not None:
-        layover_max = float(settings.layover_max_seconds)
-        sources["layover_max_seconds"] = "settings"
-    else:
-        layover_max = LAYOVER_MAX_SECONDS
-        sources["layover_max_seconds"] = "default"
-
-    if missing_trip_threshold is not None:
-        missing_threshold = Decimal(str(missing_trip_threshold))
-        sources["missing_trip_threshold"] = "explicit"
-    elif settings is not None:
-        missing_threshold = settings.missing_trip_threshold
-        sources["missing_trip_threshold"] = "settings"
-    else:
-        missing_threshold = MISSING_TRIP_THRESHOLD
-        sources["missing_trip_threshold"] = "default"
-
-    # imbalance_threshold is not an app.settings knob: explicit or default.
-    if imbalance_threshold is not None:
-        imbal_threshold = Decimal(str(imbalance_threshold))
-        sources["imbalance_threshold"] = "explicit"
-    else:
-        imbal_threshold = IMBALANCE_THRESHOLD
-        sources["imbalance_threshold"] = "default"
+    (
+        threshold,
+        cov_threshold,
+        layover_max,
+        missing_threshold,
+        imbal_threshold,
+        sources,
+    ) = _resolve_ntd_thresholds(
+        settings,
+        gap_threshold_seconds,
+        coverage_threshold,
+        layover_max_seconds,
+        missing_trip_threshold,
+        imbalance_threshold,
+    )
     positions = load_vehicle_positions(conn, period_start, period_end)
     passenger_events = load_passenger_events(conn, period_start, period_end)
     operated_trip_ids = load_operated_trip_ids(conn, period_start, period_end)
@@ -697,6 +737,41 @@ class OpsRunReport:
         return json.dumps(self.to_dict(), indent=2)
 
 
+def _resolve_ops_tolerances(
+    ops_settings,
+    otp_early_tolerance_seconds: int | None,
+    otp_late_tolerance_seconds: int | None,
+) -> tuple[int, int, dict[str, str]]:
+    """The one OTP-window precedence implementation (run_ops_period's
+    documented rule, shared with preview_ops_period): explicit argument >
+    app.settings row > code default, with per-tolerance provenance."""
+    from headway_calc.ops import (
+        OTP_EARLY_TOLERANCE_SECONDS,
+        OTP_LATE_TOLERANCE_SECONDS,
+    )
+
+    sources: dict[str, str] = {}
+    if otp_early_tolerance_seconds is not None:
+        early = int(otp_early_tolerance_seconds)
+        sources["otp_early_tolerance_seconds"] = "explicit"
+    elif ops_settings is not None:
+        early = ops_settings.otp_early_tolerance_seconds
+        sources["otp_early_tolerance_seconds"] = "settings"
+    else:
+        early = OTP_EARLY_TOLERANCE_SECONDS
+        sources["otp_early_tolerance_seconds"] = "default"
+    if otp_late_tolerance_seconds is not None:
+        late = int(otp_late_tolerance_seconds)
+        sources["otp_late_tolerance_seconds"] = "explicit"
+    elif ops_settings is not None:
+        late = ops_settings.otp_late_tolerance_seconds
+        sources["otp_late_tolerance_seconds"] = "settings"
+    else:
+        late = OTP_LATE_TOLERANCE_SECONDS
+        sources["otp_late_tolerance_seconds"] = "default"
+    return early, late, sources
+
+
 def run_ops_period(
     conn,
     period_start: date,
@@ -738,8 +813,6 @@ def run_ops_period(
     from headway_calc.ops import (
         HEADWAY_CALC_NAME,
         OTP_CALC_NAME,
-        OTP_EARLY_TOLERANCE_SECONDS,
-        OTP_LATE_TOLERANCE_SECONDS,
         compute_headway_adherence,
         compute_headway_adherence_by_route,
         compute_otp,
@@ -756,25 +829,9 @@ def run_ops_period(
     from headway_calc.settings import load_ops_policy_settings
 
     ops_settings = load_ops_policy_settings(conn) if read_settings else None
-    sources: dict[str, str] = {}
-    if otp_early_tolerance_seconds is not None:
-        early = int(otp_early_tolerance_seconds)
-        sources["otp_early_tolerance_seconds"] = "explicit"
-    elif ops_settings is not None:
-        early = ops_settings.otp_early_tolerance_seconds
-        sources["otp_early_tolerance_seconds"] = "settings"
-    else:
-        early = OTP_EARLY_TOLERANCE_SECONDS
-        sources["otp_early_tolerance_seconds"] = "default"
-    if otp_late_tolerance_seconds is not None:
-        late = int(otp_late_tolerance_seconds)
-        sources["otp_late_tolerance_seconds"] = "explicit"
-    elif ops_settings is not None:
-        late = ops_settings.otp_late_tolerance_seconds
-        sources["otp_late_tolerance_seconds"] = "settings"
-    else:
-        late = OTP_LATE_TOLERANCE_SECONDS
-        sources["otp_late_tolerance_seconds"] = "default"
+    early, late, sources = _resolve_ops_tolerances(
+        ops_settings, otp_early_tolerance_seconds, otp_late_tolerance_seconds
+    )
 
     positions = load_vehicle_positions(conn, period_start, period_end)
     schedule = load_ops_schedule(conn, period_start, period_end)
@@ -955,6 +1012,364 @@ def run_ops_period(
         routes_below_min_sample=thin_routes,
         outcomes=tuple(outcomes),
         run_info_ids=run_info_ids,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Sandbox PREVIEW entry points (handoff 0017, design point 6)
+# ---------------------------------------------------------------------------
+#
+# WHY A NEW ENTRY POINT EXISTS (the handoff requires this documented either
+# way): the preferred path was composing run_period / run_ops_period with
+# explicit-flag thresholds (--ignore-settings-style), but composition
+# genuinely cannot serve a what-if preview, because BOTH existing entry
+# points DURABLY WRITE by design — they route every finding to dq.issues and
+# COMMIT (fail-loudly-first, transaction 1) before persisting values
+# (transaction 2). A preview that wrote would pollute the real DQ workflow
+# with hypothetical findings and computed.metric_values with hypothetical
+# figures. Wrapping run_period in a rolled-back transaction was rejected as
+# dishonest (it would defeat run_period's own commit discipline with a
+# doctored connection). So the runner gains the BOUNDED preview entry points
+# below, with a structural guarantee instead:
+#
+#   preview_period / preview_ops_period NEVER WRITE. They load canonical
+#   inputs, run the same deterministic calc functions run_period runs, and
+#   return a report. No route_findings, no persist_result, no INSERT, no
+#   commit — pinned by test (test_preview.py asserts zero INSERTs and zero
+#   commits on the recording connection). Nothing a preview produces exists
+#   anywhere a certification (or any read path) could reach: a sandbox
+#   preview is EPHEMERAL and therefore structurally uncertifiable — and the
+#   migration-0024 CHECK stands behind that as the database-level wall for
+#   anything ops-categorized that IS persisted by the real ops runner.
+#
+# Threshold resolution is SHARED with the real runs (_resolve_ntd_thresholds
+# / _resolve_ops_tolerances), so a preview's baseline is exactly what the
+# next real run would use.
+
+
+@dataclass(frozen=True)
+class PreviewFinding:
+    """One would-be finding of a preview computation. NOT a dq.issues row —
+    previews never write — just the honest summary of what the calc refused
+    or flagged under the previewed thresholds."""
+
+    issue_type: str
+    severity: str
+    title: str
+
+    def to_dict(self) -> dict:
+        return {
+            "issue_type": self.issue_type,
+            "severity": self.severity,
+            "title": self.title,
+        }
+
+
+@dataclass(frozen=True)
+class PreviewOutcome:
+    """One metric's outcome under one previewed threshold set. ``value`` is
+    None when the computation refused (blocking findings) — a preview
+    refuses exactly where a real run would, never papering over a gap."""
+
+    calc_name: str
+    calc_version: str
+    metric: str
+    unit: str
+    scope: str
+    value: str | None
+    detail: dict | None
+    findings: tuple[PreviewFinding, ...]
+
+    @property
+    def blocked(self) -> bool:
+        return self.value is None
+
+    def to_dict(self) -> dict:
+        return {
+            "calc_name": self.calc_name,
+            "calc_version": self.calc_version,
+            "metric": self.metric,
+            "unit": self.unit,
+            "scope": self.scope,
+            "value": self.value,
+            "blocked": self.blocked,
+            "detail": self.detail,
+            "findings": [f.to_dict() for f in self.findings],
+        }
+
+
+@dataclass(frozen=True)
+class PreviewVariant:
+    """One threshold set to preview. Every None falls through to the same
+    precedence a real run uses (app.settings row, then code default)."""
+
+    label: str
+    gap_threshold_seconds: float | None = None
+    coverage_threshold: Decimal | float | str | None = None
+    layover_max_seconds: float | None = None
+    missing_trip_threshold: Decimal | float | str | None = None
+
+
+@dataclass(frozen=True)
+class PreviewVariantReport:
+    label: str
+    thresholds: dict[str, str]
+    threshold_sources: dict[str, str]
+    outcomes: tuple[PreviewOutcome, ...]
+
+    def to_dict(self) -> dict:
+        return {
+            "label": self.label,
+            "thresholds": dict(self.thresholds),
+            "threshold_sources": dict(self.threshold_sources),
+            "outcomes": [o.to_dict() for o in self.outcomes],
+        }
+
+
+@dataclass(frozen=True)
+class PreviewReport:
+    """Immutable report of one preview_period execution. Nothing in it was
+    persisted anywhere; ``persisted`` is a constant False so every consumer
+    can state that honestly."""
+
+    period_start: date
+    period_end: date
+    positions_loaded: int
+    passenger_events_loaded: int
+    operated_trips_loaded: int
+    stop_times_loaded: int
+    variants: tuple[PreviewVariantReport, ...]
+
+    persisted: bool = False
+
+    def to_dict(self) -> dict:
+        return {
+            "persisted": False,
+            "period_start": self.period_start.isoformat(),
+            "period_end": self.period_end.isoformat(),
+            "period_convention": "half-open [period_start, period_end), UTC",
+            "positions_loaded": self.positions_loaded,
+            "passenger_events_loaded": self.passenger_events_loaded,
+            "operated_trips_loaded": self.operated_trips_loaded,
+            "stop_times_loaded": self.stop_times_loaded,
+            "variants": [v.to_dict() for v in self.variants],
+        }
+
+
+def _preview_outcome(result: CalcResult, scope: str) -> PreviewOutcome:
+    findings = tuple(
+        PreviewFinding(
+            issue_type=f.issue_type, severity=f.severity, title=f.title
+        )
+        for f in (
+            list(result.infos)
+            + list(result.warnings)
+            + list(result.blocking_issues)
+        )
+    )
+    return PreviewOutcome(
+        calc_name=result.calc_name,
+        calc_version=result.calc_version,
+        metric=_METRIC_BY_CALC_NAME[result.calc_name],
+        unit=result.unit,
+        scope=scope,
+        value=None if result.blocking_issues else str(result.value),
+        detail=None if result.detail is None else result.detail.to_dict(),
+        findings=findings,
+    )
+
+
+def preview_period(
+    conn,
+    period_start: date,
+    period_end: date,
+    variants: tuple[PreviewVariant, ...] | list[PreviewVariant],
+    read_settings: bool = True,
+) -> PreviewReport:
+    """READ-ONLY what-if run of the four fleet-wide NTD calcs (vrm_v0,
+    vrh_v0, upt_v0, pmt_v0 — 'agency' scope) over one half-open period,
+    once per threshold variant, sharing one canonical-input load.
+
+    GUARANTEE (the sandbox honesty wall, handoff 0017 design point 6): this
+    function performs NO writes of any kind — no dq.issues rows, no
+    computed.metric_values rows, no lineage edges, no commit. Its results
+    exist only in the returned report; they can never be certified because
+    they never exist anywhere certification (or any other read path) can
+    see. Pinned by test.
+
+    Scope is deliberately bounded: fleet-wide figures only (no per-mode, no
+    DR — the DR calcs take no policy thresholds, so no knob can move them),
+    and only the four seeded NTD knobs vary. ``imbalance_threshold`` is not
+    an app.settings knob and is not previewable. A broken settings table
+    refuses exactly like a real run (SettingsError propagates).
+    """
+    if not variants:
+        raise ValueError("preview_period needs at least one variant.")
+    settings = load_policy_settings(conn) if read_settings else None
+    positions = load_vehicle_positions(conn, period_start, period_end)
+    passenger_events = load_passenger_events(conn, period_start, period_end)
+    operated_trip_ids = load_operated_trip_ids(conn, period_start, period_end)
+    trip_geometries = load_trip_geometries(conn, period_start, period_end)
+
+    variant_reports: list[PreviewVariantReport] = []
+    for variant in variants:
+        (
+            threshold,
+            cov_threshold,
+            layover_max,
+            missing_threshold,
+            imbal_threshold,
+            sources,
+        ) = _resolve_ntd_thresholds(
+            settings,
+            variant.gap_threshold_seconds,
+            variant.coverage_threshold,
+            variant.layover_max_seconds,
+            variant.missing_trip_threshold,
+            None,
+        )
+        results = (
+            compute_vrm(positions, threshold, cov_threshold),
+            compute_vrh(positions, threshold, cov_threshold, layover_max),
+            compute_upt(
+                passenger_events,
+                operated_trip_ids,
+                missing_trip_threshold=missing_threshold,
+                imbalance_threshold=imbal_threshold,
+            ),
+            compute_pmt(
+                passenger_events,
+                operated_trip_ids,
+                trip_geometries,
+                missing_trip_threshold=missing_threshold,
+                imbalance_threshold=imbal_threshold,
+            ),
+        )
+        variant_reports.append(
+            PreviewVariantReport(
+                label=variant.label,
+                thresholds={
+                    "gap_threshold_seconds": str(threshold),
+                    "coverage_threshold": str(cov_threshold),
+                    "layover_max_seconds": str(layover_max),
+                    "missing_trip_threshold": str(missing_threshold),
+                },
+                threshold_sources=sources,
+                outcomes=tuple(
+                    _preview_outcome(r, SCOPE_AGENCY) for r in results
+                ),
+            )
+        )
+
+    return PreviewReport(
+        period_start=period_start,
+        period_end=period_end,
+        positions_loaded=len(positions),
+        passenger_events_loaded=len(passenger_events),
+        operated_trips_loaded=len(operated_trip_ids),
+        stop_times_loaded=len(trip_geometries),
+        variants=tuple(variant_reports),
+    )
+
+
+@dataclass(frozen=True)
+class PreviewOpsVariant:
+    """One OTP-window set to preview (the two migration-0024 ops knobs)."""
+
+    label: str
+    otp_early_tolerance_seconds: int | None = None
+    otp_late_tolerance_seconds: int | None = None
+
+
+@dataclass(frozen=True)
+class PreviewOpsReport:
+    """Immutable report of one preview_ops_period execution — read-only,
+    exactly like PreviewReport (see preview_period's GUARANTEE)."""
+
+    period_start: date
+    period_end: date
+    positions_loaded: int
+    schedule_rows_loaded: int
+    passages_derived: int
+    derivation: dict
+    variants: tuple[PreviewVariantReport, ...]
+
+    persisted: bool = False
+
+    def to_dict(self) -> dict:
+        return {
+            "persisted": False,
+            "category": "ops",
+            "period_start": self.period_start.isoformat(),
+            "period_end": self.period_end.isoformat(),
+            "period_convention": "half-open [period_start, period_end), UTC",
+            "positions_loaded": self.positions_loaded,
+            "schedule_rows_loaded": self.schedule_rows_loaded,
+            "passages_derived": self.passages_derived,
+            "derivation": dict(self.derivation),
+            "variants": [v.to_dict() for v in self.variants],
+        }
+
+
+def preview_ops_period(
+    conn,
+    period_start: date,
+    period_end: date,
+    variants: tuple[PreviewOpsVariant, ...] | list[PreviewOpsVariant],
+    read_settings: bool = True,
+) -> PreviewOpsReport:
+    """READ-ONLY what-if run of otp_v0 ('agency' scope) over one half-open
+    period, once per OTP-window variant, sharing one input load and ONE
+    passage derivation (the derivation takes no knobs — only the on-time
+    verdict moves with the window).
+
+    Same GUARANTEE as preview_period: no writes, no commit, ephemeral
+    results only — and the ops category means even the REAL ops runner's
+    persisted figures sit behind the migration-0024 never-certifiable CHECK.
+    headway_adherence_v0 is deliberately not previewed: it takes no policy
+    knob, so a sandbox cannot move it.
+    """
+    from headway_calc.ops import compute_otp
+    from headway_calc.passages import derive_stop_passages
+    from headway_calc.reader import load_agency_timezones, load_ops_schedule
+    from headway_calc.settings import load_ops_policy_settings
+
+    if not variants:
+        raise ValueError("preview_ops_period needs at least one variant.")
+    ops_settings = load_ops_policy_settings(conn) if read_settings else None
+    positions = load_vehicle_positions(conn, period_start, period_end)
+    schedule = load_ops_schedule(conn, period_start, period_end)
+    timezones = tuple(load_agency_timezones(conn))
+    passages, stats = derive_stop_passages(positions, schedule)
+
+    variant_reports: list[PreviewVariantReport] = []
+    for variant in variants:
+        early, late, sources = _resolve_ops_tolerances(
+            ops_settings,
+            variant.otp_early_tolerance_seconds,
+            variant.otp_late_tolerance_seconds,
+        )
+        result = compute_otp(passages, stats, timezones, early, late)
+        variant_reports.append(
+            PreviewVariantReport(
+                label=variant.label,
+                thresholds={
+                    "otp_early_tolerance_seconds": str(early),
+                    "otp_late_tolerance_seconds": str(late),
+                },
+                threshold_sources=sources,
+                outcomes=(_preview_outcome(result, SCOPE_AGENCY),),
+            )
+        )
+
+    return PreviewOpsReport(
+        period_start=period_start,
+        period_end=period_end,
+        positions_loaded=len(positions),
+        schedule_rows_loaded=len(schedule),
+        passages_derived=len(passages),
+        derivation=stats.to_dict(),
+        variants=tuple(variant_reports),
     )
 
 

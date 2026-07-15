@@ -93,6 +93,23 @@ const PAIRS = [
   ["ops badge icon on info background (non-text, 3:1)", "#1d4e89", "#e7f0fa", 3.0],
   ["ops formula text on raised surface", "#1f2328", "#f6f8fa", 4.5],
 
+  // Handoff 0017 (UI wave): summary-card colored TOP BORDERS (non-text
+  // marks on the card background — the label + count are body text, checked
+  // above); the toast's success border; the delta better/worse TEXT on the
+  // card background (registry-directed metrics only — sign-neutral deltas
+  // use the muted pair checked above); the ready progress fill on the
+  // surface track; the baseline/ready/preview tags reuse the info + success
+  // text/background pairs (text checked above).
+  ["summary card danger top border on card background (non-text, 3:1)", "#9f1b1b", "#ffffff", 3.0],
+  ["summary card warning top border on card background (non-text, 3:1)", "#664b00", "#ffffff", 3.0],
+  ["summary card info top border on card background (non-text, 3:1)", "#1d4e89", "#ffffff", 3.0],
+  ["summary card success top border on card background (non-text, 3:1)", "#1c632f", "#ffffff", 3.0],
+  ["toast success border on card background (non-text, 3:1)", "#1c632f", "#ffffff", 3.0],
+  ["delta 'better' text on card background", "#1c632f", "#ffffff", 4.5],
+  ["delta 'worse' text on card background", "#9f1b1b", "#ffffff", 4.5],
+  ["ready progress fill on surface track (non-text, 3:1)", "#1c632f", "#f6f8fa", 3.0],
+  ["sandbox apply-note border on page background (non-text, 3:1)", "#1d4e89", "#ffffff", 3.0],
+
   // ---- DARK theme (handoff 0008 pillar A) ----
   // Card/content surface #161b22, page plane #0d1117. Brand color overrides
   // are NOT applied to dark text/controls (server guardrail covers light
@@ -121,6 +138,17 @@ const PAIRS = [
   ["dark: ops badge border / ops-owned dashed rule on card background (non-text, 3:1)", "#a8c7f0", "#161b22", 3.0],
   ["dark: ops badge icon on info background (non-text, 3:1)", "#a8c7f0", "#172439", 3.0],
   ["dark: ops formula text on raised surface (page plane)", "#e6edf3", "#0d1117", 4.5],
+
+  // Handoff 0017 (UI wave), dark counterparts.
+  ["dark: summary card danger top border on card background (non-text, 3:1)", "#ffb3ab", "#161b22", 3.0],
+  ["dark: summary card warning top border on card background (non-text, 3:1)", "#e8c06c", "#161b22", 3.0],
+  ["dark: summary card info top border on card background (non-text, 3:1)", "#a8c7f0", "#161b22", 3.0],
+  ["dark: summary card success top border on card background (non-text, 3:1)", "#8ddaa4", "#161b22", 3.0],
+  ["dark: toast success border on card background (non-text, 3:1)", "#8ddaa4", "#161b22", 3.0],
+  ["dark: delta 'better' text on card background", "#8ddaa4", "#161b22", 4.5],
+  ["dark: delta 'worse' text on card background", "#ffb3ab", "#161b22", 4.5],
+  ["dark: ready progress fill on page-plane track (non-text, 3:1)", "#8ddaa4", "#0d1117", 3.0],
+  ["dark: sandbox apply-note border on page plane (non-text, 3:1)", "#a8c7f0", "#0d1117", 3.0],
 ];
 
 let failed = false;

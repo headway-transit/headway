@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { ToggleButton } from "react-aria-components";
 import { ApiError, getLineage } from "../api/client";
 import type { LineageNode } from "../api/types";
+import { Breadcrumbs } from "../components/Breadcrumbs";
 import { LineageGraph } from "../components/LineageGraph";
 import { copy } from "../copy";
 
@@ -45,6 +46,15 @@ export function LineageView() {
 
   return (
     <>
+      {/* Deep-entity breadcrumb (handoff 0017 #4): the figure's receipt
+          lives on /metrics; this page is the walk onward to raw records. */}
+      <Breadcrumbs
+        trail={[
+          { label: copy.nav.metrics, to: "/metrics" },
+          { label: `${copy.lineage.crumbFigure} ${id ?? ""}` },
+          { label: copy.lineage.heading },
+        ]}
+      />
       <h1>{copy.lineage.heading}</h1>
       <p>{copy.lineage.intro}</p>
       <p>

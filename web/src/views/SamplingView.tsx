@@ -49,6 +49,7 @@ import { useMeter } from "react-aria";
 import {
   ApiError,
   createSamplingPlan,
+  downloadSamplingWorksheet,
   drawSamplingPeriod,
   estimateSamplingPmt,
   getSamplingOptions,
@@ -74,8 +75,12 @@ import {
   canRunSamplingEstimate,
   useSession,
 } from "../auth/session";
+import { Breadcrumbs } from "../components/Breadcrumbs";
+import { ExportButtons } from "../components/ExportButtons";
 import { QuoteFigure } from "../components/QuoteFigure";
+import { RowProgress } from "../components/RowProgress";
 import { copy } from "../copy";
+import { pushToast } from "../toasts";
 import { quoteContaining } from "../regulatory/quotes";
 import type { RegulatoryQuote } from "../regulatory/quotes";
 import {
@@ -618,9 +623,13 @@ function DrawForm({
 function Worksheet({
   draw,
   measurementsByUnit,
+  planLabel,
+  planAnchor,
 }: {
   draw: SamplingDrawRecord;
   measurementsByUnit: Map<string, SamplingMeasurementRecord>;
+  planLabel: string;
+  planAnchor: string;
 }) {
   const ws = s.worksheet;
   const selectionQuote = quoteContaining(
@@ -632,6 +641,20 @@ function Worksheet({
       className="sampling-worksheet"
       aria-label={ws.heading(draw.period_label)}
     >
+      {/* Deep-entity breadcrumb (handoff 0017 #4): plan → draw →
+          measurements. Label made unique per worksheet so multiple trails
+          on one page stay uniquely named landmarks. Never printed — the
+          ride checker's sheet keeps only the sheet. */}
+      <div className="no-print">
+        <Breadcrumbs
+          label={`${copy.breadcrumbs.label}: ${ws.heading(draw.period_label)}`}
+          trail={[
+            { label: s.heading, to: "/sampling" },
+            { label: planLabel, href: `#${planAnchor}` },
+            { label: ws.heading(draw.period_label) },
+          ]}
+        />
+      </div>
       <h4>{ws.heading(draw.period_label)}</h4>
       <p className="no-print">{ws.intro}</p>
       {/* The recorded seed (§63.03 reproducibility), on the sheet. */}
@@ -1248,15 +1271,45 @@ function PlanCard({
     if (m.superseded_by === null) measurementsByUnit.set(m.unit_id, m);
   }
 
+  // The in-row progress state (handoff 0017 #3): measured vs required from
+  // the API's counts; "ready" (estimate-ready) is visually distinct — an
+  // APTL plan whose sample has reached its required annual size.
+  const estimateReady =
+    progress !== null &&
+    plan.efficiency_option === "aptl" &&
+    !progress.undersampled &&
+    progress.units_measured >= progress.required_annual;
+
   return (
     <li>
-      <article className="sampling-plan card" aria-labelledby={headingId}>
+      <article
+        id={`plan-${plan.plan_id}`}
+        className="sampling-plan card"
+        aria-labelledby={headingId}
+      >
         <h3 id={headingId}>
           {label} <span className="chip">{statusLabel ?? plan.status}</span>
         </h3>
         {/* An unknown status is stated raw — never hidden. */}
         {statusLabel === undefined && (
           <p className="alert">{s.plans.statusUnknown(plan.status)}</p>
+        )}
+        {/* In-row progress (handoff 0017 #3): the API's measured/required
+            counts as text first, bar as the echo — never bar-alone. */}
+        {progress && (
+          <div className="no-print">
+            <RowProgress
+              done={progress.units_measured}
+              required={progress.required_annual}
+              text={s.measure.progressLine(
+                String(progress.units_measured),
+                String(progress.required_annual),
+              )}
+              label={s.plans.rowMeterLabel(label)}
+              ready={estimateReady}
+              readyLabel={s.plans.readyTag}
+            />
+          </div>
         )}
         <p className="sampling-created no-print">
           {s.plans.createdLine(plan.created_by, plan.created_at)}
@@ -1275,14 +1328,28 @@ function PlanCard({
             key={draw.draw_id}
             draw={draw}
             measurementsByUnit={measurementsByUnit}
+            planLabel={label}
+            planAnchor={`plan-${plan.plan_id}`}
           />
         ))}
         {draws && draws.length > 0 && (
-          <p className="no-print">
-            <button type="button" onClick={() => window.print()}>
-              {s.worksheet.printButton}
-            </button>
-          </p>
+          <div className="no-print">
+            <p>
+              <button type="button" onClick={() => window.print()}>
+                {s.worksheet.printButton}
+              </button>
+            </p>
+            {/* The server export of this plan's worksheet (handoff 0017,
+                design point 5): every drawn unit across the plan's draws
+                with its measured state, requirement + retention note
+                leading the file. Never printed — like the print button. */}
+            <ExportButtons
+              label={s.worksheet.exportLabel(label)}
+              download={(format) =>
+                downloadSamplingWorksheet(plan.plan_id, format)
+              }
+            />
+          </div>
         )}
 
         {/* The drawer's documented procedure, verbatim, after a draw. */}
@@ -1362,7 +1429,6 @@ export function SamplingView() {
   const [optionsError, setOptionsError] = useState<string | null>(null);
   const [plans, setPlans] = useState<SamplingPlanRecord[] | null>(null);
   const [plansError, setPlansError] = useState<string | null>(null);
-  const [announcement, setAnnouncement] = useState<string | null>(null);
   const [lastCreated, setLastCreated] = useState<SamplingPlanCreated | null>(
     null,
   );
@@ -1394,7 +1460,8 @@ export function SamplingView() {
 
   const handleCreated = (created: SamplingPlanCreated) => {
     setLastCreated(created);
-    setAnnouncement(s.wizard.created(String(created.plan.required_annual)));
+    // The shell-wide confirmation pattern (handoff 0017 #4).
+    pushToast(s.wizard.created(String(created.plan.required_annual)));
     // The API is the record: re-read the plans rather than patching state.
     void loadPlans();
   };
@@ -1408,12 +1475,6 @@ export function SamplingView() {
       {/* The ≥3-year retention rule (design point 2): the calc's own
           note, served by the API and shown verbatim. */}
       {options && <p className="banner no-print">{options.retention_note}</p>}
-
-      {announcement && (
-        <div role="status" className="status no-print">
-          {announcement}
-        </div>
-      )}
 
       <section
         className="card sampling-panel no-print"
@@ -1466,7 +1527,7 @@ export function SamplingView() {
                 mayManage={mayManage}
                 mayEstimate={mayEstimate}
                 dayTypes={options?.service_day_types ?? []}
-                onAnnounce={setAnnouncement}
+                onAnnounce={pushToast}
               />
             ))}
           </ul>

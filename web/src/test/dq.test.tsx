@@ -68,7 +68,7 @@ describe("/dq", () => {
     await expectNoAxeViolations();
   });
 
-  it("summarizes the queue with stat chips and filters by severity and status (aria-pressed toggles, keyboard operable)", async () => {
+  it("summarizes the queue with summary-card filter toggles (colored top border, aria-pressed, keyboard operable)", async () => {
     signInAs("viewer");
     mockIssues();
     const user = userEvent.setup();
@@ -76,19 +76,36 @@ describe("/dq", () => {
 
     await screen.findByRole("heading", { name: "Data-quality issues" });
 
-    // Queue-at-a-glance chips, computed from the loaded list (the endpoint
-    // returns the whole queue): 1 blocking open, 1 warning open ("owned"
-    // still counts as open — it is not resolved), 0 info open, 1 resolved.
+    // Queue-at-a-glance SUMMARY CARDS (handoff 0017 #2), computed from the
+    // loaded list (the endpoint returns the whole queue): 1 blocking open,
+    // 1 warning open ("owned" still counts as open — it is not resolved),
+    // 0 info open, 1 resolved. Each card IS a filter toggle.
     const summary = screen.getByRole("region", { name: "Queue at a glance" });
-    expect(summary).toHaveTextContent("1 blocking open");
-    expect(summary).toHaveTextContent("1 warning open");
-    expect(summary).toHaveTextContent("0 info open");
-    expect(summary).toHaveTextContent("1 resolved");
+    const cardRow = within(summary).getByRole("list", {
+      name: "Show issues by severity",
+    });
+    const blockingToggle = within(cardRow).getByRole("button", {
+      name: /Blocking open/,
+    });
+    const warningToggle = within(cardRow).getByRole("button", {
+      name: /Warnings open/,
+    });
+    const infoToggle = within(cardRow).getByRole("button", {
+      name: /Info open/,
+    });
+    const resolvedToggle = within(cardRow).getByRole("button", {
+      name: /Resolved/,
+    });
+    expect(blockingToggle).toHaveTextContent("1");
+    expect(warningToggle).toHaveTextContent("1");
+    expect(infoToggle).toHaveTextContent("0");
+    expect(resolvedToggle).toHaveTextContent("1");
+    // The colored top border rides a tone class (color is never alone:
+    // the label carries the meaning).
+    expect(blockingToggle.className).toContain("tone-danger");
+    expect(resolvedToggle.className).toContain("tone-success");
 
     // Blocking-only in ONE click, state conveyed via aria-pressed.
-    const blockingToggle = within(summary).getByRole("button", {
-      name: "Blocking",
-    });
     expect(blockingToggle).toHaveAttribute("aria-pressed", "false");
     await user.click(blockingToggle);
     expect(blockingToggle).toHaveAttribute("aria-pressed", "true");
@@ -99,27 +116,22 @@ describe("/dq", () => {
       screen.queryByRole("heading", { name: /GPS miles/ }),
     ).not.toBeInTheDocument();
     // Filtering hides nothing silently: the held-back count is stated and
-    // the chips above keep covering the whole queue.
+    // the cards above keep covering the whole queue.
     expect(summary).toHaveTextContent(
       "Showing 1 of 3 issues. The counts above always cover the whole queue.",
     );
-    expect(summary).toHaveTextContent("1 resolved");
+    expect(resolvedToggle).toHaveTextContent("1");
 
     // Combining filters down to nothing states so plainly — an issue is
     // never made to look resolved (or gone) by a filter.
-    await user.click(
-      within(summary).getByRole("button", { name: "Resolved" }),
-    );
+    await user.click(resolvedToggle);
     expect(
       screen.getByText(/No issues match these filters/),
     ).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Show all issues" }));
     expect(screen.getAllByRole("article")).toHaveLength(3);
 
-    // Full keyboard path: a toggle is focusable and operable with Enter.
-    const warningToggle = within(summary).getByRole("button", {
-      name: "Warning",
-    });
+    // Full keyboard path: a card toggle is focusable and operable with Enter.
     warningToggle.focus();
     await user.keyboard("{Enter}");
     expect(warningToggle).toHaveAttribute("aria-pressed", "true");
@@ -129,7 +141,7 @@ describe("/dq", () => {
     expect(
       screen.queryByRole("heading", { name: /Bus 1207/ }),
     ).not.toBeInTheDocument();
-    // Pressing the same toggle again clears it.
+    // Pressing the same card again clears it.
     await user.keyboard("{Enter}");
     expect(warningToggle).toHaveAttribute("aria-pressed", "false");
     expect(screen.getAllByRole("article")).toHaveLength(3);
@@ -175,8 +187,9 @@ describe("/dq", () => {
     );
     await user.click(submit);
 
-    // Success is announced and the card now shows the resolved state + note.
-    expect(await screen.findByRole("status")).toHaveTextContent(
+    // Success is confirmed in the shell's toast region (aria-live polite,
+    // handoff 0017 #4) and the card now shows the resolved state + note.
+    expect(await screen.findByRole("log")).toHaveTextContent(
       "is now resolved",
     );
     const card = screen
@@ -255,7 +268,7 @@ describe("/dq", () => {
     await user.clear(minutesField);
     await user.type(minutesField, "30");
     await user.click(screen.getByRole("button", { name: "Mark as resolved" }));
-    expect(await screen.findByRole("status")).toHaveTextContent(
+    expect(await screen.findByRole("log")).toHaveTextContent(
       "is now resolved",
     );
     const post = calls.find((c) => c.method === "POST");
@@ -310,7 +323,7 @@ describe("/dq", () => {
     );
     await user.click(screen.getByRole("button", { name: "Mark as resolved" }));
 
-    expect(await screen.findByRole("status")).toHaveTextContent(
+    expect(await screen.findByRole("log")).toHaveTextContent(
       "is now resolved",
     );
     // The body carries NO resolution_minutes key — blank means unstated.
@@ -352,5 +365,32 @@ describe("/dq", () => {
       .getByRole("heading", { name: /Bus 1207/ })
       .closest("article") as HTMLElement;
     expect(card).toHaveTextContent("open");
+  });
+
+  it("caps the number of drawn issue cards LOUDLY (counts still cover the whole queue) — the 2026-07-14 live-scale finding", async () => {
+    signInAs("viewer");
+    // 250 open info issues: over the 200-card render cap.
+    const many = Array.from({ length: 250 }, (_, i) => ({
+      ...warningIssue,
+      issue_id: `dq-bulk-${i}`,
+      severity: "info",
+      status: "open",
+      title: `Bulk issue ${i}`,
+    }));
+    mockApi({ "GET /dq/issues": { status: 200, body: many } });
+    renderApp("/dq");
+
+    await screen.findByRole("heading", { name: "Data-quality issues" });
+    // The cap is STATED, with both numbers.
+    expect(
+      screen.getByText(/Only the first 200 of 250 matching issues are drawn/),
+    ).toBeInTheDocument();
+    // Exactly the cap's worth of cards is drawn…
+    expect(screen.getAllByRole("article")).toHaveLength(200);
+    // …and the summary counts still cover the WHOLE queue.
+    const summary = screen.getByRole("region", { name: "Queue at a glance" });
+    expect(
+      within(summary).getByRole("button", { name: /Info open/ }),
+    ).toHaveTextContent("250");
   });
 });

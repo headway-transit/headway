@@ -188,7 +188,13 @@ h3 {
   /* Brand chrome: the decorative top bar takes the agency's primary color
      (non-text, both themes). Charts never take brand colors. */
   border-top: 3px solid var(--brand-primary);
-  background: var(--color-bg);
+  /* Themed nav chrome (branding v2, handoff 0017 #7): the --chrome-*
+     custom properties exist only while the shell applies a per-mode chrome
+     theme (Layout.tsx), and every applied pair passed the SERVER-side WCAG
+     refusal. Unset, the fallbacks are the neutral Headway tokens — every
+     one an AA-verified pair in scripts/check-contrast.mjs. */
+  background: var(--chrome-header-bg, var(--color-bg));
+  color: var(--chrome-header-text, var(--color-text));
 }
 .app-header .brand {
   display: inline-flex;
@@ -217,17 +223,25 @@ h3 {
   display: inline-block;
   padding: var(--space-1) var(--space-2);
   border-radius: var(--radius-1);
-  color: var(--color-text);
+  color: var(--chrome-header-text, var(--color-text));
   text-decoration: none;
 }
 .app-header nav a:hover {
   background: var(--color-surface);
 }
-/* The current page: accent underline + weight, never color alone. */
+/* On a themed header the surface-hover fill could fight the chrome text
+   color, so hover falls back to a plain underline there. */
+:root[data-chrome="on"] .app-header nav a:hover {
+  background: transparent;
+  text-decoration: underline;
+}
+/* The current page: accent underline + weight, never color alone. The
+   themed active accent is server-verified >= 3:1 (non-text) on the themed
+   header background. */
 .app-header nav a[aria-current="page"] {
   font-weight: 700;
   text-decoration: underline;
-  text-decoration-color: var(--color-accent);
+  text-decoration-color: var(--chrome-active-accent, var(--color-accent));
   text-decoration-thickness: 3px;
   text-underline-offset: 6px;
 }
@@ -236,8 +250,15 @@ h3 {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  color: var(--color-text-muted);
+  color: var(--chrome-header-text, var(--color-text-muted));
   font-size: var(--text-sm);
+}
+/* The signed-out "Sign in" link sits on the (possibly themed) header bar:
+   on a chrome theme it takes the server-verified header text color — the
+   accent-blue default would vanish on a dark themed bar (2026-07-14 live
+   click-through finding). Neutral chrome keeps the accent link. */
+.app-header .session-info a {
+  color: var(--chrome-header-text, var(--color-accent));
 }
 
 main {
@@ -315,6 +336,27 @@ button.link-like {
   color: var(--color-accent);
   text-decoration: underline;
   padding: var(--space-1);
+}
+
+/* Compact server-export control (handoff 0017, design point 5): the CSV +
+   XLSX button pair with its coverage note and any verbatim refusal. */
+.export-control {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin: var(--space-3) 0;
+}
+.export-control .field-hint {
+  flex-basis: 100%;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  margin: 0;
+  max-width: 36rem;
+}
+.export-control .alert {
+  flex-basis: 100%;
+  margin: 0;
 }
 
 /* ---- messages ---- */
@@ -1655,6 +1697,301 @@ ul.detail-panel li {
 .ops-owned-reference {
   color: var(--color-text-muted);
   font-size: var(--text-sm);
+}
+
+/* ---- UI wave (handoff 0017): summary cards, toasts, breadcrumbs,
+        comparison surfaces, in-row progress, sandbox ----
+   Every text color below is an EXISTING AA-verified token pair; the NEW
+   non-text pairs (card top borders, toast border, ready/progress fills,
+   delta better/worse text on card bg) are registered in
+   scripts/check-contrast.mjs. */
+
+/* Severity/status summary cards (design point 2): count cards with a
+   colored TOP BORDER + label, each an accessible filter toggle. Pressed =
+   aria-pressed + check mark + fill — never color alone. */
+.summary-cards {
+  list-style: none;
+  padding: 0;
+  margin: var(--space-2) 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  gap: var(--space-2);
+}
+.summary-card {
+  width: 100%;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-top: 4px solid var(--color-border);
+  border-radius: var(--radius-1);
+  box-shadow: var(--shadow-1);
+  padding: var(--space-2) var(--space-3);
+  color: var(--color-text);
+  cursor: pointer;
+  font: inherit;
+}
+.summary-card .summary-count {
+  font-size: var(--text-xl);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+}
+.summary-card .summary-label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-weight: 600;
+}
+.summary-card.tone-danger {
+  border-top-color: var(--color-danger-text);
+}
+.summary-card.tone-warning {
+  border-top-color: var(--color-warning-text);
+}
+.summary-card.tone-info {
+  border-top-color: var(--color-info-text);
+}
+.summary-card.tone-success {
+  border-top-color: var(--color-success-text);
+}
+.summary-card[aria-pressed="true"] {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  color: var(--color-accent-text);
+}
+
+/* Action-confirmation toasts (design point 4): the persistent aria-live
+   polite region the shell renders; dismiss is explicit, never a timer. */
+.toast-region {
+  position: fixed;
+  right: var(--space-3);
+  bottom: var(--space-3);
+  z-index: 20;
+  display: grid;
+  gap: var(--space-2);
+  max-width: 24rem;
+}
+.toast {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  background: var(--color-bg);
+  border: 1px solid var(--color-success-text);
+  border-left: 6px solid var(--color-success-text);
+  border-radius: var(--radius-1);
+  box-shadow: var(--shadow-2);
+  padding: var(--space-2) var(--space-3);
+}
+.toast p {
+  margin: 0;
+}
+.toast button {
+  flex: none;
+}
+
+/* Breadcrumbs on deep entities (design point 4). */
+.breadcrumbs ol {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  padding: 0;
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-sm);
+}
+.breadcrumbs li {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+.breadcrumbs .crumb-sep {
+  color: var(--color-text-muted);
+}
+.breadcrumbs [aria-current="page"] {
+  font-weight: 600;
+}
+
+/* Comparison deltas (design point 1): SIGN-NEUTRAL by default — muted for
+   BOTH directions, glyph + magnitude. better/worse classes appear ONLY for
+   registry-directed metrics and always ride with the word. */
+.delta {
+  color: var(--color-text-muted);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.delta.better {
+  color: var(--color-success-text);
+}
+.delta.worse {
+  color: var(--color-danger-text);
+}
+
+/* Comparison cards + matrix (/compare). */
+.compare-picker {
+  padding: var(--space-3);
+  margin: var(--space-3) 0;
+}
+.compare-picker select {
+  display: block;
+  font: inherit;
+  color: var(--color-text);
+  background: var(--color-bg);
+  border: 1px solid var(--color-input-border);
+  border-radius: var(--radius-1);
+  padding: var(--space-2);
+  margin-bottom: var(--space-3);
+  max-width: 28rem;
+}
+.compare-comparands {
+  border: 1px solid var(--color-border);
+  border-left: 4px solid var(--color-accent);
+  border-radius: var(--radius-1);
+  padding: var(--space-3);
+  margin: var(--space-3) 0;
+}
+.compare-comparands legend {
+  font-weight: 700;
+  padding: 0 var(--space-1);
+}
+.compare-cards {
+  list-style: none;
+  padding: 0;
+  margin: var(--space-3) 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: var(--space-3);
+}
+.compare-card {
+  padding: var(--space-3);
+}
+.compare-card-label {
+  margin: 0 0 var(--space-1);
+  font-weight: 600;
+}
+.compare-card-value {
+  margin: 0 0 var(--space-1);
+  font-size: var(--text-hero);
+  font-weight: 600;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+}
+.compare-card-value .cell-receipt .figure {
+  font-size: inherit;
+}
+.compare-card-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin: 0 0 var(--space-2);
+}
+.compare-card-delta {
+  margin: var(--space-1) 0;
+}
+.compare-card h3 {
+  margin: var(--space-2) 0 var(--space-1);
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+.compare-card-modes {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 2px;
+}
+.tag.baseline {
+  background: var(--color-info-bg);
+  color: var(--color-info-text);
+  border: 2px solid var(--color-info-text);
+}
+/* The receipt affordance: the figure IS the button (link-styled, opens the
+   dialog); underline + accent = never a dead number. */
+button.cell-receipt {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+.compare-matrix td {
+  min-width: 10rem;
+}
+.compare-cell-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin-top: var(--space-1);
+}
+.compare-cell-delta {
+  display: block;
+  margin-top: var(--space-1);
+}
+
+/* In-row progress (design point 3): text leads, bar echoes; the ready
+   state is fill + tag, never color alone. */
+.row-progress {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  max-width: 34rem;
+  margin: var(--space-2) 0;
+}
+.row-progress .row-progress-text {
+  font-weight: 600;
+}
+.row-progress .meter-track {
+  flex: 1;
+  min-width: 8rem;
+}
+.row-progress.ready .meter-fill {
+  background: var(--color-success-text);
+}
+.tag.ready {
+  background: var(--color-success-bg);
+  color: var(--color-success-text);
+  border: 2px solid var(--color-success-text);
+}
+
+/* Settings sandbox (/sandbox, design point 6). */
+.sandbox-banner {
+  font-weight: 600;
+}
+.sandbox-apply-note {
+  max-width: 46rem;
+  padding: var(--space-2) var(--space-3);
+  border-left: 4px solid var(--color-info-text);
+  background: var(--color-info-bg);
+  color: var(--color-info-text);
+  border-radius: var(--radius-1);
+}
+.sandbox-panel {
+  padding: var(--space-3);
+  margin: var(--space-3) 0;
+}
+.sandbox-knob {
+  margin: 0 0 var(--space-3);
+}
+.sandbox-knob details {
+  max-width: 36rem;
+  margin-top: var(--space-1);
+}
+.sandbox-knob summary {
+  cursor: pointer;
+  color: var(--color-accent);
+}
+.sandbox-rail {
+  margin: var(--space-4) 0;
+}
+.sandbox-section {
+  margin: var(--space-3) 0;
+}
+/* Would-be findings under a preview cell: small, verbatim, never hidden. */
+.sandbox-findings {
+  margin: var(--space-1) 0 0;
+  padding-left: 1.2rem;
+  font-size: var(--text-sm);
+  font-weight: 400;
 }
 
 /* ---- print: the drawn-sample worksheet (handoff 0012, design point 3).

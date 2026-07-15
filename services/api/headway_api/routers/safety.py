@@ -645,6 +645,55 @@ def list_events(
     ]
 
 
+class SafetyEventCounts(BaseModel):
+    """Counts for the /safety summary cards (handoff 0017, design point 2):
+    counted over EXACTLY the rows GET /safety/events serves under the same
+    filters, so a card can never disagree with the table. Classification is
+    each event's LATEST verdict; an event with no classification row counts
+    as 'unclassified' (never guessed); superseded events are counted
+    separately AND inside their classification bucket, exactly as the list
+    shows them."""
+
+    total: int
+    by_classification: dict[str, int]
+    unclassified: int
+    superseded: int
+
+
+@router.get("/safety/events/counts", response_model=SafetyEventCounts)
+def count_events(
+    month: Optional[str] = Query(default=None),
+    mode: Optional[str] = Query(default=None),
+    identity: Identity = Depends(require_authenticated),
+    db=Depends(get_db),
+) -> SafetyEventCounts:
+    """Classification counts over the same rows (and the same month/mode
+    filters) as GET /safety/events — composition of the one events query,
+    counted in the open, no new tables (handoff 0017)."""
+    events = list_events(
+        classification=None, month=month, mode=mode, identity=identity, db=db
+    )
+    by_classification = {c: 0 for c in VALID_CLASSIFICATIONS}
+    unclassified = 0
+    superseded = 0
+    for event in events:
+        if event.classification is None:
+            unclassified += 1
+        else:
+            # An unexpected vocabulary value still counts under its own key.
+            by_classification[event.classification] = (
+                by_classification.get(event.classification, 0) + 1
+            )
+        if event.superseded_by is not None:
+            superseded += 1
+    return SafetyEventCounts(
+        total=len(events),
+        by_classification=by_classification,
+        unclassified=unclassified,
+        superseded=superseded,
+    )
+
+
 class SupersedeRequest(SafetyEventCreate):
     reason: str = Field(
         min_length=1,

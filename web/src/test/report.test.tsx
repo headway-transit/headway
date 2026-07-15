@@ -16,7 +16,6 @@ import {
   vrmWithCoverage,
 } from "./fixtures";
 import { copy } from "../copy";
-import { buildMonthlyRidershipCsv } from "../reports/csv";
 import { monthPeriod } from "../reports/period";
 
 const DISCLAIMER =
@@ -222,73 +221,85 @@ describe("/reports/monthly", () => {
   });
 });
 
-describe("monthly ridership CSV export", () => {
-  it("every exported cell is the API-served string VERBATIM — no rounding, no arithmetic", () => {
-    const csv = buildMonthlyRidershipCsv([
-      certifiedVrm,
-      vrhValue,
-      simulatedUptValue,
-    ]);
-    const lines = csv.trimEnd().split("\r\n");
-    // Line 1: the preview disclaimer (verbatim; it needs no CSV quoting).
-    expect(lines[0]).toBe(DISCLAIMER);
-    expect(lines[1]).toBe(
-      "metric,unit,period_start,period_end,value,calc_name,calc_version,certification_status,simulated_data",
-    );
-    const [vrmRow, vrhRow, uptRow] = lines.slice(2).map((l) => l.split(","));
-    // The load-bearing assertion: exported cell === API string, character
-    // for character (trailing zeros intact, never re-parsed).
-    expect(vrmRow[4]).toBe(certifiedVrm.value);
-    expect(vrmRow[4]).toBe("12345.60");
-    expect(vrhRow[4]).toBe(vrhValue.value);
-    expect(vrhRow[4]).toBe("987.25");
-    expect(uptRow[4]).toBe(simulatedUptValue.value);
-    expect(uptRow[4]).toBe("41985.90");
-    // Full row context stays verbatim too.
-    expect(vrmRow).toEqual([
-      "vrm",
-      "miles",
-      "2026-03-01",
-      "2026-03-31",
-      "12345.60",
-      "vrm_v0",
-      "0.2.0",
-      "certified",
-      "no",
-    ]);
-    // A simulated figure is flagged in the file itself.
-    expect(uptRow[8]).toBe("SIMULATED DATA - MUST NOT BE SUBMITTED");
-  });
-
-  it("the export button assembles the CSV client-side from the served strings", async () => {
+describe("monthly ridership server export (replaced the client-side CSV, 2026-07-14)", () => {
+  it("replaces the client CSV button with the CSV/XLSX server export, states the coverage difference, and saves the served bytes verbatim", async () => {
     signInAs("viewer");
-    mockReportApi({ vrm: [certifiedVrm], vrh: [vrhValue], upt: [uptValue] });
+    const csvBody =
+      DISCLAIMER +
+      "\r\nmetric,unit,period_start,period_end,scope,value,calc_name," +
+      "calc_version,certification_status,category,simulated_data," +
+      "metric_value_id\r\n";
+    const calls = mockApi({
+      "GET /metrics/values": (call: RecordedCall) => {
+        const metric = new URL(call.url, "http://test").searchParams.get(
+          "metric",
+        );
+        return {
+          status: 200,
+          body:
+            { vrm: [certifiedVrm], vrh: [vrhValue], upt: [uptValue] }[
+              metric ?? ""
+            ] ?? [],
+        };
+      },
+      "GET /metrics/values/export": {
+        status: 200,
+        rawBody: csvBody,
+        headers: {
+          "Content-Type": "text/csv; charset=utf-8",
+          "Content-Disposition":
+            'attachment; filename="headway-metric-values-served.csv"',
+        },
+      },
+    });
     const captured: Blob[] = [];
-    const createObjectURL = vi.fn((blob: Blob) => {
+    const savedAs: string[] = [];
+    URL.createObjectURL = vi.fn((blob: Blob) => {
       captured.push(blob);
       return "blob:headway-test";
-    });
-    URL.createObjectURL = createObjectURL as typeof URL.createObjectURL;
+    }) as typeof URL.createObjectURL;
     URL.revokeObjectURL = vi.fn() as typeof URL.revokeObjectURL;
     // jsdom cannot navigate; stop the anchor click from attempting it.
     const clickSpy = vi
       .spyOn(HTMLAnchorElement.prototype, "click")
-      .mockImplementation(() => {});
+      .mockImplementation(function (this: HTMLAnchorElement) {
+        savedAs.push(this.download);
+      });
     const user = userEvent.setup();
     renderApp("/reports/monthly");
 
     await screen.findByRole("table");
-    await user.click(
-      screen.getByRole("button", { name: "Download CSV (preview only)" }),
+    // The old client-side assembly is gone: no "preview only" CSV button.
+    expect(
+      screen.queryByRole("button", { name: "Download CSV (preview only)" }),
+    ).not.toBeInTheDocument();
+    // What changed is stated out loud, right at the control.
+    expect(screen.getByText(copy.report.export.note)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /Download CSV/ }));
+    await waitFor(() => expect(captured).toHaveLength(1));
+
+    // The request is the server export, scoped to the picked month.
+    const exportCall = calls.find(
+      (c) => c.path === "/metrics/values/export",
+    );
+    expect(exportCall).toBeDefined();
+    const params = new URL(exportCall!.url, "http://test").searchParams;
+    expect(params.get("format")).toBe("csv");
+    expect(params.get("period_start")).toMatch(/^\d{4}-\d{2}-01$/);
+    expect(params.get("period_end")).toMatch(/^\d{4}-\d{2}-(28|29|30|31)$/);
+    expect(exportCall!.headers.Authorization).toBe("Bearer test-token");
+
+    // Saved byte for byte under the server's attachment filename, and
+    // confirmed through the shell's toast region.
+    expect(await captured[0].text()).toBe(csvBody);
+    expect(savedAs).toEqual(["headway-metric-values-served.csv"]);
+    expect(clickSpy).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("log")).toHaveTextContent(
+      "Download ready: headway-metric-values-served.csv",
     );
 
-    await waitFor(() => expect(createObjectURL).toHaveBeenCalledTimes(1));
-    expect(clickSpy).toHaveBeenCalledTimes(1);
-    const text = await captured[0].text();
-    expect(text).toContain(DISCLAIMER);
-    expect(text).toContain("12345.60"); // verbatim, trailing zero intact
-    expect(text).toContain("987.25");
-    expect(text).toContain("41985.90");
+    await expectNoAxeViolations();
     clickSpy.mockRestore();
   });
 });

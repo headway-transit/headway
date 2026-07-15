@@ -51,6 +51,7 @@ import { SimulatedBadge } from "../components/SimulatedBadge";
 import { copy } from "../copy";
 import { isPreVerification, isSimulated } from "../detail";
 import { monthPeriod, previousMonth } from "../reports/period";
+import { pushToast } from "../toasts";
 
 function metricLabel(code: string): string {
   return copy.metricLabels[code] ?? code;
@@ -161,6 +162,10 @@ export function CertifyView() {
   const handleCertified = async (message: string) => {
     setModalOpen(false);
     setSuccessMessage(message);
+    // The shell-wide confirmation pattern (handoff 0017 #4): a short toast
+    // confirms the act; the inline message stays as the durable record of
+    // the certification and audit identifiers.
+    pushToast(copy.certify.certifyToast);
     await load(); // re-read figures AND blockers from the API — never assume
   };
 

@@ -122,6 +122,79 @@ def contrast_ratio(color_a: str, color_b: str) -> float:
     return (lighter + 0.05) / (darker + 0.05)
 
 
+# --- Themed chrome, branding v2 (handoff 0017, design point 7) --------------
+#
+# Chrome colors sit on the agency's OWN header, not on the app's light
+# surfaces, so the guardrail here is PAIRWISE: the same WCAG 2.1 AA math
+# (contrast_ratio above, 4.5:1 minimum) applied to the pairs that actually
+# render together. Validated against the values that WOULD result from a
+# change, so no sequence of single-key updates can reach an unreadable
+# header. 'unset' (the seeded default) deactivates the theme — the shell
+# stays neutral Headway — and is always accepted.
+
+#: The three chrome settings keys (migration 0027).
+CHROME_HEADER_BG_KEY = "brand_chrome_header_bg"
+CHROME_HEADER_FG_KEY = "brand_chrome_header_fg"
+CHROME_ACCENT_KEY = "brand_chrome_accent"
+CHROME_KEYS = (CHROME_HEADER_BG_KEY, CHROME_HEADER_FG_KEY, CHROME_ACCENT_KEY)
+
+#: Sentinel meaning "not themed" (the seeded default; also a valid PUT value
+#: to turn the theme off).
+CHROME_UNSET = "unset"
+
+#: The chrome pairs that render together: (foreground key, background key,
+#: plain-language pair name for refusals).
+CHROME_PAIRS = (
+    (
+        CHROME_HEADER_FG_KEY,
+        CHROME_HEADER_BG_KEY,
+        "header text on the themed header background",
+    ),
+    (
+        CHROME_ACCENT_KEY,
+        CHROME_HEADER_BG_KEY,
+        "active-item accent on the themed header background",
+    ),
+)
+
+
+def chrome_value_problem(value: str) -> str | None:
+    """Format check for one chrome key's value: '#rrggbb' or 'unset'."""
+    if value == CHROME_UNSET:
+        return None
+    if not _HEX_COLOR_RE.fullmatch(value):
+        return (
+            f"'{value}' is not a value Headway can use for a chrome theme "
+            f"color. Please send a six-digit hex color starting with '#' "
+            f"(for example '#1a5fb4'), or 'unset' to return this part of "
+            f"the chrome to the neutral Headway look."
+        )
+    return None
+
+
+def chrome_pair_problem(values: dict[str, str]) -> str | None:
+    """The plain-language reason the PROSPECTIVE chrome value set cannot
+    stand, or None. ``values`` maps every CHROME_KEYS key to the value it
+    would hold after the change. Pairs where either side is 'unset' are
+    skipped — the theme only applies when complete, so an incomplete theme
+    cannot render an unreadable pair."""
+    for fg_key, bg_key, pair_name in CHROME_PAIRS:
+        fg = values[fg_key]
+        bg = values[bg_key]
+        if fg == CHROME_UNSET or bg == CHROME_UNSET:
+            continue
+        ratio = contrast_ratio(fg, bg)
+        if ratio < MIN_CONTRAST:
+            return (
+                f"That combination doesn't have enough contrast to be "
+                f"readable: the {pair_name} ('{fg}' on '{bg}') measures "
+                f"{ratio:.2f}:1, and readable text needs at least "
+                f"{MIN_CONTRAST}:1 (WCAG 2.1 AA). Please pick a lighter or "
+                f"darker color for one side of the pair."
+            )
+    return None
+
+
 def brand_color_problem(value: str) -> str | None:
     """The plain-language reason ``value`` cannot be a brand color, or None
     when it passes. Checks hex format first, then the AA contrast guardrail

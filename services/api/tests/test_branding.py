@@ -298,11 +298,17 @@ def test_get_logo_ip_rate_limit_429_with_retry_after(client, app):
 def test_get_branding_shape_and_defaults(client):
     r = client.get("/branding")  # NO Authorization header
     assert r.status_code == 200
-    assert r.json() == {
+    body = r.json()
+    chrome_note = body.pop("chrome_note")
+    assert "dark" in chrome_note  # the standing dark-mode statement travels
+    assert body == {
         "display_name": "Transit Agency",
         "primary": "#1a5fb4",
         "accent": "#0b57d0",
         "has_logo": False,
+        # Branding v2 (handoff 0017): chrome is null until the agency sets
+        # ALL THREE brand_chrome_* keys — neutral Headway out of the box.
+        "chrome": None,
     }
 
 
@@ -317,3 +323,101 @@ def test_get_branding_reflects_changes_and_logo(client, fake_db):
     body = r.json()
     assert body["display_name"] == "Springfield Transit"
     assert body["has_logo"] is True
+
+
+# ---------------------------------------------------------------------------
+# Branding v2 — themed chrome (handoff 0017, design point 7): the SAME WCAG
+# math applied to the chrome PAIRS (fg-on-header-bg, accent-on-header-bg),
+# checked against the values that WOULD result from each change, so no
+# sequence of single-key updates reaches an unreadable header. 'unset'
+# deactivates; GET /branding serves chrome only when all three are set.
+# ---------------------------------------------------------------------------
+
+
+def _put_setting(client, fake_db, key, value, username="cora"):
+    return client.put(
+        f"/settings/{key}", json={"value": value},
+        headers=auth_header(fake_db, username),
+    )
+
+
+def test_chrome_value_accepts_hex_and_unset_refuses_garbage():
+    assert branding.chrome_value_problem("#1f2328") is None
+    assert branding.chrome_value_problem("unset") is None
+    msg = branding.chrome_value_problem("navy")
+    assert msg is not None and "'unset'" in msg
+
+
+def test_chrome_pair_refusal_names_pair_and_ratio(client, fake_db):
+    ok = _put_setting(client, fake_db, "brand_chrome_header_bg", "#1f2328")
+    assert ok.status_code == 200  # fg/accent unset: no pair to fail yet
+    r = _put_setting(client, fake_db, "brand_chrome_header_fg", "#767676")
+    assert r.status_code == 422
+    detail = r.json()["detail"]
+    assert "3.48:1" in detail
+    assert "header text on the themed header background" in detail
+    assert "4.5:1" in detail
+    assert fake_db.settings["brand_chrome_header_fg"]["setting_value"] == "unset"
+
+    ok = _put_setting(client, fake_db, "brand_chrome_header_fg", "#ffffff")
+    assert ok.status_code == 200  # 15.80:1
+
+    r = _put_setting(client, fake_db, "brand_chrome_accent", "#0b57d0")
+    assert r.status_code == 422  # 2.47:1 on the dark header
+    assert "active-item accent" in r.json()["detail"]
+    ok = _put_setting(client, fake_db, "brand_chrome_accent", "#ffd700")
+    assert ok.status_code == 200  # 11.26:1
+
+
+def test_chrome_bg_change_cannot_break_existing_pairs(client, fake_db):
+    for key, value in (
+        ("brand_chrome_header_bg", "#1f2328"),
+        ("brand_chrome_header_fg", "#ffffff"),
+        ("brand_chrome_accent", "#ffd700"),
+    ):
+        assert _put_setting(client, fake_db, key, value).status_code == 200
+    # Whitening the header would strand the white fg AND the gold accent —
+    # the prospective-pair check refuses the bg change itself.
+    r = _put_setting(client, fake_db, "brand_chrome_header_bg", "#ffffff")
+    assert r.status_code == 422
+    assert fake_db.settings["brand_chrome_header_bg"]["setting_value"] == (
+        "#1f2328"
+    )
+
+
+def test_get_branding_serves_chrome_only_when_complete(client, fake_db):
+    assert client.get("/branding").json()["chrome"] is None
+    assert _put_setting(
+        client, fake_db, "brand_chrome_header_bg", "#1f2328"
+    ).status_code == 200
+    # Incomplete theme: still null (neutral chrome).
+    assert client.get("/branding").json()["chrome"] is None
+    _put_setting(client, fake_db, "brand_chrome_header_fg", "#ffffff")
+    _put_setting(client, fake_db, "brand_chrome_accent", "#ffd700")
+    body = client.get("/branding").json()
+    assert body["chrome"] == {
+        "header_bg": "#1f2328",
+        "header_fg": "#ffffff",
+        "accent": "#ffd700",
+    }
+    # 'unset' turns the theme off again — back to neutral Headway.
+    assert _put_setting(
+        client, fake_db, "brand_chrome_header_bg", "unset"
+    ).status_code == 200
+    assert client.get("/branding").json()["chrome"] is None
+
+
+def test_chrome_changes_are_certifying_official_only_and_audited(client, fake_db):
+    r = _put_setting(
+        client, fake_db, "brand_chrome_header_bg", "#1f2328", username="stella"
+    )
+    assert r.status_code == 403
+    r = _put_setting(client, fake_db, "brand_chrome_header_bg", "#1f2328")
+    assert r.status_code == 200
+    events = [
+        e for e in fake_db.audit_events if e["action"] == "setting_updated"
+    ]
+    assert len(events) == 1
+    detail = json.loads(events[0]["detail"])
+    assert detail["old_value"] == "unset"
+    assert detail["new_value"] == "#1f2328"

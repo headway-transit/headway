@@ -22,13 +22,30 @@ import json
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
-from headway_calc import mr20
+from headway_calc import mr20, ss50
 
+from .. import exports
 from ..auth import Identity
 from ..authz import require_authenticated
 from ..db import get_db
 
 router = APIRouter(tags=["reports"])
+
+
+def _month_or_422(month: str) -> None:
+    """The calc library owns the month convention; we only translate its
+    refusal into a plain-language 422."""
+    try:
+        mr20.month_period(month)
+    except ValueError:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"'{month}' is not a month Headway understands. Please use "
+                f"the form YYYY-MM — for example 2026-07 for July 2026 — "
+                f"with a month number from 01 to 12."
+            ),
+        )
 
 
 @router.get(
@@ -55,21 +72,74 @@ def get_mr20_report(
     db=Depends(get_db),
 ) -> Response:
     """Serve the MR-20 preview package (NOT reportable) for one month."""
-    try:
-        # The calc library owns the month convention; we only translate its
-        # refusal into a plain-language 422.
-        mr20.month_period(month)
-    except ValueError:
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                f"'{month}' is not a month Headway understands. Please use "
-                f"the form YYYY-MM — for example 2026-07 for July 2026 — "
-                f"with a month number from 01 to 12."
-            ),
-        )
+    _month_or_422(month)
     package = mr20.build_mr20_package(db, month)
     # Serialized here, once, and sent as-is: byte-identical to the package.
     return Response(
         content=json.dumps(package), media_type="application/json"
+    )
+
+
+@router.get(
+    "/reports/mr20/export",
+    response_class=Response,
+    responses={
+        200: {
+            "description": (
+                "The MR-20 preview package as a CSV or XLSX download: one "
+                "row per (scope, metric) cell, values VERBATIM from the "
+                "package; the NOT-REPORTABLE banner and every enumerated "
+                "caveat lead the CSV and form the XLSX's first sheet."
+            ),
+            "content": {exports.CSV_MEDIA_TYPE: {}, exports.XLSX_MEDIA_TYPE: {}},
+        }
+    },
+)
+def export_mr20_report(
+    month: str = Query(..., description="Calendar month as YYYY-MM."),
+    format: str = Query(default="xlsx", pattern=exports.FORMAT_PATTERN),
+    identity: Identity = Depends(require_authenticated),
+    db=Depends(get_db),
+) -> Response:
+    """Download the MR-20 preview package as CSV/XLSX (handoff 0017, design
+    point 5). Same package build as GET /reports/mr20; one row assembly
+    feeds both formats (XLSX values byte-equal to CSV values, pinned by
+    test); XLSX cells are TEXT so figures survive exactly."""
+    _month_or_422(month)
+    package = mr20.build_mr20_package(db, month)
+    grid = exports.mr20_grid(package)
+    return exports.export_response(
+        grid, format, f"headway-mr20-{month}-preview"
+    )
+
+
+@router.get(
+    "/reports/ss50/export",
+    response_class=Response,
+    responses={
+        200: {
+            "description": (
+                "The S&S-50 non-major monthly summary package as a CSV or "
+                "XLSX download: one row per (mode, type-of-service) cell "
+                "including explicit zero rows; the NOT-REPORTABLE banner, "
+                "citations, caveats and the excluded-event accounting lead "
+                "the CSV and form the XLSX's first sheet."
+            ),
+            "content": {exports.CSV_MEDIA_TYPE: {}, exports.XLSX_MEDIA_TYPE: {}},
+        }
+    },
+)
+def export_ss50_report(
+    month: str = Query(..., description="Calendar month as YYYY-MM."),
+    format: str = Query(default="xlsx", pattern=exports.FORMAT_PATTERN),
+    identity: Identity = Depends(require_authenticated),
+    db=Depends(get_db),
+) -> Response:
+    """Download the S&S-50 preview package (headway_calc.ss50, served
+    verbatim into a grid) as CSV/XLSX — handoff 0017, design point 5."""
+    _month_or_422(month)
+    package = ss50.build_ss50_package(db, month)
+    grid = exports.ss50_grid(package)
+    return exports.export_response(
+        grid, format, f"headway-ss50-{month}-preview"
     )

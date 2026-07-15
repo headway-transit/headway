@@ -27,6 +27,8 @@ import { loadBranding, useBranding } from "../branding";
 import { copy } from "../copy";
 import { canCertify, clearSession, useSession } from "../auth/session";
 import { initTheme, setTheme, useTheme } from "../theme";
+import { clearToasts } from "../toasts";
+import { ToastRegion } from "./Toasts";
 
 export function Layout() {
   const session = useSession();
@@ -43,6 +45,9 @@ export function Layout() {
       return;
     }
     mainRef.current?.focus();
+    // Action confirmations belong to the page they confirmed on: leaving
+    // the page retires them (the deterministic toast lifetime — no timers).
+    clearToasts();
   }, [location.pathname]);
 
   // Theme: resolve (localStorage override, else OS preference) and stamp
@@ -69,6 +74,30 @@ export function Layout() {
       root.style.removeProperty("--brand-accent");
     };
   }, [branding]);
+
+  // Themed nav chrome (branding v2 — handoff 0017, design point 7). The
+  // server serves ONE chrome color set, validated against itself by the
+  // WCAG pair guardrail at write time — for the LIGHT display mode. It is
+  // applied only in the mode it was validated for: in dark mode the shell
+  // keeps the neutral Headway dark tokens (the known per-mode limitation —
+  // the API's chrome_note and the branding room state it; never silently
+  // approximated). Charts are untouched: the chrome custom properties are
+  // read only by the header styles.
+  useEffect(() => {
+    const chrome = theme === "dark" ? null : (branding?.chrome ?? null);
+    const root = document.documentElement;
+    if (!chrome) return;
+    root.style.setProperty("--chrome-header-bg", chrome.header_bg);
+    root.style.setProperty("--chrome-header-text", chrome.header_fg);
+    root.style.setProperty("--chrome-active-accent", chrome.accent);
+    root.setAttribute("data-chrome", "on");
+    return () => {
+      root.style.removeProperty("--chrome-header-bg");
+      root.style.removeProperty("--chrome-header-text");
+      root.style.removeProperty("--chrome-active-accent");
+      root.removeAttribute("data-chrome");
+    };
+  }, [branding, theme]);
 
   const handleSignOut = () => {
     clearSession();
@@ -103,6 +132,9 @@ export function Layout() {
                   <NavLink to="/metrics">{copy.nav.metrics}</NavLink>
                 </li>
                 <li>
+                  <NavLink to="/compare">{copy.nav.compare}</NavLink>
+                </li>
+                <li>
                   <NavLink to="/reports/monthly">{copy.nav.reports}</NavLink>
                 </li>
                 <li>
@@ -113,6 +145,9 @@ export function Layout() {
                 </li>
                 <li>
                   <NavLink to="/dq">{copy.nav.dq}</NavLink>
+                </li>
+                <li>
+                  <NavLink to="/sandbox">{copy.nav.sandbox}</NavLink>
                 </li>
                 {/* Shown only to the certifying official — UX, not security:
                     the API enforces the role on POST /certifications and on
@@ -166,6 +201,10 @@ export function Layout() {
       <main id="main" tabIndex={-1} ref={mainRef}>
         <Outlet />
       </main>
+      {/* The shell-wide action-confirmation region (handoff 0017 #4):
+          persistent aria-live polite, so confirmations pushed from any
+          view are reliably announced. */}
+      <ToastRegion />
     </>
   );
 }

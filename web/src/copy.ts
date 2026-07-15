@@ -54,10 +54,12 @@ export const copy = {
   nav: {
     dashboard: "Dashboard",
     metrics: "Metrics",
+    compare: "Compare",
     reports: "Monthly ridership",
     safety: "Safety & security",
     sampling: "PMT sampling",
     dq: "Data quality",
+    sandbox: "Settings sandbox",
     certify: "Certify",
     branding: "Branding",
     /** Visible signed-in AND signed-out: the public page needs no account. */
@@ -69,6 +71,42 @@ export const copy = {
     /** The label names the action (what pressing it switches TO). */
     switchToDark: "Switch to dark theme",
     switchToLight: "Switch to light theme",
+  },
+
+  /**
+   * Action-confirmation toasts (handoff 0017, design point 4): the
+   * shell-wide pattern for create / supersede / certify confirmations.
+   * The region is aria-live polite; messages stay until dismissed or the
+   * user leaves the page (no auto-hide).
+   */
+  toasts: {
+    regionLabel: "Action confirmations",
+    dismiss: "Dismiss",
+  },
+
+  /**
+   * Server CSV/XLSX exports (handoff 0017, design point 5). Both formats
+   * come from ONE server-side row assembly — XLSX cells are text holding
+   * the byte-identical CSV strings — and the saved file is the response
+   * byte for byte. Per-surface group labels live with each surface's copy.
+   */
+  exports: {
+    csvButton: "Download CSV",
+    xlsxButton: "Download XLSX (Excel)",
+    toast: (filename: string) =>
+      `Download ready: ${filename}. The file holds these figures exactly as the API served them.`,
+  },
+
+  /** Breadcrumb trails on deep entities (handoff 0017, design point 4). */
+  breadcrumbs: {
+    label: "Breadcrumb",
+  },
+
+  /** Summary-card filter toggles (handoff 0017, design point 2). */
+  summaryCards: {
+    pressedHint:
+      "filter on. Press again to show everything. Filtering hides nothing from these counts.",
+    unpressedHint: "press to show only these",
   },
 
   login: {
@@ -140,6 +178,8 @@ export const copy = {
       `Calculation details for ${metric}, ${period}`,
     detailEmpty:
       "The calculation recorded no extra detail for this figure.",
+    /** The server export of exactly this table's rows (design point 5). */
+    exportLabel: "Download the computed metric values",
   },
 
   /**
@@ -201,6 +241,10 @@ export const copy = {
     certifySelected: "Certify selected figures",
     nothingSelected:
       "Select at least one figure to certify. Use the checkbox above each receipt.",
+    /** The short toast confirmation; the inline message below stays as the
+     *  durable record of the identifiers. */
+    certifyToast:
+      "Certification recorded and audit-logged. The details are on the page.",
     certifySuccess: (
       count: number,
       certificationId: string,
@@ -230,6 +274,8 @@ export const copy = {
   },
 
   lineage: {
+    /** The breadcrumb's middle crumb (handoff 0017 #4). */
+    crumbFigure: "Figure",
     heading: "How this number was made",
     intro:
       "This is the full trail for the selected figure: from the reported number, through each processing step (with the exact version that ran), down to the raw records Headway received. Nothing on this page is recalculated — it is the recorded history.",
@@ -291,17 +337,28 @@ export const copy = {
      * serves (the endpoint returns every issue; no pagination today).
      */
     summaryHeading: "Queue at a glance",
-    summaryBlockingOpen: (count: string) => `${count} blocking open`,
-    summaryWarningsOpen: (count: string) =>
-      `${count} warning${count === "1" ? "" : "s"} open`,
-    summaryInfoOpen: (count: string) => `${count} info open`,
-    summaryResolved: (count: string) => `${count} resolved`,
+    /** Summary-card labels (handoff 0017 #2): the count is the card's big
+     *  figure; severity counts cover OPEN (unresolved) issues. */
+    cardLabels: {
+      blocking: "Blocking open",
+      warning: "Warnings open",
+      info: "Info open",
+      resolved: "Resolved",
+    } as Record<string, string>,
     severityFilterLabel: "Show issues by severity",
     statusFilterLabel: "Show issues by status",
     filterAllSeverities: "All severities",
     filterAllStatuses: "All statuses",
     showingCount: (shown: string, total: string) =>
       `Showing ${shown} of ${total} issues. The counts above always cover the whole queue.`,
+    /**
+     * The render cap (2026-07-14 live click-through finding: the live queue
+     * held 35,456 issues and rendering every card hung the browser). The
+     * cap is STATED, never silent — no issue leaves the queue or the
+     * counts; the filters narrow to what matters.
+     */
+    renderCap: (cap: string, matching: string) =>
+      `Only the first ${cap} of ${matching} matching issues are drawn on this page — drawing them all would freeze the browser. Nothing is dropped: the counts above cover the whole queue, and the filter cards narrow the list to what you need.`,
     noMatch: (total: string) =>
       `No issues match these filters. The queue still holds ${total} issue(s) — filtering hides nothing from the counts above, and no issue is resolved by being filtered out.`,
     clearFilters: "Show all issues",
@@ -620,9 +677,17 @@ export const copy = {
     noFigure: (metric: string) =>
       `No ${metric} figure has been computed for this month.`,
     coverageNotReported: "Not reported",
-    exportCsv: "Download CSV (preview only)",
-    exportFileName: (year: string, month: string) =>
-      `headway-monthly-ridership-${year}-${month}-preview.csv`,
+    /**
+     * The server export replacing the retired client-side CSV assembly
+     * (2026-07-14): same disclaimer-first file, now built by the API. The
+     * note states the two differences OUT LOUD — extra columns and a wider
+     * row set — because what users download must never change silently.
+     */
+    export: {
+      label: "Download this month's computed figures",
+      note:
+        "The file is served by the API and covers every figure computed for this month — including any beyond the three ridership metrics shown above — with each figure's scope, category, and provenance id, and the preview disclaimer first.",
+    },
     /**
      * The MR-20 package section (docket #2): a rendering of GET
      * /reports/mr20. Everything regulatory in it — the banner, the citation,
@@ -662,6 +727,9 @@ export const copy = {
       download: "Download package (JSON)",
       /** The saved file is the fetched response, byte for byte. */
       downloadFileName: (month: string) => `headway-mr20-${month}.json`,
+      /** The server CSV/XLSX export of the same package (design point 5):
+       *  banner and caveats lead the file, values verbatim. */
+      exportLabel: "Download the MR-20 package as a spreadsheet",
     },
   },
 
@@ -693,6 +761,142 @@ export const copy = {
 
   errors: {
     regionLabel: "Error",
+  },
+
+  /**
+   * The comparison surface (/compare — handoff 0017, design point 1).
+   * Every figure is the API's string verbatim, every cell opens the same
+   * Receipt as every other surface, and every delta is SERVER-computed and
+   * described sign-neutrally — a difference is a difference, not a win —
+   * unless the metric's registry direction defines better/worse (coverage
+   * only today).
+   */
+  compare: {
+    heading: "Compare figures",
+    intro:
+      "Put two to four versions of the same figure side by side — different calculation versions of one period, or one calculation across periods. Every number is shown exactly as computed, every cell opens the figure's full receipt, and a difference is described as a difference, not as better or worse, unless the metric itself defines a direction.",
+    loading: "Loading the figures available to compare…",
+    empty:
+      "No computed figures are available to compare yet. Figures appear here after the pipeline runs.",
+    pickerHeading: "What to compare",
+    metricLabel: "Which figure?",
+    metricUnselected: "Choose a figure",
+    modeLabel: "Compare across",
+    modeVersions: "Calculation versions (one period)",
+    modePeriods: "Periods (one calculation)",
+    periodLabel: "Which period?",
+    periodUnselected: "Choose a period",
+    calcLabel: "Which calculation?",
+    calcUnselected: "Choose a calculation",
+    comparandsVersionsLabel: "Which calculation versions? Pick two to four.",
+    comparandsPeriodsLabel: "Which periods? Pick two to four.",
+    baselineHint:
+      "The first comparand you tick is the baseline the others are measured against.",
+    run: "Compare",
+    reasonLabel: "Why the compare button is off",
+    reasonCount: "Pick at least two and at most four comparands to compare.",
+    comparing: "Comparing…",
+    baselineTag: "Baseline",
+    cardsHeading: "Side by side",
+    cardLabel: (comparand: string) => `Comparison card for ${comparand}`,
+    vsBaseline: "the baseline",
+    vsPrevious: "the previous comparand",
+    perModeHeading: "By mode",
+    noFleetFigure: "No agency-wide figure in this comparand.",
+    matrixHeading: "Detail matrix",
+    matrixCaption: (metric: string) =>
+      `${metric} by scope and comparand, exactly as computed. Each cell's button opens the figure's full receipt; each difference is against the baseline column.`,
+    scopeColumn: "Scope",
+    /** Scope display labels; unknown scopes fall back to the raw string. */
+    scopeLabels: {
+      agency: "Agency-wide",
+      fleet: "Fleet (all modes)",
+    } as Record<string, string>,
+    modeScope: (modeLabel: string) => `Mode: ${modeLabel}`,
+    cellReceipt: (metric: string, scope: string, comparand: string) =>
+      `Receipt for ${metric}, ${scope}, ${comparand}`,
+    receiptModalHeading: "Receipt",
+    closeReceipt: "Close the receipt",
+    cellMissing: "No figure.",
+    /** Certified-vs-uncertified comparisons label BOTH (binding rule). */
+    mixedBanner:
+      "This comparison puts certified and uncertified figures side by side. Every figure carries its own certification status label — read them before drawing conclusions.",
+    delta: {
+      noChange: (versus: string) => `no change from ${versus}`,
+      more: (magnitude: string, versus: string) =>
+        `${magnitude} more than ${versus}`,
+      less: (magnitude: string, versus: string) =>
+        `${magnitude} less than ${versus}`,
+      notComparable: (versus: string) => `No comparison against ${versus}.`,
+      /** Only for registry-directed metrics — never color alone. */
+      judgement: {
+        better: "better",
+        worse: "worse",
+      },
+    },
+  },
+
+  /**
+   * The settings sandbox (/sandbox — handoff 0017, design point 6). The
+   * HARD WALLS, restated where the user reads: a preview changes nothing,
+   * is never certifiable, and applying a real change lives only in the
+   * separate audited settings flow — this page has no apply button by
+   * design. Every previewed figure and difference is computed by the
+   * deterministic calculation runner and shown verbatim.
+   */
+  sandbox: {
+    heading: "Settings sandbox",
+    /** The prominent changes-nothing statement, on every visit. */
+    banner:
+      "Modeling preview — changes nothing. Figures on this page are what-if previews computed under proposed settings. They can never be certified, never enter a report package or the public feed, and nothing on this page changes any setting or any recorded figure.",
+    intro:
+      "Try a settings change before anyone makes it: propose new values for the calculation knobs below, pick a period, and Headway's deterministic calculation runner recomputes that period's figures under the proposed settings as a preview. The arithmetic is the calculation library's — never this page's.",
+    applyNote:
+      "Nothing here applies a change. Actually changing a setting happens only in Headway's separate, audited settings flow: a certifying official updates the setting, the change is audit-logged with who changed it and when, and the calculation runner reads the new value on its next real run. This page has no apply button on purpose.",
+    settingsHeading: "Settings to model",
+    settingsIntro:
+      "Today's values come from the agency's recorded settings, shown exactly as stored. Propose a new value for at least one; leave the others blank to keep them as they are.",
+    settingsLoading: "Loading the current settings…",
+    settingsError:
+      "Headway could not load the current settings, so the sandbox cannot state what today's values are. The error above says what the server reported.",
+    noKnobs:
+      "None of the calculation settings this sandbox models are present in the agency's settings. There is nothing to preview.",
+    currentValue: (value: string) => `Today's value: ${value}`,
+    proposedLabel: (key: string) => `Proposed value for ${key}`,
+    descriptionToggle: "What this setting does",
+    periodHeading: "Period to preview",
+    run: "Run the preview",
+    running: "Running the preview…",
+    reasonLabel: "Why the preview button is off",
+    reasonNothingProposed:
+      "Propose a new value for at least one setting — a preview with nothing changed would only restate today's figures.",
+    reasonPeriodMissing:
+      "Pick the period to preview — both the from and the to date.",
+    previewDone:
+      "Preview computed. Nothing was changed — the impact rail below shows what would change.",
+    railHeading: "What would change",
+    railIntro:
+      "Both columns below were computed fresh for this preview over the same recorded data: one under today's audited settings, one under your proposed values. Every figure and every difference is the deterministic calculation library's — never this page's — and none of it was stored anywhere.",
+    railCaption: (periodStart: string, periodEnd: string) =>
+      `Figures previewed for ${periodStart} to ${periodEnd}.`,
+    previewTag: "Preview — changes nothing",
+    /** Section headings: the ntd/ops split mirrors the honesty boundary. */
+    ntdHeading: "NTD figures (what-if)",
+    opsHeading: "Operations metrics (what-if)",
+    columns: {
+      figure: "Figure",
+      current: "Under today's settings",
+      preview: "Under the proposed settings",
+      change: "Difference",
+    },
+    /** A refusing variant is a stated result; its findings are listed. */
+    previewRefused:
+      "The calculation refused to produce this figure — its reasons are listed below, word for word.",
+    settingUsedLine: (key: string, current: string, proposed: string) =>
+      `${key}: ${current} today → ${proposed} proposed`,
+    inputsLine: (parts: string) =>
+      `Rows the preview read (workflow counts): ${parts}.`,
+    versus: "today's figure",
   },
 
   /**
@@ -850,6 +1054,10 @@ export const copy = {
       "How the header chrome would look with the values above. Saving is what makes it real — and the server, not this preview, decides whether a color is readable enough.",
     previewChartNote:
       "Charts keep their own validated palette: brand colors change the chrome, never the data encodings.",
+    /** Branding v2 (handoff 0017, design point 7): the known per-mode
+     *  limitation, stated where branding is edited — never silent. */
+    chromeDarkNote:
+      "Themed nav chrome follows the same per-mode rule: a chrome theme applies only in the mode whose readability check it passed. A theme with no dark variant keeps the neutral Headway chrome in dark mode.",
     previewSampleLink: "Sample link",
     previewSampleButton: "Sample action",
     logoHeading: "Agency logo",
@@ -928,6 +1136,22 @@ export const copy = {
       ss50ModeCount: (count: string) =>
         `${count} non-major event${count === "1" ? "" : "s"}`,
       ss50ModeZero: "0 events — the summary is still due",
+      /** The server CSV/XLSX export of the month's S&S-50 package
+       *  (handoff 0017, design point 5). */
+      ss50ExportLabel: (monthName: string) =>
+        `Download the S&S-50 summary for ${monthName}`,
+      ss50ExportNote:
+        "The file is the API's S&S-50 preview package for this month: one row per mode and type of service, explicit zero-event rows included, with its not-reportable banner, citations, and excluded-event accounting first.",
+      /** Urgency summary cards = filter toggles (handoff 0017 #2). Counts
+       *  are workflow tallies of listed deadlines, never figures. */
+      summaryLabel: "Deadlines at a glance — filter by urgency",
+      urgencyCardLabels: {
+        overdue: "Overdue",
+        "due-soon": "Due within 7 days",
+        upcoming: "Due later",
+      } as Record<string, string>,
+      filteredNote: (count: string) =>
+        `${count} deadline${count === "1" ? " is" : "s are"} outside the pressed urgency filter — out of view here, never off the calendar. Press the card again to show everything.`,
       /** Urgency wording: text + icon + color, never color alone. */
       dueToday: "Due today",
       dueIn: (days: string) =>
@@ -1110,6 +1334,12 @@ export const copy = {
 
     events: {
       heading: "Recorded events",
+      /** Classification summary cards = filter toggles (handoff 0017 #2).
+       *  Counts are workflow tallies of UNSUPERSEDED events. */
+      summaryLabel: "Events at a glance — filter by classification",
+      showingCount: (shown: string, total: string) =>
+        `Showing ${shown} of ${total} recorded events. An event with no classification on file always stays visible, and no event leaves the record by being filtered out.`,
+      clearFilter: "Show all events",
       loading: "Loading events…",
       empty:
         "No events recorded yet. Events appear here as they are recorded — and they stay here permanently: corrections add a new record instead of changing an old one.",
@@ -1290,6 +1520,11 @@ export const copy = {
 
     plans: {
       heading: "Sampling plans",
+      /** The in-row progress bar (handoff 0017, design point 3): value +
+       *  label text first, bar as the visual echo — never bar-alone. */
+      rowMeterLabel: (planLabel: string) =>
+        `Sampling progress for ${planLabel}`,
+      readyTag: "Ready to estimate",
       loading: "Loading sampling plans…",
       empty:
         "No sampling plans yet. Create one above — the plan fixes the unit, option, frequency, and required sample sizes before any unit is drawn.",
@@ -1355,6 +1590,11 @@ export const copy = {
       },
       notMeasured: "Not yet measured",
       measuredLine: (by: string, at: string) => `${by}, ${at}`,
+      /** The server CSV/XLSX export of the plan's worksheet (handoff 0017,
+       *  design point 5): every drawn unit across the plan's draws with
+       *  its measured state, the requirement and retention note first. */
+      exportLabel: (planLabel: string) =>
+        `Download the worksheet for ${planLabel}`,
       drawnLine: (by: string, at: string, version: string) =>
         `Drawn by ${by} at ${at} using ${version}.`,
     },

@@ -18,6 +18,10 @@ dependencies = [
                           # moved from the test extra (it also backs fastapi.testclient)
     "python-multipart>=0.0.9",  # Apache-2.0 — multipart parsing for the
                                 # branding logo upload (handoff 0008 pillar C)
+    "openpyxl>=3.1",      # MIT — server-side XLSX export alongside CSV
+                          # (handoff 0017 design point 5); values written as
+                          # TEXT cells so figures stay byte-equal to the CSV
+                          # (floating point never touches a figure)
     "headway-calc>=0.5",  # Apache-2.0 — SIBLING PATH PACKAGE (services/calc,
                           # not on PyPI): GET /reports/mr20 imports
                           # headway_calc.mr20 and serves its package verbatim

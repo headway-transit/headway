@@ -83,7 +83,9 @@ entirely. Any 401 clears the session and returns you to `/login`.
 | `/dashboard` | Operational dashboard (handoff 0008, pillar B; any signed-in role). Hero stat tiles show the latest **certified** VRM/VRH/UPT verbatim (SimulatedBadge where flagged, provenance link on every tile). Four hand-rolled SVG charts follow the dataviz discipline: UPT line with crosshair + tooltip; VRM & VRH as **small multiples** (one axis each — never dual-axis, asserted structurally in tests); coverage-over-time from the detail JSONB with the coverage threshold as a dashed reference line; unresolved DQ issues as thin stacked bars in reserved status colors with icon + label. Every chart has a keyboard reader (arrow keys walk the points), direct end labels, and a table-view toggle (the WCAG-clean equivalent carrying provenance links). Series colors come only from the validated `--series-*` tokens — never brand colors. |
 | `/settings/branding` | Agency branding (handoff 0008, pillar C; certifying official). Display name, two brand colors with live preview, and logo upload (SVG/PNG ≤ 512 KiB, multipart to `POST /branding/logo`). The **server** refuses colors that fail WCAG AA against the app surfaces (plain-language 422, surfaced verbatim). Saved branding restyles CHROME only: the shell fetches `GET /branding` on load, shows the display name + logo in the header, and overrides `--brand-primary`/`--brand-accent`; the dark theme pins its own accent (the server guardrail covers light surfaces only), and charts never read brand tokens. |
 | `/metrics` | Computed values table: metric, unit, period, value (verbatim string), calculation name+version, certification status. Calc versions below 1.0.0 carry a "Pre-verification" tag and a plain-language banner (they are marked PRE-VERIFICATION in `services/calc/REGULATORY_TRACKER.md` — not certifiable figures yet). EVERY figure's "Details" opens its **Receipt** (`src/components/Receipt.tsx`): story line, coverage meter + exclusions, the verbatim FTA rule + citation, flags, and the walk to raw records. Read-only: the certify flow moved to `/certify`; certifying officials see a plain note linking there. |
-| `/metrics/:id/lineage` | "How this number was made": the provenance tree from `GET /metrics/values/{id}/lineage`. Default is the **lineage graph** (`src/components/LineageGraph.tsx`) — a hand-rolled accessible SVG flow (figure → processing steps → raw records; raw tier collapsed to a count node, expanding 20 at a time; arrow keys move within/between tiers, Enter toggles). A "Text view" toggle is always visible and renders the FULL nested-list tree (every node, complete record ids) — the graph is progressive enhancement, never the only path. |
+| `/compare` | The **comparison surface** (handoff 0017, design point 1; `src/views/CompareView.tsx`): pick a metric and 2–4 comparands — calculation versions of one period, or one calculation across periods — → a card row (big value verbatim, delta vs the baseline and vs the previous comparand, per-mode subline) and a detail matrix (rows = scopes, columns = comparands). Binding rules upheld: every cell's figure is a button opening the SAME Receipt as every other surface (focus-trapped dialog); deltas are SERVER-computed exact-decimal strings rendered **sign-neutrally** (glyph + magnitude, muted for both directions) unless the response's calc-registry `directions` entry defines better/worse (coverage only today — and then always with the word, never color alone); simulated/ops/DR/pre-verification badges carry through; a certified-vs-uncertified mix renders the server's label-both note verbatim and tags every figure. The comparand vocabulary is enumerated client-side from `GET /metrics/values` (a workflow enumeration); figures and deltas come verbatim from `GET /metrics/compare` — this page never subtracts two figures. |
+| `/sandbox` | The **settings sandbox** (handoff 0017, design point 6; `src/views/SandboxView.tsx`): what-if modeling behind the honesty walls. Propose values for the previewable policy knobs (current values + descriptions verbatim from `GET /settings`), pick a period, and `POST /sandbox/preview` recomputes both variants over the same recorded data — EPHEMERALLY (the API's `persisted` is constant false; nothing is written anywhere, so preview figures deliberately have no receipt/lineage door). "Modeling preview — changes nothing" banners on every visit AND on every result (the server's own banner verbatim); the impact rail shows baseline vs proposed per figure with every would-be finding listed (refusals stated, never blank) and sign-neutral server-computed deltas; there is **no apply control anywhere** — the server's settings_flow_note names the separate audited settings flow verbatim. |
+| `/metrics/:id/lineage` | "How this number was made": the provenance tree from `GET /metrics/values/{id}/lineage`. Carries a breadcrumb trail (handoff 0017 #4): Metrics → figure → this page. Default is the **lineage graph** (`src/components/LineageGraph.tsx`) — a hand-rolled accessible SVG flow (figure → processing steps → raw records; raw tier collapsed to a count node, expanding 20 at a time; arrow keys move within/between tiers, Enter toggles). A "Text view" toggle is always visible and renders the FULL nested-list tree (every node, complete record ids) — the graph is progressive enhancement, never the only path. |
 | `/reports/monthly` | Monthly ridership preview: VRM/VRH/UPT for a picked month, verbatim, with certification status, coverage summary, per-row Receipt, provenance links, simulated-data banner, and CSV export of the exact served strings. |
 | `/safety` | The **Safety & Security module** (handoff 0010, design point 5; `src/views/SafetyView.tsx`), typed against `services/api` routers/safety.py exactly. Three rooms: a **deadlines panel** (`GET /safety/deadlines`) with API-computed due dates — S&S-40 per open major event, S&S-50 per operated mode **including zero-event rows** — each rule shown as the verbatim tracker quote + page citation, urgency as text + icon + color (never color alone; the only client date math is days-until-the-served-date); a plain-language **entry form** (`POST /safety/events`, data_steward+; "Was anyone taken directly from the scene for medical care?", never "injury threshold") with rail-only questions disclosed only for the classifier's own rail-mode set, client-side validation mirroring the contract, and the returned verdict rendered as a **classification receipt** (the sscls_v0 classifier's summary and per-threshold sentences verbatim, plus the verified manual quote per token via the extract-quotes pattern; unknown tokens and unmapped quotes stated loudly, never hidden); and the **events list** with classification chips (major/non-major/not reportable), per-event receipts, and the append-only **correction flow** (`POST /safety/events/{id}/supersede`, required audit reason) — the original stays visible, struck and linked to its replacement, never hidden. Honest-scope banner on every visit: alpha, no NTD e-filing. The page never classifies an event; `property_damage_usd` is a decimal string end to end. |
 | `/dq` | Data-quality queue: severity as text + icon + color (never color alone), status/owner/description, blocking issues prominent with their consequence stated. Resolve action (required resolution note) appears for data stewards and above. |
@@ -177,6 +179,37 @@ charts never read brand tokens.
 Status messages use `role="status"`; errors use `role="alert"` and quote the
 API verbatim.
 
+### UI wave (handoff 0017): summary cards, toasts, breadcrumbs, chrome
+
+- **Summary-card filter toggles** (`src/components/SummaryCards.tsx`): the
+  count cards above /dq (severity), the /safety events list
+  (classification), and the deadlines panel (urgency) ARE the filters —
+  real buttons with `aria-pressed`, a check mark + fill when pressed
+  (never color alone), a colored top border per tone, and counts that
+  always cover the whole queue (filtering hides nothing from them; /dq
+  additionally caps DRAWN cards at 200 with a loud banner — the
+  2026-07-14 live queue held 35,456 issues and drawing them all froze the
+  tab).
+- **Toasts** (`src/toasts.ts` + `src/components/Toasts.tsx`): one
+  persistent `role="log"` aria-live-polite region in the shell; create /
+  supersede / certify / resolve confirmations push here. Deterministic
+  lifetime: explicit dismiss or route change — never a timer (a
+  confirmation that vanishes on its own schedule is a WCAG 2.2.1 trap).
+- **Breadcrumbs** (`src/components/Breadcrumbs.tsx`): deep entities carry
+  a trail — receipt → lineage (route-level), sampling plan → draw →
+  measurements (per worksheet, uniquely-labeled landmarks), safety event →
+  correction.
+- **Themed nav chrome** (branding v2): the shell applies
+  `GET /branding`.chrome (`header_bg`/`header_fg`/`accent`, every pair
+  WCAG-refused server-side at write time) as `--chrome-*` custom-property
+  overrides in the LIGHT theme only; dark keeps the neutral Headway tokens
+  (the served `chrome_note` and the branding page state the per-mode rule).
+  Neutral default when unset; charts never read chrome tokens.
+- **In-row progress bars** (`src/components/RowProgress.tsx`): the sampling
+  plans list shows measured-vs-required per plan — value + label text
+  first, bar as the visual echo, with the estimate-ready state visually
+  distinct (success fill + "Ready to estimate" tag).
+
 ### Automated checks
 
 Every view test asserts zero axe-core violations (helpers in
@@ -217,27 +250,27 @@ ADR-0001 review rather than silently assumed acceptable.
 
 ## Verification status
 
-Refreshed 2026-07-13 (Batch D of the hardening pass — the previous entry's
-10 files / 51 tests and 3-calc quotes.json had gone stale across the S&S,
-PMT+sampling, and DR waves).
+Refreshed 2026-07-14 (the handoff-0017 UI wave: /compare, /sandbox,
+summary-card filters, toasts + breadcrumbs, in-row progress, themed
+chrome).
 
 `npm run build` (includes `tsc -b` type-check) — clean:
 
 ```
 vite v8.1.4 building client environment for production...
-✓ 1318 modules transformed.
+✓ 1328 modules transformed.
 dist/index.html                   1.22 kB │ gzip:   0.64 kB
-dist/assets/index-DdnanWU7.css   23.99 kB │ gzip:   4.61 kB
-dist/assets/index-iiZvbLRJ.js   481.09 kB │ gzip: 139.62 kB
-✓ built in 247ms
+dist/assets/index-*.css          30.32 kB │ gzip:   5.47 kB
+dist/assets/index-*.js          528.50 kB │ gzip: 151.85 kB
+✓ built in 439ms
 ```
 
 `npm test -- --run` (every view test asserts zero axe violations):
 
 ```
  RUN  v4.1.10 ~/headway/web
- Test Files  20 passed (20)
-      Tests  116 passed (116)
+ Test Files  25 passed (25)
+      Tests  145 passed (145)
 ```
 
 `node scripts/extract-quotes.mjs` — all 12 calcs in the tracker's table
@@ -247,12 +280,18 @@ carry verified quotes:
 extract-quotes: wrote …/web/src/regulatory/quotes.json (dr_pmt_v0: 12, dr_upt_v0: 12, dr_voms_v0: 12, dr_vrh_v0: 12, dr_vrm_v0: 12, pmt_v0: 19, sampling_v0: 19, sscls_v0: 39, upt_v0: 8, voms_v0: 4, vrh_v0: 10, vrm_v0: 10)
 ```
 
-`npm run check:contrast`: all 49 token pairs (light + dark + chart/series)
-PASS — "All token pairs meet WCAG 2.1 AA."
+`npm run check:contrast`: all 71 token pairs (light + dark + chart/series
++ the handoff-0017 summary-card/toast/delta/progress pairs) PASS — "All
+token pairs meet WCAG 2.1 AA."
 
-**PENDING — live end-to-end against a running API.** Docker is unavailable in
-this environment, so the UI has only been exercised against the exported
-OpenAPI contract with mocked fetch. Before this increment is Done per the
-role's Definition of Done: run the stack, sign in with a seeded
-certifying-official account, certify a seeded VRM figure, walk its lineage to
-a raw record, and resolve a DQ issue — then capture that evidence here.
+**Live end-to-end (2026-07-14, handoff-0017 wave):** headless-Chrome
+click-through against the live Compose API at localhost:8000 (SPA nav only —
+in-memory token): login → /compare over real vrh_v0 0.4.0 figures across
+two periods (5364.54 vs 5389.40 h; sign-neutral "▲ 24.86 more than the
+baseline"; a cell receipt opened live) → /dq summary cards over the real
+35,456-issue queue (33 blocking open; the render cap landed from this very
+click-through) → /sandbox preview (coverage_threshold 0.95→0.90, real
+recompute; VRM refusal-vs-figure rail; nothing persisted) → themed chrome
+applied via the audited settings flow, verified light/dark, and reverted.
+Evidence in handoff 0017's frontend section. The earlier walking-skeleton
+pending (certify a figure live) was closed by the wave-13/15 click-throughs.

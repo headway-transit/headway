@@ -14,6 +14,7 @@ import type {
   Branding,
   CertificationRequest,
   CertificationResponse,
+  CompareResponse,
   DqIssue,
   ErrorEnvelope,
   LineageNode,
@@ -44,6 +45,8 @@ import type {
   SamplingPlanProgress,
   SamplingPlanRecord,
   SamplingPlanRequest,
+  SandboxPreviewRequest,
+  SandboxPreviewResponse,
   Setting,
   UpdateSettingResponse,
 } from "./types";
@@ -99,7 +102,7 @@ async function request<T>(
   method: string,
   path: string,
   body?: unknown,
-  opts: { auth?: boolean; rawText?: boolean } = {},
+  opts: { auth?: boolean; rawText?: boolean; blob?: boolean } = {},
 ): Promise<T> {
   const headers: Record<string, string> = { Accept: "application/json" };
   // FormData (multipart upload) sets its own Content-Type with the boundary;
@@ -148,6 +151,14 @@ async function request<T>(
   // re-serialization that could reorder keys or reformat numbers).
   if (opts.rawText) {
     return (await response.text()) as T;
+  }
+  // blob: a binary download (CSV/XLSX exports) — the body plus the response
+  // headers, so the caller can honor the server's attachment filename.
+  if (opts.blob) {
+    return {
+      blob: await response.blob(),
+      contentDisposition: response.headers.get("content-disposition"),
+    } as T;
   }
   return (await response.json()) as T;
 }
@@ -442,6 +453,194 @@ export function estimateSamplingPmt(
     "POST",
     `/sampling/plans/${encodeURIComponent(planId)}/estimate`,
     body,
+  );
+}
+
+// ---- comparison + sandbox (handoff 0017) ----
+//
+// Both endpoints were built in parallel against the same handoff and are
+// typed against the REGENERATED openapi.json (reconciled 2026-07-14; the
+// original parallel-build mocks guessed a different comparand token order
+// and a flat sandbox body — both corrected here against the export).
+
+/**
+ * One comparand token, exactly as GET /metrics/compare parses it:
+ * '<period_start>..<period_end>' (ISO dates, half-open) optionally followed
+ * by '@<calc_name>:<calc_version>' to pin one calculation version. The
+ * first comparand in the request is the baseline.
+ */
+export function comparandToken(
+  periodStart: string,
+  periodEnd: string,
+  calcName?: string,
+  calcVersion?: string,
+): string {
+  const period = `${periodStart}..${periodEnd}`;
+  return calcName && calcVersion
+    ? `${period}@${calcName}:${calcVersion}`
+    : period;
+}
+
+export interface CompareQuery {
+  metric: string;
+  /** 2–4 comparand tokens; the FIRST is the baseline. */
+  comparands: string[];
+  /** Optional scope subset; omitted = every scope with a figure. */
+  scopes?: string[];
+}
+
+/**
+ * GET /metrics/compare (handoff 0017, design point 1): the same reader as
+ * GET /metrics/values COMPOSED per comparand — values verbatim, deltas
+ * computed server-side in exact Decimal arithmetic and served as signed
+ * strings, direction metadata from the calc library's metric registry.
+ * This UI renders the response; it never subtracts two figures.
+ */
+export function getMetricsCompare(query: CompareQuery): Promise<CompareResponse> {
+  const params = new URLSearchParams();
+  params.set("metric", query.metric);
+  for (const token of query.comparands) params.append("comparand", token);
+  for (const scope of query.scopes ?? []) params.append("scope", scope);
+  return request<CompareResponse>("GET", `/metrics/compare?${params}`);
+}
+
+/**
+ * POST /sandbox/preview (handoff 0017, design point 6): a what-if PREVIEW
+ * recomputation for one period under proposed knob values, vs the current
+ * audited settings, over the SAME canonical inputs. Changes nothing: the
+ * calc preview entry points perform no writes, `persisted` is a constant
+ * false, and previews are ephemeral — they exist only in the response.
+ * Applying a knob stays in the separate audited settings flow (the
+ * response's settings_flow_note names it verbatim).
+ */
+export function runSandboxPreview(
+  body: SandboxPreviewRequest,
+): Promise<SandboxPreviewResponse> {
+  return request<SandboxPreviewResponse>("POST", "/sandbox/preview", body);
+}
+
+// ---- server exports (handoff 0017, design point 5) ----
+//
+// CSV/XLSX downloads served by the API. Both formats come from ONE server-
+// side row assembly (services/api headway_api/exports.py): every XLSX data
+// cell is a TEXT cell holding the byte-identical string the CSV holds, so a
+// figure survives exactly as served. The saved file is the response body
+// byte for byte — nothing here parses, reorders, or re-encodes it.
+
+export type ExportFormat = "csv" | "xlsx";
+
+/** One fetched export: the response bytes plus the name to save them as. */
+export interface ExportDownload {
+  blob: Blob;
+  filename: string;
+}
+
+/** What request() hands back for a blob download, pre-filename. */
+interface BlobResult {
+  blob: Blob;
+  contentDisposition: string | null;
+}
+
+/**
+ * The server names every export via Content-Disposition (surface + period
+ * in the stem); that name wins. The fallback mirrors the server's stem
+ * convention for the rare response without the header.
+ */
+function attachmentFilename(
+  contentDisposition: string | null,
+  fallback: string,
+): string {
+  const match = /filename="([^"]+)"/.exec(contentDisposition ?? "");
+  return match ? match[1] : fallback;
+}
+
+async function requestExport(
+  path: string,
+  fallbackFilename: string,
+): Promise<ExportDownload> {
+  const result = await request<BlobResult>("GET", path, undefined, {
+    blob: true,
+  });
+  return {
+    blob: result.blob,
+    filename: attachmentFilename(result.contentDisposition, fallbackFilename),
+  };
+}
+
+/**
+ * GET /metrics/values/export — the SAME rows GET /metrics/values serves
+ * (same optional filters), as a download. Columns are the retired
+ * client-side CSV's plus scope, category (the migration-0024 honesty
+ * boundary) and metric_value_id (the provenance path); the preview
+ * disclaimer — and a simulated-data warning when any row is simulated —
+ * leads the CSV and forms the XLSX's first sheet.
+ */
+export function downloadMetricValuesExport(
+  format: ExportFormat,
+  filters: Pick<MetricValueFilters, "period_start" | "period_end"> = {},
+): Promise<ExportDownload> {
+  const params = new URLSearchParams();
+  if (filters.period_start) params.set("period_start", filters.period_start);
+  if (filters.period_end) params.set("period_end", filters.period_end);
+  params.set("format", format);
+  const stem = [
+    "headway-metric-values",
+    ...(filters.period_start ? [filters.period_start] : []),
+    ...(filters.period_end ? [filters.period_end] : []),
+  ].join("-");
+  return requestExport(
+    `/metrics/values/export?${params}`,
+    `${stem}.${format}`,
+  );
+}
+
+/**
+ * GET /reports/mr20/export?month= — the MR-20 preview package as a grid:
+ * one row per (scope, metric) cell, values verbatim from the package; its
+ * NOT-REPORTABLE banner and every caveat lead the file.
+ */
+export function downloadMr20Export(
+  month: string,
+  format: ExportFormat,
+): Promise<ExportDownload> {
+  const params = new URLSearchParams({ month, format });
+  return requestExport(
+    `/reports/mr20/export?${params}`,
+    `headway-mr20-${month}-preview.${format}`,
+  );
+}
+
+/**
+ * GET /reports/ss50/export?month= — the S&S-50 non-major monthly summary
+ * package: one row per (mode, type-of-service) cell INCLUDING explicit
+ * zero-event rows; banner, citations, caveats and the excluded-event
+ * accounting lead the file.
+ */
+export function downloadSs50Export(
+  month: string,
+  format: ExportFormat,
+): Promise<ExportDownload> {
+  const params = new URLSearchParams({ month, format });
+  return requestExport(
+    `/reports/ss50/export?${params}`,
+    `headway-ss50-${month}-preview.${format}`,
+  );
+}
+
+/**
+ * GET /sampling/plans/{id}/worksheet — the plan's measurement worksheet:
+ * one row per selected unit per draw with its measured state; the plan's
+ * requirement, the undersampled/estimate-ready state and the retention
+ * note lead the file.
+ */
+export function downloadSamplingWorksheet(
+  planId: string,
+  format: ExportFormat,
+): Promise<ExportDownload> {
+  const params = new URLSearchParams({ format });
+  return requestExport(
+    `/sampling/plans/${encodeURIComponent(planId)}/worksheet?${params}`,
+    `headway-sampling-worksheet-${planId}.${format}`,
   );
 }
 

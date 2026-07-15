@@ -908,6 +908,21 @@ class FakeConn:
             ),
             updated_by="migration:0015",
         )
+        # Themed chrome keys (migration 0027, handoff 0017 design point 7).
+        for key in (
+            "brand_chrome_header_bg",
+            "brand_chrome_header_fg",
+            "brand_chrome_accent",
+        ):
+            self.add_setting(
+                key, "unset", "text",
+                description=(
+                    "Themed chrome (branding v2). GUARDRAIL: chrome pairs "
+                    "that fail accessibility contrast are refused (WCAG "
+                    "2.1 AA, 4.5:1)."
+                ),
+                updated_by="migration:0027",
+            )
 
     def add_safety_event(self, **overrides):
         """Seed one safety.events row (handoff 0010 / migration 0017)."""

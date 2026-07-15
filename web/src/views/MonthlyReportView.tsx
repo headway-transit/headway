@@ -5,8 +5,10 @@
  *
  * Deriving period_start/period_end from the picked month is UI logic (period
  * SELECTION); the figures themselves are the API's strings verbatim — this
- * view never computes, rounds, or edits one, and the CSV export writes the
- * exact same strings.
+ * view never computes, rounds, or edits one, and the CSV/XLSX downloads are
+ * assembled by the API from the same served strings (the client-side CSV
+ * assembly was retired for the server export on 2026-07-14; the export
+ * control's note states what changed).
  *
  * The permanent disclaimer is not decorative: the official NTD Monthly
  * Ridership submission format has not been verified against FTA's reporting
@@ -16,15 +18,22 @@
 
 import { Fragment, useEffect, useId, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { ApiError, getMr20Report, listMetricValues } from "../api/client";
+import {
+  ApiError,
+  downloadMetricValuesExport,
+  downloadMr20Export,
+  getMr20Report,
+  listMetricValues,
+} from "../api/client";
 import type { Mr20Fetch } from "../api/client";
 import type { MetricValue, Mr20Cell, Mr20Cells } from "../api/types";
+import { ExportButtons } from "../components/ExportButtons";
 import { Receipt } from "../components/Receipt";
 import { SimulatedBadge } from "../components/SimulatedBadge";
 import { copy } from "../copy";
 import { coverageSummary, isPreVerification, isSimulated } from "../detail";
+import { saveBlob } from "../download";
 import { ratioToPercentString } from "../format";
-import { buildMonthlyRidershipCsv } from "../reports/csv";
 import { monthPeriod, previousMonth } from "../reports/period";
 
 /** The metrics of the Monthly Ridership preview, in display order. */
@@ -215,23 +224,7 @@ export function MonthlyReportView() {
   const anySimulated = allValues.some((v) => isSimulated(v.detail));
   const monthName = copy.report.monthNames[month - 1];
 
-  const handleExport = () => {
-    // The CSV is assembled client-side from the API strings VERBATIM
-    // (see reports/csv.ts — asserted cell === API string in tests).
-    const csv = buildMonthlyRidershipCsv(allValues);
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = copy.report.exportFileName(
-      String(year),
-      String(month).padStart(2, "0"),
-    );
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
-    URL.revokeObjectURL(url);
-  };
+  const monthKey = `${year}-${String(month).padStart(2, "0")}`;
 
   const handleDownloadMr20 = () => {
     if (!mr20) return;
@@ -242,14 +235,7 @@ export function MonthlyReportView() {
     const blob = new Blob([mr20.raw], {
       type: "application/json;charset=utf-8",
     });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = copy.report.mr20.downloadFileName(mr20.pkg.month);
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
-    URL.revokeObjectURL(url);
+    saveBlob(blob, copy.report.mr20.downloadFileName(mr20.pkg.month));
   };
 
   return (
@@ -416,6 +402,12 @@ export function MonthlyReportView() {
                   {copy.report.mr20.download}
                 </button>
               </p>
+              {/* The server CSV/XLSX export of the SAME package (design
+                  point 5): banner + caveats lead the file, values verbatim. */}
+              <ExportButtons
+                label={copy.report.mr20.exportLabel}
+                download={(format) => downloadMr20Export(monthKey, format)}
+              />
             </>
           )}
         </section>
@@ -548,11 +540,17 @@ export function MonthlyReportView() {
           </div>
 
           {allValues.length > 0 && (
-            <p>
-              <button type="button" onClick={handleExport}>
-                {copy.report.exportCsv}
-              </button>
-            </p>
+            /* The server export (design point 5) — replaced the client-side
+               CSV assembly on 2026-07-14. The note states the differences:
+               extra columns (scope, category, metric_value_id) and every
+               computed figure for the month, not only the three shown. */
+            <ExportButtons
+              label={copy.report.export.label}
+              note={copy.report.export.note}
+              download={(format) =>
+                downloadMetricValuesExport(format, monthPeriod(year, month))
+              }
+            />
           )}
         </>
       )}

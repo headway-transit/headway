@@ -634,6 +634,35 @@ the routed issues back with it — silently destroying the run's DQ evidence,
 the opposite of fail-loudly. The ordering is regression-tested
 (`tests/test_runner.py::test_persist_failure_does_not_roll_back_committed_dq_issues`).
 
+### Sandbox previews — the READ-ONLY entry points (handoff 0017)
+
+`preview_period` / `preview_ops_period` are the what-if entry points behind
+the API's `/sandbox/preview`: they load canonical inputs once, run the same
+deterministic calc functions over 1..n threshold variants (resolution SHARED
+with the real runs — explicit > `app.settings` > default), and return a
+report. **They never write**: no `dq.issues`, no `computed.metric_values`,
+no lineage, no commit (pinned by `tests/test_preview.py` — zero INSERTs,
+zero commits on the recording connection). A new entry point exists because
+composition genuinely cannot serve here: both real entry points durably
+route findings and persist values BY DESIGN (fail-loudly-first), and a
+preview must not pollute either surface; wrapping `run_period` in a
+rolled-back transaction would have defeated its own commit discipline with a
+doctored connection. Preview results are therefore ephemeral — nothing a
+preview produces exists anywhere certification could reach (the
+migration-0024 CHECK remains the database wall for the REAL ops runner's
+persisted rows). Bounded scope: fleet-wide agency figures only; the four
+seeded NTD knobs (`preview_period`) and the two OTP-window knobs
+(`preview_ops_period`, otp_v0 only — headway_adherence takes no knob).
+
+### Metric registry direction metadata (handoff 0017)
+
+`headway_calc/registry.py` records which compared quantities define a
+better/worse direction — for the comparison UI's red/green decision, in the
+registry, never per-view. Only `coverage` registers a direction
+(`higher_is_better`); every reported metric is explicitly sign-neutral
+(`None`), and expanding the map is a deliberate reviewed act
+(`tests/test_registry.py` pins the set).
+
 ## v0 semantics (documented approximation)
 
 Trip assignment (`trip_id` present) is the revenue-service proxy; unassigned
