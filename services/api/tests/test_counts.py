@@ -30,7 +30,7 @@ def test_dq_counts_match_the_list(client, fake_db):
     body = r.json()
     assert body["total"] == 4
     assert body["by_severity"] == {"blocking": 1, "warning": 2, "info": 1}
-    assert body["by_status"] == {"open": 2, "owned": 1, "resolved": 1}
+    assert body["by_status"] == {"open": 2, "owned": 1, "resolved": 1, "attested": 0}
     listed = client.get(
         "/dq/issues", headers=auth_header(fake_db, "vera")
     ).json()
@@ -47,7 +47,7 @@ def test_dq_counts_respect_the_same_status_filter_as_the_list(client, fake_db):
     body = r.json()
     assert body["total"] == 2
     assert body["by_severity"] == {"blocking": 1, "warning": 1, "info": 0}
-    assert body["by_status"] == {"open": 2, "owned": 0, "resolved": 0}
+    assert body["by_status"] == {"open": 2, "owned": 0, "resolved": 0, "attested": 0}
 
 
 def test_dq_counts_empty_state_is_explicit_zeros(client, fake_db):
@@ -55,7 +55,7 @@ def test_dq_counts_empty_state_is_explicit_zeros(client, fake_db):
     assert r.json() == {
         "total": 0,
         "by_severity": {"blocking": 0, "warning": 0, "info": 0},
-        "by_status": {"open": 0, "owned": 0, "resolved": 0},
+        "by_status": {"open": 0, "owned": 0, "resolved": 0, "attested": 0},
     }
 
 

@@ -101,10 +101,28 @@ function PublicFigureCard({ value }: { value: PublicMetricValue }) {
       <dl>
         <dt>{copy.publicData.periodLabel}</dt>
         <dd>{period}</dd>
-        {value.certified_at && (
+        {(value.certification?.certified_at ?? value.certified_at) && (
           <>
             <dt>{copy.publicData.certifiedOnLabel}</dt>
-            <dd>{value.certified_at}</dd>
+            <dd>{value.certification?.certified_at ?? value.certified_at}</dd>
+          </>
+        )}
+        {/* The signature fingerprint (handoff 0019, design 7): the public
+            feed serves the key fingerprint — never the certifier's
+            identity. A legacy (pre-signature) certification says so
+            honestly instead of showing a blank. */}
+        {value.certification && (
+          <>
+            <dt>{copy.publicData.fingerprintLabel}</dt>
+            <dd>
+              {value.certification.key_fingerprint ? (
+                <code className="certificate-fingerprint">
+                  {value.certification.key_fingerprint}
+                </code>
+              ) : (
+                copy.publicData.fingerprintLegacy
+              )}
+            </dd>
           </>
         )}
       </dl>

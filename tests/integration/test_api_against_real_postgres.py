@@ -115,7 +115,13 @@ def test_certification_flow_persists_visibly_outside_the_app(
     headers = login(api_client, "cora.it", "certifier-pass-1")
 
     # 1. Blocking DQ issue open -> certification refused with 409.
-    body = {"metric_value_ids": [mv_id], "attestation": "January figures are correct."}
+    body = {
+        "metric_value_ids": [mv_id],
+        "attestation": "January figures are correct.",
+        # The signing ceremony's typed identity (handoff 0019).
+        "signer_full_name": "Cora Integration",
+        "signer_title": "Certifying Official",
+    }
     resp = api_client.post("/certifications", json=body, headers=headers)
     assert resp.status_code == 409, resp.text
     assert "blocking" in resp.json()["detail"]
@@ -414,6 +420,8 @@ def test_ops_figure_structurally_excluded_from_certifiable_paths(
         json={
             "metric_value_ids": [ops_id],
             "attestation": "Attempting to certify an operations metric.",
+            "signer_full_name": "Cora Integration",
+            "signer_title": "Certifying Official",
         },
         headers=headers,
     )
@@ -441,6 +449,8 @@ def test_ops_figure_structurally_excluded_from_certifiable_paths(
         json={
             "metric_value_ids": [ntd_id],
             "attestation": "January figures are correct.",
+            "signer_full_name": "Cora Integration",
+            "signer_title": "Certifying Official",
         },
         headers=headers,
     )

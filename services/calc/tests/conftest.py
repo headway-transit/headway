@@ -491,6 +491,16 @@ class RecordingCursor:
             elif "canonical.dr_trips" in sql:
                 # The DR reader SELECT (handoff 0013, migration 0021).
                 self._pending_all = list(conn.dr_trip_rows)
+            elif "cert.attestations" in sql:
+                # The statistician-attestation SELECT (handoff 0019,
+                # migration 0029). The fake honors the reader's covering
+                # filter contract by serving canned rows as-is; a
+                # pre-migration database is modeled by the missing flag.
+                if conn.attestations_table_missing:
+                    raise FakeUndefinedTable(
+                        'relation "cert.attestations" does not exist'
+                    )
+                self._pending_all = list(conn.attestation_rows)
             elif "canonical.agencies" in sql:
                 # The ops timezone SELECT (handoff 0014, migration 0026).
                 self._pending_all = list(conn.agency_timezone_rows)
@@ -569,6 +579,8 @@ class RecordingConnection:
         dr_trip_rows: list[tuple] | None = None,
         ops_schedule_rows: list[tuple] | None = None,
         agency_timezone_rows: list[tuple] | None = None,
+        attestation_rows: list[tuple] | None = None,
+        attestations_table_missing: bool = False,
     ):
         self.position_rows = position_rows or []
         # The ops slice (handoff 0014): schedule + agency timezone reads.
@@ -578,6 +590,10 @@ class RecordingConnection:
         self.operated_trip_rows = operated_trip_rows or []
         # pmt_v0's geometry rows (handoff 0011, migration 0019).
         self.stop_time_rows = stop_time_rows or []
+        # Statistician attestations (handoff 0019, migration 0029); the
+        # missing flag models a pre-0029 database (SQLSTATE 42P01 path).
+        self.attestation_rows = attestation_rows or []
+        self.attestations_table_missing = attestations_table_missing
         # The DR calcs' trip rows (handoff 0013, migration 0021).
         self.dr_trip_rows = dr_trip_rows or []
         self.metric_value_rows = metric_value_rows or []

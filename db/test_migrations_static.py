@@ -726,3 +726,56 @@ def test_branding_chrome_seeded_with_pair_guardrail():
     assert "dark" in sql_0027, (
         "0027 must restate the standing dark-mode limitation, not hide it"
     )
+
+
+def test_cert_attestations_append_only_revocation_never_deletion():
+    # Handoff 0019 / migration 0029: statistician attestations — the p. 146
+    # approval record. Append-only: DELETE always rejected; the ONLY
+    # permitted UPDATE is setting the revocation trio once, together.
+    sql = (MIGRATIONS_DIR / "0029_cert_attestations.sql").read_text(
+        encoding="utf-8"
+    )
+    assert "CREATE TABLE cert.attestations" in sql
+    for column in (
+        "statistician_name",
+        "statistician_credentials",
+        "method_description",
+        "document_reference",
+        "scope_pattern",
+        "entered_by",
+        "revoked_at",
+        "revoked_by",
+        "revocation_reason",
+    ):
+        assert column in sql, column
+    # Only the two p. 146 metrics are attestable — a DB CHECK, not policy.
+    assert "CHECK (metric IN ('upt', 'pmt'))" in sql
+    assert "attestations_revocation_all_or_none" in sql
+    assert "attestations_period_nonempty" in sql
+    assert re.search(r"BEFORE UPDATE OR DELETE ON cert\.attestations", sql)
+    assert "RAISE EXCEPTION" in sql
+    # The 'attested' DQ resolution state joins the status vocabulary.
+    assert (
+        "CHECK (status IN ('open', 'owned', 'resolved', 'attested'))" in sql
+    )
+
+
+def test_certification_signature_columns_all_or_none_append_only():
+    # Handoff 0019 / migration 0030: the certifier digital signature.
+    sql = (MIGRATIONS_DIR / "0030_certification_signature.sql").read_text(
+        encoding="utf-8"
+    )
+    for column in ("canonical_document", "signature", "key_fingerprint"):
+        assert column in sql, column
+    # canonical_document is TEXT, never JSONB — JSONB would normalize the
+    # signed bytes away.
+    assert "ADD COLUMN canonical_document TEXT" in sql
+    assert "certifications_signature_all_or_none" in sql
+    # Existing rows keep NULL forever: no UPDATE/backfill in the migration.
+    assert "UPDATE cert.certifications" not in sql
+    assert re.search(r"BEFORE UPDATE OR DELETE ON cert\.certifications", sql)
+    assert "RAISE EXCEPTION" in sql
+    # The key posture is documented in the migration itself: env/secret
+    # file only, never this database, never the repository.
+    assert "HEADWAY_SIGNING_KEY" in sql
+    assert "NEVER in this database" in sql

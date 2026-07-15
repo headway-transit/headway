@@ -28,8 +28,64 @@ from .. import exports
 from ..auth import Identity
 from ..authz import require_authenticated
 from ..db import get_db
+from .certify import _signer_identity_from_document
 
 router = APIRouter(tags=["reports"])
+
+#: Certifications whose covered figures fall inside one half-open month
+#: period AND still stand certified (handoff 0019, design point 7 — the
+#: certificate block on the MR-20/S&S-50 "Read first" sheets).
+_SELECT_PERIOD_CERTIFICATIONS = (
+    "SELECT DISTINCT c.certification_id, c.certified_by, c.certified_at, "
+    "c.key_fingerprint, c.canonical_document "
+    "FROM cert.certifications AS c "
+    "JOIN computed.metric_values AS v "
+    "ON v.metric_value_id = ANY(c.metric_value_ids) "
+    "WHERE v.period_start >= %s AND v.period_end <= %s "
+    "AND v.certification_status = 'certified' "
+    "ORDER BY c.certified_at, c.certification_id"
+)
+
+
+def _certificate_lines(db, month: str) -> list[str]:
+    """The certificate block for one month's export banner (empty when the
+    period holds no certified figures — a line is never invented). Signed
+    certifications name the typed signer, timestamp and key fingerprint;
+    pre-signature (legacy) certifications say so honestly."""
+    period_start, period_end = mr20.month_period(month)
+    rows = db.execute(
+        _SELECT_PERIOD_CERTIFICATIONS, (period_start, period_end)
+    ).fetchall()
+    if not rows:
+        return []
+    lines = [
+        "Certificate: figures in this period are covered by the "
+        "certification(s) below. Verify any of them (tamper-evidence) at "
+        "GET /public/certifications/{certification_id}/verify."
+    ]
+    for row in rows:
+        certification_id, certified_by, certified_at = (
+            str(row[0]), row[1], row[2],
+        )
+        key_fingerprint, canonical_document = row[3], row[4]
+        if key_fingerprint is None:
+            lines.append(
+                f"Certification {certification_id}: certified by "
+                f"{certified_by} on {certified_at.isoformat()} — recorded "
+                f"before digital signatures existed (no fingerprint; "
+                f"honest history, never backfilled)."
+            )
+            continue
+        name, title = _signer_identity_from_document(canonical_document)
+        signer = (
+            f"{name}, {title}" if name and title else certified_by
+        )
+        lines.append(
+            f"Certification {certification_id}: signed by {signer} on "
+            f"{certified_at.isoformat()} — Ed25519 signature, key "
+            f"fingerprint {key_fingerprint}."
+        )
+    return lines
 
 
 def _month_or_422(month: str) -> None:
@@ -107,7 +163,9 @@ def export_mr20_report(
     test); XLSX cells are TEXT so figures survive exactly."""
     _month_or_422(month)
     package = mr20.build_mr20_package(db, month)
-    grid = exports.mr20_grid(package)
+    grid = exports.mr20_grid(
+        package, certificate_lines=_certificate_lines(db, month)
+    )
     return exports.export_response(
         grid, format, f"headway-mr20-{month}-preview"
     )
@@ -139,7 +197,9 @@ def export_ss50_report(
     verbatim into a grid) as CSV/XLSX — handoff 0017, design point 5."""
     _month_or_422(month)
     package = ss50.build_ss50_package(db, month)
-    grid = exports.ss50_grid(package)
+    grid = exports.ss50_grid(
+        package, certificate_lines=_certificate_lines(db, month)
+    )
     return exports.export_response(
         grid, format, f"headway-ss50-{month}-preview"
     )

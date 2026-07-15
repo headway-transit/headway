@@ -15,7 +15,7 @@ def test_viewer_cannot_certify(client, fake_db):
     mv = fake_db.add_metric_value()
     r = client.post(
         "/certifications",
-        json={"metric_value_ids": [mv["metric_value_id"]], "attestation": "ok"},
+        json={"metric_value_ids": [mv["metric_value_id"]], "attestation": "ok", "signer_full_name": "Cora Certifier", "signer_title": "Chief Executive Officer"},
         headers=auth_header(fake_db, "vera"),
     )
     assert r.status_code == 403
@@ -31,7 +31,7 @@ def test_report_preparer_cannot_certify_separation_of_duties(client, fake_db):
     mv = fake_db.add_metric_value()
     r = client.post(
         "/certifications",
-        json={"metric_value_ids": [mv["metric_value_id"]], "attestation": "ok"},
+        json={"metric_value_ids": [mv["metric_value_id"]], "attestation": "ok", "signer_full_name": "Cora Certifier", "signer_title": "Chief Executive Officer"},
         headers=auth_header(fake_db, "petra"),
     )
     assert r.status_code == 403

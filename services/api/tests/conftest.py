@@ -26,10 +26,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-from headway_api import auth, machine_auth  # noqa: E402
+from headway_api import auth, machine_auth, signing  # noqa: E402
 from headway_api.app import Settings, create_app  # noqa: E402
 
 TEST_SECRET = "test-only-session-secret-not-for-production"
+
+#: Deterministic Ed25519 seed for tests — NEVER a production key. The app
+#: fixture injects the loaded signer onto app.state so certify tests sign;
+#: the no-key refusal path builds its own app without it.
+TEST_SIGNING_SEED_HEX = "ab" * 32
 
 # bcrypt is deliberately slow; hash each test password once per session.
 _PASSWORDS = {
@@ -77,6 +82,8 @@ class FakeConn:
         self.sampling_plans: dict[str, dict] = {}
         self.sampling_draws: list[dict] = []
         self.sampling_measurements: dict[str, dict] = {}
+        # Statistician attestations (handoff 0019 / migration 0029).
+        self.attestations: dict[str, dict] = {}
         self._next_classification_id = 1
         self._next_event_id = 1
         self.executed: list[tuple[str, tuple]] = []
@@ -100,6 +107,7 @@ class FakeConn:
                 self.sampling_plans,
                 self.sampling_draws,
                 self.sampling_measurements,
+                self.attestations,
                 self._next_classification_id,
                 self._next_event_id,
             )
@@ -121,6 +129,7 @@ class FakeConn:
                 self.sampling_plans,
                 self.sampling_draws,
                 self.sampling_measurements,
+                self.attestations,
                 self._next_classification_id,
                 self._next_event_id,
             ) = snapshot
@@ -141,6 +150,25 @@ class FakeConn:
                 if u
                 else []
             )
+            return FakeCursor(rows)
+
+        if (
+            q.startswith("SELECT metric_value_id, metric, unit")
+            and "ANY(%s)" in q
+        ):
+            # certify._SELECT_FIGURES (handoff 0019): the full figure rows
+            # the canonical document covers.
+            wanted = [str(i) for i in params[0]]
+            rows = [
+                (
+                    mv["metric_value_id"], mv["metric"], mv["unit"],
+                    mv["period_start"], mv["period_end"], mv["scope"],
+                    mv["value"], mv["calc_name"], mv["calc_version"],
+                    mv["category"], mv["detail"],
+                )
+                for i, mv in self.metric_values.items()
+                if i in wanted
+            ]
             return FakeCursor(rows)
 
         if q.startswith("SELECT metric_value_id, metric, unit"):
@@ -199,7 +227,7 @@ class FakeConn:
                 1
                 for i in self.dq_issues.values()
                 if i["severity"] == "blocking"
-                and i["status"] != "resolved"
+                and i["status"] in ("open", "owned")
                 # migration 0024: only NTD findings gate certification.
                 and (
                     "AND category = 'ntd'" not in q
@@ -209,16 +237,90 @@ class FakeConn:
             return FakeCursor([(n,)])
 
         if q.startswith("INSERT INTO cert.certifications"):
-            ids, certified_by, attestation = params
+            # Migration 0030 shape: explicit id + timestamp + the signature
+            # trio (the certified_at in the row is EXACTLY the timestamp
+            # inside the signed document).
+            (certification_id, ids, certified_by, certified_at, attestation,
+             canonical_document, signature, key_fingerprint) = params
             cert = {
-                "certification_id": str(uuid.uuid4()),
+                "certification_id": str(certification_id),
                 "metric_value_ids": list(ids),
                 "certified_by": certified_by,
-                "certified_at": dt.datetime.now(UTC),
+                "certified_at": certified_at,
                 "attestation": attestation,
+                "canonical_document": canonical_document,
+                "signature": signature,
+                "key_fingerprint": key_fingerprint,
             }
             self.certifications.append(cert)
             return FakeCursor([(cert["certification_id"], cert["certified_at"])])
+
+        if q.startswith(
+            "SELECT certification_id, metric_value_ids, certified_by"
+        ):
+            rows = list(self.certifications)
+            if "WHERE certification_id = %s" in q:
+                rows = [
+                    c for c in rows
+                    if c["certification_id"] == str(params[0])
+                ]
+            else:
+                rows.sort(
+                    key=lambda c: (c["certified_at"], c["certification_id"])
+                )
+            return FakeCursor(
+                [
+                    (
+                        c["certification_id"], c["metric_value_ids"],
+                        c["certified_by"], c["certified_at"],
+                        c["attestation"], c.get("canonical_document"),
+                        c.get("signature"), c.get("key_fingerprint"),
+                    )
+                    for c in rows
+                ]
+            )
+
+        if q.startswith(
+            "SELECT certification_id, certified_at, key_fingerprint"
+        ):
+            # public._SELECT_CERTIFICATION_REFS (handoff 0019, point 7).
+            return FakeCursor(
+                [
+                    (
+                        c["certification_id"], c["certified_at"],
+                        c.get("key_fingerprint"), c["metric_value_ids"],
+                    )
+                    for c in self.certifications
+                ]
+            )
+
+        if q.startswith("SELECT DISTINCT c.certification_id"):
+            # reports._SELECT_PERIOD_CERTIFICATIONS: certifications whose
+            # covered figures fall in the half-open month period and stand
+            # certified.
+            period_start, period_end = params
+            rows = []
+            for c in sorted(
+                self.certifications,
+                key=lambda c: (c["certified_at"], c["certification_id"]),
+            ):
+                for mv_id in c["metric_value_ids"]:
+                    mv = self.metric_values.get(str(mv_id))
+                    if (
+                        mv is not None
+                        and mv["period_start"] >= period_start
+                        and mv["period_end"] <= period_end
+                        and mv["certification_status"] == "certified"
+                    ):
+                        rows.append(
+                            (
+                                c["certification_id"], c["certified_by"],
+                                c["certified_at"], c.get("key_fingerprint"),
+                                c.get("canonical_document"),
+                            )
+                        )
+                        break
+            return FakeCursor(rows)
 
         if q.startswith("UPDATE computed.metric_values SET certification_status"):
             wanted = [str(i) for i in params[0]]
@@ -273,7 +375,7 @@ class FakeConn:
         if q.startswith("UPDATE dq.issues SET status = 'resolved'"):
             resolution, resolution_minutes, issue_id = params
             issue = self.dq_issues.get(str(issue_id))
-            if issue is None or issue["status"] == "resolved":
+            if issue is None or issue["status"] not in ("open", "owned"):
                 return FakeCursor([])
             issue["status"] = "resolved"
             issue["resolved_at"] = dt.datetime.now(UTC)
@@ -286,6 +388,29 @@ class FakeConn:
                         issue["severity"], issue["resolved_at"],
                     )
                 ]
+            )
+
+        if q.startswith("UPDATE dq.issues SET status = 'attested'"):
+            resolution, issue_id = params
+            issue = self.dq_issues.get(str(issue_id))
+            if issue is None or issue["status"] not in ("open", "owned"):
+                return FakeCursor([])
+            issue["status"] = "attested"
+            issue["resolved_at"] = dt.datetime.now(UTC)
+            issue["resolution"] = resolution
+            return FakeCursor(
+                [
+                    (
+                        issue["issue_id"], issue["issue_type"],
+                        issue["severity"], issue["resolved_at"],
+                    )
+                ]
+            )
+
+        if q.startswith("SELECT issue_type, status FROM dq.issues"):
+            issue = self.dq_issues.get(str(params[0]))
+            return FakeCursor(
+                [(issue["issue_type"], issue["status"])] if issue else []
             )
 
         if q.startswith("SELECT status FROM dq.issues"):
@@ -706,7 +831,91 @@ class FakeConn:
             m["superseded_by"] = str(replacement_id)
             return FakeCursor([(m["measurement_id"],)])
 
+        # -- Statistician attestations (handoff 0019 / migration 0029) -------
+        if q.startswith("INSERT INTO cert.attestations"):
+            (statistician_name, statistician_credentials, method_description,
+             document_reference, metric, scope_pattern, period_start,
+             period_end, entered_by) = params
+            att = {
+                "attestation_id": str(uuid.uuid4()),
+                "statistician_name": statistician_name,
+                "statistician_credentials": statistician_credentials,
+                "method_description": method_description,
+                "document_reference": document_reference,
+                "metric": metric,
+                "scope_pattern": scope_pattern,
+                "period_start": period_start,
+                "period_end": period_end,
+                "entered_by": entered_by,
+                "entered_at": dt.datetime.now(UTC),
+                "revoked_at": None,
+                "revoked_by": None,
+                "revocation_reason": None,
+            }
+            self.attestations[att["attestation_id"]] = att
+            return FakeCursor([self._attestation_row(att)])
+
+        if q.startswith(
+            "SELECT attestation_id, statistician_name, statistician_credentials, method_description, document_reference, metric"
+        ):
+            # The full-column attestation SELECT (list / one).
+            if "WHERE attestation_id = %s" in q:
+                att = self.attestations.get(str(params[0]))
+                rows = [att] if att else []
+            else:
+                rows = list(self.attestations.values())
+                i = 0
+                if "metric = %s" in q:
+                    rows = [r for r in rows if r["metric"] == params[i]]
+                    i += 1
+                if "revoked_at IS NULL" in q:
+                    rows = [r for r in rows if r["revoked_at"] is None]
+                rows.sort(key=lambda r: (r["entered_at"], r["attestation_id"]))
+            return FakeCursor([self._attestation_row(r) for r in rows])
+
+        if q.startswith(
+            "SELECT attestation_id, statistician_name, statistician_credentials, method_description, metric"
+        ):
+            # dq._SELECT_ATTESTATION_FOR_ISSUE (9 columns).
+            att = self.attestations.get(str(params[0]))
+            rows = (
+                [
+                    (
+                        att["attestation_id"], att["statistician_name"],
+                        att["statistician_credentials"],
+                        att["method_description"], att["metric"],
+                        att["scope_pattern"], att["period_start"],
+                        att["period_end"], att["revoked_at"],
+                    )
+                ]
+                if att
+                else []
+            )
+            return FakeCursor(rows)
+
+        if q.startswith("UPDATE cert.attestations SET revoked_at"):
+            revoked_by, reason, attestation_id = params
+            att = self.attestations.get(str(attestation_id))
+            if att is None or att["revoked_at"] is not None:
+                return FakeCursor([])
+            att["revoked_at"] = dt.datetime.now(UTC)
+            att["revoked_by"] = revoked_by
+            att["revocation_reason"] = reason
+            return FakeCursor([self._attestation_row(att)])
+
         raise AssertionError(f"FakeConn has no handler for SQL: {q!r}")
+
+    @staticmethod
+    def _attestation_row(att: dict) -> tuple:
+        """The routers' _COLUMNS order (routers/attestations.py)."""
+        return (
+            att["attestation_id"], att["statistician_name"],
+            att["statistician_credentials"], att["method_description"],
+            att["document_reference"], att["metric"], att["scope_pattern"],
+            att["period_start"], att["period_end"], att["entered_by"],
+            att["entered_at"], att["revoked_at"], att["revoked_by"],
+            att["revocation_reason"],
+        )
 
     def _latest_safety_rows(self) -> list[dict]:
         """Each event merged with its LATEST classification (classified_at,
@@ -1039,6 +1248,28 @@ class FakeConn:
         self.safety_classifications.append(row)
         return row
 
+    def add_attestation(self, **overrides):
+        """Seed one cert.attestations row (handoff 0019 / migration 0029)."""
+        att = {
+            "attestation_id": str(uuid.uuid4()),
+            "statistician_name": "Dr. R. Fisher",
+            "statistician_credentials": "PhD statistics",
+            "method_description": "Route-stratified expansion factoring",
+            "document_reference": "dms://approvals/2026/factoring.pdf",
+            "metric": "upt",
+            "scope_pattern": "agency",
+            "period_start": dt.date(2026, 6, 1),
+            "period_end": dt.date(2026, 7, 1),
+            "entered_by": "cora",
+            "entered_at": dt.datetime(2026, 7, 2, 9, 0, tzinfo=UTC),
+            "revoked_at": None,
+            "revoked_by": None,
+            "revocation_reason": None,
+        }
+        att.update(overrides)
+        self.attestations[att["attestation_id"]] = att
+        return att
+
     def add_edge(self, output_kind, output_id, transform_name, transform_version,
                  input_kind, input_id):
         self.lineage_edges.append(
@@ -1142,14 +1373,24 @@ def fake_webhook_sender():
 
 
 @pytest.fixture
-def app(fake_db, settings, fake_store, fake_producer, fake_webhook_sender):
-    return create_app(
+def test_signer():
+    return signing.load_signer({signing.ENV_KEY: TEST_SIGNING_SEED_HEX})
+
+
+@pytest.fixture
+def app(fake_db, settings, fake_store, fake_producer, fake_webhook_sender,
+        test_signer):
+    application = create_app(
         settings=settings,
         db=fake_db,
         object_store=fake_store,
         producer=fake_producer,
         webhook_sender=fake_webhook_sender,
     )
+    # The installation signing key (handoff 0019), injected like every other
+    # external seam — signing.get_signer serves this cached instance.
+    application.state.signer = test_signer
+    return application
 
 
 @pytest.fixture

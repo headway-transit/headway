@@ -14,7 +14,7 @@ SECRET = "shared-hmac-secret-for-the-receiver-1"
 def _certify(client, fake_db, mv_ids):
     return client.post(
         "/certifications",
-        json={"metric_value_ids": mv_ids, "attestation": "June figures are accurate."},
+        json={"metric_value_ids": mv_ids, "attestation": "June figures are accurate.", "signer_full_name": "Cora Certifier", "signer_title": "Chief Executive Officer"},
         headers=auth_header(fake_db, "cora"),
     )
 
@@ -347,7 +347,7 @@ def test_certification_only_subscription_gets_no_dq_events_and_vice_versa(
 
 
 def test_no_sender_configured_is_an_audited_failure_not_an_error(
-    fake_db, settings
+    fake_db, settings, test_signer
 ):
     from fastapi.testclient import TestClient
 
@@ -355,6 +355,7 @@ def test_no_sender_configured_is_an_audited_failure_not_an_error(
 
     app = create_app(settings=settings, db=fake_db, webhook_sender=None)
     app.state.webhook_sender = None  # simulate a deployment with no sender
+    app.state.signer = test_signer  # certification always signs (handoff 0019)
     fake_db.add_webhook_subscription(secret=SECRET)
     mv = fake_db.add_metric_value()
     with TestClient(app) as client:

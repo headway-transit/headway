@@ -384,6 +384,13 @@ services:
       # existing .env files. The API itself refuses to start on an empty
       # secret (fail-loudly at the right layer, never a baked-in default).
       HEADWAY_SESSION_SECRET: ${HEADWAY_SESSION_SECRET:-}
+      # Certification signing key (handoff 0019): 64 hex chars = the Ed25519
+      # seed the API signs certifications with. Installer-generated into
+      # .env (openssl rand -hex 32), same posture as the session secret:
+      # env/secret file ONLY — never the database, never the repo. Empty =
+      # the certify endpoint refuses with a plain-language 503 (a
+      # certification is never silently recorded unsigned).
+      HEADWAY_SIGNING_KEY: ${HEADWAY_SIGNING_KEY:-}
       # libpq keyword conninfo, NOT a URL — sidesteps the percent-encoding
       # trap (2026-07-09 live-run finding) without needing PG* support in
       # the app. NOTE: a password containing spaces or quotes would still

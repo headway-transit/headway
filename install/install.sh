@@ -850,6 +850,13 @@ write_env_file() {
   # the passwords above (it is a secret; it is never logged).
   set_env_value HEADWAY_SESSION_SECRET "$(openssl rand -hex 32)"
 
+  # The installation's certification signing key (handoff 0019): a 32-byte
+  # Ed25519 seed as 64 hex characters. Generated HERE, at install — it
+  # lives only in .env (mode 600), never in the database or the repo, and
+  # it is never logged. Rotating it later changes the key fingerprint on
+  # new certificates; old ones verify only against the old key.
+  set_env_value HEADWAY_SIGNING_KEY "$(openssl rand -hex 32)"
+
   write_access_env
 
   ok "Configuration file created."

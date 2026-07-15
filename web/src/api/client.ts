@@ -11,9 +11,17 @@
 
 import { clearSession, getSession } from "../auth/session";
 import type {
+  AttestationCreated,
+  AttestationRecord,
+  AttestationRequest,
+  AttestationRevokeRequest,
+  AttestationRevoked,
   Branding,
+  CertificationCertificate,
+  CertificationIntent,
   CertificationRequest,
   CertificationResponse,
+  VerificationResult,
   CompareResponse,
   DqIssue,
   ErrorEnvelope,
@@ -208,6 +216,85 @@ export function certify(
   body: CertificationRequest,
 ): Promise<CertificationResponse> {
   return request<CertificationResponse>("POST", "/certifications", body);
+}
+
+// ---- signature + attestations (handoff 0019) ----
+//
+// Typed against services/api routers/certify.py + attestations.py EXACTLY
+// (reconciled 2026-07-15 against the backend's parallel build; final check
+// against the regenerated openapi.json when it lands).
+
+/**
+ * GET /certifications/intent — the fixed statements the signing ceremony
+ * renders: the ESIGN-style intent statement and the honest-scope
+ * statement. SERVER-SERVED so screen and signed record carry the same
+ * words; if this cannot be loaded, the ceremony refuses to arm (a
+ * signature must never be given against words the server did not state).
+ */
+export function getCertificationIntent(): Promise<CertificationIntent> {
+  return request<CertificationIntent>("GET", "/certifications/intent");
+}
+
+/**
+ * GET /certifications/{id} — the certificate: the record, the raw signed
+ * bytes, the parsed canonical document, and a LIVE verification result
+ * the server computes on every read. Rendered verbatim by the UI.
+ */
+export function getCertification(
+  certificationId: string,
+): Promise<CertificationCertificate> {
+  return request<CertificationCertificate>(
+    "GET",
+    `/certifications/${encodeURIComponent(certificationId)}`,
+  );
+}
+
+/**
+ * GET /certifications/{id}/verify — the server re-verifies the stored
+ * canonical document against the stored signature (handoff 0019 design 6).
+ * The UI shows the verdict verbatim, verified or FAILED — never softened.
+ */
+export function verifyCertification(
+  certificationId: string,
+): Promise<VerificationResult> {
+  return request<VerificationResult>(
+    "GET",
+    `/certifications/${encodeURIComponent(certificationId)}/verify`,
+  );
+}
+
+/** GET /attestations — every recorded statistician attestation, revoked
+ *  ones included (append-only history; any signed-in role reads). */
+export function listAttestations(): Promise<AttestationRecord[]> {
+  return request<AttestationRecord[]>("GET", "/attestations");
+}
+
+/**
+ * POST /attestations (certifying_official — enforced server-side;
+ * audited). Records that a qualified statistician approved a factoring
+ * method for a declared scope. The UI records the approval's existence
+ * and pointer — never the approval document itself.
+ */
+export function createAttestation(
+  body: AttestationRequest,
+): Promise<AttestationCreated> {
+  return request<AttestationCreated>("POST", "/attestations", body);
+}
+
+/**
+ * POST /attestations/{id}/revoke (certifying_official; audited). Revokes
+ * — never deletes: the row stays visible with its revocation trio, and
+ * figures already factored under it keep their provenance permanently.
+ */
+export function revokeAttestation(
+  attestationId: string,
+  body: AttestationRevokeRequest,
+): Promise<AttestationRevoked> {
+  return request<AttestationRevoked>(
+    "POST",
+    `/attestations/${encodeURIComponent(attestationId)}/revoke`,
+    body,
+  );
 }
 
 /** The one deliberately unauthenticated path (handoff 0006, design point 8). */

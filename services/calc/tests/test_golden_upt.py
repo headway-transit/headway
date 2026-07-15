@@ -20,7 +20,12 @@ from decimal import Decimal
 
 from conftest import load_events
 
-from headway_calc.upt import compute_upt
+# Pinned to the RETAINED 0.1.0 function (compute_upt_v0_1_0 — the
+# test_golden.py convention): these goldens anchor upt_v0 0.1.0 forever;
+# 0.2.0 (attestation path, handoff 0019) has its own tests, and the
+# no-attestation byte-for-byte equivalence is pinned in
+# test_upt_attestation.py.
+from headway_calc.upt import compute_upt_v0_1_0 as compute_upt
 
 
 def test_golden_blocked_case_refuses_above_fta_threshold(

@@ -127,7 +127,7 @@ def test_per_mode_run_emits_agency_plus_scoped_rows(
     # a semantics change — no version bump).
     assert by_key[("vrm", "mode:bus")].calc_version == "0.2.0"
     assert by_key[("vrh", "mode:bus")].calc_version == "0.4.0"
-    assert by_key[("upt", "mode:bus")].calc_version == "0.1.0"
+    assert by_key[("upt", "mode:bus")].calc_version == "0.2.0"
     assert by_key[("voms", "mode:bus")].calc_version == "0.1.0"
     assert by_key[("voms", "agency")].unit == "vehicles"
 

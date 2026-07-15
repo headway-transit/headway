@@ -22,7 +22,16 @@ from ..db import get_db
 
 router = APIRouter(tags=["data-quality"])
 
-VALID_STATUSES = ("open", "owned", "resolved")
+#: 'attested' (migration 0029, handoff 0019): the closed state reserved for
+#: the p. 146 >2%-missing-data refusal when a recorded statistician
+#: attestation covers it — the trail says exactly WHY the gap stopped
+#: blocking, instead of a generic 'resolved'. Set only via
+#: POST /dq/issues/{id}/attest, referencing the attestation, audited.
+VALID_STATUSES = ("open", "owned", "resolved", "attested")
+
+#: The one issue_type the attested state applies to: the p. 146 refusal
+#: (upt_v0/pmt_v0 'apc_missing_trips_above_fta_threshold').
+ATTESTABLE_ISSUE_TYPE = "apc_missing_trips_above_fta_threshold"
 
 
 class DqIssue(BaseModel):
@@ -68,6 +77,23 @@ class ResolveResponse(BaseModel):
     audit_event_id: int
 
 
+class AttestRequest(BaseModel):
+    """Close a p. 146 refusal issue under a recorded statistician
+    attestation (handoff 0019). The resolution text is built server-side
+    from the attestation — the caller supplies only the reference."""
+
+    attestation_id: str = Field(min_length=1)
+
+
+class AttestResponse(BaseModel):
+    issue_id: str
+    status: str  # always 'attested'
+    resolved_at: dt.datetime
+    resolution: str
+    attestation_id: str
+    audit_event_id: int
+
+
 _SELECT_ISSUES = (
     "SELECT issue_id, issue_type, severity, status, owner, title, description, "
     "source_record_ids, created_at, resolved_at, resolution, resolution_minutes "
@@ -77,8 +103,28 @@ _SELECT_ISSUES = (
 _RESOLVE_ISSUE = (
     "UPDATE dq.issues SET status = 'resolved', resolved_at = now(), "
     "resolution = %s, resolution_minutes = %s "
-    "WHERE issue_id = %s AND status <> 'resolved' "
+    "WHERE issue_id = %s AND status IN ('open', 'owned') "
     "RETURNING issue_id, issue_type, severity, resolved_at"
+)
+
+#: The attested closure (handoff 0019): only the p. 146 refusal issue, only
+#: from an open/owned state, resolution text built server-side naming the
+#: attestation — never a free-text masquerade of the state.
+_ATTEST_ISSUE = (
+    "UPDATE dq.issues SET status = 'attested', resolved_at = now(), "
+    "resolution = %s "
+    "WHERE issue_id = %s AND status IN ('open', 'owned') "
+    "RETURNING issue_id, issue_type, severity, resolved_at"
+)
+
+_SELECT_ATTESTATION_FOR_ISSUE = (
+    "SELECT attestation_id, statistician_name, statistician_credentials, "
+    "method_description, metric, scope_pattern, period_start, period_end, "
+    "revoked_at FROM cert.attestations WHERE attestation_id = %s"
+)
+
+_SELECT_ISSUE_TYPE_STATUS = (
+    "SELECT issue_type, status FROM dq.issues WHERE issue_id = %s"
 )
 
 _SELECT_OLD_RESOLUTION_MINUTES = (
@@ -193,9 +239,10 @@ def resolve_issue(
             raise HTTPException(
                 status_code=409,
                 detail=(
-                    "This data-quality issue is already resolved. It cannot "
-                    "be resolved again — reopening and re-resolving would "
-                    "need a new issue so the history stays honest."
+                    "This data-quality issue is already closed (resolved or "
+                    "attested). It cannot be resolved again — reopening and "
+                    "re-resolving would need a new issue so the history "
+                    "stays honest."
                 ),
             )
         resolved_id, issue_type, severity, resolved_at = (
@@ -234,5 +281,119 @@ def resolve_issue(
         resolved_at=resolved_at,
         resolution=body.resolution,
         resolution_minutes=body.resolution_minutes,
+        audit_event_id=audit_event_id,
+    )
+
+
+@router.post("/dq/issues/{issue_id}/attest", response_model=AttestResponse)
+def attest_issue(
+    issue_id: str,
+    body: AttestRequest,
+    identity: Identity = Depends(require_at_least("data_steward")),
+    db=Depends(get_db),
+) -> AttestResponse:
+    """Close ONE p. 146 refusal issue under a recorded statistician
+    attestation — the explicit 'attested' state (handoff 0019, never a
+    generic 'resolved', never a deletion).
+
+    Refuses loudly when: the issue does not exist (404); the issue is not
+    the p. 146 refusal type (409 — no other gap has a statistician cure:
+    'agencies must not collect a smaller sample than the chosen sampling
+    plan prescribes', 2026 NTD Policy Manual p. 149); the issue is already
+    closed (409); the attestation does not exist (404) or is revoked (409).
+    The resolution text is built here from the attestation record. Audited
+    in the same transaction.
+    """
+    with db.transaction():
+        att = db.execute(
+            _SELECT_ATTESTATION_FOR_ISSUE, (body.attestation_id,)
+        ).fetchone()
+        if att is None:
+            raise HTTPException(
+                status_code=404,
+                detail=(
+                    "No attestation with that id exists. Enter the "
+                    "statistician's approval first (POST /attestations)."
+                ),
+            )
+        if att[8] is not None:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "That attestation has been revoked, so it cannot close "
+                    "this issue. A revoked approval covers nothing going "
+                    "forward."
+                ),
+            )
+        issue = db.execute(_SELECT_ISSUE_TYPE_STATUS, (issue_id,)).fetchone()
+        if issue is None:
+            raise HTTPException(
+                status_code=404,
+                detail="No data-quality issue with that id exists.",
+            )
+        issue_type, status = issue[0], issue[1]
+        if issue_type != ATTESTABLE_ISSUE_TYPE:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Only the 2%-missing-data refusal "
+                    f"({ATTESTABLE_ISSUE_TYPE}) can be closed by a "
+                    "statistician attestation — that is the one gap the "
+                    "manual gives a statistician-approval path (2026 NTD "
+                    "Policy Manual p. 146). Every other issue keeps the "
+                    "normal resolution workflow; in particular a short "
+                    "sample has NO statistician cure: 'agencies must not "
+                    "collect a smaller sample than the chosen sampling "
+                    "plan prescribes' (p. 149)."
+                ),
+            )
+        if status not in ("open", "owned"):
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "This data-quality issue is already closed (resolved "
+                    "or attested). Closing it again would blur the trail."
+                ),
+            )
+        resolution = (
+            f"Attested: statistician {att[1]} ({att[2]}) approved the "
+            f"factoring method — {att[3]} — for metric {att[4]}, scope "
+            f"pattern {att[5]!r}, period [{att[6].isoformat()}, "
+            f"{att[7].isoformat()}) (attestation #{att[0]}, 2026 NTD "
+            f"Policy Manual p. 146). The next calc run over a covered "
+            f"period factors up under this attestation and the figure "
+            f"carries its provenance."
+        )
+        row = db.execute(_ATTEST_ISSUE, (resolution, issue_id)).fetchone()
+        if row is None:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "This data-quality issue changed while your request "
+                    "was being recorded. Nothing was changed. Please "
+                    "refresh and try again."
+                ),
+            )
+        attested_id, _type, _severity, resolved_at = (
+            str(row[0]), row[1], row[2], row[3],
+        )
+        audit_event_id = write_event(
+            db,
+            actor=identity.username,
+            action="dq_attest",
+            subject_kind="dq.issues",
+            subject_id=attested_id,
+            detail={
+                "attestation_id": str(att[0]),
+                "resolution": resolution,
+                "attested_by_role": identity.role,
+            },
+        )
+    return AttestResponse(
+        issue_id=attested_id,
+        status="attested",
+        resolved_at=resolved_at,
+        resolution=resolution,
+        attestation_id=str(att[0]),
         audit_event_id=audit_event_id,
     )

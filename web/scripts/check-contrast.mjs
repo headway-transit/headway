@@ -110,6 +110,15 @@ const PAIRS = [
   ["ready progress fill on surface track (non-text, 3:1)", "#1c632f", "#f6f8fa", 3.0],
   ["sandbox apply-note border on page background (non-text, 3:1)", "#1d4e89", "#ffffff", 3.0],
 
+  // Handoff 0019 (attestations + signature): the statistician-approved
+  // exception family — the attested-callout tag text/icon on the exception
+  // background, and the callout border / attestation-card rule as non-text
+  // marks on the card background. The signature/certificate panels reuse
+  // pairs already registered above (accent rule on surface, success/danger
+  // borders, muted monospace hashes).
+  ["exception tag text + icon on exception background", "#4c2889", "#f1eafb", 4.5],
+  ["exception callout border on card background (non-text, 3:1)", "#4c2889", "#ffffff", 3.0],
+
   // ---- DARK theme (handoff 0008 pillar A) ----
   // Card/content surface #161b22, page plane #0d1117. Brand color overrides
   // are NOT applied to dark text/controls (server guardrail covers light
@@ -149,6 +158,10 @@ const PAIRS = [
   ["dark: delta 'worse' text on card background", "#ffb3ab", "#161b22", 4.5],
   ["dark: ready progress fill on page-plane track (non-text, 3:1)", "#8ddaa4", "#0d1117", 3.0],
   ["dark: sandbox apply-note border on page plane (non-text, 3:1)", "#a8c7f0", "#0d1117", 3.0],
+
+  // Handoff 0019, dark counterparts of the exception family.
+  ["dark: exception tag text + icon on exception background", "#cdb4f6", "#251a3d", 4.5],
+  ["dark: exception callout border on card background (non-text, 3:1)", "#cdb4f6", "#161b22", 3.0],
 ];
 
 let failed = false;

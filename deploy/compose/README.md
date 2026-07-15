@@ -25,6 +25,15 @@ Check status with `docker compose ps` — every service should report
 and says which variable is unset; that is deliberate (fail loudly, never boot
 with baked-in credentials).
 
+Secrets note (handoff 0019): alongside the session secret, `.env` holds
+`HEADWAY_SIGNING_KEY` — the installation's Ed25519 certification signing key
+(64 hex chars; `openssl rand -hex 32`; the installer generates it). It lives
+ONLY in `.env` (mode 600) or a secret file — never in the database, never in
+the repository. Without it the API runs but refuses to certify (503, nothing
+written): a certification is never recorded unsigned. Rotating it changes
+the key fingerprint on new certificates; keep the old key if you need to
+re-verify certificates it signed (see `services/api/README.md`).
+
 To stop: `docker compose down`. Data survives in named volumes; add `-v` only
 if you intend to erase everything.
 

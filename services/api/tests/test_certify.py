@@ -19,7 +19,7 @@ def test_certify_happy_path_writes_cert_status_and_audit(client, fake_db):
         json={
             "metric_value_ids": ids,
             "attestation": "I certify these June 2026 figures are accurate.",
-        },
+        "signer_full_name": "Cora Certifier", "signer_title": "Chief Executive Officer"},
         headers=auth_header(fake_db, "cora"),
     )
     assert r.status_code == 201
@@ -56,7 +56,7 @@ def test_certify_refused_409_when_open_blocking_dq_issue(client, fake_db):
                          title="Vehicle 42 odometer conflict")
     r = client.post(
         "/certifications",
-        json={"metric_value_ids": [mv["metric_value_id"]], "attestation": "ok"},
+        json={"metric_value_ids": [mv["metric_value_id"]], "attestation": "ok", "signer_full_name": "Cora Certifier", "signer_title": "Chief Executive Officer"},
         headers=auth_header(fake_db, "cora"),
     )
     assert r.status_code == 409
@@ -73,7 +73,7 @@ def test_certify_refused_when_blocking_issue_owned_but_not_resolved(client, fake
     fake_db.add_dq_issue(severity="blocking", status="owned", owner="stella")
     r = client.post(
         "/certifications",
-        json={"metric_value_ids": [mv["metric_value_id"]], "attestation": "ok"},
+        json={"metric_value_ids": [mv["metric_value_id"]], "attestation": "ok", "signer_full_name": "Cora Certifier", "signer_title": "Chief Executive Officer"},
         headers=auth_header(fake_db, "cora"),
     )
     assert r.status_code == 409
@@ -86,7 +86,7 @@ def test_certify_allowed_once_blocking_issue_resolved(client, fake_db):
     fake_db.add_dq_issue(severity="warning", status="open")  # warnings don't block
     r = client.post(
         "/certifications",
-        json={"metric_value_ids": [mv["metric_value_id"]], "attestation": "ok"},
+        json={"metric_value_ids": [mv["metric_value_id"]], "attestation": "ok", "signer_full_name": "Cora Certifier", "signer_title": "Chief Executive Officer"},
         headers=auth_header(fake_db, "cora"),
     )
     assert r.status_code == 201
@@ -98,7 +98,7 @@ def test_certify_unknown_metric_value_404(client, fake_db):
         json={
             "metric_value_ids": ["00000000-0000-0000-0000-000000000000"],
             "attestation": "ok",
-        },
+        "signer_full_name": "Cora Certifier", "signer_title": "Chief Executive Officer"},
         headers=auth_header(fake_db, "cora"),
     )
     assert r.status_code == 404
@@ -109,7 +109,7 @@ def test_certify_already_certified_409(client, fake_db):
     mv = fake_db.add_metric_value(certification_status="certified")
     r = client.post(
         "/certifications",
-        json={"metric_value_ids": [mv["metric_value_id"]], "attestation": "ok"},
+        json={"metric_value_ids": [mv["metric_value_id"]], "attestation": "ok", "signer_full_name": "Cora Certifier", "signer_title": "Chief Executive Officer"},
         headers=auth_header(fake_db, "cora"),
     )
     assert r.status_code == 409
@@ -120,7 +120,7 @@ def test_certify_requires_nonempty_attestation(client, fake_db):
     mv = fake_db.add_metric_value()
     r = client.post(
         "/certifications",
-        json={"metric_value_ids": [mv["metric_value_id"]], "attestation": ""},
+        json={"metric_value_ids": [mv["metric_value_id"]], "attestation": "", "signer_full_name": "Cora Certifier", "signer_title": "Chief Executive Officer"},
         headers=auth_header(fake_db, "cora"),
     )
     assert r.status_code == 422
@@ -163,7 +163,7 @@ def test_certify_refuses_ops_figures_with_plain_language_409(client, fake_db):
         json={
             "metric_value_ids": [ntd["metric_value_id"], ops["metric_value_id"]],
             "attestation": "Attempting to certify an operations metric.",
-        },
+        "signer_full_name": "Cora Certifier", "signer_title": "Chief Executive Officer"},
         headers=auth_header(fake_db, "cora"),
     )
     assert r.status_code == 409
@@ -195,7 +195,7 @@ def test_open_blocking_ops_finding_never_gates_ntd_certification(client, fake_db
         json={
             "metric_value_ids": [mv["metric_value_id"]],
             "attestation": "June figures verified.",
-        },
+        "signer_full_name": "Cora Certifier", "signer_title": "Chief Executive Officer"},
         headers=auth_header(fake_db, "cora"),
     )
     assert r.status_code == 201
@@ -209,7 +209,7 @@ def test_open_blocking_ops_finding_never_gates_ntd_certification(client, fake_db
         json={
             "metric_value_ids": [mv2["metric_value_id"]],
             "attestation": "July figures verified.",
-        },
+        "signer_full_name": "Cora Certifier", "signer_title": "Chief Executive Officer"},
         headers=auth_header(fake_db, "cora"),
     )
     assert r2.status_code == 409

@@ -60,8 +60,10 @@ step:
    computer, the installer stops and explains your options instead of
    overwriting anything.
 3. **Creates the configuration file** (`deploy/compose/.env`) with strong
-   randomly generated passwords. The file is readable only by your user
-   account.
+   randomly generated passwords, plus the installation's certification
+   signing key (the key that makes every certification tamper-evident —
+   it lives only in this file, never in the database). The file is
+   readable only by your user account.
 4. **Starts Headway** — the database, message queue, file storage,
    metrics and dashboards — and waits until every part reports healthy.
    The first start downloads software and can take 10–20 minutes.

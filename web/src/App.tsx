@@ -10,7 +10,9 @@ import {
 import { setUnauthorizedHandler } from "./api/client";
 import { useSession } from "./auth/session";
 import { Layout } from "./components/Layout";
+import { AttestationsView } from "./views/AttestationsView";
 import { BrandingView } from "./views/BrandingView";
+import { CertificateView } from "./views/CertificateView";
 import { CertifyView } from "./views/CertifyView";
 import { CompareView } from "./views/CompareView";
 import { DashboardView } from "./views/DashboardView";
@@ -82,9 +84,17 @@ export function AppRoutes() {
               that changes nothing — any signed-in role may model; the API
               enforces whatever role the preview run requires. */}
           <Route path="/sandbox" element={<SandboxView />} />
+          {/* Statistician attestations (handoff 0019, design A): any
+              signed-in role reads the record; recording one is gated in
+              the UI and enforced by the API on POST /attestations. */}
+          <Route path="/attestations" element={<AttestationsView />} />
           {/* Role-gated in the UI (nav link + in-page notice); the API
               enforces certifying_official on POST /certifications. */}
           <Route path="/certify" element={<CertifyView />} />
+          {/* The certificate (handoff 0019, design 5): the stored record
+              of one certification with its signature block and verify
+              action. Any signed-in role may read it. */}
+          <Route path="/certifications/:id" element={<CertificateView />} />
           {/* Role-gated in the UI; the API enforces certifying_official on
               PUT /settings/* and POST /branding/logo (handoff 0008 C). */}
           <Route path="/settings/branding" element={<BrandingView />} />

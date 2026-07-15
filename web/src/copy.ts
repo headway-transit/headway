@@ -60,6 +60,7 @@ export const copy = {
     sampling: "PMT sampling",
     dq: "Data quality",
     sandbox: "Settings sandbox",
+    attestations: "Attestations",
     certify: "Certify",
     branding: "Branding",
     /** Visible signed-in AND signed-out: the public page needs no account. */
@@ -228,7 +229,6 @@ export const copy = {
     reasonBlockers: (count: string) =>
       `Certification is blocked: ${count} blocking data-quality issue(s) must be resolved first.`,
     reasonBlockersLink: "View the blocking issues",
-    reasonLabel: "Why the certify button is off",
     warningsHeading: "Read this before you sign",
     simulatedWarning:
       "You are about to attest to figures computed from simulated test data. Simulated figures must never be submitted to the FTA. Certifying them would put your name on numbers that do not come from real service.",
@@ -238,39 +238,208 @@ export const copy = {
       "I have read these warnings and I understand what certifying these figures would mean.",
     acknowledgeHint:
       "The certify button stays off until you confirm the warning above.",
-    certifySelected: "Certify selected figures",
     nothingSelected:
       "Select at least one figure to certify. Use the checkbox above each receipt.",
-    /** The short toast confirmation; the inline message below stays as the
-     *  durable record of the identifiers. */
-    certifyToast:
-      "Certification recorded and audit-logged. The details are on the page.",
-    certifySuccess: (
-      count: number,
-      certificationId: string,
-      auditEventId: string,
-    ) =>
-      `Certification recorded for ${count} figure${count === 1 ? "" : "s"}. Certification ID ${certificationId}. Audit event ${auditEventId}. The API has audit-logged who certified and when.`,
+
+    /**
+     * The signing ceremony (handoff 0019, design 5): the cockpit's final
+     * step is a signature block — the signer types their full name and
+     * title against the intent statement, with everything the signature
+     * covers listed above it. The API canonicalizes, signs, and stores;
+     * this page never records anything locally.
+     */
+    sign: {
+      heading: "Sign and certify",
+      coversHeading: "What your signature covers",
+      coversIntro:
+        "Your signature will cover exactly the figures and acknowledgments listed here — nothing more, nothing less.",
+      coversEmpty:
+        "No figures are selected yet. Tick a figure above to bring it under your signature.",
+      figureSummary: (
+        metric: string,
+        period: string,
+        value: string,
+        unit: string,
+        calc: string,
+      ) => `${metric}, ${period}: ${value} ${unit} — calculated by ${calc}`,
+      /** Receipt hashes exist only inside the signed document — stated. */
+      receiptHashPending:
+        "Receipt hash: computed and recorded by the server when it signs.",
+      /** A covered figure that relies on a statistician attestation. The
+       *  figure's simulated/pre-verification flags travel inside its
+       *  signed detail; the warnings panel above gates the acknowledgment. */
+      attestationReliance: (id: string) =>
+        `This figure relies on statistician attestation #${id}.`,
+      /**
+       * The intent statement itself is SERVER text (GET
+       * /certifications/intent), rendered verbatim — never this bundle's
+       * words. These two strings only explain its absence.
+       */
+      intentLoading:
+        "Headway is still loading the signing statement from the server. Signing stays off until it arrives — you can only sign against the exact words the server will record.",
+      intentUnavailable:
+        "Headway could not load the signing statement from the server, so there is nothing to sign against. Signing is off until it loads.",
+      nameLabel: "Your full name",
+      nameHint: "Type your full legal name, exactly as it should appear on the certificate.",
+      titleLabel: "Your title",
+      titleHint: "Your role at the agency, e.g. “Chief Executive Officer” or “NTD Certifying Official”.",
+      submit: "Sign and certify",
+      reasonLabel: "Why the sign-and-certify button is off",
+      nameMissing: "Type your full name. The signature must carry it.",
+      titleMissing: "Type your title. The signature must carry it.",
+      /** The server records the signature; the UI then shows the certificate. */
+      recordedNote:
+        "When you sign, the server builds the signed record, signs it with the installation's signing key, and stores it. You will then see the certificate.",
+    },
   },
 
-  certifyModal: {
-    heading: "Certify these figures",
+  /**
+   * The certificate view (/certifications/:id — handoff 0019, design 5–8):
+   * the signature block front and center, the covered figures, and the
+   * backend's honest-scope statement rendered VERBATIM — never paraphrased.
+   */
+  certificate: {
+    heading: "Certification certificate",
+    crumbCertify: "Certify",
+    crumbSelf: (id: string) => `Certificate ${id}`,
     intro:
-      "You are about to certify the figures below. Certifying means you are formally stating these numbers are correct. Headway will record who certified, when, and your statement — this record cannot be edited later.",
-    attestationLabel: "Attestation statement",
-    attestationHint:
-      "In your own words, state that you have reviewed these figures and believe them to be correct.",
-    attestationRequired:
-      "Please write an attestation statement before certifying. It is the formal record of what you are stating.",
-    confirm: "Certify",
-    cancel: "Cancel",
-    figureSummary: (
+      "This is the permanent record of one certification: who signed, what the signature covers, and the digital signature the server recorded. Nothing on this page is recalculated — it is the stored record.",
+    signatureHeading: "Signature",
+    signedBy: (name: string, title: string) => `Signed by ${name}, ${title}`,
+    /** Pre-signature records carry only the account that certified. */
+    certifiedByOnly: (username: string) =>
+      `Certified by the account ${username}.`,
+    signedAt: (timestamp: string) => `Signed at ${timestamp}`,
+    fingerprintLabel: "Signing key fingerprint",
+    signatureLabel: "Digital signature (Ed25519)",
+    verifyButton: "Verify this signature",
+    verifying: "Asking the server to re-verify the signature…",
+    /** Lead-ins only; the server's own message renders verbatim after
+     *  them (the unsigned-legacy verdict has no lead — the server's
+     *  message stands alone). */
+    verifiedLead: "Signature verified.",
+    failedLead: "SIGNATURE VERIFICATION FAILED.",
+    mismatchLead: "SIGNATURE NOT CHECKABLE.",
+    scopeHeading: "What this signature covers — and what it does not",
+    /** LOUD absence: the honest-scope statement lives inside the signed
+     *  document; a signed record without one is stated, never papered. */
+    scopeMissing:
+      "The signed record does not contain the server's statement of what this signature covers. Without it, this certificate cannot describe the signature's meaning — treat the signature's scope as unstated.",
+    statementHeading: "The statement that was signed",
+    coveredHeading: "Figures this signature covers",
+    /** Degraded-but-honest: a legacy record has no signed figure list. */
+    coveredIdsOnly:
+      "This record holds only the identifiers of the covered figures, not a signed figure list. Each identifier links to its figure's provenance.",
+    coveredFigure: (
       metric: string,
       period: string,
       value: string,
       unit: string,
       calc: string,
     ) => `${metric}, ${period}: ${value} ${unit} — calculated by ${calc}`,
+    receiptHash: (hash: string) => `Receipt hash: ${hash}`,
+    provenanceLink: "How this number was made",
+    attestationsHeading: "Statistician attestations the figures relied on",
+    attestationLine: (id: string, statistician: string) =>
+      `Attestation #${id} — ${statistician}`,
+    attestationsLink: "See the attestations page",
+    loadErrorLead:
+      "Headway could not load this certificate. The server said:",
+  },
+
+  /**
+   * Statistician attestations (/attestations — handoff 0019, design A).
+   * The p. 146 rule permits factoring beyond the 2% missing-trip line only
+   * under a statistician-approved method; this room records that approval
+   * (its existence and an external document pointer — never the document)
+   * and shows every recorded attestation, revoked ones included.
+   */
+  attestations: {
+    heading: "Statistician attestations",
+    intro:
+      "When more than 2% of trips are missing passenger counts, federal rules allow the figures to be adjusted up only if a qualified statistician has approved the adjustment method. This page records that approval so the calculation can apply it — and lists every approval on record. The federal rule, word for word:",
+    /** What recording one does — and the calc behavior either way. */
+    behaviorNote:
+      "Without a matching attestation on record, Headway refuses to adjust figures with more than 2% of trips missing — exactly as before. With one, the calculation applies the approved method within the attestation's declared scope and stamps the attestation number into the figure's receipt.",
+    limitsHeading: "What an attestation can never do",
+    /** Statements of Headway behavior (handoff 0019, design 3's hard
+     *  limits, pinned by calc tests) — regulatory rules themselves are
+     *  always shown as verbatim quotes where they apply. */
+    limits: [
+      "It never unblocks an undersampled PMT sampling plan. Undersampling stays refused — the sampling pages quote the manual's own no-undersampling rule.",
+      "It never touches the simulated-data flag. Simulated figures stay marked simulated everywhere.",
+      "It never applies outside its declared scope — the metric, the mode and type of service, and the period range recorded with it.",
+      "It never affects operations metrics. Those are not NTD reported figures and take no adjustments.",
+    ],
+    listHeading: "Attestations on record",
+    empty:
+      "No attestations are on record. Figures with more than 2% of trips missing will be refused until a statistician-approved method is recorded here.",
+    /** Every record stays visible — revocation is a state, not a deletion. */
+    revokedTag: "Revoked",
+    revokedNote: (timestamp: string, by: string) =>
+      `Revoked ${timestamp} by ${by}. Revoked attestations stay on record — nothing here is ever deleted.`,
+    revokedReason: (reason: string) => `Reason: ${reason}`,
+    attestationLabel: (id: string) => `Attestation #${id}`,
+    /** Revocation (certifying official; audited; append-only). */
+    revoke: {
+      heading: "Revoke this attestation",
+      note: "Revoking stops FUTURE calculation runs from factoring under this approval. Figures already computed under it keep its record permanently, and the attestation itself stays on this page — revoked, never deleted.",
+      reasonLabel: (id: string) => `Reason for revoking attestation #${id}`,
+      button: (id: string) => `Revoke attestation #${id}`,
+      reasonMissing:
+        "Write the reason for revoking. It is kept in the record and the audit log.",
+      reasonHint: "Kept in the record and the audit log.",
+      toast: "Attestation revoked and audit-logged. It stays on record below.",
+    },
+    statisticianLine: (name: string, credentials: string) =>
+      `Approved by ${name} — ${credentials}`,
+    methodHeading: "Approved method",
+    scopeHeading: "Scope of the approval",
+    scopeMetric: (metric: string) => `Metric: ${metric}`,
+    scopePattern: (pattern: string) => `Applies to: ${pattern}`,
+    scopePeriod: (start: string, end: string) =>
+      `Period: ${start} to ${end}`,
+    documentLine: (reference: string) =>
+      `Approval document: ${reference} (Headway stores this pointer, never the document itself)`,
+    enteredLine: (username: string, timestamp: string) =>
+      `Recorded by ${username}, ${timestamp}`,
+
+    /** The audited entry form (authorized role; server-enforced). */
+    form: {
+      heading: "Record a new attestation",
+      intro:
+        "Record an approval a qualified statistician has already given. You are recording that the approval exists and where its document lives — Headway never stores the document itself. This entry is audit-logged and permanent: an attestation can later be revoked, never deleted.",
+      notAllowed:
+        "Only a certifying official can record an attestation. You can still read every attestation on record below.",
+      statisticianLegend: "The statistician",
+      nameLabel: "Statistician's full name",
+      credentialsLabel: "Credentials",
+      credentialsHint:
+        "Their qualification and affiliation, e.g. “PhD, Statistics — State University; independent consultant”.",
+      methodLegend: "The approved method",
+      methodLabel: "Method description",
+      methodHint:
+        "In plain words, the adjustment method the statistician approved, e.g. “Factor up by route-level average boardings from the surrounding four weeks”.",
+      documentLabel: "Approval document reference",
+      documentHint:
+        "Where the signed approval lives — a file path, records-system number, or document id. Headway stores this pointer only.",
+      scopeLegend: "Scope of the approval",
+      metricLabel: "Metric",
+      metricHint:
+        "The reported figure the approval covers. Only figures built from 100% counts can carry one.",
+      patternLabel: "Mode and type of service",
+      patternHint:
+        "Which figure scopes the approval covers, exactly as scopes appear on the Metrics page: “agency” for the agency-wide figure, a scope like “mode:DR”, a pattern like “mode:DR:tos:*” for every DR type of service, or “*” for every scope.",
+      periodStartLabel: "Covers periods from",
+      periodEndLabel: "Up to (not including)",
+      submit: "Record attestation",
+      reasonLabel: "Why the record button is off",
+      missingField: (field: string) => `Fill in “${field}”.`,
+      toast:
+        "Attestation recorded and audit-logged. It appears in the list below.",
+      success: (id: string, auditEventId: string) =>
+        `Attestation #${id} recorded. Audit event ${auditEventId}.`,
+    },
   },
 
   lineage: {
@@ -329,6 +498,8 @@ export const copy = {
       open: "Open",
       owned: "Owned",
       resolved: "Resolved",
+      /** Migration 0029: closed by a statistician attestation (p. 146). */
+      attested: "Attested",
     } as Record<string, string>,
     /**
      * The queue-at-a-glance chips (2026-07-11 click-through, finding 2).
@@ -417,6 +588,11 @@ export const copy = {
       `${source} (${count} events)`,
     uptCounts: (withEvents: string, operated: string) =>
       `Passenger counts were recorded on ${withEvents} of ${operated} operated trips.`,
+    /** The statistician-attestation provenance line (handoff 0019). */
+    attestationLine: (id: string, method: string | null) =>
+      method
+        ? `Adjusted under statistician attestation #${id} — approved method: ${method} (see the Attestations page).`
+        : `Adjusted under statistician attestation #${id} (see the Attestations page).`,
     known: {
       total_groups: (n: string) => `Vehicle-trip groups in this period: ${n}.`,
       clean_position_share: (p: string) =>
@@ -542,6 +718,30 @@ export const copy = {
     anomalyNote:
       "The calculation flagged something unusual about this figure. Review the details above before trusting it.",
     walkLink: "Walk this number to its raw records",
+
+    /**
+     * The attested-figure callout (handoff 0019, design 2): a figure
+     * factored beyond the 2% missing-trip threshold under a
+     * statistician-approved method. A JUSTIFIED EXCEPTION, visually
+     * distinct — labeled and bordered so it never reads as either a normal
+     * figure or an error. The statement wording is the handoff's, verbatim;
+     * the rule itself is the verbatim p. 146 quote placed beneath it.
+     */
+    attested: {
+      tag: "Statistician-approved exception",
+      statement: (id: string) =>
+        `This figure was factored beyond the 2% threshold under a statistician-approved method — attestation #${id}.`,
+      statistician: (name: string) => `Approved by ${name}.`,
+      method: (summary: string) => `The approved method: ${summary}`,
+      /** Honest absence: the calc served an attestation id but no summary. */
+      methodMissing:
+        "The calculation did not include the approved method's summary with this figure.",
+      detailsLink: (id: string) =>
+        `Read attestation #${id} on the Attestations page`,
+      /** The p. 146 rule must be on file for an attested figure. */
+      quoteMissing: (calcName: string) =>
+        `No verified quote of the statistician-approval rule (manual p. 146) is on file for the ${calcName} calculation. Regenerate the quotes (npm run extract:quotes) — an attested figure must not ship without the rule that permits it.`,
+    },
   },
 
   /**
@@ -752,6 +952,11 @@ export const copy = {
     machineReadable: "Machine-readable version of this data (JSON)",
     periodLabel: "Period",
     certifiedOnLabel: "Certified on",
+    /** The signature fingerprint (handoff 0019, design 7) — the public
+     *  feed serves it without any certifier identity. */
+    fingerprintLabel: "Signature key fingerprint",
+    fingerprintLegacy:
+      "Certified before digital signatures existed in Headway — no signature fingerprint.",
     statusCertified: "Certified",
     calcLine: (name: string, version: string) =>
       `Calculated by ${name} (version ${version}).`,

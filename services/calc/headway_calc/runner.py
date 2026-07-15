@@ -56,6 +56,7 @@ from decimal import Decimal
 
 from headway_calc._blocks import LAYOVER_MAX_SECONDS
 from headway_calc._grouping import COVERAGE_THRESHOLD, GAP_THRESHOLD_SECONDS
+from headway_calc.attestation import applicable_attestations
 from headway_calc.dq import route_findings
 from headway_calc.dr import (
     compute_dr_pmt,
@@ -83,6 +84,7 @@ from headway_calc.mode import (
 from headway_calc.persist import _METRIC_BY_CALC_NAME, persist_result
 from headway_calc.pmt import compute_pmt
 from headway_calc.reader import (
+    load_attestations,
     load_dr_trips,
     load_operated_trip_ids,
     load_passenger_events,
@@ -219,6 +221,10 @@ class RunReport:
     #: canonical.dr_trips rows loaded for the period — the DR calcs' input
     #: (handoff 0013); default 0 keeps pre-0013 constructions working.
     dr_trips_loaded: int = 0
+    #: Unrevoked cert.attestations rows covering the period (handoff 0019 —
+    #: the statistician-attestation context of the upt_v0/pmt_v0 0.2.0
+    #: factor-up path); default 0 keeps pre-0019 constructions working.
+    attestations_loaded: int = 0
 
     @property
     def persisted_count(self) -> int:
@@ -268,6 +274,7 @@ class RunReport:
             "operated_trips_loaded": self.operated_trips_loaded,
             "stop_times_loaded": self.stop_times_loaded,
             "dr_trips_loaded": self.dr_trips_loaded,
+            "attestations_loaded": self.attestations_loaded,
             "per_mode": self.per_mode,
             "run_info_ids": list(self.run_info_ids),
             "persisted_count": self.persisted_count,
@@ -399,6 +406,16 @@ def run_period(
     the run REFUSES before reading any canonical row — a guessed threshold
     could certify a figure the agency never approved.
 
+    Statistician attestations (handoff 0019): the run loads the unrevoked
+    cert.attestations rows covering the period (migration 0029; a
+    pre-migration database loads none and refuses exactly as before) and
+    passes each scoped upt_v0/pmt_v0 computation ONLY the attestations
+    matching its metric, scope, and period
+    (headway_calc.attestation.applicable_attestations). A >2% missing-data
+    share WITH a governing attestation factors up and persists WITH the
+    attestation's provenance in the detail; WITHOUT one it refuses
+    byte-for-byte as before. No other calc receives attestations.
+
     Loads positions (block_id joined), passenger events and operated
     trip_ids via headway_calc.reader, computes the three metrics — VRM under
     the handoff-0002 gap policy, VRH block-aware with trip-level excision
@@ -467,6 +484,18 @@ def run_period(
     operated_trip_ids = load_operated_trip_ids(conn, period_start, period_end)
     trip_geometries = load_trip_geometries(conn, period_start, period_end)
     dr_trips = load_dr_trips(conn, period_start, period_end)
+    # Statistician attestations (handoff 0019): unrevoked cert.attestations
+    # rows covering the run period; each scoped upt/pmt computation receives
+    # ONLY the attestations matching its metric AND scope AND period (the
+    # pure applicable_attestations selection — hard limit 3). No other calc
+    # takes an attestation: the p. 146 rule is a UPT/PMT 100%-count rule.
+    attestations = load_attestations(conn, period_start, period_end)
+
+    def _attestations_for(metric: str, scope: str):
+        return applicable_attestations(
+            attestations, metric, scope, period_start, period_end
+        )
+
     results: tuple[CalcResult, ...] = (
         compute_vrm(positions, threshold, cov_threshold),
         compute_vrh(positions, threshold, cov_threshold, layover_max),
@@ -475,6 +504,7 @@ def run_period(
             operated_trip_ids,
             missing_trip_threshold=missing_threshold,
             imbalance_threshold=imbal_threshold,
+            attestations=_attestations_for("upt", SCOPE_AGENCY),
         ),
         # pmt_v0 (handoff 0011): the same p. 146 threshold family as upt_v0.
         # shape_dist_unit_miles is deliberately NOT set here: the GTFS spec
@@ -488,6 +518,7 @@ def run_period(
             trip_geometries,
             missing_trip_threshold=missing_threshold,
             imbalance_threshold=imbal_threshold,
+            attestations=_attestations_for("pmt", SCOPE_AGENCY),
         ),
     )
 
@@ -510,6 +541,9 @@ def run_period(
                 positions,
                 missing_trip_threshold=missing_threshold,
                 imbalance_threshold=imbal_threshold,
+                attestations_for_scope=lambda scope: _attestations_for(
+                    "upt", scope
+                ),
             ),
             compute_pmt_by_mode(
                 passenger_events,
@@ -517,6 +551,9 @@ def run_period(
                 trip_geometries,
                 missing_trip_threshold=missing_threshold,
                 imbalance_threshold=imbal_threshold,
+                attestations_for_scope=lambda scope: _attestations_for(
+                    "pmt", scope
+                ),
             ),
             compute_voms_by_mode(positions, period_start, period_end),
         )
@@ -673,6 +710,7 @@ def run_period(
         run_info_ids=run_info_ids,
         stop_times_loaded=len(trip_geometries),
         dr_trips_loaded=len(dr_trips),
+        attestations_loaded=len(attestations),
     )
 
 
@@ -1210,6 +1248,11 @@ def preview_period(
     passenger_events = load_passenger_events(conn, period_start, period_end)
     operated_trip_ids = load_operated_trip_ids(conn, period_start, period_end)
     trip_geometries = load_trip_geometries(conn, period_start, period_end)
+    # Attestations are resolved exactly as a real run resolves them (handoff
+    # 0019) — a preview whose upt/pmt outcome differed from the next real
+    # run's would be a lie. Loading them is a SELECT: the no-writes
+    # guarantee stands.
+    attestations = load_attestations(conn, period_start, period_end)
 
     variant_reports: list[PreviewVariantReport] = []
     for variant in variants:
@@ -1236,6 +1279,9 @@ def preview_period(
                 operated_trip_ids,
                 missing_trip_threshold=missing_threshold,
                 imbalance_threshold=imbal_threshold,
+                attestations=applicable_attestations(
+                    attestations, "upt", SCOPE_AGENCY, period_start, period_end
+                ),
             ),
             compute_pmt(
                 passenger_events,
@@ -1243,6 +1289,9 @@ def preview_period(
                 trip_geometries,
                 missing_trip_threshold=missing_threshold,
                 imbalance_threshold=imbal_threshold,
+                attestations=applicable_attestations(
+                    attestations, "pmt", SCOPE_AGENCY, period_start, period_end
+                ),
             ),
         )
         variant_reports.append(

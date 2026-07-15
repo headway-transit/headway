@@ -39,8 +39,10 @@ sort uses), so the same table state always yields the same row sequence.
 
 from __future__ import annotations
 
+import logging
 from datetime import date, datetime, timezone
 
+from headway_calc.attestation import AttestationContext
 from headway_calc.types import (
     DrTrip,
     OpsScheduledStop,
@@ -410,3 +412,77 @@ def load_operated_trip_ids(
         (_utc_midnight(period_start), _utc_midnight(period_end)),
     )
     return [row[0] for row in cur.fetchall()]
+
+
+_logger = logging.getLogger(__name__)
+
+#: Unrevoked attestations whose declared [period_start, period_end) range
+#: covers the WHOLE run period (handoff 0019; scope/metric matching is the
+#: pure headway_calc.attestation.applicable_attestations, applied by the
+#: runner per scoped result). Deterministic order (entered_at,
+#: attestation_id) — the governing-attestation order.
+_SELECT_ATTESTATIONS_SQL = (
+    "SELECT attestation_id, statistician_name, statistician_credentials, "
+    "method_description, document_reference, metric, scope_pattern, "
+    "period_start, period_end, entered_by, entered_at, revoked_at "
+    "FROM cert.attestations "
+    "WHERE revoked_at IS NULL AND period_start <= %s AND period_end >= %s "
+    "ORDER BY entered_at, attestation_id"
+)
+
+
+def load_attestations(
+    conn,
+    period_start: date,
+    period_end: date,
+) -> list[AttestationContext]:
+    """Load the unrevoked statistician attestations covering one run period
+    (cert.attestations, migration 0029, handoff 0019).
+
+    The SQL filters to unrevoked rows whose declared date range covers the
+    WHOLE half-open run period; metric and scope matching stay in the pure
+    ``headway_calc.attestation.applicable_attestations`` (unit-tested logic,
+    applied by the runner per scoped result — never in SQL).
+
+    A database predating migration 0029 (relation cert.attestations does
+    not exist, SQLSTATE 42P01 — the load_policy_settings precedent) returns
+    an empty list after rolling back the failed statement and logging a
+    WARNING: no attestation can have been entered without the table, so
+    empty is the honest answer, and the >2% refusal path stands exactly as
+    before. Any other database error propagates unchanged. Refuses
+    (ValueError) an empty or inverted period.
+    """
+    from headway_calc.settings import _is_undefined_table
+
+    _refuse_bad_period(period_start, period_end)
+    cur = conn.cursor()
+    try:
+        cur.execute(_SELECT_ATTESTATIONS_SQL, (period_start, period_end))
+    except Exception as exc:  # noqa: BLE001 — re-raised unless 42P01
+        if not _is_undefined_table(exc):
+            raise
+        conn.rollback()
+        _logger.warning(
+            "cert.attestations does not exist (pre-migration-0029 database): "
+            "no statistician attestations are loadable, so any >2% "
+            "missing-data share refuses exactly as before. Apply migration "
+            "0029 to record attestations."
+        )
+        return []
+    return [
+        AttestationContext(
+            attestation_id=str(row[0]),
+            statistician_name=row[1],
+            statistician_credentials=row[2],
+            method_description=row[3],
+            document_reference=row[4],
+            metric=row[5],
+            scope_pattern=row[6],
+            period_start=row[7],
+            period_end=row[8],
+            entered_by=row[9],
+            entered_at=row[10],
+            revoked_at=row[11],
+        )
+        for row in cur.fetchall()
+    ]

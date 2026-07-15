@@ -74,6 +74,19 @@ export function canCertify(session: Session | null): boolean {
 }
 
 /**
+ * Recording a statistician attestation (handoff 0019, design A). The
+ * handoff names certifying_official as the candidate authorized role (or a
+ * new attestation-manager permission if the backend mints one); the
+ * smallest honest fit in today's four-role model is certifying_official —
+ * the official accountable for what the attestation unlocks. UX only; the
+ * API enforces the real rule, and this helper is reconciled against the
+ * backend's choice when its routes land.
+ */
+export function canEnterAttestations(session: Session | null): boolean {
+  return canCertify(session);
+}
+
+/**
  * Mirrors the API (handoff 0010): recording or correcting a safety event
  * requires data_steward or above.
  */

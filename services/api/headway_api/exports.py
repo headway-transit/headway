@@ -257,10 +257,17 @@ def _mr20_rows_for_scope(scope_label: str, cells: dict, pending_d2: str):
             ]
 
 
-def mr20_grid(package: dict) -> Grid:
+def mr20_grid(package: dict, certificate_lines: Sequence[str] = ()) -> Grid:
     """The headway_calc.mr20 package as a grid: its NOT-REPORTABLE banner
     and every programmatically enumerated caveat lead (banner lines / first
-    sheet), then one row per (scope, metric) cell, values verbatim."""
+    sheet), then one row per (scope, metric) cell, values verbatim.
+
+    ``certificate_lines`` (handoff 0019, design point 7): when the period
+    holds certified figures, the caller passes the certificate block
+    (signer, timestamp, key fingerprint per certification —
+    routers/reports._certificate_lines) and it joins the banner / "Read
+    first" sheet after the caveats. Empty when nothing is certified —
+    no line is ever invented."""
     banner = [
         package["banner"],
         f"Form {package['form']} preview for {package['month']} "
@@ -274,6 +281,7 @@ def mr20_grid(package: dict) -> Grid:
         f"Caveat [{c['id']}, {c['status']}]: {c['text']}"
         for c in package["caveats"]
     )
+    banner.extend(str(line) for line in certificate_lines)
     rows = list(_mr20_rows_for_scope("fleet", package["fleet"], ""))
     for mode in sorted(package["modes"]):
         entry = package["modes"][mode]
@@ -297,10 +305,14 @@ SS50_HEADER = (
 )
 
 
-def ss50_grid(package: dict) -> Grid:
+def ss50_grid(package: dict, certificate_lines: Sequence[str] = ()) -> Grid:
     """The headway_calc.ss50 package as a grid: banner + citations + caveats
     + the excluded-event accounting lead; then one row per (mode, TOS) cell
-    including the explicit zero rows."""
+    including the explicit zero rows.
+
+    ``certificate_lines`` exactly as mr20_grid: the period's certificate
+    block joins the banner / "Read first" sheet when certified figures
+    exist for the month; empty otherwise."""
     banner = [
         package["banner"],
         f"Form {package['form']} preview for {package['month']} "
@@ -316,6 +328,7 @@ def ss50_grid(package: dict) -> Grid:
     banner.extend(
         f"Caveat [{c['id']}]: {c['text']}" for c in package["caveats"]
     )
+    banner.extend(str(line) for line in certificate_lines)
     excluded = package["excluded"]
     for label, key in (
         ("major (S&S-40, not counted here)", "major_event_ids"),

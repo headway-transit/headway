@@ -28,6 +28,7 @@ import { useMeter } from "react-aria";
 import type { MetricValue } from "../api/types";
 import { copy } from "../copy";
 import {
+  attestationReference,
   coverageSummary,
   detailLines,
   isOps,
@@ -165,9 +166,21 @@ export function Receipt({ value }: ReceiptProps) {
   // never blank.
   const exclusions = coverageSummary(detail);
 
+  // The statistician-attestation stamp (handoff 0019, design 2): a figure
+  // factored beyond the 2% missing-trip threshold under a statistician-
+  // approved method (detail.attestation — the calc's provenance dict). It
+  // is rendered by the labeled exception callout below, so the generic
+  // detail list omits the key (never both).
+  const attested = attestationReference(detail);
+  const generalDetail: Detail = attested
+    ? Object.fromEntries(
+        Object.entries(detail).filter(([key]) => key !== "attestation"),
+      )
+    : detail;
+
   // The rest of the calculation detail (absorbed MetricDetail), minus the
   // coverage sentence already shown beside the meter.
-  const lines = detailLines(detail).filter((line) => line !== exclusions);
+  const lines = detailLines(generalDetail).filter((line) => line !== exclusions);
 
   // The honesty boundary (handoff 0014): an ops figure is badged in its
   // story line and its rule section cites the INDUSTRY basis + the
@@ -245,6 +258,71 @@ export function Receipt({ value }: ReceiptProps) {
           )
         )}
       </div>
+
+      {/* The statistician-approved exception (handoff 0019, design 2):
+          rendered as a LABELED, bordered callout of its own — a justified
+          exception under the p. 146 rule, visually distinct from a normal
+          figure without reading as an error (the exception tokens are a
+          dedicated family, not the danger/warning ones). The statement
+          wording is the handoff's; the rule beneath it is the verbatim
+          p. 146 quote (upt_v0 is the tracker's home for the rule when the
+          producing calc has no copy of its own on file). */}
+      {attested && (
+        <div className="attested-callout">
+          <p className="attested-head">
+            <span className="tag attested">
+              <svg
+                aria-hidden="true"
+                viewBox="0 0 16 16"
+                width="14"
+                height="14"
+                focusable="false"
+              >
+                <path
+                  d="M8 1l5.5 2v4.2c0 3.3-2.2 6.3-5.5 7.8-3.3-1.5-5.5-4.5-5.5-7.8V3L8 1z"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.6"
+                />
+                <path
+                  d="M5.4 8.2l1.8 1.8 3.4-3.6"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.6"
+                />
+              </svg>
+              {copy.receipt.attested.tag}
+            </span>
+          </p>
+          <p>{copy.receipt.attested.statement(attested.id)}</p>
+          <QuoteFigure
+            quote={
+              quoteContaining(
+                value.calc_name,
+                "qualified statistician approve the factoring method",
+              ) ??
+              quoteContaining(
+                "upt_v0",
+                "qualified statistician approve the factoring method",
+              )
+            }
+            missingMessage={copy.receipt.attested.quoteMissing(value.calc_name)}
+          />
+          {attested.statistician && (
+            <p>{copy.receipt.attested.statistician(attested.statistician)}</p>
+          )}
+          <p>
+            {attested.method
+              ? copy.receipt.attested.method(attested.method)
+              : copy.receipt.attested.methodMissing}
+          </p>
+          <p>
+            <Link to="/attestations">
+              {copy.receipt.attested.detailsLink(attested.id)}
+            </Link>
+          </p>
+        </div>
+      )}
 
       {/* (c) the rule inside the number. For an OPS figure (handoff 0014):
           the INDUSTRY basis — verbatim TCQSM quotes with page citations —

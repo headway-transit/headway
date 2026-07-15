@@ -166,6 +166,9 @@ def api_client(migrated_db, monkeypatch):
     """
     monkeypatch.setenv("HEADWAY_DATABASE_URL", migrated_db)
     monkeypatch.setenv("HEADWAY_SESSION_SECRET", TEST_SESSION_SECRET)
+    # The installation signing key (handoff 0019): certification always
+    # signs; a test-only deterministic seed, never a production key.
+    monkeypatch.setenv("HEADWAY_SIGNING_KEY", "ab" * 32)
 
     from fastapi.testclient import TestClient
 

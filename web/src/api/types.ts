@@ -101,15 +101,44 @@ export interface LineageNode {
 export interface PublicMetricValue extends MetricValue {
   /** ISO date-time; not yet served by the API — rendered only when present. */
   certified_at?: string;
+  /**
+   * The certification block (handoff 0019, design 7): the public feed
+   * serves the signing-key fingerprint — never the certifier's identity.
+   * key_fingerprint is null on pre-signature (legacy) certifications;
+   * the whole block is null/absent on an API that predates it.
+   */
+  certification?: {
+    certification_id: string;
+    /** ISO date-time */
+    certified_at: string;
+    key_fingerprint: string | null;
+  } | null;
 }
 
-// ---- /certifications ----
+// ---- /certifications (handoff 0019, design B — the digital signature) ----
+//
+// Typed against services/api routers/certify.py EXACTLY (reconciled
+// 2026-07-15 against the backend's parallel build of the same handoff:
+// CertificationRequest/Response, CertificationRecord/Certificate,
+// VerificationResult, IntentResponse). The original mock-first shapes
+// (signer_name, a flat scope_statement, an acknowledgments array, a
+// per-figure receipt_hash on MetricValue) were all corrected here — none
+// silently: see handoff 0019's frontend evidence.
 
 export interface CertificationRequest {
   /** minItems 1 */
   metric_value_ids: string[];
-  /** minLength 1 */
+  /**
+   * The intent statement the signer signed against, sent verbatim (the
+   * server records it as the document's attestation_text — the permanent
+   * record carries exactly the words the signer saw). The UI displays the
+   * SERVER's statement (GET /certifications/intent), never its own.
+   */
   attestation: string;
+  /** The typed full name — the signing ceremony's deliberate act. */
+  signer_full_name: string;
+  /** The typed title. */
+  signer_title: string;
 }
 
 export interface CertificationResponse {
@@ -119,6 +148,204 @@ export interface CertificationResponse {
   /** ISO date-time */
   certified_at: string;
   attestation: string;
+  signer_full_name: string;
+  signer_title: string;
+  /** The exact signed bytes (canonical JSON), as stored. */
+  canonical_document: string;
+  /** Base64 Ed25519 signature over canonical_document. */
+  signature: string;
+  key_fingerprint: string;
+  algorithm?: string;
+  audit_event_id: number;
+}
+
+/**
+ * GET /certifications/intent — the fixed statements the signing ceremony
+ * renders: the ESIGN-style intent statement the typed name/title are
+ * entered against, and the honest-scope statement printed on the
+ * certificate. SERVED BY THE BACKEND so the screen and the signed record
+ * carry the same words; the UI never substitutes its own.
+ */
+export interface CertificationIntent {
+  intent_statement: string;
+  scope_statement: string;
+  algorithm?: string;
+}
+
+/**
+ * The statistician-attestation provenance a factored-beyond-2% figure
+ * carries permanently (headway_calc attestation.to_provenance_dict —
+ * detail.attestation on the figure, and the certificate document's
+ * statistician_attestations entries). All values are JSON-safe strings.
+ */
+export interface AttestationProvenance {
+  attestation_id: string;
+  statistician_name: string;
+  statistician_credentials: string;
+  method_description: string;
+  document_reference: string;
+  metric: string;
+  scope_pattern: string;
+  /** ISO date */
+  period_start: string;
+  /** ISO date */
+  period_end: string;
+  entered_by: string;
+  /** ISO date-time */
+  entered_at: string;
+  /** The verbatim p. 146 basis sentence the calc pinned. */
+  basis?: string;
+}
+
+/**
+ * One figure exactly as the signature covers it (the canonical document's
+ * figures[]). Values are strings verbatim; receipt_sha256 is the figure's
+ * receipt hash, independently recomputable from the served figure.
+ */
+export interface CertificateCoveredFigure {
+  metric_value_id: string;
+  metric: string;
+  unit: string;
+  /** ISO date */
+  period_start: string;
+  /** ISO date */
+  period_end: string;
+  scope: string;
+  value: string;
+  calc_name: string;
+  calc_version: string;
+  category?: string;
+  detail?: Record<string, unknown>;
+  /** SHA-256 receipt hash recorded in the signed document. */
+  receipt_sha256: string;
+}
+
+/** The parsed canonical document (the exact signed content). */
+export interface CertificationDocument {
+  document_type: string;
+  document_version: number;
+  certification_id: string;
+  /** ISO date-time */
+  certified_at: string;
+  certifier: {
+    username: string;
+    role: string;
+    typed_full_name: string;
+    typed_title: string;
+  };
+  /** The ESIGN-style intent statement, as signed. */
+  intent_statement: string;
+  /** The honest-scope statement (design 8), as signed — verbatim. */
+  scope_statement: string;
+  /** The request's attestation text, as signed. */
+  attestation_text: string;
+  figures: CertificateCoveredFigure[];
+  statistician_attestations: AttestationProvenance[];
+}
+
+/**
+ * GET /certifications/{id}/verify — the server re-verifies the STORED
+ * document bytes against the STORED signature (and the document's binding
+ * to this very row). `message` is the server's plain-language verdict,
+ * shown verbatim in every direction — a failure is never softened.
+ */
+export interface VerificationResult {
+  certification_id: string;
+  signed: boolean;
+  /** null for unsigned legacy records (nothing to verify). */
+  verified: boolean | null;
+  /** 'verified' | 'failed' | 'unsigned_legacy' | 'key_mismatch' */
+  verdict: string;
+  algorithm?: string;
+  key_fingerprint?: string | null;
+  /** ISO date-time */
+  certified_at: string;
+  message: string;
+}
+
+/** One certification as GET /certifications lists it. Legacy records
+ *  (pre-signature) carry signed=false and null signer fields. */
+export interface CertificationRecord {
+  certification_id: string;
+  metric_value_ids: string[];
+  certified_by: string;
+  /** ISO date-time */
+  certified_at: string;
+  attestation: string;
+  signed: boolean;
+  key_fingerprint: string | null;
+  signer_full_name: string | null;
+  signer_title: string | null;
+}
+
+/**
+ * GET /certifications/{id} — the certificate view: the record plus the
+ * raw signed bytes, the parsed document, and a LIVE verification result
+ * computed by the server on every read.
+ */
+export interface CertificationCertificate extends CertificationRecord {
+  canonical_document: string | null;
+  signature: string | null;
+  /** Parsed canonical document; null for legacy/unparseable (the
+   *  verification result reports the failure loudly). */
+  document: CertificationDocument | null;
+  verification: VerificationResult;
+}
+
+// ---- /attestations (handoff 0019, design A — statistician attestations) ----
+//
+// Typed against services/api routers/attestations.py EXACTLY (reconciled
+// 2026-07-15). Entry and revocation are certifying_official (the backend's
+// documented smallest-honest-fit role choice); any signed-in role reads.
+// Append-only: revocation sets the revocation trio, nothing is deleted.
+
+export interface AttestationRequest {
+  statistician_name: string;
+  /** Plain-language summary of why this statistician is qualified. */
+  statistician_credentials: string;
+  /** The approved factoring method, in the statistician's terms. */
+  method_description: string;
+  /** External pointer to the approval document — never the document. */
+  document_reference: string;
+  /** upt | pmt — the p. 146 rule covers the 100%-count paths only. */
+  metric: string;
+  /**
+   * fnmatch pattern over computed.metric_values.scope: 'agency',
+   * 'mode:bus', 'mode:DR:tos:*', or '*' for every scope.
+   */
+  scope_pattern: string;
+  /** ISO date — half-open [start, end) range the approval covers. */
+  period_start: string;
+  /** ISO date */
+  period_end: string;
+}
+
+/** One recorded attestation. Revoked rows are served by default —
+ *  revocation is history, not deletion. */
+export interface AttestationRecord extends AttestationRequest {
+  attestation_id: string;
+  entered_by: string;
+  /** ISO date-time */
+  entered_at: string;
+  /** ISO date-time, or null while the attestation stands. */
+  revoked_at: string | null;
+  revoked_by: string | null;
+  revocation_reason: string | null;
+}
+
+/** POST /attestations 201 response (flat: the record + the audit id). */
+export interface AttestationCreated extends AttestationRecord {
+  audit_event_id: number;
+}
+
+/** POST /attestations/{id}/revoke body. */
+export interface AttestationRevokeRequest {
+  /** minLength 1 — kept in the record and the audit log. */
+  reason: string;
+}
+
+/** POST /attestations/{id}/revoke response (flat). */
+export interface AttestationRevoked extends AttestationRecord {
   audit_event_id: number;
 }
 

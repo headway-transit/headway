@@ -190,8 +190,8 @@ def test_clean_period_persists_all_metrics_and_routes_only_infos(clean_rows):
     )
     assert vrm.calc_version == "0.2.0"
     assert vrh.calc_version == "0.4.0"
-    assert upt.calc_version == "0.1.0"
-    assert pmt.calc_version == "0.1.0"
+    assert upt.calc_version == "0.2.0"
+    assert pmt.calc_version == "0.2.0"
     # Golden expected values (tests/golden/vrm_vrh_v0/expected.json; the
     # no-block fallback reproduces the 0.2.0 VRH value exactly). No
     # passenger events / operated trips: upt and pmt are the degenerate 0s.
@@ -444,17 +444,17 @@ def test_persist_failure_does_not_roll_back_committed_dq_issues(
         run_period(conn, PERIOD_START, PERIOD_END)
 
     # The dq issues were inserted AND committed before the failing insert:
-    # statements are [6 SELECTs (app.settings, then the 5 reader SELECTs:
+    # statements are [7 SELECTs (app.settings, then the 6 reader SELECTs:
     # positions, passenger events, operated trips, trip geometry, DR trips —
-    # handoff 0013), vrm blocking dq insert, vrh's 2 info dq inserts,
-    # failing mv insert]; the sole commit boundary covers exactly the first
-    # nine.
-    for sql, _ in conn.executed[0:6]:
+    # handoff 0013 — and attestations, handoff 0019), vrm blocking dq
+    # insert, vrh's 2 info dq inserts, failing mv insert]; the sole commit
+    # boundary covers exactly the first ten.
+    for sql, _ in conn.executed[0:7]:
         assert sql.lstrip().startswith("SELECT")
-    for sql, _ in conn.executed[6:9]:
+    for sql, _ in conn.executed[7:10]:
         assert "INSERT INTO dq.issues" in sql
-    assert "INSERT INTO computed.metric_values" in conn.executed[9][0]
-    assert conn.commits == [9]  # committed through the dq inserts, no further
+    assert "INSERT INTO computed.metric_values" in conn.executed[10][0]
+    assert conn.commits == [10]  # committed through the dq inserts, no further
     # The value phase alone was rolled back; the commit record stands.
     assert conn.rollback_count == 1
 
@@ -517,11 +517,11 @@ def test_run_report_json_is_parseable_and_complete(clean_rows):
     assert parsed["metrics"][1]["calc_version"] == "0.4.0"
     assert parsed["metrics"][1]["detail"] == VRH_CLEAN_DETAIL
     assert parsed["metrics"][1]["info_count"] == 2
-    assert parsed["metrics"][2]["calc_version"] == "0.1.0"
+    assert parsed["metrics"][2]["calc_version"] == "0.2.0"
     assert parsed["metrics"][2]["unit"] == "unlinked_passenger_trips"
     assert parsed["metrics"][2]["coverage"] is None
     assert parsed["metrics"][2]["detail"] == UPT_EMPTY_DETAIL
-    assert parsed["metrics"][3]["calc_version"] == "0.1.0"
+    assert parsed["metrics"][3]["calc_version"] == "0.2.0"
     assert parsed["metrics"][3]["unit"] == "passenger_miles"
     assert parsed["metrics"][3]["coverage"] is None
     assert parsed["metrics"][3]["detail"] == PMT_EMPTY_DETAIL

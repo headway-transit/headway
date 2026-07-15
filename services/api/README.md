@@ -18,7 +18,15 @@ preserved end to end; floating point never touches a figure).
 | GET | `/metrics/compare` | any signed-in role | Comparison surface (handoff 0017): one `metric` across 2–4 `comparand`s (`<start>..<end>` optionally `@<calc_name>:<calc_version>` — periods, or calc versions of the same figure) per `scope` row. COMPOSITION ONLY of the `/metrics/values` reader (mr20-style latest-row pick per cell); cells are FULL verbatim rows (receipt affordance intact), missing cells carry explicit reasons, deltas are exact-Decimal strings (comparison affordances, never figures), direction metadata comes from the calc library's registry (`coverage` only — everything else sign-neutral), certified/uncertified mixes are flagged. |
 | GET | `/metrics/values/export` | any signed-in role | `/metrics/values` as a CSV or XLSX download (`format=csv\|xlsx`, same filters as the list). ONE row assembly feeds both formats — XLSX values byte-equal to CSV values cell-for-cell (pinned by test), every XLSX cell TEXT (an Excel number cell is an IEEE double — it would corrupt an exact figure). The preview disclaimer (+ a simulated-data warning when any row is simulated) leads the CSV and forms the XLSX's first sheet. |
 | GET | `/metrics/values/{id}/lineage` | any signed-in role, **or** machine key scope `read:metrics` | "Explain this number": recursive traversal of `lineage.edges` (recursive CTE) from the figure down to `raw.records`, returned as a tree `{kind, id, transform_name, transform_version, inputs: [...]}`. A figure with no lineage is a loud 500, never an empty 200. Machine path rate-limited per key + audited (actor `key:<prefix>`); every auth failure is one generic 401 that never reveals which credential type was expected. |
-| POST | `/certifications` | `certifying_official` only | Inserts `cert.certifications`, marks the figures `certified`, and writes the `audit.events` row — all in ONE transaction. Refuses with 409 while any blocking DQ issue is unresolved. |
+| POST | `/certifications` | `certifying_official` only | The SIGNING certification (handoff 0019): the certifier's typed full name + title are entered against the intent statement; the server assembles the canonical document (figures + receipt hashes + certifier identity + acknowledgments incl. statistician attestations + timestamp), signs it Ed25519 with the installation key, inserts `cert.certifications` (document + signature + key fingerprint, migration 0030), marks the figures `certified`, and writes the `audit.events` row — all in ONE transaction. Refuses 409 while any blocking DQ issue is open/owned (`resolved` and `attested` are the closed states); refuses 503 (nothing written) when no signing key is configured — a certification is never recorded unsigned. |
+| GET | `/certifications` | any signed-in role | Certification records: covered ids, certifier, timestamp, signed flag, key fingerprint, typed signer name/title (parsed from the signed document). Pre-signature records read `signed=false` honestly — never backfilled. |
+| GET | `/certifications/intent` | any signed-in role | The fixed ESIGN-style intent statement the ceremony renders and the honest-scope statement printed on the certificate (installation key = integrity + attribution within this system, NOT PKI non-repudiation; per-certifier WebAuthn keys are the documented v1). |
+| GET | `/certifications/{id}` | any signed-in role | The certificate view: signature block (typed name/title, fingerprint, signature), the stored canonical document (raw signed text + parsed object), and a LIVE verification result. |
+| GET | `/certifications/{id}/verify` | any signed-in role | Re-verifies the STORED document bytes against the STORED signature under the installation key AND checks the document is bound to this very row (certification_id + covered figure ids). Verdicts: `verified` / `failed` (LOUD — treat as tampered) / `unsigned_legacy` / `key_mismatch` (rotated key — honestly inconclusive, not proof of tampering). |
+| POST | `/attestations` | `certifying_official` only | Record a statistician's p. 146 factoring approval (migration 0029, append-only): name, credentials summary, method, external document reference, scope (ONE metric `upt`/`pmt`, fnmatch scope pattern, half-open date range). From the next calc run, a covered >2% missing-data share factors up under it and the figure carries the attestation provenance permanently. Audited. Role choice documented in `routers/attestations.py` (smallest honest fit). |
+| GET | `/attestations` (+ `/{id}`) | any signed-in role | Attestations (filter `metric`, `include_revoked=false`); revoked rows serve by default — revocation is history, not deletion. |
+| POST | `/attestations/{id}/revoke` | `certifying_official` only | Revoke (never delete): sets revoked_at/by/reason once — the migration-0029 trigger enforces exactly that shape. Figures already factored keep their provenance; FUTURE runs stop factoring under it. Audited. |
+| POST | `/dq/issues/{id}/attest` | `data_steward` or above | Close ONE p. 146 refusal issue (`apc_missing_trips_above_fta_threshold`) to the explicit `attested` state, referencing a live attestation; the resolution text is built server-side from the attestation. Refuses any other issue_type — no other gap has a statistician cure ('agencies must not collect a smaller sample than the chosen sampling plan prescribes', p. 149). Audited. |
 | GET | `/dq/issues` | any signed-in role | Data-quality issues; filter by `status`. Rows include `resolution_minutes` (migration 0016) — null when the effort was not recorded. |
 | GET | `/dq/issues/counts` | any signed-in role | Severity/status counts for the /dq summary cards (handoff 0017): counted over EXACTLY the rows `/dq/issues` serves under the same `status` filter (composition, no new tables), missing buckets explicit zeros. |
 | POST | `/dq/issues/{id}/resolve` | `data_steward` or above | Resolves an issue with a resolution note + audit event, in one transaction. Optional `resolution_minutes` (int ≥ 0; plain-language 422 otherwise) records the effort, audited old→new. Post-commit, dispatches the `dq.issue.resolved` webhook (best-effort — a delivery problem never fails the resolve). |
@@ -37,7 +45,8 @@ preserved end to end; floating point never touches a figure).
 | POST | `/webhooks` | `certifying_official` | Subscribe a URL to `certification.created` and/or `dq.issue.resolved`. The HMAC secret is accepted here and never returned by anything. Audited. |
 | GET | `/webhooks` | `certifying_official` | Lists subscriptions (secret-free). |
 | DELETE | `/webhooks/{id}` | `certifying_official` | Removes a subscription (soft revoke). Audited. |
-| GET | `/public/metrics/certified` | **none — public open data** | ONLY figures a certifying official already attested (`certification_status='certified'`) AND `category='ntd'` (migration 0024 — an operations figure is structurally uncertifiable and hard-excluded here besides); values as strings, `detail` verbatim (simulated flags shown, figures never hidden); no PII; rate-limited per client IP. |
+| GET | `/public/metrics/certified` | **none — public open data** | ONLY figures a certifying official already attested (`certification_status='certified'`) AND `category='ntd'` (migration 0024 — an operations figure is structurally uncertifiable and hard-excluded here besides); values as strings, `detail` verbatim (simulated flags shown, figures never hidden); no PII; rate-limited per client IP. Each row now carries its `certification` ref `{certification_id, certified_at, key_fingerprint}` (fingerprint `null` for pre-signature legacy records) — never the certifier's identity. |
+| GET | `/public/certifications/{id}/verify` | **none — public** | Public tamper-evidence check: same server-side re-verification as the authenticated endpoint, serving verdict + algorithm + fingerprint + timestamp ONLY (no certifier identity, no document, no auth material). Rate-limited per client IP. |
 | POST | `/safety/events` | `data_steward` or above | Enter one Safety & Security event (handoff 0010; migration 0017). Plain-language validation; runs the deterministic classifier (`headway_calc.sscls`, sscls_v0) SYNCHRONOUSLY and returns classification + thresholds_met + a plain-language explanation with the tracker citation per threshold. Event, classification, and audit record commit in ONE transaction. |
 | GET | `/safety/events` | any signed-in role | Events with each one's LATEST classification; filters: `classification` (major/non_major/not_reportable), `month` (YYYY-MM, UTC half-open on `occurred_at`), `mode`. `property_damage_usd` is a string (exact NUMERIC). |
 | GET | `/safety/events/counts` | any signed-in role | Classification counts for the /safety summary cards (handoff 0017): counted over EXACTLY the rows `/safety/events` serves under the same `month`/`mode` filters; latest verdict per event, `unclassified` counted separately (never guessed), `superseded` surfaced. |
@@ -355,10 +364,33 @@ append-only at the DB level (migration 0007 trigger).
   ADR-0004). Per-request tenant→database routing arrives with hosted
   multi-tenancy; the seam is `app.state.db` / `get_db`.
 
+## Certification signing key (handoff 0019)
+
+Certifications are signed with the INSTALLATION's Ed25519 key. The key is a
+32-byte seed held **only** in the environment or a secret file — never in
+the database, never in this repository:
+
+- `HEADWAY_SIGNING_KEY` — 64 hex characters (`openssl rand -hex 32`). The
+  installer generates this into `deploy/compose/.env` next to the session
+  secret; `deploy/compose/compose.yaml` passes it to the api service.
+- `HEADWAY_SIGNING_KEY_FILE` — alternatively, a path to a file holding those
+  64 hex characters; generated (mode 0600) at first signing use if absent.
+
+Neither set → the certify endpoint refuses with a plain-language 503 and
+certifies nothing. The byte-precise canonicalization of what is signed is
+documented in `headway_api/signing.py` (sorted keys, compact separators,
+ASCII escapes, UTF-8; figures as exact NUMERIC strings). Rotating the key
+changes the fingerprint: older certificates then verify as `key_mismatch`
+(honest — keep the old key to re-verify old certificates). HONEST SCOPE,
+stated on every certificate: an installation-held key proves integrity and
+attribution within this system, not PKI non-repudiation; per-certifier
+WebAuthn keys are the documented v1.
+
 ## Running
 
 ```sh
 export HEADWAY_SESSION_SECRET=<random 32+ bytes>
+export HEADWAY_SIGNING_KEY=$(openssl rand -hex 32)   # certification signing (handoff 0019)
 export HEADWAY_DATABASE_URL=postgresql://.../agency_db
 uvicorn "headway_api.app:create_app" --factory
 ```
@@ -372,7 +404,23 @@ python3 -m pytest tests/ -q
 
 ## Verification status
 
-- `pytest tests/ -q`: **202 passed** (2026-07-13, ops analytics wave,
+- `pytest tests/ -q`: **279 passed** (2026-07-15, attestation + signature
+  wave, handoff 0019) — prior suite plus 34 new: statistician attestation
+  entry/list/revoke with authz + audit; the explicit `attested` DQ closure
+  (p. 146 refusals only — any other issue_type refuses citing the p. 149
+  no-smaller-sample sentence verbatim) and its effect on the certify gate;
+  the signing certification (canonical document with independently
+  recomputable receipt hashes, Ed25519 signature, fingerprint, audit);
+  typed-name/title required; 503-nothing-written without a signing key;
+  verify verdicts (`verified`/`failed`/`unsigned_legacy`/`key_mismatch`)
+  incl. THE tamper tests (mutated document, mutated signature, and a
+  valid-but-swapped document failing row binding); public verify + public
+  fingerprint with zero certifier identity; MR-20/S&S-50 exports gaining
+  the certificate block (signed + legacy lines) on the "Read first" sheet.
+  Live end-to-end 2026-07-15: attestation → attested factored PMT figure →
+  signed certification → verify → SQL-tamper in a scratch database copy
+  failing LOUDLY — evidence in handoff 0019.
+- Previous: `pytest tests/ -q`: **202 passed** (2026-07-13, ops analytics wave,
   handoff 0014) — the 196 below plus 6 new: the public certified endpoint
   excludes a category='ops' row even in the (database-impossible)
   certified state and serves `category` on every row; certifying an ops

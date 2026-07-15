@@ -7,7 +7,12 @@ import {
   renderApp,
   signInAs,
 } from "./helpers";
-import { blockingIssue, resolvedIssue, warningIssue } from "./fixtures";
+import {
+  attestedBlockingIssue,
+  blockingIssue,
+  resolvedIssue,
+  warningIssue,
+} from "./fixtures";
 
 function mockIssues() {
   return mockApi({
@@ -19,6 +24,50 @@ function mockIssues() {
 }
 
 describe("/dq", () => {
+  it("treats an ATTESTED blocking issue as closed (migration 0029): visible with its resolution story, not counted open, no resolve form, no blocking note", async () => {
+    signInAs("data_steward");
+    mockApi({
+      "GET /dq/issues": {
+        status: 200,
+        body: [attestedBlockingIssue, blockingIssue],
+      },
+    });
+    renderApp("/dq");
+
+    // The open count matches the API's certification rule: the attested
+    // issue is CLOSED, so only the open one counts.
+    expect(
+      await screen.findByRole("button", { name: /Blocking open/ }),
+    ).toHaveTextContent("1");
+
+    // The attested issue stays fully visible — status labeled, its
+    // resolution story shown, no blocking prominence, no resolve form.
+    const card = screen
+      .getByRole("heading", { name: /412 of 9123 operated trips/ })
+      .closest("article") as HTMLElement;
+    expect(card).toHaveTextContent("attested");
+    expect(card).toHaveTextContent(
+      "Closed under statistician attestation #att-3 (p. 146): the factoring method was approved.",
+    );
+    expect(card).not.toHaveTextContent(
+      "Must be resolved before any figure can be certified.",
+    );
+    expect(
+      within(card).queryByRole("button", { name: /^Resolve:/ }),
+    ).not.toBeInTheDocument();
+    // The still-open blocking issue keeps its resolve form and note.
+    const openCard = screen
+      .getByRole("heading", { name: /Bus 1207 sent no location data/ })
+      .closest("article") as HTMLElement;
+    expect(openCard).toHaveTextContent(
+      "Must be resolved before any figure can be certified.",
+    );
+    expect(
+      within(openCard).getByRole("button", { name: /^Resolve:/ }),
+    ).toBeInTheDocument();
+
+    await expectNoAxeViolations();
+  });
   it("lists issues with severity as text (not color alone), status, owner, and blocking prominence", async () => {
     signInAs("viewer");
     mockIssues();

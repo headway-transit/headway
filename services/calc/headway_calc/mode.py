@@ -29,8 +29,9 @@ Pure and deterministic: stdlib only; partition keys iterate sorted.
 from __future__ import annotations
 
 from decimal import Decimal
-from typing import Iterable
+from typing import Callable, Iterable
 
+from headway_calc.attestation import AttestationContext
 from headway_calc.types import (
     SEVERITY_INFO,
     CalcResult,
@@ -204,8 +205,11 @@ def compute_upt_by_mode(
     *,
     missing_trip_threshold: Decimal = MISSING_TRIP_THRESHOLD,
     imbalance_threshold: Decimal = IMBALANCE_THRESHOLD,
+    attestations_for_scope: (
+        Callable[[str], tuple[AttestationContext, ...]] | None
+    ) = None,
 ) -> dict[str, CalcResult]:
-    """upt_v0 0.1.0 per mode bucket: the UNCHANGED compute_upt over each
+    """upt_v0 0.2.0 per mode bucket: the UNCHANGED compute_upt over each
     mode's events, with that mode's operated-trip denominator derived from
     the run's positions (operated_trip_ids_by_mode). Buckets are the union
     of the event buckets and the operated-trip buckets — a mode with
@@ -216,7 +220,15 @@ def compute_upt_by_mode(
     Note the p. 146 factor-up now applies PER MODE on this path — closer to
     the manual's per-mode/TOS totals than the fleet-wide factor (the
     documented upt_v0 limitation); the fleet-wide scope 'agency' figure is
-    unchanged."""
+    unchanged.
+
+    ``attestations_for_scope`` (handoff 0019): a pure selector called with
+    each bucket's scope string (scope_for_mode(bucket), e.g. 'mode:bus')
+    returning the statistician attestations applicable to THAT scope — the
+    runner passes headway_calc.attestation.applicable_attestations bound to
+    the run's period, so an attestation never leaks across scopes (hard
+    limit 3). Default None: no attestation context, the pre-0019 behavior
+    byte for byte."""
     positions = list(positions)
     event_buckets = partition_events_by_mode(events)
     operated_buckets = operated_trip_ids_by_mode(positions)
@@ -227,6 +239,11 @@ def compute_upt_by_mode(
             operated_buckets.get(bucket, []),
             missing_trip_threshold=missing_trip_threshold,
             imbalance_threshold=imbalance_threshold,
+            attestations=(
+                ()
+                if attestations_for_scope is None
+                else attestations_for_scope(scope_for_mode(bucket))
+            ),
         )
     return results
 
@@ -239,8 +256,11 @@ def compute_pmt_by_mode(
     missing_trip_threshold: Decimal = MISSING_TRIP_THRESHOLD,
     imbalance_threshold: Decimal = IMBALANCE_THRESHOLD,
     shape_dist_unit_miles: Decimal | None = None,
+    attestations_for_scope: (
+        Callable[[str], tuple[AttestationContext, ...]] | None
+    ) = None,
 ) -> dict[str, CalcResult]:
-    """pmt_v0 0.1.0 per mode bucket (handoff 0011): the UNCHANGED compute_pmt
+    """pmt_v0 0.2.0 per mode bucket (handoff 0011): the UNCHANGED compute_pmt
     over each mode's events, with that mode's operated-trip denominator
     derived from the run's positions — bucket construction identical to
     compute_upt_by_mode (a mode with operated trips but zero events still
@@ -252,7 +272,11 @@ def compute_pmt_by_mode(
 
     Note the p. 146 factor-up applies PER MODE on this path — closer to the
     manual's per-mode/TOS totals than the fleet-wide factor; the fleet-wide
-    scope 'agency' figure is unchanged (the upt_v0 precedent)."""
+    scope 'agency' figure is unchanged (the upt_v0 precedent).
+
+    ``attestations_for_scope`` (handoff 0019): exactly as
+    compute_upt_by_mode — a pure per-scope selector; default None keeps the
+    pre-0019 behavior byte for byte."""
     positions = list(positions)
     stop_times = list(stop_times)
     event_buckets = partition_events_by_mode(events)
@@ -266,6 +290,11 @@ def compute_pmt_by_mode(
             missing_trip_threshold=missing_trip_threshold,
             imbalance_threshold=imbalance_threshold,
             shape_dist_unit_miles=shape_dist_unit_miles,
+            attestations=(
+                ()
+                if attestations_for_scope is None
+                else attestations_for_scope(scope_for_mode(bucket))
+            ),
         )
     return results
 

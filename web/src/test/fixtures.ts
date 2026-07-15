@@ -1,4 +1,6 @@
 import type {
+  AttestationRecord,
+  CertificationCertificate,
   CompareResponse,
   DqIssue,
   LineageNode,
@@ -116,6 +118,207 @@ export const simulatedUptValue: MetricValue = {
   detail: {
     ...uptDetail,
     source_mix: { tides: 40000, tides_simulated: 1567 },
+  },
+};
+
+/**
+ * The statistician-attestation provenance dict a factored-beyond-2% figure
+ * carries permanently (handoff 0019, design 2 — reconciled against
+ * headway_calc/attestation.py to_provenance_dict).
+ */
+export const attestationProvenance = {
+  attestation_id: "att-3",
+  statistician_name: "Dr. Maria Chen",
+  statistician_credentials:
+    "PhD, Statistics — State University; independent consultant",
+  method_description:
+    "Factor up by route-level average boardings from the surrounding four weeks.",
+  document_reference: "records://agency/approvals/2026-014.pdf",
+  metric: "upt",
+  scope_pattern: "agency",
+  period_start: "2026-03-01",
+  period_end: "2026-07-01",
+  entered_by: "certifier",
+  entered_at: "2026-03-05T15:00:00Z",
+  basis:
+    "if the vehicle trips with missing data exceed 2 percent of total trips, agencies must have a qualified statistician approve the factoring method used to account for the missing percentage",
+};
+
+/** A figure factored BEYOND the 2% missing-trip threshold under a
+ *  statistician-approved method: detail.attestation is the calc's
+ *  provenance dict, carried by the figure permanently. */
+export const attestedUptDetail = {
+  ...uptDetail,
+  missing_trips: 412,
+  missing_share: "0.0452",
+  factor_applied: "1.047327",
+  attestation: attestationProvenance,
+};
+
+export const attestedUptValue: MetricValue = {
+  ...uptValue,
+  metric_value_id: "mv-upt-att-1",
+  calc_version: "0.2.0",
+  value: "43518.20",
+  detail: attestedUptDetail,
+};
+
+/** One standing statistician attestation (handoff 0019, design A —
+ *  services/api routers/attestations.py Attestation, reconciled). */
+export const attestationRecord: AttestationRecord = {
+  attestation_id: "att-3",
+  statistician_name: "Dr. Maria Chen",
+  statistician_credentials:
+    "PhD, Statistics — State University; independent consultant",
+  method_description:
+    "Factor up by route-level average boardings from the surrounding four weeks.",
+  document_reference: "records://agency/approvals/2026-014.pdf",
+  metric: "upt",
+  scope_pattern: "agency",
+  period_start: "2026-03-01",
+  period_end: "2026-07-01",
+  entered_by: "certifier",
+  entered_at: "2026-03-05T15:00:00Z",
+  revoked_at: null,
+  revoked_by: null,
+  revocation_reason: null,
+};
+
+/** A REVOKED attestation — must stay visible, labeled, never hidden. */
+export const revokedAttestationRecord: AttestationRecord = {
+  ...attestationRecord,
+  attestation_id: "att-2",
+  statistician_name: "Dr. Sam Osei",
+  method_description: "Uniform factor across all routes.",
+  period_start: "2026-01-01",
+  period_end: "2026-03-01",
+  revoked_at: "2026-02-20T09:00:00Z",
+  revoked_by: "certifier",
+  revocation_reason: "Superseded by a route-level method.",
+};
+
+/** The server's fixed signing statements (GET /certifications/intent —
+ *  stand-ins with the same meaning; the UI renders whatever is served). */
+export const certificationIntentFixture = {
+  intent_statement:
+    "By typing my full name and title and submitting, I am signing this certification electronically. I have reviewed each figure listed on this certificate, including its data-quality record and the regulatory basis shown on its receipt, and I attest that to the best of my knowledge these figures are accurate and complete. I intend this electronic signature to carry the same weight as my handwritten signature.",
+  scope_statement:
+    "This certificate is signed with this Headway installation's signing key. The signature proves the certified record has not been altered since it was signed (integrity) and ties the signing to this installation and the signed-in certifying official named above (attribution within this system). It is not a personal public-key-infrastructure signature: the installation, not the certifier, holds the key, so it does not by itself prove WHO pressed the button beyond this system's own login records.",
+  algorithm: "ed25519",
+};
+
+const FINGERPRINT = "SHA256:9wL2xkq8vX0FZm3n1p5r7t9u1w3y5a7c9e1g3i5k7m0";
+
+/** The parsed canonical document inside certificateFixture. */
+export const certificateDocumentFixture = {
+  document_type: "headway-certification",
+  document_version: 1,
+  certification_id: "cert-42",
+  certified_at: "2026-07-02T15:00:00Z",
+  certifier: {
+    username: "certifier",
+    role: "certifying_official",
+    typed_full_name: "Alex Rivera",
+    typed_title: "NTD Certifying Official",
+  },
+  intent_statement: certificationIntentFixture.intent_statement,
+  scope_statement: certificationIntentFixture.scope_statement,
+  attestation_text: certificationIntentFixture.intent_statement,
+  figures: [
+    {
+      metric_value_id: "mv-vrm-1",
+      metric: "vrm",
+      unit: "miles",
+      period_start: "2026-03-01",
+      period_end: "2026-03-31",
+      scope: "agency",
+      value: "12345.60",
+      calc_name: "vrm_v0",
+      calc_version: "1.0.0",
+      category: "ntd",
+      detail: {},
+      receipt_sha256:
+        "aa11bb22cc33dd44ee55ff66aa77bb88cc99dd00ee11ff22aa33bb44cc55dd66",
+    },
+    {
+      metric_value_id: "mv-vrh-1",
+      metric: "vrh",
+      unit: "hours",
+      period_start: "2026-03-01",
+      period_end: "2026-03-31",
+      scope: "agency",
+      value: "987.25",
+      calc_name: "vrh_v0",
+      calc_version: "1.0.0",
+      category: "ntd",
+      detail: {},
+      receipt_sha256:
+        "1122334455667788990011223344556677889900aabbccddeeff001122334455",
+    },
+  ],
+  statistician_attestations: [attestationProvenance],
+};
+
+/** The server's verified-on-load verdict for certificateFixture. */
+export const verifiedResultFixture = {
+  certification_id: "cert-42",
+  signed: true,
+  verified: true,
+  verdict: "verified",
+  algorithm: "ed25519",
+  key_fingerprint: FINGERPRINT,
+  certified_at: "2026-07-02T15:00:00Z",
+  message:
+    "Verified: the stored certificate is byte-identical to what was signed, the signature is valid under this installation's key, and the document is bound to this certification record.",
+};
+
+/**
+ * A signed certificate as GET /certifications/{id} serves it (services/api
+ * routers/certify.py CertificationCertificate, reconciled 2026-07-15):
+ * the record + raw signed bytes + parsed document + a LIVE verification
+ * result. Every statement the UI shows comes from this record, verbatim.
+ */
+export const certificateFixture: CertificationCertificate = {
+  certification_id: "cert-42",
+  metric_value_ids: ["mv-vrm-1", "mv-vrh-1"],
+  certified_by: "certifier",
+  certified_at: "2026-07-02T15:00:00Z",
+  attestation: certificationIntentFixture.intent_statement,
+  signed: true,
+  key_fingerprint: FINGERPRINT,
+  signer_full_name: "Alex Rivera",
+  signer_title: "NTD Certifying Official",
+  canonical_document: JSON.stringify(certificateDocumentFixture),
+  signature: "ZWQyNTUxOS1zaWduYXR1cmUtYnl0ZXM=",
+  document: certificateDocumentFixture,
+  verification: verifiedResultFixture,
+};
+
+/** A certification recorded BEFORE the signing key existed (design 4:
+ *  honest history — null signature columns, never backfilled). */
+export const unsignedCertificateFixture: CertificationCertificate = {
+  certification_id: "cert-7",
+  metric_value_ids: ["mv-vrm-0"],
+  certified_by: "certifier",
+  certified_at: "2026-07-01T12:00:00Z",
+  attestation: "I reviewed these figures and they are correct.",
+  signed: false,
+  key_fingerprint: null,
+  signer_full_name: null,
+  signer_title: null,
+  canonical_document: null,
+  signature: null,
+  document: null,
+  verification: {
+    certification_id: "cert-7",
+    signed: false,
+    verified: null,
+    verdict: "unsigned_legacy",
+    algorithm: "ed25519",
+    key_fingerprint: null,
+    certified_at: "2026-07-01T12:00:00Z",
+    message:
+      "This certification was recorded before digital signatures existed in Headway (it has no signature — honest history, never backfilled). There is nothing to verify; its authenticity rests on the audit trail alone.",
   },
 };
 
@@ -505,6 +708,24 @@ export const blockingIssue: DqIssue = {
   resolved_at: null,
   resolution: null,
   resolution_minutes: null,
+};
+
+/**
+ * A blocking issue CLOSED by a statistician attestation (migration 0029 —
+ * the p. 146 closure). 'attested' is a closed state like 'resolved': it
+ * must not block certification (the API counts open/owned only) and must
+ * not count as open anywhere in the UI.
+ */
+export const attestedBlockingIssue: DqIssue = {
+  ...blockingIssue,
+  issue_id: "dq-att-1",
+  issue_type: "apc_missing_trips_above_fta_threshold",
+  status: "attested",
+  title:
+    "Missing-trip share 0.0452 exceeds the FTA 2% threshold: 412 of 9123 operated trips have no passenger events",
+  resolved_at: "2026-07-15T16:00:00Z",
+  resolution:
+    "Closed under statistician attestation #att-3 (p. 146): the factoring method was approved.",
 };
 
 export const warningIssue: DqIssue = {

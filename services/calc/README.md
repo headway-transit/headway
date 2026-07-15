@@ -39,10 +39,21 @@ are `Decimal`, never float.
   trip-level excision, handoff 0004), `compute_vrh_v0_3` (0.3.0, block-level
   exclusion, retained unchanged), `compute_vrh_v0_2` (0.2.0,
   retained unchanged) and `compute_vrh_v0_1` (0.1.0, retained unchanged).
-- `headway_calc/upt.py` — `upt_v0`: `compute_upt` (0.1.0 — Unlinked
+- `headway_calc/upt.py` — `upt_v0`: `compute_upt` (0.2.0 — Unlinked
   Passenger Trips over TIDES passenger events, handoff 0005; the p. 146
-  missing-trip rule with the REAL FTA 2% threshold; see "Unlinked Passenger
-  Trips" below).
+  missing-trip rule with the REAL FTA 2% threshold; 0.2.0 adds the
+  statistician-attestation factor-up path, handoff 0019; see "Unlinked
+  Passenger Trips" below) and `compute_upt_v0_1_0` (0.1.0, retained
+  unchanged).
+- `headway_calc/attestation.py` — the statistician-attestation context
+  (handoff 0019): `AttestationContext` (the immutable read model of
+  cert.attestations, migration 0029), pure scope/period/metric matching
+  (`applicable_attestations`, fnmatch scope patterns, whole-period cover),
+  `governing_attestation` (earliest-entered wins; wrong metric raises), and
+  the verbatim p. 146 / p. 149 sentences the feature stands on. HARD
+  LIMITS pinned by tests: no attestation input exists anywhere in
+  sampling, ops, vrm/vrh/voms/dr — an attestation unlocks EXACTLY the
+  p. 146 factoring rule and nothing else.
 - `headway_calc/voms.py` — `voms_v0`: `compute_voms` (0.1.0 — monthly
   Vehicles Operated in Maximum Service, handoff 0009: max over UTC service
   days of distinct in-trip vehicles; BLOCKING-FREE by design, partial
@@ -164,7 +175,23 @@ REGULATORY_TRACKER.md; deliberately NO new tracker rows. Goldens:
 OTP 50.00 %, cvh 0.2200; a refusals case exercising every refusal reason
 → honest blocking refusals).
 
-## Unlinked Passenger Trips — upt_v0 0.1.0
+## Unlinked Passenger Trips — upt_v0 0.2.0 (0.1.0 retained)
+
+0.2.0 (handoff 0019): `compute_upt(..., attestations=())` accepts the
+statistician-attestation context. WITHOUT an applicable attestation the
+>2% refusal is byte-for-byte 0.1.0's (regression-pinned in
+tests/test_upt_attestation.py); WITH one (unrevoked, metric `upt`, scope
+pattern matching, declared range covering the whole run period — the
+runner selects via `headway_calc.attestation.applicable_attestations` from
+cert.attestations), the SAME deterministic factor-up as the ≤2% branch
+applies — p. 146's own permission once "a qualified statistician approve[s]
+the factoring method" — plus one info finding
+`apc_missing_trips_attested_factor_up` quoting p. 146 verbatim, and the
+attestation's provenance dict in `detail.attestation` (permanent; revoking
+the attestation stops FUTURE runs only). The ≤2% branch ignores
+attestations byte-for-byte; simulated-source flags stand untouched.
+`compute_upt_v0_1_0` retains 0.1.0 runnable (the sscls convention). The
+0.1.0 semantics below are otherwise unchanged in 0.2.0.
 
 Per handoff 0005, `compute_upt(events, operated_trip_ids, *,
 missing_trip_threshold=Decimal("0.02"), imbalance_threshold=Decimal("0.10"))`
@@ -212,7 +239,15 @@ computes UPT from TIDES passenger events (2026 NTD Policy Manual p. 143:
 - **Fleet-wide limitation**: the factor-up is fleet-wide in v0, not per
   mode/TOS (handoff 0005 open question; see `REGULATORY_TRACKER.md`).
 
-## Passenger Miles Traveled — pmt_v0 0.1.0 (handoff 0011)
+## Passenger Miles Traveled — pmt_v0 0.2.0 (0.1.0 retained; handoff 0011)
+
+0.2.0 (handoff 0019): the same statistician-attestation factor-up as
+upt_v0 0.2.0, with metric `pmt` — the >2% (missing + invalid-operated)
+refusal stands byte-for-byte without an applicable attestation
+(tests/test_pmt_attestation.py); with one, the VALID-trip figure factors
+up and carries the attestation provenance, while invalid trips stay
+excluded and warned (an attestation approves the factoring method, never
+an invalid load profile). `compute_pmt_v0_1_0` retains 0.1.0 runnable.
 
 `headway_calc.pmt.compute_pmt(events, operated_trip_ids, stop_times, ...)`
 — PMT per the 2026 NTD Policy Manual pp. 143–155 (verified; tracker section
@@ -671,6 +706,31 @@ position-derived haversine (trip-distance authority deferred to slice 2 per
 handoff 0001).
 
 ## Verification status
+
+### What ran (2026-07-15, handoff 0019 — statistician attestations)
+
+```
+$ cd services/calc && python3 -m pytest tests/ -q
+537 passed
+```
+
+New: tests/test_attestation.py (14 — verbatim p. 146/p. 149 quote pins,
+context validation, fnmatch scope + whole-period-cover matching,
+deterministic governing selection, and the STRUCTURAL hard limits: no
+attestation parameter exists anywhere in sampling, ops, the ops runner, or
+vrm/vrh/voms/dr), tests/test_upt_attestation.py (8 — byte-for-byte
+no-attestation regression vs the retained 0.1.0, the attested factor-up
+with provenance + p. 146-quoting info finding, revoked/wrong-metric/
+≤2%-ignores cases, simulated flags standing, earliest-entered governs),
+tests/test_pmt_attestation.py (4 — same for PMT plus invalid trips staying
+excluded on an attested run), tests/test_runner_attestation.py (5 — the
+cert.attestations read through run_period, provenance in the persisted
+detail JSONB, scope isolation on the per-mode path, and the
+pre-migration-0029 missing-table fallback). Live 2026-07-15: the
+handoff-0011 PMT refusal period ([2026-07-09, 2026-07-10), share 0.3659)
+factored up under a recorded attestation — 221,996.24 passenger miles
+persisted WITH attestation provenance, psql-verified (handoff 0019
+evidence).
 
 ### What ran (2026-07-13, handoff 0014 — OPERATIONS analytics v0)
 

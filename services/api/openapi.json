@@ -387,7 +387,53 @@
         }
       }
     },
+    "/certifications/intent": {
+      "get": {
+        "tags": [
+          "certification"
+        ],
+        "summary": "Get Intent",
+        "description": "The fixed statements the signing ceremony renders: the ESIGN-style\nintent statement the typed name/title are entered against, and the\nhonest-scope statement printed on the certificate.",
+        "operationId": "get_intent_certifications_intent_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntentResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/certifications": {
+      "get": {
+        "tags": [
+          "certification"
+        ],
+        "summary": "List Certifications",
+        "description": "Every certification record, oldest first (any signed-in role \u2014 the\nrecord view; the public surface serves fingerprints only).",
+        "operationId": "list_certifications_certifications_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/CertificationRecord"
+                  },
+                  "type": "array",
+                  "title": "Response List Certifications Certifications Get"
+                }
+              }
+            }
+          }
+        }
+      },
       "post": {
         "tags": [
           "certification"
@@ -411,6 +457,291 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/CertificationResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/certifications/{certification_id}": {
+      "get": {
+        "tags": [
+          "certification"
+        ],
+        "summary": "Get Certification",
+        "description": "The certificate view: the signature block (typed name/title,\nfingerprint), everything the signature covers (the parsed document),\nthe raw signed bytes, and a live verification result.",
+        "operationId": "get_certification_certifications__certification_id__get",
+        "parameters": [
+          {
+            "name": "certification_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Certification Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CertificationCertificate"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/certifications/{certification_id}/verify": {
+      "get": {
+        "tags": [
+          "certification"
+        ],
+        "summary": "Verify Certification",
+        "description": "Re-verify the stored certificate against its stored signature (any\nsigned-in role). The same check, without login, is\nGET /public/certifications/{id}/verify \u2014 it serves no certifier\nidentity, only the verdict and fingerprint.",
+        "operationId": "verify_certification_certifications__certification_id__verify_get",
+        "parameters": [
+          {
+            "name": "certification_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Certification Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VerificationResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/attestations": {
+      "post": {
+        "tags": [
+          "attestations"
+        ],
+        "summary": "Create Attestation",
+        "description": "Record a statistician's approval (append-only, audited).\n\nFrom the next calc run onward, a >2% missing-data share on a covered\n(metric, scope, period) factors up under this attestation instead of\nrefusing \u2014 and the factored figure carries the attestation's provenance\npermanently.",
+        "operationId": "create_attestation_attestations_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AttestationRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AttestationCreated"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "attestations"
+        ],
+        "summary": "List Attestations",
+        "description": "List attestations (any signed-in role \u2014 the record is the point).\nRevoked rows are served by default: revocation is history, not\ndeletion; filter with include_revoked=false for the live set.",
+        "operationId": "list_attestations_attestations_get",
+        "parameters": [
+          {
+            "name": "metric",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Metric"
+            }
+          },
+          {
+            "name": "include_revoked",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": true,
+              "title": "Include Revoked"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Attestation"
+                  },
+                  "title": "Response List Attestations Attestations Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/attestations/{attestation_id}": {
+      "get": {
+        "tags": [
+          "attestations"
+        ],
+        "summary": "Get Attestation",
+        "operationId": "get_attestation_attestations__attestation_id__get",
+        "parameters": [
+          {
+            "name": "attestation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Attestation Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Attestation"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/attestations/{attestation_id}/revoke": {
+      "post": {
+        "tags": [
+          "attestations"
+        ],
+        "summary": "Revoke Attestation",
+        "description": "Revoke an attestation (never delete it \u2014 migration-0029 trigger).\n\nFigures already factored under it keep their attestation provenance\nforever (the history is honest); revocation stops FUTURE calc runs from\nfactoring under it. Audited in the same transaction.",
+        "operationId": "revoke_attestation_attestations__attestation_id__revoke_post",
+        "parameters": [
+          {
+            "name": "attestation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Attestation Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RevokeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AttestationRevoked"
                 }
               }
             }
@@ -566,6 +897,59 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ResolveResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/dq/issues/{issue_id}/attest": {
+      "post": {
+        "tags": [
+          "data-quality"
+        ],
+        "summary": "Attest Issue",
+        "description": "Close ONE p. 146 refusal issue under a recorded statistician\nattestation \u2014 the explicit 'attested' state (handoff 0019, never a\ngeneric 'resolved', never a deletion).\n\nRefuses loudly when: the issue does not exist (404); the issue is not\nthe p. 146 refusal type (409 \u2014 no other gap has a statistician cure:\n'agencies must not collect a smaller sample than the chosen sampling\nplan prescribes', 2026 NTD Policy Manual p. 149); the issue is already\nclosed (409); the attestation does not exist (404) or is revoked (409).\nThe resolution text is built here from the attestation record. Audited\nin the same transaction.",
+        "operationId": "attest_issue_dq_issues__issue_id__attest_post",
+        "parameters": [
+          {
+            "name": "issue_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Issue Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AttestRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AttestResponse"
                 }
               }
             }
@@ -1193,6 +1577,49 @@
                   },
                   "type": "array",
                   "title": "Response List Certified Values Public Metrics Certified Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/public/certifications/{certification_id}/verify": {
+      "get": {
+        "tags": [
+          "public"
+        ],
+        "summary": "Public Verify Certification",
+        "description": "Public tamper-evidence check (handoff 0019, design point 6/7):\nre-verifies the stored certificate bytes against the stored Ed25519\nsignature, server-side, and returns the verdict.\n\nPUBLIC-SAFE by construction: the response carries the verdict,\nalgorithm, fingerprint, and timestamp \u2014 never the certifier's identity,\nnever the document, never any auth material. Rate-limited per client IP\nexactly like /public/metrics/certified (which serves the\ncertification_id + fingerprint this endpoint verifies).",
+        "operationId": "public_verify_certification_public_certifications__certification_id__verify_get",
+        "parameters": [
+          {
+            "name": "certification_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Certification Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VerificationResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -2274,6 +2701,438 @@
   },
   "components": {
     "schemas": {
+      "AttestRequest": {
+        "properties": {
+          "attestation_id": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Attestation Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "attestation_id"
+        ],
+        "title": "AttestRequest",
+        "description": "Close a p. 146 refusal issue under a recorded statistician\nattestation (handoff 0019). The resolution text is built server-side\nfrom the attestation \u2014 the caller supplies only the reference."
+      },
+      "AttestResponse": {
+        "properties": {
+          "issue_id": {
+            "type": "string",
+            "title": "Issue Id"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "resolved_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Resolved At"
+          },
+          "resolution": {
+            "type": "string",
+            "title": "Resolution"
+          },
+          "attestation_id": {
+            "type": "string",
+            "title": "Attestation Id"
+          },
+          "audit_event_id": {
+            "type": "integer",
+            "title": "Audit Event Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "issue_id",
+          "status",
+          "resolved_at",
+          "resolution",
+          "attestation_id",
+          "audit_event_id"
+        ],
+        "title": "AttestResponse"
+      },
+      "Attestation": {
+        "properties": {
+          "attestation_id": {
+            "type": "string",
+            "title": "Attestation Id"
+          },
+          "statistician_name": {
+            "type": "string",
+            "title": "Statistician Name"
+          },
+          "statistician_credentials": {
+            "type": "string",
+            "title": "Statistician Credentials"
+          },
+          "method_description": {
+            "type": "string",
+            "title": "Method Description"
+          },
+          "document_reference": {
+            "type": "string",
+            "title": "Document Reference"
+          },
+          "metric": {
+            "type": "string",
+            "title": "Metric"
+          },
+          "scope_pattern": {
+            "type": "string",
+            "title": "Scope Pattern"
+          },
+          "period_start": {
+            "type": "string",
+            "format": "date",
+            "title": "Period Start"
+          },
+          "period_end": {
+            "type": "string",
+            "format": "date",
+            "title": "Period End"
+          },
+          "entered_by": {
+            "type": "string",
+            "title": "Entered By"
+          },
+          "entered_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Entered At"
+          },
+          "revoked_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revoked At"
+          },
+          "revoked_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revoked By"
+          },
+          "revocation_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revocation Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "attestation_id",
+          "statistician_name",
+          "statistician_credentials",
+          "method_description",
+          "document_reference",
+          "metric",
+          "scope_pattern",
+          "period_start",
+          "period_end",
+          "entered_by",
+          "entered_at",
+          "revoked_at",
+          "revoked_by",
+          "revocation_reason"
+        ],
+        "title": "Attestation"
+      },
+      "AttestationCreated": {
+        "properties": {
+          "attestation_id": {
+            "type": "string",
+            "title": "Attestation Id"
+          },
+          "statistician_name": {
+            "type": "string",
+            "title": "Statistician Name"
+          },
+          "statistician_credentials": {
+            "type": "string",
+            "title": "Statistician Credentials"
+          },
+          "method_description": {
+            "type": "string",
+            "title": "Method Description"
+          },
+          "document_reference": {
+            "type": "string",
+            "title": "Document Reference"
+          },
+          "metric": {
+            "type": "string",
+            "title": "Metric"
+          },
+          "scope_pattern": {
+            "type": "string",
+            "title": "Scope Pattern"
+          },
+          "period_start": {
+            "type": "string",
+            "format": "date",
+            "title": "Period Start"
+          },
+          "period_end": {
+            "type": "string",
+            "format": "date",
+            "title": "Period End"
+          },
+          "entered_by": {
+            "type": "string",
+            "title": "Entered By"
+          },
+          "entered_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Entered At"
+          },
+          "revoked_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revoked At"
+          },
+          "revoked_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revoked By"
+          },
+          "revocation_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revocation Reason"
+          },
+          "audit_event_id": {
+            "type": "integer",
+            "title": "Audit Event Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "attestation_id",
+          "statistician_name",
+          "statistician_credentials",
+          "method_description",
+          "document_reference",
+          "metric",
+          "scope_pattern",
+          "period_start",
+          "period_end",
+          "entered_by",
+          "entered_at",
+          "revoked_at",
+          "revoked_by",
+          "revocation_reason",
+          "audit_event_id"
+        ],
+        "title": "AttestationCreated"
+      },
+      "AttestationRequest": {
+        "properties": {
+          "statistician_name": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Statistician Name"
+          },
+          "statistician_credentials": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Statistician Credentials",
+            "description": "A plain-language summary of why this statistician is qualified (the manual prescribes no specific qualifications; the agency is accountable for them)."
+          },
+          "method_description": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Method Description",
+            "description": "The approved factoring method, in the statistician's terms."
+          },
+          "document_reference": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Document Reference",
+            "description": "External pointer to the approval document (file path, document system id). The document itself is never stored here."
+          },
+          "metric": {
+            "type": "string",
+            "title": "Metric"
+          },
+          "scope_pattern": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Scope Pattern",
+            "description": "Which figure scopes the approval covers, as an fnmatch pattern over computed.metric_values.scope: 'agency', 'mode:bus', 'mode:DR:tos:*', or '*' for every scope."
+          },
+          "period_start": {
+            "type": "string",
+            "format": "date",
+            "title": "Period Start"
+          },
+          "period_end": {
+            "type": "string",
+            "format": "date",
+            "title": "Period End"
+          }
+        },
+        "type": "object",
+        "required": [
+          "statistician_name",
+          "statistician_credentials",
+          "method_description",
+          "document_reference",
+          "metric",
+          "scope_pattern",
+          "period_start",
+          "period_end"
+        ],
+        "title": "AttestationRequest"
+      },
+      "AttestationRevoked": {
+        "properties": {
+          "attestation_id": {
+            "type": "string",
+            "title": "Attestation Id"
+          },
+          "statistician_name": {
+            "type": "string",
+            "title": "Statistician Name"
+          },
+          "statistician_credentials": {
+            "type": "string",
+            "title": "Statistician Credentials"
+          },
+          "method_description": {
+            "type": "string",
+            "title": "Method Description"
+          },
+          "document_reference": {
+            "type": "string",
+            "title": "Document Reference"
+          },
+          "metric": {
+            "type": "string",
+            "title": "Metric"
+          },
+          "scope_pattern": {
+            "type": "string",
+            "title": "Scope Pattern"
+          },
+          "period_start": {
+            "type": "string",
+            "format": "date",
+            "title": "Period Start"
+          },
+          "period_end": {
+            "type": "string",
+            "format": "date",
+            "title": "Period End"
+          },
+          "entered_by": {
+            "type": "string",
+            "title": "Entered By"
+          },
+          "entered_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Entered At"
+          },
+          "revoked_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revoked At"
+          },
+          "revoked_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revoked By"
+          },
+          "revocation_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revocation Reason"
+          },
+          "audit_event_id": {
+            "type": "integer",
+            "title": "Audit Event Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "attestation_id",
+          "statistician_name",
+          "statistician_credentials",
+          "method_description",
+          "document_reference",
+          "metric",
+          "scope_pattern",
+          "period_start",
+          "period_end",
+          "entered_by",
+          "entered_at",
+          "revoked_at",
+          "revoked_by",
+          "revocation_reason",
+          "audit_event_id"
+        ],
+        "title": "AttestationRevoked"
+      },
       "Body_upload_logo_branding_logo_post": {
         "properties": {
           "file": {
@@ -2332,6 +3191,205 @@
         "title": "BrandingResponse",
         "description": "What the app shell needs to brand itself. Colors here have already\npassed the WCAG AA contrast guardrail at write time."
       },
+      "CertificationCertificate": {
+        "properties": {
+          "certification_id": {
+            "type": "string",
+            "title": "Certification Id"
+          },
+          "metric_value_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Metric Value Ids"
+          },
+          "certified_by": {
+            "type": "string",
+            "title": "Certified By"
+          },
+          "certified_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Certified At"
+          },
+          "attestation": {
+            "type": "string",
+            "title": "Attestation"
+          },
+          "signed": {
+            "type": "boolean",
+            "title": "Signed"
+          },
+          "key_fingerprint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key Fingerprint"
+          },
+          "signer_full_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Signer Full Name"
+          },
+          "signer_title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Signer Title"
+          },
+          "canonical_document": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Canonical Document"
+          },
+          "signature": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Signature"
+          },
+          "document": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Document"
+          },
+          "verification": {
+            "$ref": "#/components/schemas/VerificationResult"
+          }
+        },
+        "type": "object",
+        "required": [
+          "certification_id",
+          "metric_value_ids",
+          "certified_by",
+          "certified_at",
+          "attestation",
+          "signed",
+          "key_fingerprint",
+          "signer_full_name",
+          "signer_title",
+          "canonical_document",
+          "signature",
+          "document",
+          "verification"
+        ],
+        "title": "CertificationCertificate",
+        "description": "The full certificate view (the frontend's certificate screen):\nthe stored canonical document (raw signed text + parsed object), the\nsignature, and a live verification result."
+      },
+      "CertificationRecord": {
+        "properties": {
+          "certification_id": {
+            "type": "string",
+            "title": "Certification Id"
+          },
+          "metric_value_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Metric Value Ids"
+          },
+          "certified_by": {
+            "type": "string",
+            "title": "Certified By"
+          },
+          "certified_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Certified At"
+          },
+          "attestation": {
+            "type": "string",
+            "title": "Attestation"
+          },
+          "signed": {
+            "type": "boolean",
+            "title": "Signed"
+          },
+          "key_fingerprint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key Fingerprint"
+          },
+          "signer_full_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Signer Full Name"
+          },
+          "signer_title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Signer Title"
+          }
+        },
+        "type": "object",
+        "required": [
+          "certification_id",
+          "metric_value_ids",
+          "certified_by",
+          "certified_at",
+          "attestation",
+          "signed",
+          "key_fingerprint",
+          "signer_full_name",
+          "signer_title"
+        ],
+        "title": "CertificationRecord",
+        "description": "One certification as listed/viewed. Legacy (pre-signature) records\ncarry signed=false and NULL signature fields \u2014 honest history."
+      },
       "CertificationRequest": {
         "properties": {
           "metric_value_ids": {
@@ -2346,12 +3404,24 @@
             "type": "string",
             "minLength": 1,
             "title": "Attestation"
+          },
+          "signer_full_name": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Signer Full Name"
+          },
+          "signer_title": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Signer Title"
           }
         },
         "type": "object",
         "required": [
           "metric_value_ids",
-          "attestation"
+          "attestation",
+          "signer_full_name",
+          "signer_title"
         ],
         "title": "CertificationRequest"
       },
@@ -2381,6 +3451,31 @@
             "type": "string",
             "title": "Attestation"
           },
+          "signer_full_name": {
+            "type": "string",
+            "title": "Signer Full Name"
+          },
+          "signer_title": {
+            "type": "string",
+            "title": "Signer Title"
+          },
+          "canonical_document": {
+            "type": "string",
+            "title": "Canonical Document"
+          },
+          "signature": {
+            "type": "string",
+            "title": "Signature"
+          },
+          "key_fingerprint": {
+            "type": "string",
+            "title": "Key Fingerprint"
+          },
+          "algorithm": {
+            "type": "string",
+            "title": "Algorithm",
+            "default": "ed25519"
+          },
           "audit_event_id": {
             "type": "integer",
             "title": "Audit Event Id"
@@ -2393,6 +3488,11 @@
           "certified_by",
           "certified_at",
           "attestation",
+          "signer_full_name",
+          "signer_title",
+          "canonical_document",
+          "signature",
+          "key_fingerprint",
           "audit_event_id"
         ],
         "title": "CertificationResponse"
@@ -3388,6 +4488,29 @@
           "parse_status"
         ],
         "title": "IngestResponse"
+      },
+      "IntentResponse": {
+        "properties": {
+          "intent_statement": {
+            "type": "string",
+            "title": "Intent Statement"
+          },
+          "scope_statement": {
+            "type": "string",
+            "title": "Scope Statement"
+          },
+          "algorithm": {
+            "type": "string",
+            "title": "Algorithm",
+            "default": "ed25519"
+          }
+        },
+        "type": "object",
+        "required": [
+          "intent_statement",
+          "scope_statement"
+        ],
+        "title": "IntentResponse"
       },
       "KeyListItem": {
         "properties": {
@@ -4406,6 +5529,38 @@
         "title": "PreviewSide",
         "description": "One variant's outcome for one metric: the would-be value (or an\nhonest refusal) plus every would-be finding. Nothing here was written\nanywhere."
       },
+      "PublicCertificationRef": {
+        "properties": {
+          "certification_id": {
+            "type": "string",
+            "title": "Certification Id"
+          },
+          "certified_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Certified At"
+          },
+          "key_fingerprint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key Fingerprint"
+          }
+        },
+        "type": "object",
+        "required": [
+          "certification_id",
+          "certified_at",
+          "key_fingerprint"
+        ],
+        "title": "PublicCertificationRef",
+        "description": "The public face of a certification (handoff 0019, design point 7):\nWHICH record certified the figure, WHEN, and the signing key's\nfingerprint \u2014 enough to verify tamper-evidence via\nGET /public/certifications/{id}/verify. NO certifier identity here\n(that lives in the authenticated record); a NULL fingerprint is a\npre-signature legacy certification, honestly unsigned."
+      },
       "PublicMetricValue": {
         "properties": {
           "metric_value_id": {
@@ -4465,6 +5620,16 @@
             "type": "string",
             "title": "Category",
             "default": "ntd"
+          },
+          "certification": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PublicCertificationRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -4654,6 +5819,20 @@
           "audit_event_id"
         ],
         "title": "RevokeKeyResponse"
+      },
+      "RevokeRequest": {
+        "properties": {
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "reason"
+        ],
+        "title": "RevokeRequest"
       },
       "RevokeSubscriptionResponse": {
         "properties": {
@@ -5653,6 +6832,68 @@
           "type"
         ],
         "title": "ValidationError"
+      },
+      "VerificationResult": {
+        "properties": {
+          "certification_id": {
+            "type": "string",
+            "title": "Certification Id"
+          },
+          "signed": {
+            "type": "boolean",
+            "title": "Signed"
+          },
+          "verified": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verified"
+          },
+          "verdict": {
+            "type": "string",
+            "title": "Verdict"
+          },
+          "algorithm": {
+            "type": "string",
+            "title": "Algorithm",
+            "default": "ed25519"
+          },
+          "key_fingerprint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key Fingerprint"
+          },
+          "certified_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Certified At"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "certification_id",
+          "signed",
+          "verified",
+          "verdict",
+          "certified_at",
+          "message"
+        ],
+        "title": "VerificationResult"
       }
     }
   }

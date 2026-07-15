@@ -614,6 +614,13 @@ class UptDetail:
       NTD Policy Manual p. 146) and ``imbalance_threshold`` (default 0.10 —
       the p. 151 APC validation example) — the run's explicit inputs, carried
       for provenance exactly as the coverage thresholds are.
+    - ``attestation`` (upt_v0 0.2.0, handoff 0019) — the statistician
+      attestation provenance dict
+      (headway_calc.attestation.AttestationContext.to_provenance_dict) when
+      the figure was factored beyond the 2% threshold under a recorded,
+      in-scope attestation; None otherwise. Emitted in ``to_dict`` ONLY when
+      present, so every pre-0019 detail (and every non-attested run) is
+      byte-identical to upt_v0 0.1.0's output.
 
     ``to_dict`` renders every Decimal as a string so JSON never coerces a
     reported ratio through binary float; source_mix keys are emitted sorted.
@@ -628,9 +635,10 @@ class UptDetail:
     source_mix: dict[str, int]
     missing_trip_threshold: Decimal
     imbalance_threshold: Decimal
+    attestation: dict | None = None
 
     def to_dict(self) -> dict:
-        return {
+        detail = {
             "total_boardings_counted": self.total_boardings_counted,
             "operated_trips": self.operated_trips,
             "trips_with_events": self.trips_with_events,
@@ -643,6 +651,9 @@ class UptDetail:
             "missing_trip_threshold": str(self.missing_trip_threshold),
             "imbalance_threshold": str(self.imbalance_threshold),
         }
+        if self.attestation is not None:
+            detail["attestation"] = dict(self.attestation)
+        return detail
 
 
 @dataclass(frozen=True)
@@ -677,6 +688,11 @@ class PmtDetail:
       None when not supplied (shape data then unusable — never guessed).
     - ``source_mix`` and both thresholds — exactly as UptDetail carries
       them (simulated-data rule + threshold provenance).
+    - ``attestation`` (pmt_v0 0.2.0, handoff 0019) — exactly as UptDetail
+      carries it: the statistician attestation provenance dict when the
+      figure was factored beyond the 2% threshold under a recorded,
+      in-scope attestation; None otherwise, and emitted ONLY when present
+      (pre-0019 details stay byte-identical).
 
     ``to_dict`` renders every Decimal as a string; dict keys are emitted
     sorted.
@@ -696,9 +712,10 @@ class PmtDetail:
     source_mix: dict[str, int]
     missing_trip_threshold: Decimal
     imbalance_threshold: Decimal
+    attestation: dict | None = None
 
     def to_dict(self) -> dict:
-        return {
+        detail = {
             "passenger_miles_counted": str(self.passenger_miles_counted),
             "operated_trips": self.operated_trips,
             "trips_with_events": self.trips_with_events,
@@ -726,6 +743,9 @@ class PmtDetail:
             "missing_trip_threshold": str(self.missing_trip_threshold),
             "imbalance_threshold": str(self.imbalance_threshold),
         }
+        if self.attestation is not None:
+            detail["attestation"] = dict(self.attestation)
+        return detail
 
 
 @dataclass(frozen=True)

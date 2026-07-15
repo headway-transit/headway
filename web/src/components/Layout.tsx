@@ -149,6 +149,12 @@ export function Layout() {
                 <li>
                   <NavLink to="/sandbox">{copy.nav.sandbox}</NavLink>
                 </li>
+                {/* Statistician attestations (handoff 0019): every signed-in
+                    role can read the record; the entry form inside is
+                    role-gated (UX only — the API enforces the role). */}
+                <li>
+                  <NavLink to="/attestations">{copy.nav.attestations}</NavLink>
+                </li>
                 {/* Shown only to the certifying official — UX, not security:
                     the API enforces the role on POST /certifications and on
                     every branding write. */}

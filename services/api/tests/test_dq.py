@@ -131,5 +131,5 @@ def test_resolve_already_resolved_409_no_second_audit_event(client, fake_db):
         headers=auth_header(fake_db, "stella"),
     )
     assert r.status_code == 409
-    assert "already resolved" in r.json()["detail"]
+    assert "already closed" in r.json()["detail"]
     assert not any(e["action"] == "dq_resolve" for e in fake_db.audit_events)

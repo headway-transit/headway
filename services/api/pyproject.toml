@@ -22,6 +22,11 @@ dependencies = [
                           # (handoff 0017 design point 5); values written as
                           # TEXT cells so figures stay byte-equal to the CSV
                           # (floating point never touches a figure)
+    "cryptography>=42",   # Apache-2.0 OR BSD-3-Clause (pyca; ADR-0001 tier 2
+                          # permissive) — Ed25519 certification signatures
+                          # (handoff 0019; headway_api/signing.py). The
+                          # signing KEY lives only in the environment/secret
+                          # file, never in this repo or the database.
     "headway-calc>=0.5",  # Apache-2.0 — SIBLING PATH PACKAGE (services/calc,
                           # not on PyPI): GET /reports/mr20 imports
                           # headway_calc.mr20 and serves its package verbatim

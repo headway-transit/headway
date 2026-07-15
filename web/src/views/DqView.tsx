@@ -67,11 +67,16 @@ export function DqView() {
   const mayResolve = canResolveDqIssues(session);
 
   // Queue tallies (issue counts, not regulatory figures; full list — see
-  // the component comment). "Open" here means not resolved.
+  // the component comment). "Open" means status open or owned: 'resolved'
+  // and 'attested' (migration 0029 — the p. 146 statistician closure) are
+  // both CLOSED states, exactly as the certification gate counts them.
   const all = issues ?? [];
   const countBy = (severity: string) =>
-    all.filter((i) => i.severity === severity && i.status !== "resolved")
-      .length;
+    all.filter(
+      (i) =>
+        i.severity === severity &&
+        (i.status === "open" || i.status === "owned"),
+    ).length;
   const resolvedCount = all.filter((i) => i.status === "resolved").length;
 
   const filtered = all.filter(
@@ -284,7 +289,10 @@ interface IssueCardProps {
 function IssueCard({ issue, mayResolve, onResolved }: IssueCardProps) {
   const headingId = useId();
   const isBlocking = issue.severity === "blocking";
-  const isResolved = issue.status === "resolved";
+  // Two closed states (migration 0029): 'resolved', and 'attested' — the
+  // p. 146 statistician closure. A closed issue no longer blocks and takes
+  // no resolve form, but it stays fully visible with its resolution story.
+  const isClosed = issue.status === "resolved" || issue.status === "attested";
 
   return (
     <li>
@@ -295,7 +303,7 @@ function IssueCard({ issue, mayResolve, onResolved }: IssueCardProps) {
         <h2 id={headingId}>{issue.title}</h2>
         <p>
           <SeverityBadge severity={issue.severity} />{" "}
-          {isBlocking && !isResolved && <strong>{copy.dq.blockingNote}</strong>}
+          {isBlocking && !isClosed && <strong>{copy.dq.blockingNote}</strong>}
         </p>
         <p>{issue.description}</p>
         <dl>
@@ -311,7 +319,7 @@ function IssueCard({ issue, mayResolve, onResolved }: IssueCardProps) {
               <dd>{issue.source_record_ids.join(", ")}</dd>
             </>
           )}
-          {isResolved && (
+          {isClosed && issue.resolved_at !== null && (
             <>
               <dt>{copy.dq.resolvedLabel}</dt>
               <dd>{issue.resolved_at}</dd>
@@ -331,7 +339,7 @@ function IssueCard({ issue, mayResolve, onResolved }: IssueCardProps) {
             </>
           )}
         </dl>
-        {mayResolve && !isResolved && (
+        {mayResolve && !isClosed && (
           <ResolveForm issue={issue} onResolved={onResolved} />
         )}
       </article>

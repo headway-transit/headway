@@ -96,11 +96,17 @@ randomness. Time comes exclusively from the input events.
 
 from __future__ import annotations
 
+import dataclasses
 import math
 from dataclasses import dataclass
 from decimal import ROUND_HALF_EVEN, Decimal
 from typing import Iterable
 
+from headway_calc.attestation import (
+    P146_ATTESTATION_BASIS,
+    AttestationContext,
+    governing_attestation,
+)
 from headway_calc.distance import MILES_QUANTUM, haversine_miles, miles_to_decimal
 from headway_calc.types import (
     SEVERITY_BLOCKING,
@@ -122,7 +128,13 @@ from headway_calc.upt import (
 )
 
 CALC_NAME = "pmt_v0"
-CALC_VERSION = "0.1.0"
+#: 0.2.0 (handoff 0019): the >2% path accepts a statistician attestation
+#: context, exactly as upt_v0 0.2.0 — WITH a recorded, unrevoked, in-scope
+#: attestation the figure is factored up per the p. 146 sentence and carries
+#: the attestation's provenance permanently; WITHOUT one, the refusal is
+#: byte-for-byte 0.1.0's (regression-pinned). 0.1.0 is RETAINED runnable as
+#: compute_pmt_v0_1_0 (the sscls convention).
+CALC_VERSION = "0.2.0"
 #: The NTD measure itself (mirrors upt_v0's unit-naming convention).
 UNIT = "passenger_miles"
 
@@ -293,8 +305,9 @@ def compute_pmt(
     missing_trip_threshold: Decimal = MISSING_TRIP_THRESHOLD,
     imbalance_threshold: Decimal = IMBALANCE_THRESHOLD,
     shape_dist_unit_miles: Decimal | None = None,
+    attestations: Iterable[AttestationContext] = (),
 ) -> CalcResult:
-    """Compute pmt_v0 (version 0.1.0) — Passenger Miles Traveled.
+    """Compute pmt_v0 (version 0.2.0) — Passenger Miles Traveled.
 
     Base figure (p. 145: "the sum of the distances each passenger
     traveled"): per trip with a trip assignment (the v0 revenue-service
@@ -314,10 +327,21 @@ def compute_pmt(
       (exact comparison): the valid-trip figure is factored up
       deterministically, PMT_reported = counted × operated/(operated −
       missing − invalid_operated), quantized 0.01 mile;
-    - above the threshold: ONE blocking
+    - above the threshold WITHOUT an applicable attestation: ONE blocking
       'apc_missing_trips_above_fta_threshold' finding (the same issue_type
       as upt_v0 — it is the same p. 146 rule) and value None: the
-      statistician-approved factoring is a human workflow, never guessed;
+      statistician-approved factoring is a human workflow, never guessed.
+      Byte-for-byte the 0.1.0 refusal (regression-pinned);
+    - above the threshold WITH an applicable attestation (handoff 0019 —
+      the same semantics as upt_v0 0.2.0: ``attestations`` are already
+      scope/period-matched by the caller, the calc re-checks metric
+      ('pmt' — mismatch raises ValueError) and revocation, the
+      earliest-entered survivor governs): the SAME deterministic factor-up
+      as the ≤2% branch plus ONE info finding
+      ``'apc_missing_trips_attested_factor_up'`` and the attestation's
+      provenance in ``detail.attestation``. Nothing else moves: invalid
+      trips stay excluded and warned, simulated-source flags stand, the
+      ≤2% branch ignores attestations entirely;
     - zero operated trips (degenerate period): share 0, factor 1.
 
     Info findings: 'simulated_source_data' exactly as upt_v0 (handoff 0005
@@ -527,7 +551,64 @@ def compute_pmt(
     blocking_issues: tuple[Finding, ...] = ()
     factor_applied: Decimal | None = None
     value: Decimal | None = None
-    if above_threshold:
+    attestation_provenance: dict | None = None
+    governing = governing_attestation(attestations, "pmt")
+    if above_threshold and governing is not None:
+        # The p. 146 permission path (handoff 0019), exactly as upt_v0
+        # 0.2.0: a recorded statistician approval factors the VALID-trip
+        # figure up deterministically; the exclusions and their warnings
+        # stand untouched. unusable_count > 0 here by construction.
+        exact_factor = Decimal(operated_count) / Decimal(
+            operated_count - unusable_count
+        )
+        value = (
+            counted
+            * Decimal(operated_count)
+            / Decimal(operated_count - unusable_count)
+        ).quantize(MILES_QUANTUM, rounding=ROUND_HALF_EVEN)
+        factor_applied = exact_factor.quantize(
+            _FACTOR_QUANTUM, rounding=ROUND_HALF_EVEN
+        )
+        attestation_provenance = governing.to_provenance_dict()
+        infos.append(
+            Finding(
+                issue_type="apc_missing_trips_attested_factor_up",
+                severity=SEVERITY_INFO,
+                title=(
+                    f"Factored beyond the 2% threshold under a "
+                    f"statistician-approved method — attestation "
+                    f"#{governing.attestation_id}"
+                ),
+                description=(
+                    f"{missing_count} of {operated_count} operated trips "
+                    f"(observed in canonical.vehicle_positions) have zero "
+                    f"passenger events and {len(invalid_operated)} more "
+                    f"failed the pp. 151-152 validity checks (their load "
+                    f"profiles were discarded): missing-data share {share} "
+                    f"exceeds the threshold of {missing_trip_threshold}. The "
+                    f"2026 NTD Policy Manual p. 146 permits factoring here "
+                    f"only with approval: '{P146_ATTESTATION_BASIS}' That "
+                    f"approval is on record as attestation "
+                    f"#{governing.attestation_id} — statistician "
+                    f"{governing.statistician_name} "
+                    f"({governing.statistician_credentials}); approved "
+                    f"method: {governing.method_description}; approval "
+                    f"document: {governing.document_reference}; entered by "
+                    f"{governing.entered_by} at "
+                    f"{governing.entered_at.isoformat()}. The valid-trip "
+                    f"figure was factored up by {factor_applied} (counted x "
+                    f"operated / (operated - missing - invalid_operated)) "
+                    f"and carries this attestation in its detail "
+                    f"permanently. Revoking the attestation never deletes "
+                    f"this record; it prevents FUTURE runs from factoring "
+                    f"under it."
+                ),
+                # Missing trips have no passenger-event records to cite;
+                # invalid trips' records are cited by their own warnings.
+                source_record_ids=(),
+            )
+        )
+    elif above_threshold:
         unusable_named = missing + invalid_operated
         named = ", ".join(unusable_named[:_TRIPS_NAMED])
         if unusable_count > _TRIPS_NAMED:
@@ -599,6 +680,7 @@ def compute_pmt(
         source_mix=source_mix,
         missing_trip_threshold=missing_trip_threshold,
         imbalance_threshold=imbalance_threshold,
+        attestation=attestation_provenance,
     )
 
     return CalcResult(
@@ -612,6 +694,36 @@ def compute_pmt(
         infos=tuple(infos),
         detail=detail,
     )
+
+
+def compute_pmt_v0_1_0(
+    events: Iterable[PassengerEvent],
+    operated_trip_ids: Iterable[str],
+    stop_times: Iterable[StopTime],
+    *,
+    missing_trip_threshold: Decimal = MISSING_TRIP_THRESHOLD,
+    imbalance_threshold: Decimal = IMBALANCE_THRESHOLD,
+    shape_dist_unit_miles: Decimal | None = None,
+) -> CalcResult:
+    """pmt_v0 0.1.0, RETAINED runnable (the sscls convention — shipped
+    versions stay reproducible; handoff 0019).
+
+    0.1.0 predates statistician attestations: it is exactly compute_pmt
+    with no attestation context — every output is byte-identical, because
+    the 0.2.0 change is strictly additive (the attestation detail key is
+    emitted only when an attestation governed, which can never happen
+    here). Pinned by tests/test_pmt_attestation.py.
+    """
+    result = compute_pmt(
+        events,
+        operated_trip_ids,
+        stop_times,
+        missing_trip_threshold=missing_trip_threshold,
+        imbalance_threshold=imbalance_threshold,
+        shape_dist_unit_miles=shape_dist_unit_miles,
+        attestations=(),
+    )
+    return dataclasses.replace(result, calc_version="0.1.0")
 
 
 # ---------------------------------------------------------------------------

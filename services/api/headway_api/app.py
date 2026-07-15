@@ -17,6 +17,7 @@ from . import __version__, auth, webhooks
 from .db import lifespan
 from .machine_auth import RateLimiter
 from .routers import (
+    attestations,
     branding,
     certify,
     dq,
@@ -131,6 +132,7 @@ def create_app(
     app.include_router(auth.router)
     app.include_router(metrics.router)
     app.include_router(certify.router)
+    app.include_router(attestations.router)
     app.include_router(dq.router)
     app.include_router(machine_keys.router)
     app.include_router(machine_read.router)

@@ -14,12 +14,16 @@ from decimal import Decimal
 
 from conftest import load_events, load_stop_times
 
+# compute_pmt pinned to the RETAINED 0.1.0 function (the test_golden.py
+# convention): these goldens anchor pmt_v0 0.1.0 forever; 0.2.0 (attestation
+# path, handoff 0019) has its own tests, and the no-attestation byte-for-byte
+# equivalence is pinned in test_pmt_attestation.py.
 from headway_calc.pmt import (
     ESTIMATION_METHOD,
-    compute_pmt,
     estimate_pmt_average_trip_length,
     estimate_pmt_from_average_trip_length,
 )
+from headway_calc.pmt import compute_pmt_v0_1_0 as compute_pmt
 
 
 def _unit(case: dict) -> Decimal | None:

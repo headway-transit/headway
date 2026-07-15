@@ -295,7 +295,7 @@ def test_attack_preview_results_cannot_be_certified(client, fake_db, monkeypatch
     fabricated = "00000000-0000-0000-0000-00000000beef"
     r = client.post(
         "/certifications",
-        json={"metric_value_ids": [fabricated], "attestation": "attempt"},
+        json={"metric_value_ids": [fabricated], "attestation": "attempt", "signer_full_name": "Cora Certifier", "signer_title": "Chief Executive Officer"},
         headers=auth_header(fake_db, "cora"),
     )
     assert r.status_code == 404

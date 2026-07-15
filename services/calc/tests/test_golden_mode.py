@@ -82,7 +82,7 @@ def test_golden_upt_per_mode_values_and_exact_fleet_sum(
     assert _values(by_mode) == mode_golden_expected["per_mode"]["upt"]
     assert str(fleet.value) == mode_golden_expected["fleet"]["upt"]
     assert sum(r.value for r in by_mode.values()) == fleet.value
-    assert {r.calc_version for r in by_mode.values()} == {"0.1.0"}
+    assert {r.calc_version for r in by_mode.values()} == {"0.2.0"}
     # The unassigned boarding (count 4) is outside the revenue proxy: the
     # unknown bucket's UPT is the degenerate 0, not an invented count.
     unknown = by_mode["unknown"]

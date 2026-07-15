@@ -335,4 +335,27 @@ describe("regulatory quotes (src/regulatory/quotes.json)", () => {
       }
     }
   });
+
+  it("resolves EVERY snippet the attestation surfaces depend on, under BOTH factor-up calcs (handoff 0019)", () => {
+    // The attested-receipt callout and the /attestations page place these
+    // rules verbatim; a missing quote would ship a paraphrase-only screen.
+    const statistician = "qualified statistician approve the factoring method";
+    for (const calc of ["upt_v0", "pmt_v0"]) {
+      expect(
+        quoteContaining(calc, statistician),
+        `the p. 146 statistician sentence is missing under ${calc}`,
+      ).not.toBeNull();
+    }
+    // The undersampling HARD LIMIT (p. 149) — no statistician cure — and
+    // the p. 150 qualifications guidance, both shown on /attestations.
+    expect(
+      quoteContaining("upt_v0", "must not collect a smaller sample"),
+    ).not.toBeNull();
+    expect(
+      quoteContaining(
+        "upt_v0",
+        "FTA does not prescribe specific statistician qualifications",
+      ),
+    ).not.toBeNull();
+  });
 });

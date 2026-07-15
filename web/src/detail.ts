@@ -53,6 +53,43 @@ export function isOps(value: MetricValue): boolean {
   return value.category === "ops";
 }
 
+/**
+ * The statistician-attestation provenance a factored-beyond-2% figure
+ * carries permanently (handoff 0019, design 2: `detail.attestation` is the
+ * calc's to_provenance_dict — reconciled 2026-07-15 against
+ * headway_calc/attestation.py). A stamp with unexpected inner keys still
+ * surfaces (the known fields shown; the dict also renders raw-but-tidy via
+ * detailLines wherever the callout is not drawn) — never silently dropped.
+ */
+export interface AttestationReference {
+  /** cert.attestations id — receipts cite "attestation #<id>". */
+  id: string;
+  /** The statistician-approved method, verbatim; null if absent. */
+  method: string | null;
+  /** The approving statistician's name, verbatim; null if absent. */
+  statistician: string | null;
+}
+
+function stringOrNull(value: unknown): string | null {
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+export function attestationReference(
+  detail: Detail | undefined,
+): AttestationReference | null {
+  const stamp = detail?.attestation;
+  if (typeof stamp !== "object" || stamp === null || Array.isArray(stamp)) {
+    return null;
+  }
+  const s = stamp as Record<string, unknown>;
+  if (s.attestation_id === undefined || s.attestation_id === null) return null;
+  return {
+    id: detailValueToString(s.attestation_id),
+    method: stringOrNull(s.method_description),
+    statistician: stringOrNull(s.statistician_name),
+  };
+}
+
 /** Detail keys that hold a ratio string, displayed as a percentage. */
 const PERCENT_KEYS = new Set([
   "clean_position_share",
@@ -239,6 +276,16 @@ export function detailLines(detail: Detail): string[] {
     lines.push(coverageSummary(detail) as string);
     consumed.add("coverage");
     consumed.add("excluded_groups");
+  }
+
+  // The statistician-attestation provenance (handoff 0019): one plain
+  // sentence naming the attestation and its approved method — the callout
+  // renders the full record where receipts are drawn; this line covers
+  // every other surface that lists detail.
+  const attested = attestationReference(detail);
+  if (attested) {
+    lines.push(copy.detail.attestationLine(attested.id, attested.method));
+    consumed.add("attestation");
   }
 
   // The UPT missing-trip adjustment (FTA-sanctioned factor-up).

@@ -39,6 +39,49 @@ function mockPublic(body: unknown) {
 }
 
 describe("/public (certified open data)", () => {
+  it("renders the certification block's key fingerprint when served — and the honest legacy line for a pre-signature certification (handoff 0019, design 7)", async () => {
+    const signedRow: PublicMetricValue = {
+      ...certifiedValue,
+      certification: {
+        certification_id: "cert-42",
+        certified_at: "2026-07-15T23:00:05Z",
+        key_fingerprint: "ed25519:f0995b71ecc91f99d6c0794eee26297907fe2ae7",
+      },
+    };
+    const legacyRow: PublicMetricValue = {
+      ...certifiedSimulatedUpt,
+      certification: {
+        certification_id: "cert-7",
+        certified_at: "2026-04-02T09:00:00Z",
+        key_fingerprint: null,
+      },
+    };
+    mockPublic([signedRow, legacyRow]);
+    renderApp("/public");
+
+    // The signed row: the fingerprint verbatim — never any certifier
+    // identity (the public feed carries none by design).
+    const vrmCard = (
+      await screen.findByRole("heading", { name: "Vehicle Revenue Miles (VRM)" })
+    ).closest("article") as HTMLElement;
+    expect(vrmCard).toHaveTextContent("Signature key fingerprint");
+    expect(vrmCard).toHaveTextContent(
+      "ed25519:f0995b71ecc91f99d6c0794eee26297907fe2ae7",
+    );
+    expect(vrmCard).toHaveTextContent("Certified on");
+    expect(vrmCard).toHaveTextContent("2026-07-15T23:00:05Z");
+
+    // The legacy row states the absence instead of a blank cell.
+    const uptCard = screen
+      .getByRole("heading", { name: "Unlinked Passenger Trips (UPT)" })
+      .closest("article") as HTMLElement;
+    expect(uptCard).toHaveTextContent(
+      "Certified before digital signatures existed in Headway — no signature fingerprint.",
+    );
+
+    await expectNoAxeViolations();
+  });
+
   it("renders the certified figures as receipt-lite cards WITHOUT any sign-in, values verbatim, no token sent", async () => {
     // NO signInAs: the whole point is that this page needs no account.
     const calls = mockPublic([certifiedValue, certifiedSimulatedUpt]);
@@ -76,6 +119,9 @@ describe("/public (certified open data)", () => {
       "The calculation reported no coverage information for this figure.",
     );
     expect(vrmCard).toHaveTextContent("Calculated by vrm_v0 (version 0.1.0).");
+    // No certification block on this row (an API predating handoff 0019):
+    // no fingerprint line is invented.
+    expect(vrmCard).not.toHaveTextContent("Signature key fingerprint");
 
     // The simulated figure keeps its badge — transparency shows the flags —
     // plus its coverage line and (when served) its certification date.

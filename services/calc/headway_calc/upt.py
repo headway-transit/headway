@@ -50,9 +50,15 @@ randomness. Time comes exclusively from the input events.
 
 from __future__ import annotations
 
+import dataclasses
 from decimal import ROUND_HALF_EVEN, Decimal
 from typing import Iterable
 
+from headway_calc.attestation import (
+    P146_ATTESTATION_BASIS,
+    AttestationContext,
+    governing_attestation,
+)
 from headway_calc.types import (
     SEVERITY_BLOCKING,
     SEVERITY_INFO,
@@ -64,7 +70,14 @@ from headway_calc.types import (
 )
 
 CALC_NAME = "upt_v0"
-CALC_VERSION = "0.1.0"
+#: 0.2.0 (handoff 0019): the >2% path accepts a statistician attestation
+#: context — WITH a recorded, unrevoked, in-scope attestation the figure is
+#: factored up per the p. 146 sentence ("agencies must have a qualified
+#: statistician approve the factoring method") and carries the attestation's
+#: provenance permanently; WITHOUT one, the refusal is byte-for-byte 0.1.0's
+#: (regression-pinned). 0.1.0 is RETAINED runnable as compute_upt_v0_1_0
+#: (the sscls convention — shipped versions stay reproducible).
+CALC_VERSION = "0.2.0"
 #: 'boardings' would be ambiguous against the counted base; the persisted unit
 #: names the NTD measure itself.
 UNIT = "unlinked_passenger_trips"
@@ -164,8 +177,9 @@ def compute_upt(
     *,
     missing_trip_threshold: Decimal = MISSING_TRIP_THRESHOLD,
     imbalance_threshold: Decimal = IMBALANCE_THRESHOLD,
+    attestations: Iterable[AttestationContext] = (),
 ) -> CalcResult:
-    """Compute upt_v0 (version 0.1.0) — Unlinked Passenger Trips.
+    """Compute upt_v0 (version 0.2.0) — Unlinked Passenger Trips.
 
     Base count (p. 143: "the number of boardings on public transportation
     vehicles"): the sum of ``event_count`` over events whose ``event_type``
@@ -204,9 +218,25 @@ def compute_upt(
       boardings (Decimal 1, ROUND_HALF_EVEN — documented engineering
       rounding; the manual prescribes none). The factor and all inputs are
       recorded in the detail.
-    - share > threshold: ONE blocking finding
-      ``'apc_missing_trips_above_fta_threshold'`` and value None — the
-      statistician-approved factoring is a human workflow, never guessed.
+    - share > threshold WITHOUT an applicable attestation: ONE blocking
+      finding ``'apc_missing_trips_above_fta_threshold'`` and value None —
+      the statistician-approved factoring is a human workflow, never
+      guessed. Byte-for-byte the 0.1.0 refusal (regression-pinned).
+    - share > threshold WITH an applicable attestation (handoff 0019 —
+      ``attestations`` are AttestationContexts already matched to this
+      run's scope and period by the caller via
+      headway_calc.attestation.applicable_attestations; the calc re-checks
+      metric — a non-'upt' attestation raises ValueError — and skips
+      revoked ones; the earliest-entered survivor governs): the SAME
+      deterministic factor-up as the ≤2% branch — the p. 146 sentence
+      permits it once "a qualified statistician approve[s] the factoring
+      method" — plus ONE info finding
+      ``'apc_missing_trips_attested_factor_up'`` naming the attestation and
+      quoting p. 146, and the attestation's full provenance dict in
+      ``detail.attestation`` (the figure carries it permanently).
+      Attestations NEVER touch anything else: the ≤2% branch ignores them
+      entirely (byte-identical output), simulated-source flags stand, and
+      no other finding changes.
     - zero operated trips (degenerate period): nothing operated, nothing
       missing — share 0, factor 1, the counted figure stands.
 
@@ -399,7 +429,62 @@ def compute_upt(
     blocking_issues: tuple[Finding, ...] = ()
     factor_applied: Decimal | None = None
     value: Decimal | None = None
-    if above_threshold:
+    attestation_provenance: dict | None = None
+    governing = governing_attestation(attestations, "upt")
+    if above_threshold and governing is not None:
+        # The p. 146 sentence's OWN permission path (handoff 0019): a
+        # qualified statistician approved the factoring method, recorded as
+        # an unrevoked in-scope cert.attestations row — so the SAME
+        # deterministic factor-up as the ≤2% branch applies, and the figure
+        # carries the attestation's provenance permanently. missing_count>0
+        # here by construction (share > threshold > 0).
+        exact_factor = Decimal(operated_count) / Decimal(
+            operated_count - missing_count
+        )
+        value = (
+            Decimal(counted_boardings)
+            * Decimal(operated_count)
+            / Decimal(operated_count - missing_count)
+        ).quantize(_UPT_QUANTUM, rounding=ROUND_HALF_EVEN)
+        factor_applied = exact_factor.quantize(
+            _FACTOR_QUANTUM, rounding=ROUND_HALF_EVEN
+        )
+        attestation_provenance = governing.to_provenance_dict()
+        infos.append(
+            Finding(
+                issue_type="apc_missing_trips_attested_factor_up",
+                severity=SEVERITY_INFO,
+                title=(
+                    f"Factored beyond the 2% threshold under a "
+                    f"statistician-approved method — attestation "
+                    f"#{governing.attestation_id}"
+                ),
+                description=(
+                    f"{missing_count} of {operated_count} operated trips "
+                    f"(observed in canonical.vehicle_positions) have zero "
+                    f"passenger events: missing share {missing_share} exceeds "
+                    f"the threshold of {missing_trip_threshold}. The 2026 NTD "
+                    f"Policy Manual p. 146 permits factoring here only with "
+                    f"approval: '{P146_ATTESTATION_BASIS}' That approval is "
+                    f"on record as attestation #{governing.attestation_id} — "
+                    f"statistician {governing.statistician_name} "
+                    f"({governing.statistician_credentials}); approved "
+                    f"method: {governing.method_description}; approval "
+                    f"document: {governing.document_reference}; entered by "
+                    f"{governing.entered_by} at "
+                    f"{governing.entered_at.isoformat()}. The figure was "
+                    f"factored up by {factor_applied} (counted x operated / "
+                    f"(operated - missing)) and carries this attestation in "
+                    f"its detail permanently. Revoking the attestation never "
+                    f"deletes this record; it prevents FUTURE runs from "
+                    f"factoring under it."
+                ),
+                # Missing trips have, by definition, no passenger-event
+                # records to cite; the attestation row is named above.
+                source_record_ids=(),
+            )
+        )
+    elif above_threshold:
         named = ", ".join(missing[:_MISSING_TRIPS_NAMED])
         if missing_count > _MISSING_TRIPS_NAMED:
             named += f", ... ({missing_count - _MISSING_TRIPS_NAMED} more)"
@@ -465,6 +550,7 @@ def compute_upt(
         source_mix=source_mix,
         missing_trip_threshold=missing_trip_threshold,
         imbalance_threshold=imbalance_threshold,
+        attestation=attestation_provenance,
     )
 
     return CalcResult(
@@ -478,3 +564,30 @@ def compute_upt(
         infos=tuple(infos),
         detail=detail,
     )
+
+
+def compute_upt_v0_1_0(
+    events: Iterable[PassengerEvent],
+    operated_trip_ids: Iterable[str],
+    *,
+    missing_trip_threshold: Decimal = MISSING_TRIP_THRESHOLD,
+    imbalance_threshold: Decimal = IMBALANCE_THRESHOLD,
+) -> CalcResult:
+    """upt_v0 0.1.0, RETAINED runnable (the sscls convention — shipped
+    versions stay reproducible; handoff 0019).
+
+    0.1.0 predates statistician attestations: it is exactly compute_upt
+    with no attestation context — every output (values, findings, detail
+    JSON) is byte-identical, because the 0.2.0 change is strictly additive
+    (the attestation detail key is emitted only when an attestation
+    governed, which can never happen here). Pinned by
+    tests/test_upt_attestation.py.
+    """
+    result = compute_upt(
+        events,
+        operated_trip_ids,
+        missing_trip_threshold=missing_trip_threshold,
+        imbalance_threshold=imbalance_threshold,
+        attestations=(),
+    )
+    return dataclasses.replace(result, calc_version="0.1.0")

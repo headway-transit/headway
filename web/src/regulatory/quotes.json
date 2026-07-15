@@ -385,6 +385,18 @@
     {
       "quote": "Verified — NTD Sampling Manual",
       "citation": "NTD Sampling Manual — 2026 NTD Full Reporting Policy Manual, p. 150"
+    },
+    {
+      "quote": "However, if the vehicle trips with missing data exceed 2 percent of total trips, agencies must have a qualified statistician approve the factoring method used to account for the missing percentage.",
+      "citation": "The permission sentence — 2026 NTD Policy Manual, Full Reporting, p. 146, PDF p. 164"
+    },
+    {
+      "quote": "If a transit agency samples, they must follow the sampling technique exactly. Agencies may oversample, as long as the oversampling is selected randomly. However, agencies must not collect a smaller sample than the chosen sampling plan prescribes. Additionally, agencies must not change the number of trips in the sample, except to randomly oversample, or the approaches for selecting trips that comprise the sample.",
+      "citation": "The undersampling HARD LIMIT — 2026 NTD Policy Manual, Full Reporting, p. 149, PDF p. 167"
+    },
+    {
+      "quote": "A qualified statistician can ensure that a sampling plan meets FTA statistical sampling requirements. FTA does not prescribe specific statistician qualifications. Instead, transit agencies must ensure that statisticians are qualified. The statistician may be an in-house staff person with a working knowledge of, and an education or background in, statistics. The statistician also may be a hired consultant with appropriate qualifications.",
+      "citation": "Statistician qualifications — 2026 NTD Policy Manual, Full Reporting, p. 150, PDF p. 168"
     }
   ],
   "sampling_v0": [
@@ -655,6 +667,18 @@
     {
       "quote": "Minimum confidence of 95 percent; and Minimum precision level of ±10 percent.",
       "citation": "Sampling floor — 2026 NTD Policy Manual, Full Reporting, p. 149"
+    },
+    {
+      "quote": "However, if the vehicle trips with missing data exceed 2 percent of total trips, agencies must have a qualified statistician approve the factoring method used to account for the missing percentage.",
+      "citation": "The permission sentence — 2026 NTD Policy Manual, Full Reporting, p. 146, PDF p. 164"
+    },
+    {
+      "quote": "If a transit agency samples, they must follow the sampling technique exactly. Agencies may oversample, as long as the oversampling is selected randomly. However, agencies must not collect a smaller sample than the chosen sampling plan prescribes. Additionally, agencies must not change the number of trips in the sample, except to randomly oversample, or the approaches for selecting trips that comprise the sample.",
+      "citation": "The undersampling HARD LIMIT — 2026 NTD Policy Manual, Full Reporting, p. 149, PDF p. 167"
+    },
+    {
+      "quote": "A qualified statistician can ensure that a sampling plan meets FTA statistical sampling requirements. FTA does not prescribe specific statistician qualifications. Instead, transit agencies must ensure that statisticians are qualified. The statistician may be an in-house staff person with a working knowledge of, and an education or background in, statistics. The statistician also may be a hired consultant with appropriate qualifications.",
+      "citation": "Statistician qualifications — 2026 NTD Policy Manual, Full Reporting, p. 150, PDF p. 168"
     }
   ],
   "voms_v0": [

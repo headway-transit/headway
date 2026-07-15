@@ -63,7 +63,7 @@ export interface MockedResponse {
 
 export type RouteHandler =
   | MockedResponse
-  | ((call: RecordedCall) => MockedResponse);
+  | ((call: RecordedCall) => MockedResponse | Promise<MockedResponse>);
 
 /**
  * The app shell fetches GET /branding on every mount (handoff 0008 pillar
@@ -114,7 +114,10 @@ export function mockApi(routes: Record<string, RouteHandler>): RecordedCall[] {
       if (!handler) {
         throw new Error(`Unexpected fetch in test: ${method} ${url}`);
       }
-      const result = typeof handler === "function" ? handler(call) : handler;
+      // A handler may return a Promise (e.g. a manually-resolved deferred) so
+      // tests can pin response ORDER — the stale-response guard regressions.
+      const result =
+        typeof handler === "function" ? await handler(call) : handler;
       if (result.rawBody !== undefined) {
         return new Response(result.rawBody, {
           status: result.status,

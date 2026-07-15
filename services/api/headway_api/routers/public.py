@@ -21,16 +21,30 @@ from __future__ import annotations
 
 import datetime as dt
 from decimal import Decimal
-from typing import Any
+from typing import Any, Optional
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from ..db import get_db
 from ..machine_auth import enforce_rate_limit
+from .certify import VerificationResult, verify_certification_row
 from .metrics import _detail_as_dict
 
 router = APIRouter(tags=["public"])
+
+
+class PublicCertificationRef(BaseModel):
+    """The public face of a certification (handoff 0019, design point 7):
+    WHICH record certified the figure, WHEN, and the signing key's
+    fingerprint — enough to verify tamper-evidence via
+    GET /public/certifications/{id}/verify. NO certifier identity here
+    (that lives in the authenticated record); a NULL fingerprint is a
+    pre-signature legacy certification, honestly unsigned."""
+
+    certification_id: str
+    certified_at: dt.datetime
+    key_fingerprint: Optional[str]
 
 
 class PublicMetricValue(BaseModel):
@@ -53,6 +67,9 @@ class PublicMetricValue(BaseModel):
     # this router's WHERE clause — they can never be published as certified
     # open data. Served so the payload states its own category.
     category: str = "ntd"
+    # The certification that covers this figure (handoff 0019, design point
+    # 7). None only if the certification row is unexpectedly absent.
+    certification: Optional[PublicCertificationRef] = None
 
 
 _SELECT_CERTIFIED = (
@@ -68,6 +85,33 @@ _SELECT_CERTIFIED = (
 )
 
 
+#: Certification references for the public payload: id, timestamp, and key
+#: fingerprint per covered metric_value_id. No certifier identity.
+_SELECT_CERTIFICATION_REFS = (
+    "SELECT certification_id, certified_at, key_fingerprint, "
+    "metric_value_ids FROM cert.certifications"
+)
+
+_SELECT_CERTIFICATION_ROW = (
+    "SELECT certification_id, metric_value_ids, certified_by, certified_at, "
+    "attestation, canonical_document, signature, key_fingerprint "
+    "FROM cert.certifications WHERE certification_id = %s"
+)
+
+
+def _certification_refs_by_metric_value(db) -> dict[str, PublicCertificationRef]:
+    refs: dict[str, PublicCertificationRef] = {}
+    for row in db.execute(_SELECT_CERTIFICATION_REFS, ()).fetchall():
+        ref = PublicCertificationRef(
+            certification_id=str(row[0]),
+            certified_at=row[1],
+            key_fingerprint=row[2],
+        )
+        for metric_value_id in row[3]:
+            refs[str(metric_value_id)] = ref
+    return refs
+
+
 @router.get("/public/metrics/certified", response_model=list[PublicMetricValue])
 def list_certified_values(request: Request) -> list[PublicMetricValue]:
     # UNAUTHENTICATED by design (see module docstring) — so no identity
@@ -76,6 +120,7 @@ def list_certified_values(request: Request) -> list[PublicMetricValue]:
     enforce_rate_limit(request.app.state.public_rate_limiter, client_ip)
     db = get_db(request)
     rows = db.execute(_SELECT_CERTIFIED, ()).fetchall()
+    certification_refs = _certification_refs_by_metric_value(db)
     return [
         PublicMetricValue(
             metric_value_id=str(r[0]),
@@ -91,6 +136,34 @@ def list_certified_values(request: Request) -> list[PublicMetricValue]:
             certification_status=r[10],
             detail=_detail_as_dict(r[11]),
             category=r[12],
+            certification=certification_refs.get(str(r[0])),
         )
         for r in rows
     ]
+
+
+@router.get(
+    "/public/certifications/{certification_id}/verify",
+    response_model=VerificationResult,
+)
+def public_verify_certification(
+    certification_id: str, request: Request
+) -> VerificationResult:
+    """Public tamper-evidence check (handoff 0019, design point 6/7):
+    re-verifies the stored certificate bytes against the stored Ed25519
+    signature, server-side, and returns the verdict.
+
+    PUBLIC-SAFE by construction: the response carries the verdict,
+    algorithm, fingerprint, and timestamp — never the certifier's identity,
+    never the document, never any auth material. Rate-limited per client IP
+    exactly like /public/metrics/certified (which serves the
+    certification_id + fingerprint this endpoint verifies)."""
+    client_ip = request.client.host if request.client else "unknown"
+    enforce_rate_limit(request.app.state.public_rate_limiter, client_ip)
+    db = get_db(request)
+    row = db.execute(_SELECT_CERTIFICATION_ROW, (certification_id,)).fetchone()
+    if row is None:
+        raise HTTPException(
+            status_code=404, detail="No certification with that id exists."
+        )
+    return verify_certification_row(request.app, row)
