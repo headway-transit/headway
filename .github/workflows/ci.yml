@@ -37,6 +37,7 @@ jobs:
       web: ${{ steps.filter.outputs.web }}
       integration: ${{ steps.filter.outputs.integration }}
       adapters: ${{ steps.filter.outputs.adapters }}
+      notebooks: ${{ steps.filter.outputs.notebooks }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -69,6 +70,7 @@ jobs:
             echo "web=$(hit '^web/|^scripts/license|^\.github/workflows/')"
             echo "integration=$(hit '^services/api/|^db/|^tests/integration/|^\.github/workflows/')"
             echo "adapters=$(hit '^adapters/|^contracts/|^services/transform/|^\.github/workflows/')"
+            echo "notebooks=$(hit '^notebooks/|^\.github/workflows/')"
           } >> "$GITHUB_OUTPUT"
 
   go-ingestion:
@@ -285,6 +287,44 @@ jobs:
         working-directory: web
         run: npm test -- --run
 
+  notebooks-validate:
+    # Analyst example notebooks (handoff 0018): every committed .ipynb must
+    # be well-formed, schema-valid nbformat. Validity ONLY — execution needs
+    # a live Headway stack with data in it, which CI does not have; the
+    # honest re-execution rule lives in notebooks/README.md.
+    name: notebooks / nbformat validity
+    needs: changes
+    if: needs.changes.outputs.notebooks == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: install nbformat
+        run: python -m pip install nbformat
+      - name: validate every committed notebook
+        run: |
+          python3 - <<'EOF'
+          import glob, sys
+          import nbformat
+
+          paths = sorted(glob.glob("notebooks/**/*.ipynb", recursive=True))
+          if not paths:
+              print("FAIL: no notebooks found under notebooks/ (expected by CI)")
+              sys.exit(1)
+          failed = False
+          for path in paths:
+              try:
+                  nb = nbformat.read(path, as_version=4)
+                  nbformat.validate(nb)
+                  print(f"ok   {path}")
+              except Exception as exc:
+                  print(f"FAIL {path}: {exc}")
+                  failed = True
+          sys.exit(1 if failed else 0)
+          EOF
+
   license-gate:
     # ADR-0001 Amendment 1: permissive passes; weak-copyleft only via the
     # reviewed allowlist (scripts/license_allowlist.toml); strong copyleft,
@@ -312,6 +352,7 @@ jobs:
             -e "services/transform[test,kafka,db]" \
             -e "services/api[test,ingest]" \
             -e "services/ai[test,ollama]" \
+            -e "clients/python[pandas,test]" \
             -r db/requirements.txt
       - uses: actions/setup-node@v6
         if: hashFiles('web/package.json') != ''

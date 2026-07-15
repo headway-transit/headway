@@ -22,8 +22,9 @@ Ecosystems:
           (go install github.com/google/go-licenses@latest); falls back to
           `go mod download -json all` + LICENSE-file fingerprinting in the
           module cache when go-licenses is not installed.
-  python  resolves each services/*/pyproject.toml [project.dependencies]
-          (+ all optional-dependency extras) and db/requirements.txt against
+  python  resolves each services/*/pyproject.toml and clients/*/pyproject.toml
+          [project.dependencies] (+ all optional-dependency extras) and
+          db/requirements.txt against
           the installed environment via importlib.metadata, walking the
           transitive Requires-Dist closure. This pyproject-driven mode is the
           default; --all-installed scans every installed distribution instead.
@@ -220,8 +221,14 @@ def _tier_of_canonical(canon: str) -> str:
     return TIER_UNKNOWN
 
 
-_TIER_RANK = {TIER_PERMISSIVE: 0, TIER_WEAK: 1, TIER_FORBIDDEN: 2,
-              TIER_UNKNOWN: 3}
+# Severity order for compound expressions (OR takes the best part, AND the
+# worst). Public-domain dedications rank between weak-copyleft and forbidden:
+# they can pass, but only via a scope="dev" allowlist entry (Amendment 2) —
+# stricter than tier 3, never as fatal as tier 4. (numpy 2.x exposed the
+# earlier omission of this tier here: its 'BSD-3-Clause AND … AND CC0-1.0'
+# expression crashed the gate instead of being judged — 2026-07-15.)
+_TIER_RANK = {TIER_PERMISSIVE: 0, TIER_WEAK: 1, TIER_PUBLIC_DOMAIN: 2,
+              TIER_FORBIDDEN: 3, TIER_UNKNOWN: 4}
 
 
 def classify(license_expr: str) -> tuple[str, str]:
@@ -786,9 +793,10 @@ def main() -> int:
                     help="python: scan every installed distribution instead "
                          "of the pyproject-declared dependency closure")
     ap.add_argument("--requirements-from-pyproject", action="store_true",
-                    help="python: resolve services/*/pyproject.toml declared "
-                         "dependencies via importlib.metadata (this is the "
-                         "default; flag kept for explicit invocation)")
+                    help="python: resolve services/*/pyproject.toml and "
+                         "clients/*/pyproject.toml declared dependencies via "
+                         "importlib.metadata (this is the default; flag kept "
+                         "for explicit invocation)")
     args = ap.parse_args()
 
     repo = args.repo_root.resolve()
@@ -803,7 +811,8 @@ def main() -> int:
         reports.append(scan_go(repo, allowlist))
     if args.ecosystem in ("all", "python"):
         reports.append(scan_python(repo, allowlist, args.all_installed,
-                                   ["services/*/pyproject.toml"]))
+                                   ["services/*/pyproject.toml",
+                                    "clients/*/pyproject.toml"]))
     if args.ecosystem in ("all", "node"):
         reports.append(scan_node(repo, allowlist))
     return print_report(reports, args.explain)

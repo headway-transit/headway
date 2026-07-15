@@ -77,3 +77,10 @@ ecosystem = "node"
 license = "CC0-1.0"
 scope = "dev"
 rationale = "Precedent entry from ADR-0001 Amendment 2: dev-only transitive of the jsdom test environment (jsdom -> css-tree -> mdn-data); never present in dist/ or any release artifact."
+
+[[allow]]
+package = "numpy"
+ecosystem = "python"
+license = "BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0"
+scope = "dev"
+rationale = "Transitive of the headway-client [pandas] extra (handoff 0018); the AND-composed expression's worst part is a CC0-1.0 dedication on vendored snippets, so it lands in tier 3b. Analyst-side only: installed from PyPI into the analyst's own environment; never present in any Headway release artifact or shipped image."

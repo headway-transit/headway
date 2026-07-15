@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "headway-client"
+version = "0.1.0"
+description = "Python client for the Headway API: computed transit metrics with full provenance, lineage walks, and data-quality issues. Explores freely; never originates a figure."
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+readme = "README.md"
+keywords = ["transit", "ntd", "gtfs", "provenance", "open-data"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Information Analysis",
+]
+# Core stays minimal by design (handoff 0018): one HTTP client, nothing else.
+dependencies = [
+    "httpx>=0.27",  # BSD-3-Clause — already an ADR-0001-cleared tree dependency
+]
+
+[project.urls]
+Homepage = "https://github.com/headway-transit/headway"
+Documentation = "https://github.com/headway-transit/headway/blob/main/docs/analyst-access.md"
+
+[project.optional-dependencies]
+# DataFrame helpers (headway_client.frames). Optional so the core client
+# stays dependency-minimal; pandas is BSD-3-Clause (ADR-0001 tier 2).
+pandas = [
+    "pandas>=2.0",
+]
+test = [
+    "pytest>=8",
+]
+
+[tool.setuptools.packages.find]
+include = ["headway_client*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -46,6 +46,10 @@ It checks the machine, generates strong secrets, brings the stack up, applies mi
 
 Then **connect your data** — GTFS feeds, passenger counts, or exports from your existing databases: [`docs/connecting-your-data.md`](docs/connecting-your-data.md). Point it at any agency's public GTFS/GTFS-RT feeds and watch real figures assemble with full provenance in minutes.
 
+### For analysts
+
+Your planning and data teams can work in the tools they already use: a typed [Python client](clients/python/) whose DataFrames always carry provenance columns, [example notebooks executed against a live stack](notebooks/), and a least-privilege read-only SQL role — setup in [`docs/analyst-access.md`](docs/analyst-access.md). Explore and compute freely: nothing computed outside Headway's calculation library (services/calc) can ever become a reported figure. Only the calculation library writes computed.metric_values, and the walls are structural database CHECKs, not policy.
+
 ## What runs where
 
 Everything runs on commodity open-source infrastructure — PostgreSQL + TimescaleDB, Apache Kafka, MinIO, Prometheus/Grafana — on one Linux box a small agency can afford. Gov-cloud deployments run the *identical* signed artifacts under Kubernetes. **If a feature only works in the cloud, it is rejected.**

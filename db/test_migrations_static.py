@@ -641,6 +641,65 @@ def test_agencies_feed_declared_timezone():
     assert re.search(r"agency_id TEXT PRIMARY KEY", sql_0026)
 
 
+def test_readonly_analyst_role_least_privilege():
+    # Handoff 0018 / migration 0028: the analyst read-only SQL role.
+    # NOLOGIN (a bundle of privileges, never a credential), SELECT limited
+    # to canonical/computed/lineage/dq plus raw.records METADATA columns
+    # only, and no grant anywhere near auth/audit/cert/app/safety/sampling.
+    sql_0028 = (MIGRATIONS_DIR / "0028_readonly_analyst_role.sql").read_text(
+        encoding="utf-8"
+    )
+    assert "CREATE ROLE headway_readonly NOLOGIN" in sql_0028
+    statements = "\n".join(
+        line
+        for line in sql_0028.splitlines()
+        if not line.lstrip().startswith("--")
+    )
+    # The four granted schemas — and ONLY those — appear in GRANT statements
+    # (raw appears solely for the column-level metadata grant checked below).
+    assert re.search(
+        r"GRANT USAGE ON SCHEMA canonical, computed, lineage, dq\s+"
+        r"TO headway_readonly",
+        statements,
+    )
+    assert re.search(
+        r"GRANT SELECT ON ALL TABLES IN SCHEMA canonical, computed, "
+        r"lineage, dq\s+TO headway_readonly",
+        statements,
+    )
+    # Future tables in the granted schemas stay covered.
+    assert re.search(
+        r"ALTER DEFAULT PRIVILEGES IN SCHEMA canonical, computed, lineage, "
+        r"dq\s+GRANT SELECT ON TABLES TO headway_readonly",
+        statements,
+    )
+    # Excluded schemas never appear in any GRANT statement.
+    for schema in ("auth", "audit", "cert", "app", "safety", "sampling"):
+        assert not re.search(
+            rf"GRANT[^;]*\b{schema}\b", statements, re.S
+        ), f"headway_readonly must have no grant touching schema {schema}"
+    # raw.records: metadata columns only — the payload pointer and the
+    # parser output (which can quote payload fragments) stay unreadable.
+    grant_raw = re.search(
+        r"GRANT SELECT \(([^)]*)\)\s+ON raw\.records TO headway_readonly",
+        statements,
+        re.S,
+    )
+    assert grant_raw, "raw.records access must be a column-level grant"
+    granted_columns = {c.strip() for c in grant_raw.group(1).split(",")}
+    assert granted_columns == {
+        "record_id", "source", "connector", "connector_version",
+        "content_type", "payload_encoding", "fetched_at", "landed_at",
+        "parse_status",
+    }
+    assert "payload_ref" not in statements
+    assert "parse_error" not in statements
+    # No blanket grant on raw: no ALL-TABLES grant may name the raw schema.
+    assert not re.search(
+        r"GRANT SELECT ON ALL TABLES IN SCHEMA[^;]*\braw\b", statements
+    )
+
+
 def test_branding_chrome_seeded_with_pair_guardrail():
     # Handoff 0017 design point 7 / migration 0027: themed nav chrome keys.
     # Seeded 'unset' (neutral Headway by default, never client-creatable),
