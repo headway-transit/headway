@@ -11,7 +11,13 @@ Schema cannot express:
   ``_simulated`` suffix if and only if provenance declares synthetic fixtures
   (handoff-0005 binding rule, applied to adapters by handoff 0015);
 - every field referenced by a ``local_date_of`` derivation must be a mapped
-  datetime target field.
+  datetime target field (checked per emission when ``emit`` fans out);
+- headerless formats (``csv.header: false``) declare unique positional
+  ``columns`` covering every source column the spec reads;
+- ``emit`` fan-out: emission names are unique, and each emission's merged
+  field set (base ``fields`` + overrides) contains every REQUIRED field of
+  the target contract (the JSON Schema enforces that completeness on the
+  base ``fields`` only for specs WITHOUT ``emit``).
 
 Provenance rule (handoff 0015 Addendum, BINDING): a spec's provenance block
 references the agency-provided SAMPLE it was verified against (or declares
@@ -113,6 +119,24 @@ class FieldDef:
     of: str | None = None
     sources: tuple[str, ...] = ()
     separator: str = ":"
+    prefix: str = ""  # concat: literal prepended to the joined value
+    suffix: str = ""  # concat: literal appended to the joined value
+
+
+@dataclass(frozen=True)
+class Emission:
+    """One fan-out emission (``emit`` list entry).
+
+    ``effective_fields`` is the base ``fields`` mapping with this emission's
+    overrides merged in (override wins per target field; override-only
+    targets append in emission order) — precomputed once at spec load so the
+    engine's per-row work is a plain field-list walk either way.
+    """
+
+    name: str
+    when: tuple[Filter, ...]
+    overrides: tuple[FieldDef, ...]
+    effective_fields: tuple[FieldDef, ...]
 
 
 @dataclass(frozen=True)
@@ -128,9 +152,16 @@ class MappingSpec:
     delimiter: str
     quotechar: str
     skip_leading_rows: int
+    #: True when the file carries a column-name header row (default). False:
+    #: headerless export; ``columns`` names the positions.
+    header: bool
+    #: Positional column names for headerless exports (empty when header).
+    columns: tuple[str, ...]
     timezone_name: str
     filters: tuple[Filter, ...]
     fields: tuple[FieldDef, ...]
+    #: Fan-out emissions (empty tuple = classic one-record-per-kept-row).
+    emissions: tuple[Emission, ...]
     synthetic: bool
     #: SHA-256 (first 12 hex chars) of the spec file's exact bytes — the
     #: content-addressed spec version stamped into adapter lineage edges.
@@ -144,7 +175,11 @@ class MappingSpec:
     def source_columns(self) -> set[str]:
         """Every source column the spec reads (for the header check)."""
         needed: set[str] = {f.column for f in self.filters}
-        for fd in self.fields:
+        field_defs = list(self.fields)
+        for emission in self.emissions:
+            needed.update(f.column for f in emission.when)
+            field_defs.extend(emission.overrides)
+        for fd in field_defs:
             if fd.kind == "from":
                 assert fd.source is not None
                 needed.add(fd.source)
@@ -195,7 +230,79 @@ def _build_field(target: str, doc: dict) -> FieldDef:
         of=doc.get("of"),
         sources=tuple(doc.get("sources") or ()),
         separator=doc.get("separator", ":"),
+        prefix=doc.get("prefix", ""),
+        suffix=doc.get("suffix", ""),
     )
+
+
+def _build_filter(doc: dict) -> Filter:
+    return Filter(
+        column=doc["column"],
+        op=doc["op"],
+        value=doc.get("value"),
+        values=tuple(doc.get("values") or ()),
+        reason=doc["reason"],
+    )
+
+
+def _merge_fields(
+    base: tuple[FieldDef, ...], overrides: tuple[FieldDef, ...]
+) -> tuple[FieldDef, ...]:
+    """Base fields with overrides substituted in place, new targets appended."""
+    by_target = {fd.target: fd for fd in overrides}
+    merged = [by_target.pop(fd.target, fd) for fd in base]
+    merged.extend(fd for fd in overrides if fd.target in by_target)
+    return tuple(merged)
+
+
+def _contract_required_fields(contract: str) -> frozenset[str]:
+    """The target contract's required field names, read from the checked-in
+    mapping schema itself (the no-``emit`` completeness clause) so this module
+    can never drift from the contract without failing loudly."""
+    for clause in MAPPING_SCHEMA["allOf"]:
+        condition = clause.get("if", {})
+        target = (
+            condition.get("properties", {})
+            .get("target_contract", {})
+            .get("const")
+        )
+        required = (
+            clause.get("then", {})
+            .get("properties", {})
+            .get("fields", {})
+            .get("required")
+        )
+        if target == contract and required:
+            return frozenset(required)
+    raise AssertionError(  # pragma: no cover - schema is checked in
+        f"contracts/adapter-mapping.v0.schema.json declares no required-field "
+        f"clause for target_contract {contract!r}"
+    )
+
+
+def _field_semantics_problems(
+    fields: tuple[FieldDef, ...], where: str
+) -> list[str]:
+    """Field-set checks a JSON Schema cannot express, for ONE field set
+    (the base fields, or an emission's merged effective fields)."""
+    problems: list[str] = []
+    datetime_targets = {
+        fd.target for fd in fields if fd.kind == "from" and fd.coerce == "datetime"
+    }
+    for fd in fields:
+        if fd.kind == "derived" and fd.derived == "local_date_of":
+            if fd.of not in datetime_targets:
+                problems.append(
+                    f"{where}/{fd.target}: local_date_of references {fd.of!r}, "
+                    "which is not a datetime-coerced mapped target field"
+                )
+        if fd.kind == "from" and (fd.unit_from or fd.unit_to):
+            if fd.coerce not in ("decimal", "number"):
+                problems.append(
+                    f"{where}/{fd.target}: unit conversion requires coerce "
+                    f"decimal or number, not {fd.coerce!r}"
+                )
+    return problems
 
 
 def load_spec(path: Path | str) -> MappingSpec:
@@ -254,53 +361,107 @@ def load_spec(path: Path | str) -> MappingSpec:
     fields = tuple(
         _build_field(target, doc) for target, doc in document["fields"].items()
     )
-    datetime_targets = {
-        fd.target for fd in fields if fd.kind == "from" and fd.coerce == "datetime"
-    }
-    for fd in fields:
-        if fd.kind == "derived" and fd.derived == "local_date_of":
-            if fd.of not in datetime_targets:
-                problems.append(
-                    f"fields/{fd.target}: local_date_of references {fd.of!r}, "
-                    "which is not a datetime-coerced mapped target field"
+
+    emissions: list[Emission] = []
+    seen_names: set[str] = set()
+    for e_idx, e_doc in enumerate(document.get("emit") or ()):
+        name = e_doc["name"]
+        if name in seen_names:
+            problems.append(
+                f"emit[{e_idx}]: emission name {name!r} is declared twice — "
+                "emission names must be unique so suppression findings are "
+                "unambiguous"
+            )
+        seen_names.add(name)
+        overrides = tuple(
+            _build_field(target, doc) for target, doc in e_doc["fields"].items()
+        )
+        emissions.append(
+            Emission(
+                name=name,
+                when=tuple(_build_filter(f) for f in e_doc.get("when") or ()),
+                overrides=overrides,
+                effective_fields=_merge_fields(fields, overrides),
+            )
+        )
+
+    contract = document["target_contract"]
+    if emissions:
+        # With fan-out, contract required-field completeness is per emission
+        # over the MERGED field set (the schema enforces it on the base
+        # `fields` only for specs without `emit`).
+        required = _contract_required_fields(contract)
+        for emission in emissions:
+            problems.extend(
+                _field_semantics_problems(
+                    emission.effective_fields, f"emit/{emission.name}"
                 )
-        if fd.kind == "from" and (fd.unit_from or fd.unit_to):
-            if fd.coerce not in ("decimal", "number"):
+            )
+            mapped_targets = {fd.target for fd in emission.effective_fields}
+            missing = sorted(required - mapped_targets)
+            if missing:
                 problems.append(
-                    f"fields/{fd.target}: unit conversion requires coerce "
-                    f"decimal or number, not {fd.coerce!r}"
+                    f"emit/{emission.name}: merged fields (base + overrides) "
+                    f"are missing required {contract} field(s) "
+                    + ", ".join(missing)
                 )
+    else:
+        problems.extend(_field_semantics_problems(fields, "fields"))
+
+    source_format = document["source_format"]
+    csv_opts = source_format.get("csv") or {}
+    header = csv_opts.get("header", True)
+    columns = tuple(csv_opts.get("columns") or ())
+    filters = tuple(_build_filter(f) for f in document.get("filters") or ())
+
+    if not header:
+        duplicates = sorted({c for c in columns if columns.count(c) > 1})
+        if duplicates:
+            problems.append(
+                "source_format/csv/columns: duplicate positional column "
+                "name(s) " + ", ".join(repr(d) for d in duplicates)
+            )
 
     if problems:
         raise SpecError(path, problems)
 
-    source_format = document["source_format"]
-    csv_opts = source_format.get("csv") or {}
-    filters = tuple(
-        Filter(
-            column=f["column"],
-            op=f["op"],
-            value=f.get("value"),
-            values=tuple(f.get("values") or ()),
-            reason=f["reason"],
-        )
-        for f in document.get("filters") or ()
-    )
-
-    return MappingSpec(
+    spec = MappingSpec(
         path=str(path),
         vendor=vendor,
         product=product,
         source_label=label,
-        target_contract=document["target_contract"],
+        target_contract=contract,
         encoding=source_format.get("encoding", "utf-8-sig"),
         delimiter=csv_opts.get("delimiter", ","),
         quotechar=csv_opts.get("quotechar", '"'),
         skip_leading_rows=csv_opts.get("skip_leading_rows", 0),
+        header=header,
+        columns=columns,
         timezone_name=tz_name,
         filters=filters,
         fields=fields,
+        emissions=tuple(emissions),
         synthetic=synthetic,
         spec_sha12=hashlib.sha256(spec_bytes).hexdigest()[:12],
         raw=document,
     )
+
+    if not header:
+        # A headerless file cannot be checked against a header at runtime, so
+        # the "does the spec read columns the format has?" check happens HERE,
+        # against the declared positional columns — at registration time.
+        unresolvable = sorted(spec.source_columns() - set(columns))
+        if unresolvable:
+            raise SpecError(
+                path,
+                [
+                    "source_format/csv/columns: the spec reads source "
+                    "column(s) "
+                    + ", ".join(repr(c) for c in unresolvable)
+                    + " that the declared positional columns list does not "
+                    "contain (headerless format — positions are declared, "
+                    "never guessed)"
+                ],
+            )
+
+    return spec

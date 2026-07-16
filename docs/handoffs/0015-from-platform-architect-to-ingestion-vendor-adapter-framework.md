@@ -107,6 +107,209 @@ Row-level spot checks: `1207:00001 | 2026-03-07 14:15:00+00 | Passenger boarded 
 
 Framework green end to end; first real vendor spec drops in the day an agency sample exists.
 
+## Outputs — first real adapter (2026-07-16)
+
+**`adapters/tripspark/streets/` — TripSpark Streets APC stop visits → TIDES
+`passenger_events`, registered under `tripspark_streets`** (the exact label the
+2026-07-13 live fail-closed test refused — it now maps). Verified against the
+partner agency's OWN sample export (an assigned-APC data pull provided
+2026-07-16; gitignored under docs/reference/vendor/, used ONLY for local
+verification per the Addendum's binding rules). All committed fixtures are
+fully synthetic re-creations of the sample's shape; evidence below is
+counts-only — no stop/route/agency-identifying strings.
+
+### Mapping-spec format extensions (backward-compatible, both exercised by a new reference product)
+
+The real export needed two features the v0 schema lacked; both were added to
+`contracts/adapter-mapping.v0.schema.json` + `contracts/adapter-mapping.v0.md`
+as backward-compatible extensions (no version bump — pure additions; every
+pre-existing spec validates unchanged):
+
+1. **Headerless positional columns** — `source_format.csv.header: false` +
+   `csv.columns` (ordered positional names from the agency's sample; unique,
+   must cover every column the spec reads — registration-time check).
+   `columns` without an explicit `header: false` is schema-invalid. With no
+   header to refuse a wrong export against, the defense is per-row: a
+   width-mismatched row QUARANTINES with a reason (never a guessed position).
+2. **`emit` fan-out** — an optional list of named emissions per source row
+   (generic: any target contract). Each emission merges field overrides over
+   the base `fields` (merged set must be contract-complete — registration
+   check) and may declare `when` suppression predicates with REQUIRED
+   reasons, surfaced as aggregated `adapter_emissions_filtered` info
+   findings. A row with every emission suppressed counts as filtered (the
+   0/0 dwell-ping case); rows are ATOMIC (any failing non-suppressed
+   emission quarantines the whole row, nothing half-mapped). `concat` gained
+   optional literal `prefix`/`suffix` so emissions from one row derive
+   DISTINCT ids (`<rowkey>:<stopref>:board` / `:alight` — required by the
+   canonical natural keys). Fixture expected.json gains a REQUIRED `emitted`
+   key for fan-out specs (mapped/filtered/quarantined stay ROW counts).
+
+New reference product `adapters/_reference/acme/stopcount/` (synthetic,
+`acme_stopcount_simulated`) exercises both extensions plus every new
+quarantine/suppression path, so the features stay CI-exercised independent of
+the real adapter; feature matrix updated in `adapters/_reference/README.md`.
+
+### The TripSpark mapping (details in `adapters/tripspark/streets/README.md`)
+
+18 headerless positional columns; timezone `America/Los_Angeles` (declared);
+one row per APC stop-visit report fans out to `Passenger boarded`
+(count=BoardCount) and/or `Passenger alighted` (count=AlightCount); zero/blank
+counts suppress the emission with a dwell-ping reason; blank-TripName
+(unassigned-style) rows are filtered by declaration; `trip_id_performed` =
+TripName (the export's stable "route - pattern - trip start" identifier),
+`trip_stop_sequence` = PatternPointRank, `vehicle_id` = VehicleName,
+`event_timestamp` = EventDateISO localized→UTC, `service_date` = local
+calendar date; StopCode is preserved inside `passenger_event_id`. TotalCount
+(drifting load counter), UnmodifiedAlightCount, APCSource, route/pattern/stop
+display names deliberately unmapped in v0.
+
+### Harness output (real, 2026-07-16)
+
+```
+$ python3 adapters/validate
+registry: 4 adapter(s) registered (acme_paravan_simulated, acme_ridelog_simulated, acme_stopcount_simulated, tripspark_streets)
+spec acme/paravan -> demand_response_trip (source_label acme_paravan_simulated, spec 12dee2040892): schema + semantic checks OK
+  fixture paravan_bookings.csv: rows 11 = mapped 3 + filtered 1 + quarantined 7; canonical 3, edges 6, deterministic OK
+spec acme/ridelog -> tides_passenger_events (source_label acme_ridelog_simulated, spec 4a95002c7639): schema + semantic checks OK
+  fixture ridelog_empty_day.csv: rows 0 = mapped 0 + filtered 0 + quarantined 0; canonical 0, edges 0, deterministic OK
+  fixture ridelog_mixed_day.csv: rows 11 = mapped 2 + filtered 2 + quarantined 7; canonical 2, edges 4, deterministic OK
+  fixture ridelog_wrong_export.csv: rows 0 = mapped 0 + filtered 0 + quarantined 0 [file refused]; canonical 0, edges 0, deterministic OK
+spec acme/stopcount -> tides_passenger_events (source_label acme_stopcount_simulated, spec 9f623a6a219f): schema + semantic checks OK
+  fixture stopcount_day.csv: rows 10 = mapped 3 + filtered 3 + quarantined 4; emitted 4 (fan-out); canonical 4, edges 8, deterministic OK
+spec tripspark/streets -> tides_passenger_events (source_label tripspark_streets, spec e5935bf101cc): schema + semantic checks OK
+  fixture stop_visits.csv: rows 12 = mapped 3 + filtered 4 + quarantined 5; emitted 4 (fan-out); canonical 4, edges 8, deterministic OK
+  fixture wrong_width_export.csv: rows 2 = mapped 0 + filtered 0 + quarantined 2; emitted 0 (fan-out); canonical 0, edges 0, deterministic OK
+adapters/validate: ALL CHECKS PASSED   (exit 0)
+```
+
+### Local verification against the REAL sample (counts only)
+
+Engine run over the agency-provided file (gitignored; never committed):
+**50 rows = 9 mapped + 41 filtered (dwell pings, via emission suppression) +
+0 quarantined → 10 emitted records: 1 boarded event (total boardings 1) + 9
+alighted events (total alightings 13); 20 lineage edges; deterministic
+double-run identical; all 10 event ids distinct; 4 distinct trip identifiers,
+4 vehicles.** These totals independently match a plain awk column-sum over
+the raw file (sum col4 = 1, sum col5 = 13).
+
+### Live end-to-end (running compose stack, 2026-07-16)
+
+REAL sample dropped as-is (headerless — the mapping needs no added header) →
+`headway-vendor-file` connector (local binary, `VENDOR_SOURCE=tripspark_streets`,
+`POLL_INTERVAL=2s`, stability guard observed, file → processed/) → MinIO +
+`raw.vendor.files` (end offset 5 → 6) → local `python -m headway_transform`
+(`KAFKA_TOPICS=raw.vendor.files`, side group `headway-adapters-0015-live`,
+registry: 4 labels incl. `tripspark_streets`) → TimescaleDB. psql-verified
+from a SEPARATE connection (container `psql`):
+
+```
+        what           | count
+-----------------------+-------
+ raw_vendor_records    |     2   -- the 0015 refused record + this file (content-addressed)
+ passenger_events      |    10   -- source='tripspark_streets'
+ boarded_events        |     1   -- total boardings  = 1
+ alighted_events       |     9   -- total alightings = 13
+ adapter_edges         |    10   -- adapter:tripspark_streets @ e5935bf101cc (the spec hash)
+ normalizer_edges      |    10   -- normalize_tides_passenger_events @ 0.1.1
+ dq_emissions_filtered |     2   -- aggregated dwell-ping suppressions (boarded + alighted)
+ quarantined rows      |     0
+```
+
+Every canonical row carries exactly TWO lineage edges (verified by
+group-count: `edges_per_row=2` for all 10 rows). Event window:
+2026-07-16 05:11:32Z → 05:23:41Z (22:11–22:23 local) — 4 trips, 4 vehicles.
+
+**Redelivery idempotence:** the byte-identical file re-dropped → connector
+re-produced (end offset 6 → 7) → side group re-consumed to offset 7 → every
+count above UNCHANGED (raw, canonical, lineage, dq) — zero new rows.
+
+**Fail-closed history note:** the 2026-07-13 evidence above used
+`tripspark_streets` as its live UNREGISTERED example; that refused raw record
+(count 1 in `raw_vendor_records` before this run) and its blocking
+`unregistered_adapter_source` finding remain in place, and the same label now
+maps — the unit test that pinned the refusal switched to a still-unregistered
+label and a new test pins the registered flow.
+
+**UPT over the covered window — honestly: not computable.** The sample is a
+~12-minute sliver of one evening (22:11–22:23 local): 1 boarding and 13
+alightings across 4 trips — an end-of-day, alighting-heavy tail, useless as a
+ridership figure. Beyond the sliver size, `upt_v0` structurally needs
+operated-trip coverage (missing-trip share vs the 2% FTA line) against the
+AGENCY'S OWN schedule/positions, and this stack's canonical GTFS is the MBTA
+demo feed — the export's trip identifiers ("route - pattern - start" strings)
+match no GTFS trip_id yet (open question below). Raw window totals are
+reported instead of pretending at a UPT.
+
+**Operational note (relearned + sharpened):** the 0015 SIGKILL warning
+applies to shell pipelines too — a `| head` truncation killed the first side
+consumer mid-transaction, and the orphaned idle-in-transaction backend
+blocked every later replay of the same content-addressed record. When
+clearing stray backends, terminate ONLY pids whose client is confirmed dead:
+one live-container backend (mid GTFS-static replay) was clipped collaterally
+this run; the container quarantine-logged the failure, restarted, and
+resumed idempotently (zero data impact — verified). Recorded in
+services/transform/README.md.
+
+### Suites / gates (2026-07-16)
+
+- transform `pytest -q`: **144 passed** (was 131; +13 in
+  `tests/test_adapters.py`: headerless refusals + width quarantine, fan-out
+  spec semantics + atomicity + distinct ids, tripspark fixtures end-to-end,
+  registered-label consumer flow, harness `emitted` green/red paths).
+- ingestion `go test ./... -count=1`: all packages ok (unchanged — the
+  connector needed no changes; the intake is format-agnostic by design).
+- `python3 adapters/validate`: ALL CHECKS PASSED (4 adapters, above).
+- license gate: `python3 scripts/license_gate.py --ecosystem python` → PASS
+  (53 dependencies; no new dependencies added).
+
+### Open questions (also in the adapter README)
+
+1. **TripName → GTFS trip_id resolution**: the export's stable trip
+   identifier is a "route - pattern - trip start" string; joining it to
+   canonical GTFS trips needs a per-agency resolution config (future
+   increment — prerequisite for real UPT/coverage over this feed).
+2. **StopCode → stop_id resolution**: StopCode matches the agency's GTFS
+   `stop_code`; the canonical `passenger_events` subset has no stop-identity
+   column (same gap as rail-PMT placement, handoff 0011). Preserved inside
+   `passenger_event_id` until the contract gains the column.
+3. **service_date rollover**: mapped as the local calendar date; the
+   export's after-midnight service-day convention is not derivable from an
+   evening-window sample — verify against a midnight-spanning sample.
+4. **UnmodifiedAlightCount / APCSource** as future provenance surfaces
+   (balancing delta; count-source discrimination).
+5. **The balancing log** is its own future adapter (corrections/audit feed),
+   not part of this spec.
+
+### Deviations
+
+1. **Directory is `adapters/tripspark/streets/` (product `streets`), not
+   `streets-apc`**: the framework's registration rule (spec.py, schema)
+   REQUIRES `source_label == <vendor>_<product>`, and the required label is
+   `tripspark_streets` (the 0015 fail-closed precedent); the schema's
+   snake-case pattern also forbids a hyphen. A future balancing-log adapter
+   would register as its own product (e.g. `streets_balancing`).
+2. **No `mapping_spec_version` bump** for the two format extensions: both
+   are strictly additive (new optional keys; conditional required-fields
+   clause relaxes ONLY when the new `emit` key is present), so every
+   existing v0 spec validates and behaves identically. Flagged for Platform
+   Architect ratification per the governance note in adapters/README.md
+   (the mapping-spec format is a wire contract).
+
+### Privacy checks run over the committed diff (final greps)
+
+Every changed/added file was grepped for the real sample's identifying
+strings before this evidence was written: the two real stop-code prefixes,
+all real route-name strings, all real pattern-code strings, real stop-name
+street/place words, real vehicle numbers, real APC key prefixes, and the
+agency's name/initialisms. Zero hits in committed content (the only
+occurrences anywhere are in gitignored docs/reference/vendor/ files). The
+exact grep list is recorded in the session evidence; the strings themselves
+are deliberately NOT reproduced here.
+
 ## Platform Architect ratification — `raw.vendor.files` topic (2026-07-14)
 
 Reviewed per contracts/topics.v0.md governance (0013 precedent): naming follows the registry convention; object_ref encoding matches the file-payload precedent; envelope unchanged; the fail-closed label rules extend correctly (unregistered adapter source → blocking finding, raw retained, zero canonical writes — stricter than prior topics, appropriately, since this topic carries arbitrary vendor formats); the synthetic-provenance ⇔ `_simulated`-label equivalence is a sound extension of the handoff-0005 binding rule. **RATIFIED.** One note for the next increment: the machine-push (HTTPS) vendor intake stays a Backend open question — the file-drop connector is the only intake for this topic today, and the registry entry says so.
+
+## Platform Architect ratification — mapping-spec v0 additive extensions (2026-07-16)
+
+Reviewed the two contract extensions shipped with the first real adapter: (1) headerless positional columns (`csv.header: false` + `csv.columns`, registration-checked, per-row width quarantine since no header exists to refuse); (2) generic `emit` fan-out (named emissions, per-emission suppression with required reasons, atomic rows, contract-completeness re-checked at registration). Both strictly additive — every pre-existing spec remains valid unmodified, both exercised by a new reference product in CI, both documented in the prose contract. Keeping `mapping_spec_version` at v0 for additive changes is CORRECT (the version fences breaking changes only); the precedent is hereby the rule: additive = same version + reference-adapter coverage; breaking = v1. **RATIFIED.**

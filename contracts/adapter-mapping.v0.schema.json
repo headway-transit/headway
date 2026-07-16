@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://headway.dev/contracts/adapter-mapping.v0.schema.json",
   "title": "Headway Vendor Adapter Mapping Spec v0",
-  "description": "The machine-validated format of adapters/<vendor>/<product>/mapping.v0.yaml (handoff 0015): a declarative mapping from one vendor export format onto ONE open Headway contract (ADR-0006 - vendors get adapters, never pipeline forks). A spec declares the source file format (CSV dialect in v0; the 'kind' discriminator reserves fixed_width/xml as future sibling blocks so v0 CSV specs never break), field-by-field mappings with explicit type coercions, constants and derived fields, unit conversions, a REQUIRED timezone declaration (a timezone is never guessed), row-filter predicates with human-readable reasons, and a REQUIRED provenance block naming the agency-provided sample the spec was verified against. Provenance rule (BINDING, handoff 0015 Addendum): a mapping spec is derived exclusively from an agency's OWN anonymized data exports. The provenance block references that SAMPLE (date, providing agency, anonymization note) - NEVER a vendor manual, and no committed adapter artifact may quote, excerpt, or paraphrase vendor documentation. Prose companion: contracts/adapter-mapping.v0.md.",
+  "description": "The machine-validated format of adapters/<vendor>/<product>/mapping.v0.yaml (handoff 0015): a declarative mapping from one vendor export format onto ONE open Headway contract (ADR-0006 - vendors get adapters, never pipeline forks). A spec declares the source file format (CSV dialect in v0, with or without a header row - headerless exports declare positional column names; the 'kind' discriminator reserves fixed_width/xml as future sibling blocks so v0 CSV specs never break), field-by-field mappings with explicit type coercions, constants and derived fields, unit conversions, a REQUIRED timezone declaration (a timezone is never guessed), row-filter predicates with human-readable reasons, an optional 'emit' fan-out list (one source row emits zero or more contract records, each emission with its own field overrides and reasoned suppression predicates), and a REQUIRED provenance block naming the agency-provided sample the spec was verified against. Provenance rule (BINDING, handoff 0015 Addendum): a mapping spec is derived exclusively from an agency's OWN anonymized data exports. The provenance block references that SAMPLE (date, providing agency, anonymization note) - NEVER a vendor manual, and no committed adapter artifact may quote, excerpt, or paraphrase vendor documentation. Prose companion: contracts/adapter-mapping.v0.md.",
   "type": "object",
   "required": [
     "mapping_spec_version",
@@ -16,6 +16,197 @@
     "provenance"
   ],
   "additionalProperties": false,
+  "$defs": {
+    "predicate": {
+      "type": "object",
+      "required": ["column", "op", "reason"],
+      "additionalProperties": false,
+      "properties": {
+        "column": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The SOURCE column the predicate tests (whitespace-stripped cell value)."
+        },
+        "op": {
+          "type": "string",
+          "enum": ["equals", "not_equals", "in", "not_in", "not_empty"],
+          "description": "Predicate operator. equals/not_equals take 'value'; in/not_in take 'values'; not_empty takes neither."
+        },
+        "value": {
+          "type": "string",
+          "description": "Comparison value for equals / not_equals."
+        },
+        "values": {
+          "type": "array",
+          "items": {"type": "string"},
+          "minItems": 1,
+          "description": "Comparison set for in / not_in."
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 10,
+          "description": "REQUIRED plain-language reason rows (or emissions) failing this predicate are out of the target contract's scope. Shown verbatim in the aggregated DQ finding."
+        }
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"op": {"enum": ["equals", "not_equals"]}}},
+          "then": {"required": ["value"]}
+        },
+        {
+          "if": {"properties": {"op": {"enum": ["in", "not_in"]}}},
+          "then": {"required": ["values"]}
+        }
+      ]
+    },
+    "field_def": {
+      "type": "object",
+      "oneOf": [
+        {
+          "required": ["from"],
+          "additionalProperties": false,
+          "properties": {
+            "from": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Source column name in the vendor file's header (or in the declared positional 'columns' list for headerless formats)."
+            },
+            "coerce": {
+              "type": "string",
+              "enum": ["string", "integer", "decimal", "number", "boolean", "date", "datetime", "enum_map"],
+              "description": "Type coercion applied to the stripped cell value. Default string. An empty cell is an ABSENT value (the field is omitted; required-ness is the contract validation's business - absence is never coalesced to a default). A value that fails its coercion QUARANTINES the row with a reason."
+            },
+            "format": {
+              "type": "string",
+              "minLength": 1,
+              "description": "strptime format for date/datetime coercions (REQUIRED for datetime; date defaults to ISO %Y-%m-%d). A datetime parsed WITHOUT an offset (no %z) is localized to the spec's timezone; one parsed WITH %z keeps its own offset."
+            },
+            "values": {
+              "type": "object",
+              "minProperties": 1,
+              "additionalProperties": {"type": ["string", "boolean", "integer", "number"]},
+              "description": "enum_map lookup table: source value -> emitted value. A source value with no entry QUARANTINES the row - vendor vocabulary is mapped explicitly, never guessed."
+            },
+            "true_values": {
+              "type": "array",
+              "items": {"type": "string"},
+              "minItems": 1,
+              "description": "boolean coercion: source values (case-insensitive) meaning true."
+            },
+            "false_values": {
+              "type": "array",
+              "items": {"type": "string"},
+              "minItems": 1,
+              "description": "boolean coercion: source values (case-insensitive) meaning false. A value in neither list quarantines the row."
+            },
+            "unit": {
+              "type": "object",
+              "required": ["from", "to"],
+              "additionalProperties": false,
+              "description": "Unit conversion applied after a decimal/number coercion. v0 converts distances to statute miles using exact Decimal factors (1 international mile = 1609.344 m exactly - NIST SP 811 Appendix B; verify against the published handbook, never memory).",
+              "properties": {
+                "from": {"type": "string", "enum": ["kilometers", "meters", "miles"]},
+                "to": {"type": "string", "enum": ["miles"]}
+              }
+            }
+          },
+          "allOf": [
+            {
+              "if": {"properties": {"coerce": {"const": "enum_map"}}, "required": ["coerce"]},
+              "then": {"required": ["values"]}
+            },
+            {
+              "if": {"properties": {"coerce": {"const": "boolean"}}, "required": ["coerce"]},
+              "then": {"required": ["true_values", "false_values"]}
+            },
+            {
+              "if": {"properties": {"coerce": {"const": "datetime"}}, "required": ["coerce"]},
+              "then": {"required": ["format"]}
+            }
+          ]
+        },
+        {
+          "required": ["const"],
+          "additionalProperties": false,
+          "properties": {
+            "const": {
+              "type": ["string", "boolean", "integer", "number"],
+              "description": "Constant value emitted for every mapped row (e.g. mode: DR, tos: DO when an export carries one service type by definition)."
+            }
+          }
+        },
+        {
+          "required": ["derived"],
+          "additionalProperties": false,
+          "properties": {
+            "derived": {
+              "type": "string",
+              "enum": ["local_date_of", "concat"],
+              "description": "Deterministic derivation. local_date_of: the LOCAL wall-clock date (in the spec timezone) of an already-mapped datetime target field named by 'of' (e.g. service_date from pickup_timestamp). concat: join the stripped values of source columns 'sources' with 'separator' (e.g. a record id from unit + sequence), optionally wrapped in literal 'prefix'/'suffix' strings. Derived fields are evaluated after all from/const fields."
+            },
+            "of": {
+              "type": "string",
+              "minLength": 1,
+              "description": "local_date_of: the TARGET field (already mapped, datetime-coerced) whose local date is taken."
+            },
+            "sources": {
+              "type": "array",
+              "items": {"type": "string", "minLength": 1},
+              "minItems": 1,
+              "description": "concat: SOURCE columns whose stripped values are joined."
+            },
+            "separator": {
+              "type": "string",
+              "description": "concat: join separator. Default ':'."
+            },
+            "prefix": {
+              "type": "string",
+              "minLength": 1,
+              "description": "concat: literal string prepended to the joined value. With 'emit' fan-out, a per-emission prefix/suffix keeps identifiers distinct when two emissions derive their id from the same source row."
+            },
+            "suffix": {
+              "type": "string",
+              "minLength": 1,
+              "description": "concat: literal string appended to the joined value (see prefix)."
+            }
+          },
+          "allOf": [
+            {
+              "if": {"properties": {"derived": {"const": "local_date_of"}}},
+              "then": {"required": ["of"]}
+            },
+            {
+              "if": {"properties": {"derived": {"const": "concat"}}},
+              "then": {"required": ["sources"]}
+            }
+          ]
+        }
+      ]
+    },
+    "emission": {
+      "type": "object",
+      "required": ["name", "fields"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "description": "Snake-case emission identifier, unique within the spec. Named in suppression DQ findings and in the prose doc."
+        },
+        "when": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/predicate"},
+          "description": "Per-emission suppression predicates on the SOURCE row, each with a REQUIRED reason. An emission failing any predicate is not emitted for that row - suppressions are counted and surfaced as an aggregated info-severity DQ finding per (file, emission, predicate), never silent. A row whose EVERY emission is suppressed counts as filtered. Typical use: a zero/blank count column means no event of this type occurred at this stop visit."
+        },
+        "fields": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": {"$ref": "#/$defs/field_def"},
+          "description": "Target-field overrides for this emission, merged over the top-level 'fields' (override wins per target field). The merged set must contain every REQUIRED field of the target contract (enforced at registration). At least one override is required - two identical emissions would collide on the contract's natural keys."
+        }
+      }
+    }
+  },
   "properties": {
     "mapping_spec_version": {
       "const": 0,
@@ -77,9 +268,29 @@
             "skip_leading_rows": {
               "type": "integer",
               "minimum": 0,
-              "description": "Physical lines to skip before the header row (vendor banner/title lines). Default 0. The next line after the skip is ALWAYS treated as the column-name header."
+              "description": "Physical lines to skip before the header row - or before the first DATA row when header is false (vendor banner/title lines). Default 0."
+            },
+            "header": {
+              "type": "boolean",
+              "description": "Whether the file carries a column-name header row after the skip. Default true. When false, the export is HEADERLESS and 'columns' declares the positional column names - every data row must then have exactly that many fields (a width mismatch quarantines the row; positions are never mapped by guesswork)."
+            },
+            "columns": {
+              "type": "array",
+              "items": {"type": "string", "minLength": 1},
+              "minItems": 1,
+              "description": "Positional column names for a headerless export (header: false), in file order, one name per position. Names are spec-local labels for the positions the agency's sample demonstrated; 'from'/filter/concat references resolve against this list. Unique; declared only when header is false."
             }
-          }
+          },
+          "allOf": [
+            {
+              "if": {"properties": {"header": {"const": false}}, "required": ["header"]},
+              "then": {"required": ["columns"]}
+            },
+            {
+              "if": {"required": ["columns"]},
+              "then": {"properties": {"header": {"const": false}}, "required": ["header"]}
+            }
+          ]
         }
       },
       "allOf": [
@@ -97,167 +308,19 @@
     "filters": {
       "type": "array",
       "description": "Row-filter predicates applied to raw vendor rows BEFORE mapping, in order. A row failing any filter is excluded WITH the filter's reason - excluded rows are counted and surfaced as an aggregated info-severity DQ finding per file, never silently dropped (Shared Constraint 7).",
-      "items": {
-        "type": "object",
-        "required": ["column", "op", "reason"],
-        "additionalProperties": false,
-        "properties": {
-          "column": {
-            "type": "string",
-            "minLength": 1,
-            "description": "The SOURCE column the predicate tests (whitespace-stripped cell value)."
-          },
-          "op": {
-            "type": "string",
-            "enum": ["equals", "not_equals", "in", "not_in", "not_empty"],
-            "description": "Predicate operator. equals/not_equals take 'value'; in/not_in take 'values'; not_empty takes neither."
-          },
-          "value": {
-            "type": "string",
-            "description": "Comparison value for equals / not_equals."
-          },
-          "values": {
-            "type": "array",
-            "items": {"type": "string"},
-            "minItems": 1,
-            "description": "Comparison set for in / not_in."
-          },
-          "reason": {
-            "type": "string",
-            "minLength": 10,
-            "description": "REQUIRED plain-language reason rows failing this predicate are out of the target contract's scope. Shown verbatim in the aggregated DQ finding."
-          }
-        },
-        "allOf": [
-          {
-            "if": {"properties": {"op": {"enum": ["equals", "not_equals"]}}},
-            "then": {"required": ["value"]}
-          },
-          {
-            "if": {"properties": {"op": {"enum": ["in", "not_in"]}}},
-            "then": {"required": ["values"]}
-          }
-        ]
-      }
+      "items": {"$ref": "#/$defs/predicate"}
     },
     "fields": {
       "type": "object",
-      "description": "Target-contract field name -> mapping definition. Every REQUIRED field of the target contract must have an entry (enforced below per target_contract); optional contract fields may be omitted entirely. Each definition is exactly one of: a source-column mapping ('from', with optional coercion), a constant ('const'), or a derived field ('derived').",
+      "description": "Target-contract field name -> mapping definition. Without 'emit', every REQUIRED field of the target contract must have an entry (enforced below per target_contract); with 'emit', this is the BASE mapping shared by all emissions, and each emission's merged (base + overrides) set must be complete instead (enforced at registration). Optional contract fields may be omitted entirely. Each definition is exactly one of: a source-column mapping ('from', with optional coercion), a constant ('const'), or a derived field ('derived').",
       "minProperties": 1,
-      "additionalProperties": {
-        "type": "object",
-        "oneOf": [
-          {
-            "required": ["from"],
-            "additionalProperties": false,
-            "properties": {
-              "from": {
-                "type": "string",
-                "minLength": 1,
-                "description": "Source column name in the vendor file's header."
-              },
-              "coerce": {
-                "type": "string",
-                "enum": ["string", "integer", "decimal", "number", "boolean", "date", "datetime", "enum_map"],
-                "description": "Type coercion applied to the stripped cell value. Default string. An empty cell is an ABSENT value (the field is omitted; required-ness is the contract validation's business - absence is never coalesced to a default). A value that fails its coercion QUARANTINES the row with a reason."
-              },
-              "format": {
-                "type": "string",
-                "minLength": 1,
-                "description": "strptime format for date/datetime coercions (REQUIRED for datetime; date defaults to ISO %Y-%m-%d). A datetime parsed WITHOUT an offset (no %z) is localized to the spec's timezone; one parsed WITH %z keeps its own offset."
-              },
-              "values": {
-                "type": "object",
-                "minProperties": 1,
-                "additionalProperties": {"type": ["string", "boolean", "integer", "number"]},
-                "description": "enum_map lookup table: source value -> emitted value. A source value with no entry QUARANTINES the row - vendor vocabulary is mapped explicitly, never guessed."
-              },
-              "true_values": {
-                "type": "array",
-                "items": {"type": "string"},
-                "minItems": 1,
-                "description": "boolean coercion: source values (case-insensitive) meaning true."
-              },
-              "false_values": {
-                "type": "array",
-                "items": {"type": "string"},
-                "minItems": 1,
-                "description": "boolean coercion: source values (case-insensitive) meaning false. A value in neither list quarantines the row."
-              },
-              "unit": {
-                "type": "object",
-                "required": ["from", "to"],
-                "additionalProperties": false,
-                "description": "Unit conversion applied after a decimal/number coercion. v0 converts distances to statute miles using exact Decimal factors (1 international mile = 1609.344 m exactly - NIST SP 811 Appendix B; verify against the published handbook, never memory).",
-                "properties": {
-                  "from": {"type": "string", "enum": ["kilometers", "meters", "miles"]},
-                  "to": {"type": "string", "enum": ["miles"]}
-                }
-              }
-            },
-            "allOf": [
-              {
-                "if": {"properties": {"coerce": {"const": "enum_map"}}, "required": ["coerce"]},
-                "then": {"required": ["values"]}
-              },
-              {
-                "if": {"properties": {"coerce": {"const": "boolean"}}, "required": ["coerce"]},
-                "then": {"required": ["true_values", "false_values"]}
-              },
-              {
-                "if": {"properties": {"coerce": {"const": "datetime"}}, "required": ["coerce"]},
-                "then": {"required": ["format"]}
-              }
-            ]
-          },
-          {
-            "required": ["const"],
-            "additionalProperties": false,
-            "properties": {
-              "const": {
-                "type": ["string", "boolean", "integer", "number"],
-                "description": "Constant value emitted for every mapped row (e.g. mode: DR, tos: DO when an export carries one service type by definition)."
-              }
-            }
-          },
-          {
-            "required": ["derived"],
-            "additionalProperties": false,
-            "properties": {
-              "derived": {
-                "type": "string",
-                "enum": ["local_date_of", "concat"],
-                "description": "Deterministic derivation. local_date_of: the LOCAL wall-clock date (in the spec timezone) of an already-mapped datetime target field named by 'of' (e.g. service_date from pickup_timestamp). concat: join the stripped values of source columns 'sources' with 'separator' (e.g. a record id from unit + sequence). Derived fields are evaluated after all from/const fields."
-              },
-              "of": {
-                "type": "string",
-                "minLength": 1,
-                "description": "local_date_of: the TARGET field (already mapped, datetime-coerced) whose local date is taken."
-              },
-              "sources": {
-                "type": "array",
-                "items": {"type": "string", "minLength": 1},
-                "minItems": 1,
-                "description": "concat: SOURCE columns whose stripped values are joined."
-              },
-              "separator": {
-                "type": "string",
-                "description": "concat: join separator. Default ':'."
-              }
-            },
-            "allOf": [
-              {
-                "if": {"properties": {"derived": {"const": "local_date_of"}}},
-                "then": {"required": ["of"]}
-              },
-              {
-                "if": {"properties": {"derived": {"const": "concat"}}},
-                "then": {"required": ["sources"]}
-              }
-            ]
-          }
-        ]
-      }
+      "additionalProperties": {"$ref": "#/$defs/field_def"}
+    },
+    "emit": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/emission"},
+      "description": "OPTIONAL fan-out: one source row emits zero or more contract records, one per listed emission (in order). Each emission merges its field overrides over the base 'fields' and may declare 'when' suppression predicates with reasons (e.g. a stop-visit row carrying both a boardings column and an alightings column becomes a 'Passenger boarded' record and/or a 'Passenger alighted' record; a zero count suppresses that emission with a reason). Without 'emit', a spec maps exactly one record per kept row (unchanged v0 behavior). A row is quarantined atomically: if any non-suppressed emission fails coercion or contract validation, NO record from that row is emitted and the row is quarantined with every problem found."
     },
     "provenance": {
       "type": "object",
@@ -329,14 +392,6 @@
       "then": {
         "properties": {
           "fields": {
-            "required": [
-              "passenger_event_id",
-              "service_date",
-              "event_timestamp",
-              "trip_stop_sequence",
-              "event_type",
-              "vehicle_id"
-            ],
             "propertyNames": {
               "enum": [
                 "passenger_event_id",
@@ -349,6 +404,47 @@
                 "event_count"
               ]
             }
+          },
+          "emit": {
+            "items": {
+              "properties": {
+                "fields": {
+                  "propertyNames": {
+                    "enum": [
+                      "passenger_event_id",
+                      "service_date",
+                      "event_timestamp",
+                      "trip_stop_sequence",
+                      "event_type",
+                      "vehicle_id",
+                      "trip_id_performed",
+                      "event_count"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"target_contract": {"const": "tides_passenger_events"}},
+        "required": ["target_contract"],
+        "not": {"required": ["emit"]}
+      },
+      "then": {
+        "properties": {
+          "fields": {
+            "required": [
+              "passenger_event_id",
+              "service_date",
+              "event_timestamp",
+              "trip_stop_sequence",
+              "event_type",
+              "vehicle_id"
+            ]
           }
         }
       }
@@ -361,20 +457,6 @@
       "then": {
         "properties": {
           "fields": {
-            "required": [
-              "dr_trip_id",
-              "service_date",
-              "vehicle_id",
-              "mode",
-              "tos",
-              "pickup_timestamp",
-              "dropoff_timestamp",
-              "riders",
-              "attendants_companions",
-              "ada_related",
-              "sponsored",
-              "no_show"
-            ],
             "propertyNames": {
               "enum": [
                 "dr_trip_id",
@@ -405,6 +487,71 @@
                 "dispatching_point_id"
               ]
             }
+          },
+          "emit": {
+            "items": {
+              "properties": {
+                "fields": {
+                  "propertyNames": {
+                    "enum": [
+                      "dr_trip_id",
+                      "service_date",
+                      "vehicle_id",
+                      "mode",
+                      "tos",
+                      "request_timestamp",
+                      "dispatch_timestamp",
+                      "pickup_timestamp",
+                      "dropoff_timestamp",
+                      "pickup_lat",
+                      "pickup_lon",
+                      "dropoff_lat",
+                      "dropoff_lon",
+                      "onboard_miles",
+                      "distance_source",
+                      "pickup_odometer_miles",
+                      "dropoff_odometer_miles",
+                      "riders",
+                      "attendants_companions",
+                      "ada_related",
+                      "sponsored",
+                      "sponsor",
+                      "no_show",
+                      "interruption_after",
+                      "driver_shift_id",
+                      "dispatching_point_id"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"target_contract": {"const": "demand_response_trip"}},
+        "required": ["target_contract"],
+        "not": {"required": ["emit"]}
+      },
+      "then": {
+        "properties": {
+          "fields": {
+            "required": [
+              "dr_trip_id",
+              "service_date",
+              "vehicle_id",
+              "mode",
+              "tos",
+              "pickup_timestamp",
+              "dropoff_timestamp",
+              "riders",
+              "attendants_companions",
+              "ada_related",
+              "sponsored",
+              "no_show"
+            ]
           }
         }
       }

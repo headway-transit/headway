@@ -93,17 +93,26 @@ code cannot drift from the checked-in contract without failing loudly).
   `spec.py` (mapping.v0.yaml loading, machine-validated against
   `contracts/adapter-mapping.v0.schema.json` + semantic checks: resolvable
   IANA timezone, `<vendor>_<product>` label rules with the mandatory
-  `_simulated` suffix for synthetic provenance), `registry.py` (fail-closed
+  `_simulated` suffix for synthetic provenance; 2026-07-16 extensions —
+  headerless positional columns must be unique and cover every read column,
+  `emit` emission names unique with per-emission merged-field contract
+  completeness), `registry.py` (fail-closed
   label registry — registration REQUIRES sample fixtures; duplicate/broken
   specs refuse the whole registry at startup), `engine.py` (dialect-aware
-  parsing via `row_guard`, filters with reasons, coercions/constants/derived
+  parsing via `row_guard` — header'd or headerless positional (`header:
+  false` + declared `columns`; row-width mismatches quarantine), filters
+  with reasons, coercions/constants/derived
   fields/exact-Decimal unit conversions, declared-timezone handling that
-  quarantines DST-ambiguous/nonexistent wall times, the target contract's
+  quarantines DST-ambiguous/nonexistent wall times, `emit` fan-out (one
+  source row → zero or more contract records; per-emission reasoned
+  suppression predicates surface as aggregated `adapter_emissions_filtered`
+  info findings; rows are atomic — any failing non-suppressed emission
+  quarantines the whole row), the target contract's
   validation — JSON Schema for DR plus the contract normalizers per-row —
   and one adapter lineage edge per canonical row carrying
   `adapter:<source_label>` + the spec's content hash), `harness.py` (the
-  core of `adapters/validate`: full row accounting, pinned expected counts,
-  deterministic round-trip). The consumer routes `raw.vendor.files` through
+  core of `adapters/validate`: full row accounting, pinned expected counts
+  incl. `emitted` for fan-out specs, deterministic round-trip). The consumer routes `raw.vendor.files` through
   the registry: an UNREGISTERED envelope source label is refused with a
   blocking `unregistered_adapter_source` dq.issues row (raw record retained,
   zero canonical writes — fail closed, never guessed). Reference adapter +
@@ -157,6 +166,26 @@ cd services/transform && python3 -m pytest tests/ -q
 
 ## Verification status
 
+- **2026-07-16 (first REAL vendor adapter — TripSpark Streets APC, handoff
+  0015 follow-up):** `python3 -m pytest tests/ -q` → **144 passed** (was
+  131). New in `tests/test_adapters.py` (13 tests): headerless positional
+  columns (undeclared/duplicate column refusals, `columns` without
+  `header: false` schema-invalid, per-row width-mismatch quarantine), `emit`
+  fan-out (unique emission names, per-emission merged-field contract
+  completeness, one row → two distinct records via concat `suffix`, atomic
+  row quarantine, suppression findings), the registered `tripspark_streets`
+  flow to canonical (the label the 0015 live refusal used — now the first
+  real adapter), and harness `emitted` pinning (green/missing-key
+  red/drift red). Harness: `python3 adapters/validate` → ALL CHECKS PASSED
+  over 4 registered adapters. Live end-to-end + redelivery idempotence
+  evidence: handoff 0015, "Outputs — first real adapter (2026-07-16)".
+  Operational reminder relearned live: stop side consumers with
+  SIGTERM/SIGINT and never let a shell pipeline (`| head`) kill one
+  mid-transaction — the orphaned idle-in-transaction backend blocks every
+  later replay of the same content-addressed record until terminated, and
+  when clearing stray backends, terminate ONLY pids whose client process is
+  confirmed dead (one live-container backend was clipped collaterally this
+  run; it quarantine-logged, restarted, and resumed idempotently).
 - **2026-07-13 (vendor adapter framework v0, handoff 0015):**
   `python3 -m pytest tests/ -q` → **131 passed** (was 102). New:
   `tests/test_adapters.py` (29 tests — spec machine-validation refusals

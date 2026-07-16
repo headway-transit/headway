@@ -1,0 +1,166 @@
+# TripSpark Streets APC stop-visit export -> TIDES passenger_events.
+# FIRST REAL vendor adapter (handoff 0015 follow-up, 2026-07-16).
+#
+# Derived EXCLUSIVELY from the partner agency's own sample export (an APC
+# data pull provided 2026-07-16 from the agency's fixed-route reporting
+# warehouse) — never from vendor documentation (handoff 0015 Addendum,
+# BINDING). The export is a HEADERLESS CSV: one row per APC stop-visit
+# report, 18 positional columns as demonstrated by the sample. The committed
+# fixtures are fully synthetic re-creations of that shape (see provenance).
+#
+# Semantics (from the agency's description of its own export + the sample):
+# BoardCount/AlightCount are the processed (balanced) counts; one source row
+# fans out into a 'Passenger boarded' and/or 'Passenger alighted' TIDES
+# event. Zero-count emissions are suppressed with a reason — the export
+# repeats stop rows with 0/0 counts as dwell pings, which carry no passenger
+# activity. TotalCount is an onboard-load counter that drifts and is NOT
+# mapped in v0; UnmodifiedAlightCount (the pre-balancing alight count) is a
+# future provenance surface, not mapped in v0.
+mapping_spec_version: 0
+vendor: tripspark
+product: streets
+source_label: tripspark_streets
+target_contract: tides_passenger_events
+
+source_format:
+  kind: csv
+  # The sample export carries a UTF-8 byte-order mark.
+  encoding: utf-8-sig
+  csv:
+    # NO header row: positions are declared from the agency's sample. A row
+    # whose field count differs from these 18 positions quarantines —
+    # positions are never mapped by guesswork.
+    header: false
+    columns:
+      - VehicleLocationAPCKey
+      - VehicleName
+      - TotalCount
+      - BoardCount
+      - AlightCount
+      - UnmodifiedAlightCount
+      - APCSource
+      - IsTripper
+      - IsDetour
+      - TripName
+      - RouteName
+      - RouteShortName
+      - PatternName
+      - StopName
+      - StopCode
+      - PatternPointRank
+      - DirectionKey
+      - EventDateISO
+
+# Event timestamps are ISO-8601 LOCAL wall-clock times in the agency's zone.
+# Declared, never guessed: DST-ambiguous and nonexistent wall times
+# quarantine their rows.
+timezone: America/Los_Angeles
+
+filters:
+  - column: TripName
+    op: not_empty
+    reason: >-
+      APC reports without a trip assignment (blank TripName) lack the trip
+      and stop-sequence identity the passenger_events contract requires;
+      this spec maps the assigned export, and unassigned reports are out of
+      its scope by declaration.
+
+# Base fields shared by both emissions.
+fields:
+  service_date:
+    # The local wall-clock date of the event. NOTE (recorded in README):
+    # this is the CALENDAR date; the export's service-day rollover
+    # convention for after-midnight trips is not derivable from the sample
+    # (an evening window) and is an open question.
+    derived: local_date_of
+    of: event_timestamp
+  event_timestamp:
+    from: EventDateISO
+    coerce: datetime
+    format: "%Y-%m-%dT%H:%M:%S"
+  trip_stop_sequence:
+    # The stop's rank within the trip's pattern — the sequence source in
+    # this export.
+    from: PatternPointRank
+    coerce: integer
+  vehicle_id:
+    from: VehicleName
+  trip_id_performed:
+    # "route - pattern - trip start time": the stable trip identifier in
+    # this export. Resolution against canonical GTFS trip_ids is a
+    # per-agency join config — future increment (README open questions).
+    from: TripName
+
+# Fan-out: one APC stop-visit row emits up to TWO TIDES events. The
+# passenger_event_id embeds the export's unique row key AND the stop code
+# (the TIDES subset Headway carries has no stop identity column yet — the
+# rail-PMT stop_id gap; README open questions), plus a per-emission suffix
+# so the two events from one row stay distinct under the contract's
+# natural keys.
+emit:
+  - name: boarded
+    when:
+      - column: BoardCount
+        op: not_in
+        values: ["0", ""]
+        reason: >-
+          A zero or blank BoardCount means no boarding occurred at this APC
+          stop-visit report (the export repeats stop rows with zero counts
+          as dwell pings); a zero-count boarding event is not emitted.
+    fields:
+      passenger_event_id:
+        derived: concat
+        sources: [VehicleLocationAPCKey, StopCode]
+        separator: ":"
+        suffix: ":board"
+      event_type:
+        const: "Passenger boarded"
+      event_count:
+        from: BoardCount
+        coerce: integer
+  - name: alighted
+    when:
+      - column: AlightCount
+        op: not_in
+        values: ["0", ""]
+        reason: >-
+          A zero or blank AlightCount means no alighting occurred at this
+          APC stop-visit report (the export repeats stop rows with zero
+          counts as dwell pings); a zero-count alighting event is not
+          emitted.
+    fields:
+      passenger_event_id:
+        derived: concat
+        sources: [VehicleLocationAPCKey, StopCode]
+        separator: ":"
+        suffix: ":alight"
+      event_type:
+        const: "Passenger alighted"
+      event_count:
+        from: AlightCount
+        coerce: integer
+
+provenance:
+  verified_against:
+    sample:
+      date: "2026-07-16"
+      providing_agency: >-
+        partner agency (private) — the agency's own APC data pull from its
+        fixed-route reporting warehouse, provided expressly for this mapping
+      anonymization: >-
+        The agency-provided sample is AGENCY-IDENTIFIABLE (stop names, route
+        names, stop-code prefixes) and stays gitignored, used only to verify
+        this mapping locally. The committed fixtures are fully SYNTHETIC
+        re-creations of the sample's shape — same 18 headerless positional
+        columns, same value formats, same edge cases (dwell pings,
+        both-counts rows, an unassigned-style row) — with every stop name,
+        stop code, route/pattern/trip name, vehicle name, key, and timestamp
+        invented. No value from the agency's sample appears in any committed
+        file.
+  verification_date: "2026-07-16"
+  notes: >-
+    Mapping verified against the agency sample locally (counts-only evidence
+    in handoff 0015) and against the committed synthetic fixtures by
+    adapters/validate. Field semantics come from the agency's description of
+    its own export and from the sample itself — no vendor documentation is
+    quoted, excerpted, or paraphrased here (handoff 0015 Addendum, BINDING).

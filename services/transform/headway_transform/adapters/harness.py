@@ -149,13 +149,38 @@ def _validate_fixture(spec_path, spec, fixture: Path, report: HarnessReport) -> 
         report.fail(f"{prefix}: {len(unreasoned)} quarantine finding(s) lack a reason")
 
     # 2) every mapped record passed contract validation (engine refuses
-    #    otherwise); re-check the arithmetic end to end.
+    #    otherwise); re-check the arithmetic end to end. Under `emit`
+    #    fan-out a mapped ROW may emit several records, so records ==
+    #    canonical always, and records == mapped rows only without emit.
     canonical = len(result.passenger_events) + len(result.dr_trips)
-    if not (len(result.records) == result.mapped_count == canonical):
+    if len(result.records) != canonical:
+        report.fail(
+            f"{prefix}: record arithmetic broken — records "
+            f"{len(result.records)}, canonical rows {canonical}"
+        )
+    if spec.emissions:
+        if "emitted" not in expected:
+            report.fail(
+                f"{expected_path.name}: spec declares `emit` fan-out — pin "
+                "the emitted-record count with an 'emitted' key so fan-out "
+                "drift is a red build"
+            )
+        elif expected["emitted"] != len(result.records):
+            report.fail(
+                f"{prefix}: emitted records expected {expected['emitted']}, "
+                f"got {len(result.records)}"
+            )
+        if not result.file_refused and len(result.records) < result.mapped_count:
+            report.fail(
+                f"{prefix}: {result.mapped_count} mapped row(s) produced only "
+                f"{len(result.records)} record(s) — a mapped row must emit at "
+                "least one record"
+            )
+    elif len(result.records) != result.mapped_count:
         report.fail(
             f"{prefix}: mapped-record arithmetic broken — records "
-            f"{len(result.records)}, mapped {result.mapped_count}, "
-            f"canonical rows {canonical}"
+            f"{len(result.records)}, mapped {result.mapped_count} (spec has "
+            "no emit fan-out, so one kept row maps to exactly one record)"
         )
     # two lineage edges per canonical row: normalizer edge + adapter edge.
     if len(result.edges) != 2 * canonical:
@@ -195,6 +220,11 @@ def _validate_fixture(spec_path, spec, fixture: Path, report: HarnessReport) -> 
             f"mapped {result.mapped_count} + filtered {result.filtered_count} "
             f"+ quarantined {result.quarantined_count}"
             + (" [file refused]" if result.file_refused else "")
+            + (
+                f"; emitted {len(result.records)} (fan-out)"
+                if spec.emissions
+                else ""
+            )
             + f"; canonical {canonical}, edges {len(result.edges)}, "
             f"deterministic OK"
         )

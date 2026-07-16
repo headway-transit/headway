@@ -1,0 +1,121 @@
+# Reference adapter: "Acme Transit Suite — StopCount" (INVENTED vendor format)
+# -> TIDES passenger_events. This spec exercises the two v0 extensions the
+# TripSpark Streets adapter introduced (2026-07-16): HEADERLESS positional
+# columns (csv.header: false + csv.columns) and `emit` FAN-OUT (one stop-visit
+# row emits a boarded and/or alighted record, zero counts suppressed with a
+# reason). Template for real adapters: adapters/README.md (note the BINDING
+# provenance rules — real specs are verified against an agency-provided
+# anonymized sample, never vendor documentation).
+mapping_spec_version: 0
+vendor: acme
+product: stopcount
+# Synthetic fixtures => the _simulated suffix is REQUIRED (handoff 0005 rule:
+# simulated data stays permanently distinguishable in provenance).
+source_label: acme_stopcount_simulated
+target_contract: tides_passenger_events
+
+source_format:
+  kind: csv
+  encoding: utf-8-sig
+  csv:
+    # StopCount unit exports carry NO header row: the positions below are
+    # declared from the (invented) sample. A row with a different field
+    # count quarantines — positions are never mapped by guesswork.
+    header: false
+    columns:
+      - RowKey
+      - UnitNo
+      - Ons
+      - Offs
+      - StopRef
+      - StopSeq
+      - Kind
+      - LocalTime
+
+# StopCount device clocks are agency-local wall time. Declared, never
+# guessed: DST-ambiguous and nonexistent wall times quarantine their rows.
+timezone: America/Chicago
+
+filters:
+  - column: Kind
+    op: equals
+    value: VISIT
+    reason: >-
+      StopCount self-test (TEST) records carry no passenger activity and are
+      outside the passenger_events contract's scope; only stop-visit (VISIT)
+      records map.
+
+# Base fields shared by every emission; each emission below overrides the
+# event-specific fields (id, type, count).
+fields:
+  service_date:
+    derived: local_date_of
+    of: event_timestamp
+  event_timestamp:
+    from: LocalTime
+    coerce: datetime
+    format: "%Y-%m-%d %H:%M:%S"
+  trip_stop_sequence:
+    from: StopSeq
+    coerce: integer
+  vehicle_id:
+    from: UnitNo
+
+# Fan-out: one stop-visit row emits up to TWO TIDES events. A zero or blank
+# count suppresses that emission with the declared reason (counted, surfaced
+# as an info DQ finding — never a silent drop); a row whose BOTH emissions
+# are suppressed (a dwell ping) counts as filtered.
+emit:
+  - name: boarded
+    when:
+      - column: Ons
+        op: not_in
+        values: ["0", ""]
+        reason: >-
+          A zero or blank Ons count means no boarding occurred at this stop
+          visit (dwell pings report 0/0); a zero-count boarding event is not
+          emitted.
+    fields:
+      passenger_event_id:
+        derived: concat
+        sources: [RowKey]
+        suffix: ":ons"
+      event_type:
+        const: "Passenger boarded"
+      event_count:
+        from: Ons
+        coerce: integer
+  - name: alighted
+    when:
+      - column: Offs
+        op: not_in
+        values: ["0", ""]
+        reason: >-
+          A zero or blank Offs count means no alighting occurred at this stop
+          visit (dwell pings report 0/0); a zero-count alighting event is not
+          emitted.
+    fields:
+      passenger_event_id:
+        derived: concat
+        sources: [RowKey]
+        suffix: ":offs"
+      event_type:
+        const: "Passenger alighted"
+      event_count:
+        from: Offs
+        coerce: integer
+
+provenance:
+  verified_against:
+    # Reference adapter ONLY: the fixtures are invented. A real adapter
+    # replaces this with the sample block (date / providing_agency /
+    # anonymization) referencing the agency's OWN anonymized export.
+    synthetic: true
+  verification_date: "2026-07-16"
+  notes: >-
+    The "Acme Transit Suite" vendor and its StopCount export format are
+    invented for this repository to exercise the headerless positional-column
+    mode and the `emit` fan-out feature (per-emission suppression predicates,
+    per-emission field overrides, concat prefix/suffix for distinct
+    identifiers, row-width quarantine). No real vendor product or agency data
+    is referenced.

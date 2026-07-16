@@ -132,10 +132,21 @@ class AdapterRunResult:
     file_refused: bool = False
 
     def accounted(self) -> bool:
-        """Every vendor row is mapped, filtered, or quarantined — nothing else."""
+        """Every vendor row is mapped, filtered, or quarantined — nothing else.
+
+        Counts are ROW counts. Under ``emit`` fan-out one mapped row may
+        produce more than one contract record (``emitted_count``); a row
+        whose every emission was suppressed by a declared predicate counts
+        as filtered.
+        """
         return self.total_rows == (
             self.mapped_count + self.filtered_count + self.quarantined_count
         )
+
+    @property
+    def emitted_count(self) -> int:
+        """Contract records emitted (== mapped rows for specs without emit)."""
+        return len(self.records)
 
 
 def rfc3339(dt: datetime) -> str:
@@ -257,12 +268,20 @@ def _coerce(
 
 
 def _map_row(
-    spec: MappingSpec, row: dict, problems: list[str]
+    spec: MappingSpec,
+    fields: tuple[FieldDef, ...],
+    row: dict,
+    problems: list[str],
 ) -> dict[str, object]:
-    """Map one kept vendor row to a typed contract record (may add problems)."""
+    """Map one kept vendor row to a typed contract record (may add problems).
+
+    ``fields`` is the field set to apply: ``spec.fields`` for classic
+    one-record specs, or an emission's merged effective fields under ``emit``
+    fan-out.
+    """
     typed: dict[str, object] = {}
 
-    for fd in spec.fields:
+    for fd in fields:
         if fd.kind == "from":
             raw = (row.get(fd.source) or "").strip()
             if raw == "":
@@ -273,14 +292,14 @@ def _map_row(
         elif fd.kind == "const":
             typed[fd.target] = fd.const
 
-    for fd in spec.fields:
+    for fd in fields:
         if fd.kind != "derived":
             continue
         if fd.derived == "concat":
             parts = [(row.get(col) or "").strip() for col in fd.sources]
             joined = fd.separator.join(parts)
             if joined.replace(fd.separator, "") != "":
-                typed[fd.target] = joined
+                typed[fd.target] = fd.prefix + joined + fd.suffix
         elif fd.derived == "local_date_of":
             base = typed.get(fd.of)
             if isinstance(base, datetime):
@@ -311,6 +330,51 @@ def _contract_csv(columns: tuple[str, ...], record: dict) -> bytes:
     writer.writerow(columns)
     writer.writerow([_cell(record[c]) if c in record else "" for c in columns])
     return out.getvalue().encode("utf-8")
+
+
+def _validate_record(
+    spec: MappingSpec, record: dict, record_id: str, source: str
+) -> tuple[list, list[LineageEdge], Optional[str]]:
+    """Run the TARGET CONTRACT's validation on one mapped record.
+
+    Returns (canonical_rows, normalizer_edges, None) on success, or
+    ([], [], reason) when the contract rejects the record — the caller
+    quarantines the vendor row with that reason, and no nonconforming
+    record is ever emitted.
+    """
+    if spec.target_contract == TARGET_DR:
+        schema_errors = sorted(
+            DR_CONTRACT_VALIDATOR.iter_errors(record), key=lambda e: list(e.path)
+        )
+        if schema_errors:
+            return (
+                [],
+                [],
+                "contract validation (demand-response-trip.v0.schema.json): "
+                + "; ".join(
+                    f"{'/'.join(str(p) for p in err.path) or '<record>'}: "
+                    f"{err.message}"
+                    for err in schema_errors
+                ),
+            )
+        csv_bytes = _contract_csv(_DR_COLUMNS, record)
+        rows, edges, findings = dr_trips.normalize(csv_bytes, record_id, source)
+    else:
+        assert spec.target_contract == TARGET_TIDES
+        csv_bytes = _contract_csv(_TIDES_COLUMNS, record)
+        rows, edges, findings = tides_passenger_events.normalize(
+            csv_bytes, record_id, source
+        )
+    if findings or not rows:
+        # The contract normalizer (the verified contract validation)
+        # rejected the mapped record — never land a nonconforming row.
+        return (
+            [],
+            [],
+            "target contract validation rejected the mapped record: "
+            + " | ".join(f.description for f in findings),
+        )
+    return rows, edges, None
 
 
 def run_adapter(
@@ -381,96 +445,42 @@ def run_adapter(
     stream = io.StringIO(text, newline="")
     for _ in range(spec.skip_leading_rows):
         stream.readline()
-    reader = csv.DictReader(
-        stream, delimiter=spec.delimiter, quotechar=spec.quotechar
-    )
-
-    header = reader.fieldnames or []
-    missing = sorted(spec.source_columns() - {(h or "").strip() for h in header})
-    if missing:
-        return _refuse_file(
-            "adapter_source_mismatch",
-            f"Record {record_id}: the file's header is missing source "
-            f"column(s) {', '.join(repr(m) for m in missing)} that mapping "
-            f"spec {spec.vendor}/{spec.product}@{spec.spec_sha12} reads. "
-            "The file does not match the registered export format; nothing "
-            "was mapped and the raw record is retained (fail loudly, never "
-            "a guessed column).",
+    if spec.header:
+        reader = csv.DictReader(
+            stream, delimiter=spec.delimiter, quotechar=spec.quotechar
+        )
+        header = reader.fieldnames or []
+        missing = sorted(
+            spec.source_columns() - {(h or "").strip() for h in header}
+        )
+        if missing:
+            return _refuse_file(
+                "adapter_source_mismatch",
+                f"Record {record_id}: the file's header is missing source "
+                f"column(s) {', '.join(repr(m) for m in missing)} that mapping "
+                f"spec {spec.vendor}/{spec.product}@{spec.spec_sha12} reads. "
+                "The file does not match the registered export format; nothing "
+                "was mapped and the raw record is retained (fail loudly, never "
+                "a guessed column).",
+            )
+    else:
+        # Headerless format: the spec's positional column names ARE the
+        # header (spec load already proved every read column is declared).
+        # There is no header to check a wrong export against, so each ROW's
+        # field count is checked instead — a width mismatch quarantines the
+        # row, never a guessed position.
+        reader = csv.DictReader(
+            stream,
+            fieldnames=list(spec.columns),
+            delimiter=spec.delimiter,
+            quotechar=spec.quotechar,
         )
 
     filtered_by: dict[int, int] = {}
+    # (emission index, predicate index) -> suppressed-emission count.
+    suppressed_by: dict[tuple[int, int], int] = {}
 
-    for index, row, parse_error in iter_rows(reader):
-        result.total_rows += 1
-
-        if parse_error is not None:
-            _quarantine(index, [f"CSV parse error: {parse_error}"])
-            continue
-        guard = field_problems(row)
-        if guard:
-            _quarantine(index, guard)
-            continue
-
-        kept = True
-        for f_idx, flt in enumerate(spec.filters):
-            if not flt.keeps(row):
-                filtered_by[f_idx] = filtered_by.get(f_idx, 0) + 1
-                result.filtered_count += 1
-                kept = False
-                break
-        if not kept:
-            continue
-
-        problems: list[str] = []
-        typed = _map_row(spec, row, problems)
-        if problems:
-            _quarantine(index, problems)
-            continue
-
-        record = _json_record(typed)
-
-        if spec.target_contract == TARGET_DR:
-            schema_errors = sorted(
-                DR_CONTRACT_VALIDATOR.iter_errors(record),
-                key=lambda e: list(e.path),
-            )
-            if schema_errors:
-                _quarantine(
-                    index,
-                    [
-                        "contract validation "
-                        "(demand-response-trip.v0.schema.json): "
-                        + "; ".join(
-                            f"{'/'.join(str(p) for p in err.path) or '<record>'}: "
-                            f"{err.message}"
-                            for err in schema_errors
-                        )
-                    ],
-                )
-                continue
-            csv_bytes = _contract_csv(_DR_COLUMNS, record)
-            rows, edges, findings = dr_trips.normalize(csv_bytes, record_id, source)
-        else:
-            assert spec.target_contract == TARGET_TIDES
-            csv_bytes = _contract_csv(_TIDES_COLUMNS, record)
-            rows, edges, findings = tides_passenger_events.normalize(
-                csv_bytes, record_id, source
-            )
-
-        if findings or not rows:
-            # The contract normalizer (the verified contract validation)
-            # rejected the mapped record — quarantine THIS vendor row with
-            # the normalizer's own reasons, never land a nonconforming row.
-            _quarantine(
-                index,
-                [
-                    "target contract validation rejected the mapped record: "
-                    + " | ".join(f.description for f in findings)
-                ],
-            )
-            continue
-
-        result.mapped_count += 1
+    def _accept(record: dict, rows: list, edges: list[LineageEdge]) -> None:
         result.records.append(record)
         if spec.target_contract == TARGET_DR:
             result.dr_trips.extend(rows)
@@ -488,6 +498,140 @@ def run_adapter(
                     input_id=record_id,
                 )
             )
+
+    for index, row, parse_error in iter_rows(reader):
+        result.total_rows += 1
+
+        if parse_error is not None:
+            _quarantine(index, [f"CSV parse error: {parse_error}"])
+            continue
+        guard = field_problems(row)
+        if guard:
+            _quarantine(index, guard)
+            continue
+
+        if not spec.header:
+            extra = row.get(None)
+            extra_count = len(extra) if isinstance(extra, list) else (
+                1 if extra is not None else 0
+            )
+            short = sum(
+                1 for k, v in row.items() if k is not None and v is None
+            )
+            if extra_count or short:
+                width = len(spec.columns) - short + extra_count
+                _quarantine(
+                    index,
+                    [
+                        f"row has {width} field(s) but the spec declares "
+                        f"{len(spec.columns)} positional columns (headerless "
+                        "source_format) — a width mismatch is never mapped "
+                        "by guessed positions"
+                    ],
+                )
+                continue
+
+        kept = True
+        for f_idx, flt in enumerate(spec.filters):
+            if not flt.keeps(row):
+                filtered_by[f_idx] = filtered_by.get(f_idx, 0) + 1
+                result.filtered_count += 1
+                kept = False
+                break
+        if not kept:
+            continue
+
+        if not spec.emissions:
+            # Classic path: exactly one contract record per kept row.
+            problems: list[str] = []
+            typed = _map_row(spec, spec.fields, row, problems)
+            if problems:
+                _quarantine(index, problems)
+                continue
+            record = _json_record(typed)
+            rows, edges, reject = _validate_record(spec, record, record_id, source)
+            if reject is not None:
+                _quarantine(index, [reject])
+                continue
+            result.mapped_count += 1
+            _accept(record, rows, edges)
+            continue
+
+        # Fan-out (`emit`): zero or more records per kept row, one per
+        # emission whose `when` predicates all hold. The row is ATOMIC: if
+        # any non-suppressed emission fails coercion or contract validation,
+        # the whole row quarantines and emits nothing — a half-mapped stop
+        # visit would be silently missing data.
+        problems = []
+        pending: list[tuple[dict, list, list[LineageEdge]]] = []
+        all_suppressed = True
+        for e_idx, emission in enumerate(spec.emissions):
+            suppressed = False
+            for p_idx, pred in enumerate(emission.when):
+                if not pred.keeps(row):
+                    key = (e_idx, p_idx)
+                    suppressed_by[key] = suppressed_by.get(key, 0) + 1
+                    suppressed = True
+                    break
+            if suppressed:
+                continue
+            all_suppressed = False
+            emission_problems: list[str] = []
+            typed = _map_row(
+                spec, emission.effective_fields, row, emission_problems
+            )
+            if emission_problems:
+                problems.extend(
+                    f"emission {emission.name!r}: {p}" for p in emission_problems
+                )
+                continue
+            record = _json_record(typed)
+            rows, edges, reject = _validate_record(spec, record, record_id, source)
+            if reject is not None:
+                problems.append(f"emission {emission.name!r}: {reject}")
+                continue
+            pending.append((record, rows, edges))
+
+        if all_suppressed:
+            # Every emission was suppressed by a declared, reasoned
+            # predicate — the row is out of contract scope by declaration
+            # (e.g. a zero-count dwell ping), counted as filtered and
+            # surfaced through the aggregated suppression findings below.
+            result.filtered_count += 1
+            continue
+        if problems:
+            _quarantine(index, problems)
+            continue
+        result.mapped_count += 1
+        for record, rows, edges in pending:
+            _accept(record, rows, edges)
+
+    for (e_idx, p_idx), count in sorted(suppressed_by.items()):
+        emission = spec.emissions[e_idx]
+        pred = emission.when[p_idx]
+        result.findings.append(
+            DQFinding(
+                issue_type="adapter_emissions_filtered",
+                severity=SEVERITY_INFO,
+                title=(
+                    f"Adapter {source} suppressed '{emission.name}' emissions "
+                    "by declared predicate"
+                ),
+                description=(
+                    f"Record {record_id}: emission '{emission.name}' "
+                    f"suppressed for {count} row(s) by its predicate "
+                    f"#{p_idx + 1} ({pred.column} {pred.op}"
+                    + (
+                        f" {pred.value!r}"
+                        if pred.value is not None
+                        else (f" {list(pred.values)}" if pred.values else "")
+                    )
+                    + f"): {pred.reason}. Declared suppression, counted and "
+                    "recorded — never a silent drop."
+                ),
+                source_record_ids=[record_id],
+            )
+        )
 
     for f_idx, count in sorted(filtered_by.items()):
         flt = spec.filters[f_idx]

@@ -54,11 +54,24 @@ config blocks — adding them cannot break a v0 CSV spec.
 
 For `csv`: `encoding` (Python codec, default `utf-8-sig`), `csv.delimiter`,
 `csv.quotechar` (one character each), `csv.skip_leading_rows` (vendor banner lines
-before the header). The line after the skip is always the column-name header.
-Bytes that do not decode as declared quarantine the **whole file** as a blocking
-DQ issue. Structurally hostile rows (oversized fields, NUL bytes, unterminated
-quotes absorbing following lines) are quarantined per-row by `row_guard` exactly
-as in the first-party normalizers.
+before the header — or before the first data row when headerless). By default the
+line after the skip is the column-name header; a file whose header is missing a
+source column the spec reads is refused whole (`adapter_source_mismatch`,
+blocking). Bytes that do not decode as declared quarantine the **whole file** as a
+blocking DQ issue. Structurally hostile rows (oversized fields, NUL bytes,
+unterminated quotes absorbing following lines) are quarantined per-row by
+`row_guard` exactly as in the first-party normalizers.
+
+**Headerless exports** (added 2026-07-16 for the first real adapter — some
+warehouse data pulls carry no header row): declare `csv.header: false` plus
+`csv.columns`, the ordered list of positional column names the agency's sample
+demonstrated (unique; `from`/filter/`concat` references resolve against it, and a
+spec reading an undeclared column fails registration). `columns` without an
+explicit `header: false` is schema-invalid — never ambiguous. Since there is no
+header to refuse a wrong export against, the defense is per-row: a data row whose
+field count differs from the declared width is QUARANTINED with a reason —
+positions are never mapped by guesswork. Declaring `header: false` is
+backward-compatible: existing header'd specs are untouched (default `true`).
 
 ## Timezone — declared, never guessed
 
@@ -105,7 +118,40 @@ schema); optional contract fields may be omitted. Each definition is exactly one
    fields: `local_date_of` (the local wall date, in the spec timezone, of an
    already-mapped datetime target field — e.g. `service_date` from
    `pickup_timestamp`) and `concat` (join source columns with a separator — e.g. a
-   stable record id from unit + sequence).
+   stable record id from unit + sequence; optional literal `prefix`/`suffix`
+   strings wrap the joined value, which is how fan-out emissions keep their
+   identifiers distinct when both derive from the same source row).
+
+## Fan-out (`emit`) — one source row, zero or more records
+
+Some exports carry several contract events per physical row (the motivating
+case: an APC stop-visit row with BOTH a boardings column and an alightings
+column, where TIDES `passenger_events` wants one `Passenger boarded` and one
+`Passenger alighted` record). The optional `emit` list declares one **emission**
+per potential record:
+
+- each emission has a unique snake-case `name`, optional `when` suppression
+  predicates (same shape as `filters`, each with a REQUIRED `reason`), and
+  `fields` overrides merged over the top-level `fields` (override wins per
+  target; the merged set must contain every REQUIRED field of the target
+  contract — enforced at registration, since the base alone need not be
+  complete);
+- `when` predicates test the SOURCE row. A failing predicate suppresses that
+  emission for that row — suppressions are counted and surfaced as one
+  aggregated info-severity `adapter_emissions_filtered` finding per (file,
+  emission, predicate), carrying the reason (the canonical zero-count rule: a
+  `0`/blank count column means "no such event occurred here", suppressed, never
+  a fabricated zero-count event);
+- a row whose EVERY emission is suppressed counts as **filtered** (e.g. a 0/0
+  dwell ping);
+- rows are **atomic**: if any non-suppressed emission fails coercion or the
+  target contract's validation, the whole row quarantines with every problem
+  found and emits NOTHING — a half-mapped row would be silently missing data;
+- accounting counts stay ROW counts (`total = mapped + filtered + quarantined`);
+  the record count is pinned separately (`emitted` in the fixture's
+  expected.json, REQUIRED for specs with `emit`). Without `emit` a spec maps
+  exactly one record per kept row — unchanged v0 behavior, and `emit` is fully
+  backward-compatible.
 
 ## Provenance (BINDING — handoff 0015 Addendum)
 
@@ -132,7 +178,10 @@ fixtures.
   the SHA-256 (12 hex) of the mapping spec bytes — "explain this number" can name
   the exact spec version that mapped the row.
 - **Accounting**: every vendor data row is exactly one of mapped / filtered (with
-  the filter's reason) / quarantined (with a reason). Nothing is dropped silently.
+  the filter's — or, under `emit`, the suppressing predicates' — reason) /
+  quarantined (with a reason). Nothing is dropped silently. Under `emit` a mapped
+  row emits one record per non-suppressed emission; the emitted-record count is
+  pinned by the fixtures alongside the row counts.
 - **Determinism / idempotency**: the same file bytes + the same spec bytes produce
   byte-identical output; redelivery writes zero new rows (unique natural keys +
   `ON CONFLICT DO NOTHING`, migration 0023 patterns).

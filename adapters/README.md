@@ -43,12 +43,17 @@ adapters/
    shift dates if needed — and describe what you did in
    `provenance.verified_against.sample.anonymization`.
 2. **Copy the template.** Start from `_reference/acme/ridelog/` (fixed-route
-   counts → TIDES `passenger_events`) or `_reference/acme/paravan/` (paratransit
-   bookings → `demand_response_trip`). Every mapping-spec feature is
-   demonstrated there; format semantics: `contracts/adapter-mapping.v0.md`.
+   counts → TIDES `passenger_events`), `_reference/acme/stopcount/`
+   (headerless APC stop visits with `emit` fan-out → TIDES
+   `passenger_events`), or `_reference/acme/paravan/` (paratransit bookings →
+   `demand_response_trip`) — or from the first REAL adapter,
+   `tripspark/streets/`. Every mapping-spec feature is demonstrated in
+   `_reference/`; format semantics: `contracts/adapter-mapping.v0.md`.
 3. **Write `mapping.v0.yaml`** at `adapters/<vendor>/<product>/`:
    - `source_format`: CSV dialect (encoding, delimiter, quote char, banner
-     lines to skip).
+     lines to skip). Headerless exports declare `header: false` plus the
+     positional `columns` your sample demonstrated (a row with a different
+     field count quarantines — positions are never guessed).
    - `timezone`: the IANA zone your export's local timestamps are in.
      **Required, never guessed** — DST-ambiguous/nonexistent wall times
      quarantine their rows rather than being resolved silently.
@@ -57,10 +62,17 @@ adapters/
    - `fields`: every required target-contract field, with explicit coercions,
      enum maps for vendor vocabulary, constants, derived fields, and unit
      conversions. Empty cells are *absent* — never coalesced to defaults.
+   - `emit` (optional fan-out): when one export row carries several contract
+     events (e.g. a stop-visit row with both a boardings and an alightings
+     column), declare one emission per event with per-emission field
+     overrides and reasoned `when` suppression predicates (zero counts
+     suppress the emission, never a fabricated zero-count event). See
+     `contracts/adapter-mapping.v0.md` and `_reference/acme/stopcount/`.
    - `provenance`: the sample block, per the rule above.
 4. **Commit fixtures** under `fixtures/`: the anonymized sample file(s), each
    with a `<name>.expected.json` pinning `total_rows` / `mapped` /
-   `quarantined` / `filtered`. A spec without a verified sample fixture
+   `quarantined` / `filtered` (plus `emitted` for specs with `emit`
+   fan-out). A spec without a verified sample fixture
    **cannot be registered**. Good fixtures include the ugly rows — bad enums,
    malformed numbers, contradictions — so the quarantine behavior is pinned too.
 5. **Run the harness** until green:
@@ -118,8 +130,9 @@ the sample provenance block and a plain `<vendor>_<product>` label.
   Architect; format changes require an ADR-linked handoff.
 - Adapter certification is earned by a green harness against these contracts —
   never by payment (GOVERNANCE.md anti-capture rules).
-- First-party TripSpark mapping specs (fixed-route counts → `passenger_events`;
-  paratransit bookings → `demand_response_trip`) land here the day the partner
-  agency's anonymized sample exports exist (handoff 0015 — the mappings are
-  BLOCKED on samples, by design: field semantics never come from memory or
-  vendor docs).
+- First-party TripSpark specs (handoff 0015): **`tripspark/streets/` is live**
+  (fixed-route APC stop visits → TIDES `passenger_events`, verified against
+  the partner agency's own sample export 2026-07-16 — the first real
+  adapter). The paratransit bookings → `demand_response_trip` spec still
+  awaits its sample export (BLOCKED by design: field semantics never come
+  from memory or vendor docs).
