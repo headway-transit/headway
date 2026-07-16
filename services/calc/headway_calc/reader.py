@@ -47,6 +47,7 @@ from headway_calc.types import (
     DrTrip,
     OpsScheduledStop,
     PassengerEvent,
+    ServiceDayOverride,
     StopTime,
     VehiclePosition,
 )
@@ -429,6 +430,69 @@ _SELECT_ATTESTATIONS_SQL = (
     "WHERE revoked_at IS NULL AND period_start <= %s AND period_end >= %s "
     "ORDER BY entered_at, attestation_id"
 )
+
+
+#: Agency-declared service-day overrides for one period (handoff 0020,
+#: migration 0031) — the daytype_v0 classification input. Deterministic
+#: ORDER BY service_date (the PK).
+_SELECT_SERVICE_DAY_OVERRIDES_SQL = (
+    "SELECT service_date, assigned_day_type, atypical, reason, "
+    "updated_by, updated_at "
+    "FROM app.service_day_overrides "
+    "WHERE service_date >= %s AND service_date < %s "
+    "ORDER BY service_date"
+)
+
+
+def load_service_day_overrides(
+    conn,
+    period_start: date,
+    period_end: date,
+) -> list[ServiceDayOverride]:
+    """Load the agency-declared service-day overrides covering one half-open
+    period (app.service_day_overrides, migration 0031, handoff 0020) — the
+    daytype_v0 classification input (holiday day-type reassignments per the
+    2026 NTD Policy Manual p. 156 rule + agency-declared atypical flags).
+
+    A database predating migration 0031 (relation does not exist, SQLSTATE
+    42P01 — the load_policy_settings/load_attestations precedent) returns an
+    empty list after rolling back the failed statement and logging a
+    WARNING: no override can have been declared without the table, so empty
+    is the honest answer — every date classifies by day-of-week, typical.
+    Any other database error propagates unchanged. Refuses (ValueError) an
+    empty or inverted period.
+    """
+    from headway_calc.settings import _is_undefined_table
+
+    _refuse_bad_period(period_start, period_end)
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            _SELECT_SERVICE_DAY_OVERRIDES_SQL, (period_start, period_end)
+        )
+    except Exception as exc:  # noqa: BLE001 — re-raised unless 42P01
+        if not _is_undefined_table(exc):
+            raise
+        conn.rollback()
+        _logger.warning(
+            "app.service_day_overrides does not exist (pre-migration-0031 "
+            "database): no service-day overrides are loadable, so every "
+            "date classifies by day-of-week and every day counts as "
+            "typical. Apply migration 0031 to declare holiday "
+            "reassignments and atypical days."
+        )
+        return []
+    return [
+        ServiceDayOverride(
+            service_date=row[0],
+            assigned_day_type=row[1],
+            atypical=row[2],
+            reason=row[3],
+            updated_by=row[4],
+            updated_at=row[5],
+        )
+        for row in cur.fetchall()
+    ]
 
 
 def load_attestations(

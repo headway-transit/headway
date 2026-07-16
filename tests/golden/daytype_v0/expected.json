@@ -1,0 +1,239 @@
+{
+  "typical_month": {
+    "days_operated": {
+      "weekday": {
+        "value": "2",
+        "unit": "days",
+        "calc_name": "daytype_days_operated_v0",
+        "calc_version": "0.1.0",
+        "input_record_ids": ["p-0202-a", "p-0203-a"],
+        "warning_issue_types": ["daytype_days_unobserved"],
+        "detail": {
+          "day_type": "weekday",
+          "daytype_version": "0.1.0",
+          "days_in_period_of_type": 19,
+          "days_operated": 2,
+          "days_operated_typical": 2,
+          "days_operated_atypical": 0,
+          "operated_dates": ["2026-02-02", "2026-02-03"],
+          "operated_typical_dates": ["2026-02-02", "2026-02-03"],
+          "operated_atypical_dates": [],
+          "unobserved_dates": ["2026-02-04", "2026-02-05", "2026-02-06", "2026-02-09", "2026-02-10", "2026-02-11", "2026-02-12", "2026-02-13", "2026-02-17", "2026-02-18", "2026-02-19", "2026-02-20", "2026-02-23", "2026-02-24", "2026-02-25", "2026-02-26", "2026-02-27"],
+          "atypical_dates": [],
+          "overrides_applied": [],
+          "atypical_flags_declared": true
+        }
+      },
+      "saturday": {
+        "value": "2",
+        "unit": "days",
+        "calc_name": "daytype_days_operated_v0",
+        "calc_version": "0.1.0",
+        "input_record_ids": ["p-0207-a", "p-0214-a"],
+        "warning_issue_types": ["daytype_days_unobserved"],
+        "detail": {
+          "day_type": "saturday",
+          "daytype_version": "0.1.0",
+          "days_in_period_of_type": 4,
+          "days_operated": 2,
+          "days_operated_typical": 1,
+          "days_operated_atypical": 1,
+          "operated_dates": ["2026-02-07", "2026-02-14"],
+          "operated_typical_dates": ["2026-02-07"],
+          "operated_atypical_dates": ["2026-02-14"],
+          "unobserved_dates": ["2026-02-21", "2026-02-28"],
+          "atypical_dates": ["2026-02-14"],
+          "overrides_applied": [
+            {
+              "service_date": "2026-02-14",
+              "assigned_day_type": null,
+              "atypical": true,
+              "reason": "Downtown winter festival - one-time special event service pattern",
+              "updated_by": "certifier",
+              "updated_at": "2026-02-01T00:00:00+00:00"
+            }
+          ],
+          "atypical_flags_declared": true
+        }
+      },
+      "sunday": {
+        "value": "2",
+        "unit": "days",
+        "calc_name": "daytype_days_operated_v0",
+        "calc_version": "0.1.0",
+        "input_record_ids": ["p-0208-a", "p-0216-a"],
+        "warning_issue_types": ["daytype_days_unobserved"],
+        "detail": {
+          "day_type": "sunday",
+          "daytype_version": "0.1.0",
+          "days_in_period_of_type": 5,
+          "days_operated": 2,
+          "days_operated_typical": 2,
+          "days_operated_atypical": 0,
+          "operated_dates": ["2026-02-08", "2026-02-16"],
+          "operated_typical_dates": ["2026-02-08", "2026-02-16"],
+          "operated_atypical_dates": [],
+          "unobserved_dates": ["2026-02-01", "2026-02-15", "2026-02-22"],
+          "atypical_dates": [],
+          "overrides_applied": [
+            {
+              "service_date": "2026-02-16",
+              "assigned_day_type": "sunday",
+              "atypical": false,
+              "reason": "Washington's Birthday - agency operates the Sunday schedule (2026 NTD Policy Manual p. 156 holiday rule)",
+              "updated_by": "certifier",
+              "updated_at": "2026-02-01T00:00:00+00:00"
+            }
+          ],
+          "atypical_flags_declared": true
+        }
+      }
+    },
+    "upt_avg": {
+      "weekday|typical": {
+        "value": "45.00",
+        "unit": "unlinked_passenger_trips_per_day",
+        "calc_name": "daytype_upt_avg_v0",
+        "calc_version": "0.1.0",
+        "input_record_ids": ["r-e1", "r-e3", "r-e5"],
+        "detail": {
+          "day_type": "weekday",
+          "split": "typical",
+          "daytype_version": "0.1.0",
+          "days_in_period_of_type": 19,
+          "days_operated": 2,
+          "dates": ["2026-02-02", "2026-02-03"],
+          "per_day": [
+            {"date": "2026-02-02", "value": "50", "blocked": false, "boardings_counted": 50, "operated_trips": 2, "missing_trips": 0, "factor_applied": "1.000000"},
+            {"date": "2026-02-03", "value": "40", "blocked": false, "boardings_counted": 40, "operated_trips": 1, "missing_trips": 0, "factor_applied": "1.000000"}
+          ],
+          "sum_upt": "90",
+          "average": "45.00",
+          "source_mix": {"tides": 6},
+          "missing_trip_threshold": "0.02",
+          "imbalance_threshold": "0.10",
+          "overrides_applied": [],
+          "atypical_dates": [],
+          "atypical_flags_declared": true
+        }
+      },
+      "saturday|typical": {
+        "value": "25.00",
+        "unit": "unlinked_passenger_trips_per_day",
+        "calc_name": "daytype_upt_avg_v0",
+        "calc_version": "0.1.0",
+        "input_record_ids": ["r-e7"],
+        "detail": {
+          "day_type": "saturday",
+          "split": "typical",
+          "daytype_version": "0.1.0",
+          "days_in_period_of_type": 4,
+          "days_operated": 1,
+          "dates": ["2026-02-07"],
+          "per_day": [
+            {"date": "2026-02-07", "value": "25", "blocked": false, "boardings_counted": 25, "operated_trips": 1, "missing_trips": 0, "factor_applied": "1.000000"}
+          ],
+          "sum_upt": "25",
+          "average": "25.00",
+          "source_mix": {"tides": 2},
+          "missing_trip_threshold": "0.02",
+          "imbalance_threshold": "0.10",
+          "overrides_applied": [
+            {
+              "service_date": "2026-02-14",
+              "assigned_day_type": null,
+              "atypical": true,
+              "reason": "Downtown winter festival - one-time special event service pattern",
+              "updated_by": "certifier",
+              "updated_at": "2026-02-01T00:00:00+00:00"
+            }
+          ],
+          "atypical_dates": ["2026-02-14"],
+          "atypical_flags_declared": true
+        }
+      },
+      "saturday|atypical": {
+        "value": "60.00",
+        "unit": "unlinked_passenger_trips_per_day",
+        "calc_name": "daytype_upt_avg_v0",
+        "calc_version": "0.1.0",
+        "input_record_ids": ["r-e9"],
+        "detail": {
+          "day_type": "saturday",
+          "split": "atypical",
+          "daytype_version": "0.1.0",
+          "days_in_period_of_type": 4,
+          "days_operated": 1,
+          "dates": ["2026-02-14"],
+          "per_day": [
+            {"date": "2026-02-14", "value": "60", "blocked": false, "boardings_counted": 60, "operated_trips": 1, "missing_trips": 0, "factor_applied": "1.000000"}
+          ],
+          "sum_upt": "60",
+          "average": "60.00",
+          "source_mix": {"tides": 2},
+          "missing_trip_threshold": "0.02",
+          "imbalance_threshold": "0.10",
+          "overrides_applied": [
+            {
+              "service_date": "2026-02-14",
+              "assigned_day_type": null,
+              "atypical": true,
+              "reason": "Downtown winter festival - one-time special event service pattern",
+              "updated_by": "certifier",
+              "updated_at": "2026-02-01T00:00:00+00:00"
+            }
+          ],
+          "atypical_dates": ["2026-02-14"],
+          "atypical_flags_declared": true
+        }
+      },
+      "sunday|typical": {
+        "value": "15.00",
+        "unit": "unlinked_passenger_trips_per_day",
+        "calc_name": "daytype_upt_avg_v0",
+        "calc_version": "0.1.0",
+        "input_record_ids": ["r-e11", "r-e13"],
+        "detail": {
+          "day_type": "sunday",
+          "split": "typical",
+          "daytype_version": "0.1.0",
+          "days_in_period_of_type": 5,
+          "days_operated": 2,
+          "dates": ["2026-02-08", "2026-02-16"],
+          "per_day": [
+            {"date": "2026-02-08", "value": "12", "blocked": false, "boardings_counted": 12, "operated_trips": 1, "missing_trips": 0, "factor_applied": "1.000000"},
+            {"date": "2026-02-16", "value": "18", "blocked": false, "boardings_counted": 18, "operated_trips": 1, "missing_trips": 0, "factor_applied": "1.000000"}
+          ],
+          "sum_upt": "30",
+          "average": "15.00",
+          "source_mix": {"tides": 4},
+          "missing_trip_threshold": "0.02",
+          "imbalance_threshold": "0.10",
+          "overrides_applied": [
+            {
+              "service_date": "2026-02-16",
+              "assigned_day_type": "sunday",
+              "atypical": false,
+              "reason": "Washington's Birthday - agency operates the Sunday schedule (2026 NTD Policy Manual p. 156 holiday rule)",
+              "updated_by": "certifier",
+              "updated_at": "2026-02-01T00:00:00+00:00"
+            }
+          ],
+          "atypical_dates": [],
+          "atypical_flags_declared": true
+        }
+      }
+    }
+  },
+  "refused_day": {
+    "weekday_typical_blocking_issue_types": [
+      "daytype_average_over_refused_days",
+      "apc_missing_trips_above_fta_threshold"
+    ],
+    "weekday_days_operated": "1",
+    "weekday_per_day": [
+      {"date": "2026-02-02", "value": null, "blocked": true, "boardings_counted": 10, "operated_trips": 2, "missing_trips": 1, "factor_applied": null}
+    ],
+    "no_operated_day_types": ["saturday", "sunday"]
+  }
+}

@@ -84,6 +84,9 @@ class FakeConn:
         self.sampling_measurements: dict[str, dict] = {}
         # Statistician attestations (handoff 0019 / migration 0029).
         self.attestations: dict[str, dict] = {}
+        # Service-day overrides (handoff 0020 / migration 0031), keyed by
+        # ISO date string.
+        self.service_day_overrides: dict[str, dict] = {}
         self._next_classification_id = 1
         self._next_event_id = 1
         self.executed: list[tuple[str, tuple]] = []
@@ -108,6 +111,7 @@ class FakeConn:
                 self.sampling_draws,
                 self.sampling_measurements,
                 self.attestations,
+                self.service_day_overrides,
                 self._next_classification_id,
                 self._next_event_id,
             )
@@ -130,6 +134,7 @@ class FakeConn:
                 self.sampling_draws,
                 self.sampling_measurements,
                 self.attestations,
+                self.service_day_overrides,
                 self._next_classification_id,
                 self._next_event_id,
             ) = snapshot
@@ -473,6 +478,89 @@ class FakeConn:
                     )
                     for k in rows
                 ]
+            )
+
+        # -- agency workbook latest rows (handoff 0020) ----------------------
+        if q.startswith(
+            "SELECT DISTINCT ON (metric, scope) metric, scope, metric_value_id"
+        ):
+            period_start, period_end = params
+            wanted = (
+                "upt", "upt_avg", "days_operated", "voms", "otp",
+                "headway_adherence",
+            )
+            candidates = [
+                r
+                for r in self.metric_values.values()
+                if r["period_start"] == period_start
+                and r["period_end"] == period_end
+                and r["metric"] in wanted
+            ]
+            latest: dict[tuple, dict] = {}
+            # Newest computed_at wins (metric_value_id tie-break) — the
+            # DISTINCT ON the app's SQL does.
+            for r in sorted(
+                candidates,
+                key=lambda r: (r["computed_at"], str(r["metric_value_id"])),
+            ):
+                latest[(r["metric"], r["scope"])] = r
+            return FakeCursor(
+                [
+                    (
+                        r["metric"], r["scope"], r["metric_value_id"],
+                        r["value"], r["unit"], r["calc_name"],
+                        r["calc_version"], r["certification_status"],
+                        r["category"], r["detail"],
+                    )
+                    for _k, r in sorted(latest.items())
+                ]
+            )
+
+        # -- service-day overrides (handoff 0020 / migration 0031) ----------
+        if q.startswith("SELECT service_date, assigned_day_type, atypical"):
+            rows = sorted(
+                self.service_day_overrides.values(),
+                key=lambda o: o["service_date"],
+            )
+            if "WHERE service_date >= %s AND service_date < %s" in q:
+                rows = [
+                    o for o in rows
+                    if params[0] <= o["service_date"] < params[1]
+                ]
+            elif "WHERE service_date = %s" in q:
+                rows = [o for o in rows if o["service_date"] == params[0]]
+            return FakeCursor(
+                [
+                    (
+                        o["service_date"], o["assigned_day_type"],
+                        o["atypical"], o["reason"], o["updated_by"],
+                        o["updated_at"],
+                    )
+                    for o in rows
+                ]
+            )
+
+        if q.startswith("INSERT INTO app.service_day_overrides"):
+            service_date, assigned, atypical, reason, updated_by = params
+            # The migration-0031 CHECKs, honestly modeled by the fake.
+            assert assigned in (None, "weekday", "saturday", "sunday")
+            assert assigned is not None or atypical
+            assert reason.strip()
+            row = {
+                "service_date": service_date,
+                "assigned_day_type": assigned,
+                "atypical": atypical,
+                "reason": reason,
+                "updated_by": updated_by,
+                "updated_at": dt.datetime.now(UTC),
+            }
+            self.service_day_overrides[service_date.isoformat()] = row
+            return FakeCursor([(row["updated_at"],)])
+
+        if q.startswith("DELETE FROM app.service_day_overrides"):
+            row = self.service_day_overrides.pop(params[0].isoformat(), None)
+            return FakeCursor(
+                [] if row is None else [(row["service_date"],)]
             )
 
         # -- per-agency settings (migration 0014) ----------------------------
@@ -993,6 +1081,21 @@ class FakeConn:
         mv.update(overrides)
         self.metric_values[mv["metric_value_id"]] = mv
         return mv
+
+    def add_service_day_override(self, service_date, *, assigned_day_type=None,
+                                 atypical=False, reason="declared for test",
+                                 updated_by="certifier"):
+        """Seed an app.service_day_overrides row (handoff 0020)."""
+        row = {
+            "service_date": service_date,
+            "assigned_day_type": assigned_day_type,
+            "atypical": atypical,
+            "reason": reason,
+            "updated_by": updated_by,
+            "updated_at": dt.datetime(2026, 7, 1, 12, 0, tzinfo=UTC),
+        }
+        self.service_day_overrides[service_date.isoformat()] = row
+        return row
 
     def add_dq_issue(self, **overrides):
         issue = {

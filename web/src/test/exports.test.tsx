@@ -12,7 +12,7 @@
  */
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
   expectNoAxeViolations,
@@ -212,7 +212,14 @@ describe("MR-20 section — server export control", () => {
     await user.click(screen.getByRole("button", { name: "MR-20 package" }));
     await screen.findByText(mr20Package.banner);
 
-    await user.click(screen.getByRole("button", { name: /Download CSV/ }));
+    // Scoped to the MR-20 control's group: the monthly agency workbook
+    // control (handoff 0020) also offers a CSV button on this page.
+    const mr20Control = screen.getByRole("group", {
+      name: "Download the MR-20 package as a spreadsheet",
+    });
+    await user.click(
+      within(mr20Control).getByRole("button", { name: /Download CSV/ }),
+    );
     await waitFor(() => expect(blobs).toHaveLength(1));
 
     const call = calls.find((c) => c.path === "/reports/mr20/export");
@@ -226,6 +233,107 @@ describe("MR-20 section — server export control", () => {
     expect(screen.getByRole("log")).toHaveTextContent(
       "Download ready: headway-mr20-preview.csv",
     );
+    await expectNoAxeViolations();
+  });
+});
+
+describe("/reports/monthly — monthly agency workbook export control (handoff 0020, CONTRACT-AHEAD)", () => {
+  // Built and MOCK-TESTED against the handoff-0020 contract
+  // (GET /reports/agency-workbook?month=&format=) while the backend lands
+  // the endpoint in a parallel wave. Reconcile against the regenerated
+  // openapi.json when it appears; until then the live server's refusal
+  // renders verbatim at the control (the error test below is that path).
+  function mockReport(workbookHandler: RouteHandler) {
+    return mockApi({
+      "GET /metrics/values": { status: 200, body: [] },
+      "GET /reports/agency-workbook": workbookHandler,
+    });
+  }
+
+  it("downloads the month's workbook (XLSX) with the picked month, saves the served bytes, and confirms via the toast region", async () => {
+    signInAs("viewer");
+    const calls = mockReport(
+      exportRoute("headway-agency-workbook-2026-06.xlsx", XLSX_BODY),
+    );
+    const { blobs, filenames } = captureSaves();
+    const user = userEvent.setup();
+    renderApp("/reports/monthly");
+
+    // The control sits with the month picker and states what the file is
+    // — provenance ids per cell, absences stated, never invented.
+    const control = await screen.findByRole("group", {
+      name: "Download the monthly agency workbook",
+    });
+    expect(control).toHaveTextContent(
+      "A figure Headway has not computed is stated as absent — never invented, never zero-filled.",
+    );
+
+    await user.click(
+      within(control).getByRole("button", {
+        name: /Download XLSX \(Excel\)/,
+      }),
+    );
+    await waitFor(() => expect(blobs).toHaveLength(1));
+
+    const call = calls.find((c) => c.path === "/reports/agency-workbook");
+    expect(call).toBeDefined();
+    const params = new URL(call!.url, "http://test").searchParams;
+    expect(params.get("format")).toBe("xlsx");
+    // The picked month, as YYYY-MM (the view defaults to last month).
+    expect(params.get("month")).toMatch(/^\d{4}-\d{2}$/);
+    expect(call!.headers.Authorization).toBe("Bearer test-token");
+    expect(await blobs[0].text()).toBe(XLSX_BODY);
+    expect(filenames).toEqual(["headway-agency-workbook-2026-06.xlsx"]);
+    expect(screen.getByRole("log")).toHaveTextContent(
+      "Download ready: headway-agency-workbook-2026-06.xlsx",
+    );
+    await expectNoAxeViolations();
+  });
+
+  it("downloads the CSV variant via the same grid (format=csv)", async () => {
+    signInAs("viewer");
+    const calls = mockReport(
+      exportRoute("headway-agency-workbook-2026-06.csv", CSV_BODY),
+    );
+    const { blobs, filenames } = captureSaves();
+    const user = userEvent.setup();
+    renderApp("/reports/monthly");
+
+    const control = await screen.findByRole("group", {
+      name: "Download the monthly agency workbook",
+    });
+    await user.click(
+      within(control).getByRole("button", { name: /Download CSV/ }),
+    );
+    await waitFor(() => expect(blobs).toHaveLength(1));
+
+    const call = calls.find((c) => c.path === "/reports/agency-workbook");
+    expect(
+      new URL(call!.url, "http://test").searchParams.get("format"),
+    ).toBe("csv");
+    expect(await blobs[0].text()).toBe(CSV_BODY);
+    expect(filenames).toEqual(["headway-agency-workbook-2026-06.csv"]);
+  });
+
+  it("shows the server's refusal verbatim — the honest state while the endpoint has not landed", async () => {
+    signInAs("viewer");
+    mockReport({ status: 404, body: { detail: "Not Found" } });
+    const { blobs } = captureSaves();
+    const user = userEvent.setup();
+    renderApp("/reports/monthly");
+
+    const control = await screen.findByRole("group", {
+      name: "Download the monthly agency workbook",
+    });
+    await user.click(
+      within(control).getByRole("button", { name: /Download CSV/ }),
+    );
+
+    expect(await within(control).findByRole("alert")).toHaveTextContent(
+      "Not Found",
+    );
+    expect(blobs).toHaveLength(0);
+    expect(screen.getByRole("log")).not.toHaveTextContent("Download ready");
     await expectNoAxeViolations();
   });
 });

@@ -1,11 +1,21 @@
 import { useEffect, useId, useState } from "react";
 import type { FormEvent } from "react";
-import { ApiError, listDqIssues, resolveDqIssue } from "../api/client";
-import type { DqIssue } from "../api/types";
+import { Link } from "react-router-dom";
+import {
+  ApiError,
+  attestDqIssue,
+  listAttestations,
+  listDqIssues,
+  resolveDqIssue,
+} from "../api/client";
+import type { AttestationRecord, DqIssue } from "../api/types";
 import { canResolveDqIssues, useSession } from "../auth/session";
+import { Modal } from "../components/Modal";
+import { QuoteFigure } from "../components/QuoteFigure";
 import { SeverityIcon } from "../components/SeverityIcon";
 import { SummaryCards } from "../components/SummaryCards";
 import { copy } from "../copy";
+import { quoteContaining } from "../regulatory/quotes";
 import { pushToast } from "../toasts";
 
 /**
@@ -62,6 +72,15 @@ export function DqView() {
     );
     // The shell-wide confirmation pattern (handoff 0017 #4).
     pushToast(copy.dq.resolveSuccess(updated.title));
+  };
+
+  const handleAttested = (updated: DqIssue) => {
+    setIssues(
+      (prev) =>
+        prev?.map((i) => (i.issue_id === updated.issue_id ? updated : i)) ??
+        null,
+    );
+    pushToast(copy.dq.attest.success(updated.title));
   };
 
   const mayResolve = canResolveDqIssues(session);
@@ -206,6 +225,7 @@ export function DqView() {
                     issue={issue}
                     mayResolve={mayResolve}
                     onResolved={handleResolved}
+                    onAttested={handleAttested}
                   />
                 ))}
               </ul>
@@ -280,13 +300,30 @@ function SeverityBadge({ severity }: { severity: string }) {
   );
 }
 
+/**
+ * The one issue class with a statistician cure (handoff 0019): the calc's
+ * p. 146 refusal — more than 2% of trips missing passenger counts. The
+ * server enforces the same wall on POST /dq/issues/{id}/attest (any other
+ * type is a 409 quoting the p. 149 no-smaller-sample rule); this constant
+ * only decides where the affordance is OFFERED.
+ */
+const ATTESTABLE_ISSUE_TYPE = "apc_missing_trips_above_fta_threshold";
+
+/** The p. 146 statistician sentence — the existing quote map (upt_v0 is
+ *  the tracker's home for the rule), the AttestationsView discipline. */
+const STATISTICIAN_QUOTE = quoteContaining(
+  "upt_v0",
+  "qualified statistician approve the factoring method",
+);
+
 interface IssueCardProps {
   issue: DqIssue;
   mayResolve: boolean;
   onResolved: (updated: DqIssue) => void;
+  onAttested: (updated: DqIssue) => void;
 }
 
-function IssueCard({ issue, mayResolve, onResolved }: IssueCardProps) {
+function IssueCard({ issue, mayResolve, onResolved, onAttested }: IssueCardProps) {
   const headingId = useId();
   const isBlocking = issue.severity === "blocking";
   // Two closed states (migration 0029): 'resolved', and 'attested' — the
@@ -340,10 +377,175 @@ function IssueCard({ issue, mayResolve, onResolved }: IssueCardProps) {
           )}
         </dl>
         {mayResolve && !isClosed && (
-          <ResolveForm issue={issue} onResolved={onResolved} />
+          <>
+            <ResolveForm issue={issue} onResolved={onResolved} />
+            {/* The attest closure (handoff 0019 follow-up): offered ONLY
+                on the p. 146 refusal class — the one gap a recorded
+                statistician approval can close. Same role gate as
+                resolving (data_steward+), mirroring the API exactly. */}
+            {issue.issue_type === ATTESTABLE_ISSUE_TYPE && (
+              <AttestControl issue={issue} onAttested={onAttested} />
+            )}
+          </>
         )}
       </article>
     </li>
+  );
+}
+
+interface AttestControlProps {
+  issue: DqIssue;
+  onAttested: (updated: DqIssue) => void;
+}
+
+/**
+ * The attest action: a button opening a plain-language dialog (house Modal
+ * — APG dialog pattern) that explains what attestation means, quotes the
+ * p. 146 rule VERBATIM via the existing quote map, and offers ONLY the
+ * standing (unrevoked) attestations already on record to pick from. The
+ * server builds the resolution text and enforces every wall (issue type,
+ * scope match, revocation) — its refusals render here word for word.
+ */
+function AttestControl({ issue, onAttested }: AttestControlProps) {
+  const titleId = useId();
+  const pickId = useId();
+  const pickHintId = useId();
+  const [open, setOpen] = useState(false);
+  const [attestations, setAttestations] = useState<
+    AttestationRecord[] | null
+  >(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [picked, setPicked] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  const handleOpen = () => {
+    setOpen(true);
+    setPicked("");
+    setError(null);
+    setLoadError(null);
+    setAttestations(null);
+    // Fetched on open so the dialog always offers the CURRENT record.
+    listAttestations()
+      .then(setAttestations)
+      .catch((err) =>
+        setLoadError(err instanceof ApiError ? err.message : String(err)),
+      );
+  };
+
+  const handleSubmit = async (event: FormEvent) => {
+    event.preventDefault();
+    if (picked === "") {
+      setError(copy.dq.attest.pickRequired);
+      return;
+    }
+    setError(null);
+    setSubmitting(true);
+    try {
+      const response = await attestDqIssue(issue.issue_id, {
+        attestation_id: picked,
+      });
+      setOpen(false);
+      onAttested({
+        ...issue,
+        status: response.status,
+        resolved_at: response.resolved_at,
+        resolution: response.resolution,
+      });
+    } catch (err) {
+      // The server's refusal (wrong type, revoked attestation, scope
+      // mismatch, already closed), verbatim — never softened.
+      setError(err instanceof ApiError ? err.message : String(err));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // Revoked attestations stay on the /attestations record but are never
+  // offered here — the server would refuse them (409), so offering one
+  // would promise an action that cannot succeed.
+  const standing = (attestations ?? []).filter((a) => a.revoked_at === null);
+
+  return (
+    <>
+      <button type="button" onClick={handleOpen}>
+        {copy.dq.attest.button(issue.title)}
+      </button>
+      {open && (
+        <Modal titleId={titleId} onClose={() => setOpen(false)}>
+          <h2 id={titleId}>{copy.dq.attest.dialogHeading}</h2>
+          {/* Plain-language framing; the RULE renders verbatim below it —
+              the lead-in never stands alone (the house discipline). */}
+          <p>{copy.dq.attest.intro}</p>
+          <QuoteFigure
+            quote={STATISTICIAN_QUOTE}
+            missingMessage={copy.receipt.attested.quoteMissing("upt_v0")}
+          />
+          {error && (
+            <div role="alert" className="alert">
+              {error}
+            </div>
+          )}
+          {loadError && (
+            <div role="alert" className="alert">
+              {loadError}
+            </div>
+          )}
+          {!attestations && !loadError && (
+            <p>{copy.dq.attest.loadingAttestations}</p>
+          )}
+          {attestations && standing.length === 0 && (
+            <>
+              <p className="banner">{copy.dq.attest.noneAvailable}</p>
+              <p>
+                <Link to="/attestations">
+                  {copy.dq.attest.attestationsLink}
+                </Link>
+              </p>
+            </>
+          )}
+          {attestations && standing.length > 0 && (
+            <form onSubmit={handleSubmit}>
+              <label htmlFor={pickId}>{copy.dq.attest.pickLabel}</label>
+              <p id={pickHintId} className="field-hint">
+                {copy.dq.attest.pickHint}
+              </p>
+              <select
+                id={pickId}
+                aria-describedby={pickHintId}
+                value={picked}
+                onChange={(e) => setPicked(e.target.value)}
+              >
+                <option value="">—</option>
+                {standing.map((a) => (
+                  <option key={a.attestation_id} value={a.attestation_id}>
+                    {copy.dq.attest.optionLabel(
+                      a.attestation_id,
+                      a.statistician_name,
+                      a.metric,
+                      a.scope_pattern,
+                      a.period_start,
+                      a.period_end,
+                    )}
+                  </option>
+                ))}
+              </select>
+              <p>
+                <Link to="/attestations">
+                  {copy.dq.attest.attestationsLink}
+                </Link>
+              </p>
+              <button type="submit" className="primary" disabled={submitting}>
+                {copy.dq.attest.submit}
+              </button>{" "}
+              <button type="button" onClick={() => setOpen(false)}>
+                {copy.dq.attest.cancel}
+              </button>
+            </form>
+          )}
+        </Modal>
+      )}
+    </>
   );
 }
 

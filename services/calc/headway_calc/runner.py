@@ -51,7 +51,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 
 from headway_calc._blocks import LAYOVER_MAX_SECONDS
@@ -101,6 +101,9 @@ from headway_calc.vrm import compute_vrm
 #: The fleet-wide scope value (the computed.metric_values.scope column
 #: default, handoff 0001).
 SCOPE_AGENCY = "agency"
+
+#: One service day — the daytype runner's per-day attestation window.
+_ONE_DAY = timedelta(days=1)
 
 #: Demand Response scopes (handoff 0013): DR figures are inherently
 #: mode-level (they come from dispatch trips, not the GTFS-RT fleet), so
@@ -1050,6 +1053,298 @@ def run_ops_period(
         routes_below_min_sample=thin_routes,
         outcomes=tuple(outcomes),
         run_info_ids=run_info_ids,
+    )
+
+
+@dataclass(frozen=True)
+class DaytypeRunReport:
+    """Immutable report of one run_daytype_period execution (handoff 0020).
+
+    The day-type sibling of RunReport: daytype_days_operated_v0 +
+    daytype_upt_avg_v0 outcomes only (NTD category — they feed NTD figures;
+    tracker rows daytype_*). ``classification`` is the daytype_v0 0.1.0
+    verdict per date ({iso_date: {day_type, atypical, override}}) — the run's
+    calendar evidence; ``threshold_sources`` carries the two knobs this run
+    resolves (missing_trip_threshold via the app.settings precedence,
+    imbalance_threshold explicit-or-default).
+    """
+
+    period_start: date
+    period_end: date
+    missing_trip_threshold: Decimal
+    imbalance_threshold: Decimal
+    threshold_sources: dict[str, str]
+    positions_loaded: int
+    passenger_events_loaded: int
+    overrides_loaded: int
+    attestations_loaded: int
+    classification: dict[str, dict]
+    outcomes: tuple[MetricOutcome, ...]
+    per_mode: bool = False
+    daytype_name: str = "daytype_v0"
+    daytype_version: str = "0.1.0"
+
+    @property
+    def persisted_count(self) -> int:
+        return sum(1 for o in self.outcomes if o.persisted)
+
+    @property
+    def blocked_count(self) -> int:
+        return sum(1 for o in self.outcomes if not o.persisted)
+
+    def to_dict(self) -> dict:
+        return {
+            "period_start": self.period_start.isoformat(),
+            "period_end": self.period_end.isoformat(),
+            "period_convention": "half-open [period_start, period_end), UTC",
+            "daytype_name": self.daytype_name,
+            "daytype_version": self.daytype_version,
+            "missing_trip_threshold": str(self.missing_trip_threshold),
+            "imbalance_threshold": str(self.imbalance_threshold),
+            "threshold_sources": dict(self.threshold_sources),
+            "positions_loaded": self.positions_loaded,
+            "passenger_events_loaded": self.passenger_events_loaded,
+            "overrides_loaded": self.overrides_loaded,
+            "attestations_loaded": self.attestations_loaded,
+            "per_mode": self.per_mode,
+            "classification": {k: dict(v) for k, v in self.classification.items()},
+            "persisted_count": self.persisted_count,
+            "blocked_count": self.blocked_count,
+            "metrics": [o.to_dict() for o in self.outcomes],
+        }
+
+    def to_json(self) -> str:
+        return json.dumps(self.to_dict(), indent=2)
+
+
+def run_daytype_period(
+    conn,
+    period_start: date,
+    period_end: date,
+    missing_trip_threshold: Decimal | float | str | None = None,
+    imbalance_threshold: Decimal | float | str | None = None,
+    read_settings: bool = True,
+    per_mode: bool = False,
+) -> DaytypeRunReport:
+    """Run the DAY-TYPE calcs — daytype_days_operated_v0 and
+    daytype_upt_avg_v0 over one half-open period (handoff 0020;
+    ``python -m headway_calc.runner --daytype``).
+
+    A deliberately SEPARATE entry point (the run_ops_period precedent): the
+    day-type figures re-run upt_v0 per day, so folding them into run_period
+    would change existing runs' dq output; a separate run keeps the default
+    path byte-stable. Two-transaction fail-loudly-first design as always.
+
+    Pipeline: resolve missing_trip_threshold (explicit > app.settings row >
+    code default — the run_period precedence; imbalance_threshold is
+    explicit-or-default, not a settings knob) → load positions, passenger
+    events, service-day overrides (app.service_day_overrides, migration
+    0031; a pre-0031 database loads none — day-of-week, all typical) and
+    statistician attestations → classify every date (daytype_v0 0.1.0) →
+    compute Days Operated per day type (scope 'daytype:<type>') and average
+    UPT per day type and split (scope 'daytype:<type>'[':atypical'];
+    per-mode 'mode:<mode>:daytype:<type>'[':atypical'] with per_mode=True)
+    → route EVERY finding to dq.issues (category 'ntd' — these feed NTD
+    figures) → persist non-blocked results.
+
+    Attestations: each per-day upt_v0 computation receives the attestations
+    applicable to ITS result's persistence scope over that day's [d, d+1)
+    (headway_calc.attestation.applicable_attestations) — an agency attests
+    metric 'upt' with a scope_pattern matching the daytype scopes (e.g.
+    'daytype:*'). Refusal discipline is inherited: a >2% day without one
+    refuses, and the day-type average over it refuses with the same
+    receipts.
+    """
+    from headway_calc.daytype import (
+        DAYS_OPERATED_CALC_NAME,
+        UPT_AVG_CALC_NAME,
+        classify_days,
+        compute_days_operated,
+        compute_daytype_upt_avg,
+        compute_daytype_upt_avg_by_mode,
+        scope_for_daytype,
+    )
+    from headway_calc.reader import load_service_day_overrides
+
+    settings = load_policy_settings(conn) if read_settings else None
+    (
+        _gap,
+        _cov,
+        _layover,
+        missing_threshold,
+        imbal_threshold,
+        all_sources,
+    ) = _resolve_ntd_thresholds(
+        settings, None, None, None, missing_trip_threshold, imbalance_threshold
+    )
+    sources = {
+        "missing_trip_threshold": all_sources["missing_trip_threshold"],
+        "imbalance_threshold": all_sources["imbalance_threshold"],
+    }
+
+    positions = load_vehicle_positions(conn, period_start, period_end)
+    passenger_events = load_passenger_events(conn, period_start, period_end)
+    overrides = load_service_day_overrides(conn, period_start, period_end)
+    attestations = load_attestations(conn, period_start, period_end)
+
+    def _attestations_for_scope_day(scope: str, d: date):
+        # The calc hands over each result's OWN persistence scope (e.g.
+        # 'daytype:weekday', 'mode:bus:daytype:saturday:atypical') and the
+        # day; matching is the pure applicable_attestations over [d, d+1) —
+        # an attestation never leaks across scopes or days it doesn't cover.
+        return applicable_attestations(
+            attestations, "upt", scope, d, d + _ONE_DAY
+        )
+
+    scoped_results: list[tuple[str, CalcResult]] = [
+        (scope_for_daytype(day_type), result)
+        for day_type, result in compute_days_operated(
+            positions, period_start, period_end, overrides
+        ).items()
+    ]
+    agency_avgs = compute_daytype_upt_avg(
+        passenger_events,
+        positions,
+        period_start,
+        period_end,
+        overrides,
+        missing_trip_threshold=missing_threshold,
+        imbalance_threshold=imbal_threshold,
+        attestations_for_day=_attestations_for_scope_day,
+    )
+    for (day_type, split), result in agency_avgs.items():
+        scoped_results.append((scope_for_daytype(day_type, split), result))
+    if per_mode:
+        mode_avgs = compute_daytype_upt_avg_by_mode(
+            passenger_events,
+            positions,
+            period_start,
+            period_end,
+            overrides,
+            missing_trip_threshold=missing_threshold,
+            imbalance_threshold=imbal_threshold,
+            attestations_for_day=_attestations_for_scope_day,
+        )
+        for (bucket, day_type, split), result in mode_avgs.items():
+            scoped_results.append(
+                (scope_for_daytype(day_type, split, mode_bucket=bucket), result)
+            )
+
+    # Transaction 1 — fail-loudly-first (the run_period design): every
+    # finding committed before any value.
+    info_ids_by_key: dict[tuple[str, str], tuple[str, ...]] = {}
+    warning_ids_by_key: dict[tuple[str, str], tuple[str, ...]] = {}
+    blocking_ids_by_key: dict[tuple[str, str], tuple[str, ...]] = {}
+    routed_any = False
+    for scope, result in scoped_results:
+        findings = (
+            list(result.infos) + list(result.warnings) + list(result.blocking_issues)
+        )
+        if findings:
+            issue_ids = route_findings(
+                conn,
+                findings,
+                result.calc_name,
+                result.calc_version,
+                period_start,
+                period_end,
+                scope=scope,
+            )
+            routed_any = True
+            key = (result.calc_name, scope)
+            n_infos = len(result.infos)
+            n_warnings = len(result.warnings)
+            info_ids_by_key[key] = tuple(issue_ids[:n_infos])
+            warning_ids_by_key[key] = tuple(
+                issue_ids[n_infos : n_infos + n_warnings]
+            )
+            blocking_ids_by_key[key] = tuple(issue_ids[n_infos + n_warnings :])
+    if routed_any:
+        conn.commit()
+
+    # Transaction 2 — values for non-blocked results only.
+    outcomes: list[MetricOutcome] = []
+    persisted_any = False
+    try:
+        for scope, result in scoped_results:
+            detail = None if result.detail is None else result.detail.to_dict()
+            key = (result.calc_name, scope)
+            info_ids = info_ids_by_key.get(key, ())
+            warning_ids = warning_ids_by_key.get(key, ())
+            blocking_ids = blocking_ids_by_key.get(key, ())
+            if result.blocking_issues:
+                outcomes.append(
+                    MetricOutcome(
+                        calc_name=result.calc_name,
+                        calc_version=result.calc_version,
+                        metric=_METRIC_BY_CALC_NAME[result.calc_name],
+                        unit=result.unit,
+                        value=None,
+                        metric_value_id=None,
+                        routed_blocking_ids=blocking_ids,
+                        routed_warning_ids=warning_ids,
+                        routed_info_ids=info_ids,
+                        detail=detail,
+                        scope=scope,
+                    )
+                )
+            else:
+                metric_value_id = persist_result(
+                    conn, result, period_start, period_end, scope=scope
+                )
+                persisted_any = True
+                outcomes.append(
+                    MetricOutcome(
+                        calc_name=result.calc_name,
+                        calc_version=result.calc_version,
+                        metric=_METRIC_BY_CALC_NAME[result.calc_name],
+                        unit=result.unit,
+                        value=str(result.value),
+                        metric_value_id=metric_value_id,
+                        routed_blocking_ids=(),
+                        routed_warning_ids=warning_ids,
+                        routed_info_ids=info_ids,
+                        detail=detail,
+                        scope=scope,
+                    )
+                )
+        if persisted_any:
+            conn.commit()
+    except BaseException:
+        conn.rollback()
+        raise
+
+    classification = {
+        d.isoformat(): {
+            "day_type": cls.day_type,
+            "atypical": cls.atypical,
+            "override": cls.override is not None,
+        }
+        for d, cls in classify_days(
+            period_start, period_end, overrides
+        ).items()
+    }
+
+    # Deterministic sanity (the run_ops_period precedent): exactly the two
+    # day-type calcs ran — nothing else joins a daytype run.
+    assert {r.calc_name for _s, r in scoped_results} <= {
+        DAYS_OPERATED_CALC_NAME,
+        UPT_AVG_CALC_NAME,
+    }
+
+    return DaytypeRunReport(
+        period_start=period_start,
+        period_end=period_end,
+        missing_trip_threshold=missing_threshold,
+        imbalance_threshold=imbal_threshold,
+        threshold_sources=sources,
+        positions_loaded=len(positions),
+        passenger_events_loaded=len(passenger_events),
+        overrides_loaded=len(overrides),
+        attestations_loaded=len(attestations),
+        classification=classification,
+        outcomes=tuple(outcomes),
+        per_mode=per_mode,
     )
 
 

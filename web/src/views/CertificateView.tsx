@@ -27,6 +27,7 @@ import type {
   VerificationResult,
 } from "../api/types";
 import { Breadcrumbs } from "../components/Breadcrumbs";
+import { VerificationVerdict } from "../components/VerificationVerdict";
 import { copy } from "../copy";
 
 function metricLabel(code: string): string {
@@ -35,45 +36,6 @@ function metricLabel(code: string): string {
 
 function unitLabel(code: string): string {
   return copy.unitLabels[code] ?? code;
-}
-
-/**
- * One verification verdict, rendered with the server's message VERBATIM.
- * verified = status (success tokens); failed = alert (danger tokens);
- * key_mismatch = alert (warning tokens — honestly inconclusive, per the
- * server's own message); unsigned_legacy = plain banner (an honest gap,
- * not a failure).
- */
-function Verdict({ result }: { result: VerificationResult }) {
-  if (result.verdict === "verified") {
-    return (
-      <div role="status" className="status certificate-verified">
-        <p>
-          <strong>{copy.certificate.verifiedLead}</strong> {result.message}
-        </p>
-      </div>
-    );
-  }
-  if (result.verdict === "unsigned_legacy") {
-    return <p className="banner">{result.message}</p>;
-  }
-  if (result.verdict === "key_mismatch") {
-    return (
-      <div role="alert" className="alert certificate-mismatch">
-        <p>
-          <strong>{copy.certificate.mismatchLead}</strong> {result.message}
-        </p>
-      </div>
-    );
-  }
-  // 'failed' and any verdict this UI does not know: LOUD, verbatim.
-  return (
-    <div role="alert" className="alert certificate-failed">
-      <p>
-        <strong>{copy.certificate.failedLead}</strong> {result.message}
-      </p>
-    </div>
-  );
 }
 
 export function CertificateView() {
@@ -125,7 +87,9 @@ export function CertificateView() {
     <>
       <Breadcrumbs
         trail={[
-          { label: copy.certificate.crumbCertify, to: "/certify" },
+          // The index room (the small follow-up recorded in handoff 0019's
+          // evidence): list -> certificate.
+          { label: copy.certificate.crumbList, to: "/certifications" },
           { label: copy.certificate.crumbSelf(id ?? "") },
         ]}
       />
@@ -165,7 +129,7 @@ export function CertificateView() {
             <p>{copy.certificate.signedAt(certificate.certified_at)}</p>
 
             {/* The server's on-load verification verdict, verbatim. */}
-            <Verdict result={certificate.verification} />
+            <VerificationVerdict result={certificate.verification} />
 
             {certificate.signed && (
               <>
@@ -198,7 +162,9 @@ export function CertificateView() {
                 {recheck.kind === "running" && (
                   <p role="status">{copy.certificate.verifying}</p>
                 )}
-                {recheck.kind === "done" && <Verdict result={recheck.result} />}
+                {recheck.kind === "done" && (
+                  <VerificationVerdict result={recheck.result} />
+                )}
                 {recheck.kind === "error" && (
                   <div role="alert" className="alert certificate-failed">
                     <p>

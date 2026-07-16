@@ -779,3 +779,29 @@ def test_certification_signature_columns_all_or_none_append_only():
     # file only, never this database, never the repository.
     assert "HEADWAY_SIGNING_KEY" in sql
     assert "NEVER in this database" in sql
+
+
+def test_service_day_overrides_validated_and_meaningful():
+    # Handoff 0020 / migration 0031: the agency's audited day-type calendar
+    # declarations (holiday reassignments + atypical flags).
+    sql = (MIGRATIONS_DIR / "0031_service_day_overrides.sql").read_text(
+        encoding="utf-8"
+    )
+    assert "CREATE TABLE app.service_day_overrides" in sql
+    assert "service_date       DATE PRIMARY KEY" in sql
+    # The day-type vocabulary is CHECK-constrained to the p. 155 schedule
+    # types; a row that neither reassigns nor flags is unrepresentable; the
+    # reason is required and non-blank.
+    assert "service_day_overrides_day_type_vocabulary" in sql
+    assert "('weekday', 'saturday', 'sunday')" in sql
+    assert "service_day_overrides_meaningful" in sql
+    assert "assigned_day_type IS NOT NULL OR atypical" in sql
+    assert "service_day_overrides_reason_not_blank" in sql
+    # Audited-surface attribution columns (the app.settings pattern) and the
+    # documented design decision (table over settings rows; mutable with
+    # audit because every consuming figure snapshots the governing row).
+    assert "updated_by" in sql and "updated_at" in sql
+    assert "WHY A TABLE, NOT app.settings ROWS" in sql
+    assert "MUTABLE-WITH-AUDIT" in sql
+    # Regulatory basis is cited, never asserted from memory.
+    assert "p. 156" in sql and "REGULATORY_TRACKER.md" in sql

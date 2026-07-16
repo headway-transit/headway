@@ -11,6 +11,8 @@
 
 import { clearSession, getSession } from "../auth/session";
 import type {
+  AttestRequest,
+  AttestResponse,
   AttestationCreated,
   AttestationRecord,
   AttestationRequest,
@@ -19,6 +21,7 @@ import type {
   Branding,
   CertificationCertificate,
   CertificationIntent,
+  CertificationRecord,
   CertificationRequest,
   CertificationResponse,
   VerificationResult,
@@ -236,6 +239,16 @@ export function getCertificationIntent(): Promise<CertificationIntent> {
 }
 
 /**
+ * GET /certifications — every certification record, oldest first (any
+ * signed-in role). Legacy (pre-signature) records come back with
+ * signed=false and null signer fields — rendered honestly, never
+ * backfilled. The index room (/certifications) lists exactly this.
+ */
+export function listCertifications(): Promise<CertificationRecord[]> {
+  return request<CertificationRecord[]>("GET", "/certifications");
+}
+
+/**
  * GET /certifications/{id} — the certificate: the record, the raw signed
  * bytes, the parsed canonical document, and a LIVE verification result
  * the server computes on every read. Rendered verbatim by the UI.
@@ -319,6 +332,25 @@ export function listPublicCertifiedValues(): Promise<PublicMetricValue[]> {
   });
 }
 
+/**
+ * GET /public/certifications/{id}/verify — the PUBLIC tamper-evidence
+ * check (handoff 0019, designs 6–7): the server re-verifies the stored
+ * certificate bytes against the stored Ed25519 signature and returns the
+ * verdict. UNAUTHENTICATED by design (no token is ever sent), rate-limited
+ * per client IP, and the payload never carries the certifier's identity.
+ * The UI renders the verdict verbatim, verified or FAILED — never softened.
+ */
+export function publicVerifyCertification(
+  certificationId: string,
+): Promise<VerificationResult> {
+  return request<VerificationResult>(
+    "GET",
+    `/public/certifications/${encodeURIComponent(certificationId)}/verify`,
+    undefined,
+    { auth: false },
+  );
+}
+
 export function listDqIssues(status?: string): Promise<DqIssue[]> {
   const qs = status ? `?${new URLSearchParams({ status })}` : "";
   return request<DqIssue[]>("GET", `/dq/issues${qs}`);
@@ -352,6 +384,25 @@ export function resolveDqIssue(
   return request<ResolveResponse>(
     "POST",
     `/dq/issues/${encodeURIComponent(issueId)}/resolve`,
+    body,
+  );
+}
+
+/**
+ * POST /dq/issues/{id}/attest (data_steward+ — the same rule as every
+ * resolution, enforced server-side; audited). Closes ONE p. 146 refusal
+ * issue under a RECORDED statistician attestation, to the explicit
+ * 'attested' state (migration 0029). The server refuses any other issue
+ * type loudly (no other gap has a statistician cure), refuses revoked
+ * attestations, and builds the resolution text itself from the record.
+ */
+export function attestDqIssue(
+  issueId: string,
+  body: AttestRequest,
+): Promise<AttestResponse> {
+  return request<AttestResponse>(
+    "POST",
+    `/dq/issues/${encodeURIComponent(issueId)}/attest`,
     body,
   );
 }
@@ -711,6 +762,28 @@ export function downloadSs50Export(
   return requestExport(
     `/reports/ss50/export?${params}`,
     `headway-ss50-${month}-preview.${format}`,
+  );
+}
+
+/**
+ * GET /reports/agency-workbook?month= — the monthly agency workbook
+ * (handoff 0020, design point 3): the familiar monthly metrics workbook
+ * assembled by the API — ridership-by-mode and operations sheets, a
+ * provenance id per data cell, the "Read first" banner sheet leading, CSV
+ * via the same grid. CONTRACT-AHEAD NOTE (2026-07-15): typed against the
+ * handoff-0020 contract while the backend endpoint is still in flight; if
+ * the server does not serve the route yet, its refusal renders verbatim
+ * at the control. Reconcile against the regenerated openapi.json when it
+ * lands.
+ */
+export function downloadAgencyWorkbook(
+  month: string,
+  format: ExportFormat,
+): Promise<ExportDownload> {
+  const params = new URLSearchParams({ month, format });
+  return requestExport(
+    `/reports/agency-workbook?${params}`,
+    `headway-agency-workbook-${month}.${format}`,
   );
 }
 

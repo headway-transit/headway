@@ -520,3 +520,178 @@ Phase 2 — full loop against the live 0019 backend:
 - The two heaviest new tests carry explicit 15 s vitest timeouts (the
   house precedent — they sat at the 5 s default's edge under full-suite
   load on this box).
+
+## Outputs — follow-ups batch (2026-07-15)
+
+The small recorded follow-ups from this handoff's evidence sections (plus
+handoff 0017's XLSX-control pattern and one handoff-0020 contract-ahead
+control, and the clients/python CI gap from handoff 0018). Scope held to
+web/ + one .github/workflows/ci.yml edit; services/, db/, and clients/
+source untouched (the parallel backend wave owns services/ this session).
+No commits.
+
+### 1. Certifications index — /certifications (LIVE)
+
+The "GET /certifications has no UI room yet" follow-up closed:
+`src/views/CertificationsView.tsx` (route `/certifications`, nav entry
+beside Certify for EVERY signed-in role, matching the API's any-role GET).
+Every record renders verbatim, oldest first as served: signed records with
+the typed signer, timestamp, and key fingerprint; pre-signature records
+with the honest line ("Recorded before digital signatures existed in
+Headway — no signature fingerprint. Honest history, never backfilled") —
+never a blank, never a backfill. Signature-state SummaryCards (signed /
+legacy) act as filter toggles; counts always cover the whole record and
+the held-back count is stated. Each entry opens its certificate; the
+certificate view's breadcrumb now runs list → certificate
+(`Certifications › Certificate <id>`, replacing the old Certify crumb).
+The Verdict renderer was extracted to
+`src/components/VerificationVerdict.tsx` (unchanged rendering; shared with
+the new public affordance below).
+
+### 2. DQ attest affordance — POST /dq/issues/{id}/attest (write flow;
+mock-verified)
+
+`src/views/DqView.tsx`: blocking issues of the one attestable class
+(`apc_missing_trips_above_fta_threshold` — the p. 146 refusal) and no
+other now carry an "Attest: <title>" action opening a house Modal dialog:
+plain-language explanation of what attestation means, the p. 146 rule
+VERBATIM via the existing quote map (`quoteContaining("upt_v0", …)` — the
+lead-in never stands alone), and a picker offering ONLY the standing
+(unrevoked) attestations fetched live from GET /attestations (a revoked
+one is never offered — the server would 409 it). No standing attestation →
+the dialog states so and doors to /attestations. Submit → POST with only
+the attestation_id (the server builds the resolution text), toast on
+success, the card flips to the existing `attested` status chip with the
+server's resolution story, and the open counts drop exactly as the
+certification gate counts. Refusals render verbatim in the dialog.
+
+**DEVIATION from the batch instruction (reported, not absorbed):** the
+instruction said "certifying_official UX gate", but the API enforces
+data_steward+ on this route (`require_at_least("data_steward")` in
+services/api routers/dq.py — this handoff's deviation 1: "like every
+resolution"). The UX gate mirrors the API's real rule (data_steward+, the
+same gate as the resolve form): screen and server must tell the same
+story, and hiding a steward's legitimate action behind a stricter
+imagined role would be the same class of bug as the cockpit's
+attested-blocker miscount this handoff fixed.
+
+The 'attested' status chip rendering is verified live (below) and pinned
+by the new tests; the WRITE flow itself is mock-verified only — the two
+live p. 146 refusals are already closed (`attested`, backend evidence
+above) and exercising the POST live would write a workflow record into
+the live agency DB for no informational gain (the handoff-0017 write-flow
+precedent).
+
+### 3. Public verify affordance — /public (LIVE)
+
+`src/views/PublicDataView.tsx`: a certified row carrying a signature
+fingerprint now offers "Verify this signature — <metric>, <period>"
+(unique accessible names per card) hitting
+`GET /public/certifications/{id}/verify` with NO auth (no token sent even
+when signed in — pinned by test). The verdict renders verbatim through the
+shared VerificationVerdict: verified (status voice), FAILED (loud alert,
+"SIGNATURE VERIFICATION FAILED." + the server's message), key_mismatch,
+unsigned_legacy. A failure to reach the endpoint (e.g. the public rate
+limit's 429) renders as a loud failure to verify, verbatim. Legacy rows
+keep the honest no-fingerprint line and offer NO button — there is
+nothing to verify. The always-visible note states anyone can run the
+check without an account.
+
+### 4. clients/python tests in CI (.github/workflows/ci.yml)
+
+New `python-client` job (style-matched to the house pattern: own `changes`
+filter output `client` on `^clients/python/|^\.github/workflows/`,
+first-party actions, pip cache on clients/python/pyproject.toml) rather
+than a python-services matrix entry — the client lives under clients/,
+and it deliberately depends on httpx ONLY: **no headway-calc sibling
+install** (verified against clients/python/pyproject.toml — the
+instruction's suspicion "likely NOT" confirmed; the matrix's calc
+co-install exists solely for api's `headway-calc>=0.5`). Install is
+`pip install -e "clients/python[pandas,test]"`: the extra IS named `test`
+(pytest>=8), and `pandas` must ride along because tests/test_frames.py
+imports pandas at module scope. Verified locally in a fresh venv with the
+job's exact commands: **37 passed in 0.52s**. `yaml.safe_load` parses the
+edited workflow (13 jobs); the repo's own yaml-validate gate covers it in
+CI.
+
+### 5. Workbook download control (handoff 0020, CONTRACT-AHEAD — mock-only,
+stated honestly)
+
+`GET /reports/agency-workbook?month=&format=` is NOT in openapi.json and
+NOT on the live API as of this batch's close (checked at start AND
+re-checked after the suite ran: 47 paths, no workbook route — the parallel
+backend agent is still landing handoff 0020). The control ships
+contract-ahead against the handoff-0020 contract exactly as handoff 0017's
+compare/sandbox surfaces did: `downloadAgencyWorkbook(month, format)` in
+src/api/client.ts (documented as contract-ahead in the code), an
+ExportButtons control on /reports/monthly beside the month picker
+(month-scoped, whichever section is open), with a note stating what the
+file is and that absences are stated, never invented. Mock tests pin both
+formats' request params (month=YYYY-MM + format), the Content-Disposition
+filename, byte-for-byte save, toast, and the error path — which is ALSO
+today's honest live behavior: pressing the button against the live API
+renders the server's "Not Found" verbatim at the control, no toast,
+nothing saved. RECONCILE when the endpoint lands: re-check the regenerated
+openapi.json (param names/shape), then the live loop. The two pre-existing
+export tests that became ambiguous (a second export group on the reports
+page) were scoped to their own groups — no assertion weakened.
+
+### Suites / gates (2026-07-15)
+
+```
+npx tsc -b               clean
+npm test -- --run        Test Files 29 passed (29); Tests 186 passed (186)
+                         (was 28 files / 172 tests; +1 file — the
+                          certifications index — and +14 tests: 4 index,
+                          4 dq attest, 4 public verify, 3 workbook, minus
+                          scoping edits; every new surface and the open
+                          attest dialog assert zero axe violations)
+npm run lint             clean
+npm run build            clean (the >500 kB chunk warning pre-exists at
+                         HEAD — recorded in this handoff's earlier
+                         evidence)
+npm run check:contrast   All 77 token pairs meet WCAG 2.1 AA (0 new pairs:
+                         every new surface reuses house tokens — tag
+                         certified/uncertified, banner, alert, status,
+                         summary-card tones)
+python3 -c yaml.safe_load(ci.yml)   OK (13 jobs)
+clients/python job commands, fresh venv:  37 passed
+```
+
+### Live click-through (2026-07-15, headless Chrome/CDP against vite
+localhost:5173 → API 127.0.0.1:8000, SPA nav after login as dsteward — a
+NON-certifier, proving the any-role read; screenshots
+`shots-followups/01…05*.png` in the session scratchpad)
+
+1. `/certifications`: the 3 live records render — 2fbf5451 (legacy, the
+   honest no-signature line, "Certified by the account certifier."),
+   f47c4ce0 ("Signed by Casey Certifier, Director of Operations, Demo
+   Transit Agency") and a3f4c2f4 ("Signed by Alex Rivera, NTD Certifying
+   Official"), both with fingerprint `ed25519:f0995b71…` verbatim; summary
+   cards 2 signed / 1 legacy; the legacy filter narrows to 1 record with
+   the held-back count stated [01, 02].
+2. Index → certificate door: "Open certificate f47c4ce0…" → the
+   certificate view with its on-load "Signature verified." verdict and the
+   new `Certifications › Certificate f47c4ce0…` breadcrumb [03].
+3. `/public`: the fingerprinted card's verify button → LIVE
+   `GET /public/certifications/…/verify` (no auth) → "Signature verified."
+   + the server's message verbatim ("byte-identical to what was signed…");
+   the legacy card keeps the honest line and has NO verify button [04].
+   (API-level live checks also on record: signed f47c4ce0 → `verified`,
+   legacy 2fbf5451 → `unsigned_legacy`, both via curl with no credential.)
+4. `/dq` filtered to Attested: the two live attested closures render with
+   the status chip and their attestation-naming resolution stories, and
+   carry NO attest button (closed issues take no action) — the chip
+   rendering this batch was asked to verify [05].
+
+### Honest notes
+
+- Live check coverage: certifications index and public verify were
+  verified through the full live loop (both were live at batch start, as
+  the instruction stated). The DQ attest POST and the workbook download
+  are mock-verified only — the first to avoid writing workflow records
+  into the live DB, the second because the endpoint does not exist yet;
+  both stated above, neither papered over.
+- The certifications index renders every record unpaginated (3 live
+  today). The /dq render-cap precedent applies the day certifications
+  reach that scale; not pre-built for 3 rows.

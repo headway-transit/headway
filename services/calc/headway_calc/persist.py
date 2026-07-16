@@ -46,6 +46,12 @@ _METRIC_BY_CALC_NAME = {
     # OPERATIONS metrics (handoff 0014) — category 'ops' below.
     "otp_v0": "otp",
     "headway_adherence_v0": "headway_adherence",
+    # Day-type figures (handoff 0020): NTD-category figures scoped
+    # 'daytype:<type>' (+ ':atypical' / per-mode prefixes) — see
+    # headway_calc.daytype and the tracker rows daytype_days_operated_v0 /
+    # daytype_upt_avg_v0.
+    "daytype_days_operated_v0": "days_operated",
+    "daytype_upt_avg_v0": "upt_avg",
 }
 
 #: computed.metric_values.category per calc (migration 0024 — the

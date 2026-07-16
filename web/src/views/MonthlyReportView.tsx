@@ -20,6 +20,7 @@ import { Fragment, useEffect, useId, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   ApiError,
+  downloadAgencyWorkbook,
   downloadMetricValuesExport,
   downloadMr20Export,
   getMr20Report,
@@ -276,6 +277,17 @@ export function MonthlyReportView() {
           </select>
         </div>
       </div>
+
+      {/* The monthly agency workbook (handoff 0020, design point 3): one
+          month-scoped file regardless of which section is open, so the
+          control sits with the month picker. Built CONTRACT-AHEAD against
+          GET /reports/agency-workbook while the backend lands it — until
+          then the server's refusal renders verbatim at the control. */}
+      <ExportButtons
+        label={copy.report.workbook.label}
+        note={copy.report.workbook.note}
+        download={(format) => downloadAgencyWorkbook(monthKey, format)}
+      />
 
       {/* Section toggle (the ChartCard / lineage pattern: aria-pressed
           buttons; the pressed one is filled AND keeps its label). */}

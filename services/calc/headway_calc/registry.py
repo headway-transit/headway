@@ -38,6 +38,10 @@ QUANTITY_DIRECTIONS: dict[str, str | None] = {
     "voms": None,
     "otp": None,
     "headway_adherence": None,
+    # Day-type figures (handoff 0020): a Days Operated count and a ridership
+    # average are measurements — neither direction is a quality verdict.
+    "days_operated": None,
+    "upt_avg": None,
 }
 
 DIRECTION_NOTE = (

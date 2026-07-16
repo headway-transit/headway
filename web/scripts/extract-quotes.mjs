@@ -78,6 +78,10 @@ function calcNamesForHeading(heading) {
     (m) => m[1],
   );
   if (named.length > 0) return named;
+  // Plural form: "(calcs a_v0 / b_v0 / c_v0, …)" — one section backing
+  // several calc versions (first used by handoff 0020's day-type family).
+  const plural = heading.match(/calcs\s+([a-z0-9_]+(?:\s*\/\s*[a-z0-9_]+)+)/i);
+  if (plural) return plural[1].split("/").map((n) => n.trim());
   if (heading.includes("FTA NTD Policy Manual")) return ["vrm_v0", "vrh_v0"];
   // The S&S section backs the Safety & Security classifier (handoff 0010,
   // design point 2: services/calc sscls_v0) and the /safety UI's receipts.

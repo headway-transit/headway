@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import csv
 import io
+import json
 from typing import Iterable, Sequence
 
 from fastapi import Response
@@ -409,3 +410,519 @@ def sampling_worksheet_grid(
                 ]
             )
     return Grid(banner, SAMPLING_WORKSHEET_HEADER, rows)
+
+
+# ---------------------------------------------------------------------------
+# Multi-sheet workbooks (handoff 0020) — the same one-assembly invariant,
+# extended: one banner-line list + N titled sheets feed BOTH formats. In the
+# CSV, each sheet is introduced by ONE single-cell marker line
+# (SHEET_MARKER_PREFIX + title) followed by its header and rows; in the XLSX
+# the marker line becomes the sheet's TAB NAME (never a data row), the
+# banner lines are the first ("Read first") sheet, and every cell stays a
+# TEXT cell holding the byte-identical string the CSV holds.
+# ---------------------------------------------------------------------------
+
+SHEET_MARKER_PREFIX = "## "
+
+
+class SheetGrid:
+    """One titled sheet of a multi-sheet export: a Grid without banner
+    lines (the workbook's banner is workbook-level, not per-sheet)."""
+
+    def __init__(self, title: str, header: Sequence[str], rows):
+        if not title or len(title) > 31:
+            # Excel refuses sheet titles over 31 chars; refuse loudly here
+            # rather than let openpyxl mangle a name the CSV spells out.
+            raise ValueError(f"Sheet title must be 1..31 chars: {title!r}")
+        self.title = title
+        self.grid = Grid([], header, rows)
+
+
+def sheets_to_csv(banner_lines: Sequence[str], sheets: Sequence[SheetGrid]) -> bytes:
+    """CSV: banner lines first (one single-cell line each), then per sheet a
+    single-cell marker line ('## <title>'), its header, and its rows."""
+    out = io.StringIO()
+    writer = csv.writer(out, lineterminator="\r\n", quoting=csv.QUOTE_MINIMAL)
+    for line in banner_lines:
+        writer.writerow([str(line)])
+    for sheet in sheets:
+        writer.writerow([f"{SHEET_MARKER_PREFIX}{sheet.title}"])
+        writer.writerow(sheet.grid.header)
+        for row in sheet.grid.rows:
+            writer.writerow(row)
+    return out.getvalue().encode("utf-8")
+
+
+def sheets_to_xlsx(banner_lines: Sequence[str], sheets: Sequence[SheetGrid]) -> bytes:
+    """XLSX: the banner lines as the FIRST sheet ('Read first' — a
+    spreadsheet user meets the caveats before the numbers), then one sheet
+    per SheetGrid, tab-named by its title. Text cells only."""
+    if not banner_lines:
+        raise ValueError(
+            "A multi-sheet workbook must lead with banner lines — the "
+            "'Read first' sheet is not optional."
+        )
+    wb = Workbook()
+    banner_sheet = wb.active
+    banner_sheet.title = BANNER_SHEET_TITLE
+    for line in banner_lines:
+        banner_sheet.append([str(line)])
+    for sheet in sheets:
+        ws = wb.create_sheet(sheet.title)
+        ws.append(sheet.grid.header)
+        for row in sheet.grid.rows:
+            ws.append(row)
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    return buffer.getvalue()
+
+
+def sheets_export_response(
+    banner_lines: Sequence[str],
+    sheets: Sequence[SheetGrid],
+    fmt: str,
+    filename_stem: str,
+) -> Response:
+    """The multi-sheet download response builder: same assembly, either
+    format (the export_response sibling)."""
+    if fmt == "csv":
+        return Response(
+            content=sheets_to_csv(banner_lines, sheets),
+            media_type=CSV_MEDIA_TYPE,
+            headers={
+                "Content-Disposition": (
+                    f'attachment; filename="{filename_stem}.csv"'
+                )
+            },
+        )
+    return Response(
+        content=sheets_to_xlsx(banner_lines, sheets),
+        media_type=XLSX_MEDIA_TYPE,
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="{filename_stem}.xlsx"'
+            )
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
+# The monthly agency workbook (handoff 0020, design point 3) — OUR OWN
+# generic layout: "Read first" banner sheet, a Ridership-by-mode sheet and
+# an Operations sheet, every data cell either a VERBATIM served figure with
+# a visible provenance column (metric_value_id — we're proud of it) or an
+# EXPLICIT stated absence. This module formats; it never computes: no
+# arithmetic, no rounding, no derived deltas (year-over-year columns show
+# the prior year month's persisted figure verbatim with its OWN provenance;
+# comparison arithmetic lives in GET /metrics/compare, the one blessed
+# comparison affordance).
+# ---------------------------------------------------------------------------
+
+WORKBOOK_GENERATOR_NAME = "headway_api.exports.agency_workbook"
+WORKBOOK_GENERATOR_VERSION = "0.1.0"
+
+WORKBOOK_SHEET_RIDERSHIP = "Ridership by mode"
+WORKBOOK_SHEET_OPERATIONS = "Operations"
+
+WORKBOOK_HEADER = (
+    "measure",
+    "scope",
+    "value",
+    "unit",
+    "prior_year_value",
+    "prior_year_provenance",
+    "calc_name",
+    "calc_version",
+    "certification_status",
+    "category",
+    "simulated_data",
+    "provenance_metric_value_id",
+    "note",
+)
+
+#: The stated-absence cell (binding rule: absent cells STATED, never
+#: invented, never zero-filled).
+WORKBOOK_ABSENT_CELL = "no figure for this period — not yet computed by Headway"
+WORKBOOK_PRIOR_ABSENT_CELL = "no figure for this period"
+
+WORKBOOK_BANNER = (
+    "NOT REPORTABLE — automatically assembled monthly workbook preview. "
+    "Every figure below is served VERBATIM from computed.metric_values "
+    "with its provenance id; nothing in this workbook may be submitted to "
+    "the NTD."
+)
+
+#: The migration-0024 wall, stated where the ops rows live.
+WORKBOOK_OPS_BADGE = (
+    "OPERATIONS METRIC — never certifiable (database-enforced, migration "
+    "0024); not an NTD figure; never part of any submission."
+)
+
+#: Honest scope (handoff 0020, design point 4): rows the workbook STATES it
+#: does not compute, so their absence is a fact, not a gap.
+WORKBOOK_MISSED_TRIPS_NOTE = (
+    "Not computed by Headway v0: missed-trip accounting needs "
+    "schedule-vs-operated reconciliation semantics that have not been "
+    "verified against the NTD manuals yet — a known future increment "
+    "(handoff 0020). Stated absent, never zero-filled."
+)
+WORKBOOK_VAMS_NOTE = (
+    "Not computed by Headway: VAMS (Vehicles Available for Maximum Service) "
+    "requires fleet inventory data Headway does not ingest yet. Stated "
+    "absent, never zero-filled."
+)
+WORKBOOK_DAYS_NOT_OPERATED_NOTE = (
+    "Not computed by Headway v0: Days Not Operated Due to Strikes / "
+    "Officially Declared Emergencies (2026 NTD Policy Manual p. 155) need "
+    "agency declarations the settings surface does not capture yet. Stated "
+    "absent, never zero-filled."
+)
+
+_DAY_TYPES = ("weekday", "saturday", "sunday")
+
+
+def _detail_dict(detail) -> dict:
+    """detail arrives as a dict (psycopg JSONB) or JSON text (fakes/other
+    drivers); anything else is refused loudly (the mr20 convention)."""
+    if detail is None:
+        return {}
+    if isinstance(detail, dict):
+        return detail
+    if isinstance(detail, str):
+        return json.loads(detail)
+    raise TypeError(f"Unsupported detail payload type: {type(detail).__name__}")
+
+
+class _WorkbookCells:
+    """Index of one period's latest rows by (metric, scope) — tuples in the
+    reports._SELECT_WORKBOOK_LATEST column order."""
+
+    def __init__(self, rows):
+        self.by_key = {}
+        for row in rows:
+            (metric, scope, metric_value_id, value, unit, calc_name,
+             calc_version, certification_status, category, detail) = row
+            self.by_key[(metric, scope)] = {
+                "metric_value_id": str(metric_value_id),
+                "value": str(value),
+                "unit": unit,
+                "calc_name": calc_name,
+                "calc_version": calc_version,
+                "certification_status": certification_status,
+                "category": category,
+                "detail": _detail_dict(detail),
+            }
+
+    def get(self, metric: str, scope: str):
+        return self.by_key.get((metric, scope))
+
+    def plain_mode_scopes(self) -> list[str]:
+        """The plain 'mode:<mode>' scopes present (exactly two segments —
+        excludes 'mode:DR:tos:*' and 'mode:<m>:daytype:*' refinements)."""
+        return sorted(
+            {
+                scope
+                for (_metric, scope) in self.by_key
+                if scope.startswith("mode:") and scope.count(":") == 1
+            }
+        )
+
+    def any_simulated(self) -> bool:
+        return any(
+            is_simulated_detail(cell["detail"])
+            for cell in self.by_key.values()
+        )
+
+
+def _workbook_row(
+    measure: str,
+    scope_label: str,
+    cell,
+    prior_cell,
+    note: str = "",
+) -> list[str]:
+    """One workbook row: the cell verbatim, or the stated absence."""
+    if cell is None:
+        value, unit = WORKBOOK_ABSENT_CELL, ""
+        calc_name = calc_version = certification = category = ""
+        simulated = ""
+        provenance = ""
+        if note:
+            note = note
+        else:
+            note = (
+                "No computed.metric_values row for this measure and scope "
+                "in the period: not computed yet, or its run refused and "
+                "routed the reason to dq.issues. A missing figure is "
+                "reported as missing, never invented."
+            )
+    else:
+        value = cell["value"]  # VERBATIM — the exact string the API serves
+        unit = cell["unit"]
+        calc_name = cell["calc_name"]
+        calc_version = cell["calc_version"]
+        certification = cell["certification_status"]
+        category = cell["category"]
+        simulated = (
+            SIMULATED_CELL if is_simulated_detail(cell["detail"]) else "no"
+        )
+        provenance = cell["metric_value_id"]
+    if prior_cell is None:
+        prior_value = WORKBOOK_PRIOR_ABSENT_CELL
+        prior_provenance = ""
+    else:
+        prior_value = prior_cell["value"]
+        prior_provenance = prior_cell["metric_value_id"]
+    return [
+        measure,
+        scope_label,
+        value,
+        unit,
+        prior_value,
+        prior_provenance,
+        calc_name,
+        calc_version,
+        certification,
+        category,
+        simulated,
+        provenance,
+        note,
+    ]
+
+
+def _avg_note(cell) -> str:
+    """The typical/atypical statement a day-type average row carries, built
+    from FACTS in the persisted detail (formatting, never arithmetic)."""
+    if cell is None:
+        return ""
+    detail = cell["detail"]
+    days = detail.get("days_operated")
+    split = detail.get("split", "typical")
+    note = f"average over {days} operated {detail.get('day_type', '')} day(s), {split} split"
+    if detail.get("atypical_flags_declared") is False:
+        note += (
+            "; no atypical days declared for this period — every day is "
+            "typical (stated, per the agency's service-day declarations)"
+        )
+    return note
+
+
+def _days_operated_note(cell) -> str:
+    if cell is None:
+        return ""
+    detail = cell["detail"]
+    unobserved = detail.get("unobserved_dates", [])
+    if unobserved:
+        return (
+            f"observed lower bound: {len(unobserved)} date(s) of this "
+            f"schedule type had no telemetry (see the "
+            f"daytype_days_unobserved finding)"
+        )
+    return "every date of this schedule type was observed"
+
+
+def agency_workbook(
+    month: str,
+    period_start,
+    period_end,
+    prior_month: str,
+    rows,
+    prior_rows,
+    certificate_lines: Sequence[str] = (),
+) -> tuple[list[str], list[SheetGrid]]:
+    """Assemble the monthly agency workbook (banner lines + two sheets) from
+    the latest persisted rows of the month and of the prior-year month.
+
+    OUR OWN generic layout (never a partner file's): a "Read first" banner,
+    a Ridership-by-mode sheet (UPT month totals per mode, day-type averages
+    with typical/atypical splits, Days Operated per schedule type, the
+    stated-absent missed-trip and days-not-operated rows) and an Operations
+    sheet (VOMS per mode — an NTD figure — plus the migration-0024-badged
+    OTP/headway-adherence rows and the stated-absent VAMS row). Every data
+    cell is the VERBATIM served string; every present cell names its
+    metric_value_id in the visible provenance column; every absent cell is
+    STATED. Year-over-year columns show the prior year month's persisted
+    figure verbatim with its own provenance — never a derived delta (this
+    module never computes; GET /metrics/compare is the comparison surface).
+    """
+    cells = _WorkbookCells(rows)
+    prior = _WorkbookCells(prior_rows)
+
+    banner = [
+        WORKBOOK_BANNER,
+        f"Monthly agency workbook for {month} (period "
+        f"[{period_start.isoformat()}, {period_end.isoformat()}), half-open, "
+        f"UTC).",
+        f"Generated by {WORKBOOK_GENERATOR_NAME} "
+        f"{WORKBOOK_GENERATOR_VERSION}.",
+        "How to read this workbook: every data cell is the exact figure "
+        "string Headway serves (text cells — a figure is never coerced "
+        "through a floating-point number), and every present figure names "
+        "the computed.metric_values row it came from in the "
+        "provenance_metric_value_id column — 'explain this number' starts "
+        "there (GET /metrics/values/{id}/lineage).",
+        "Absent cells are STATED ('" + WORKBOOK_ABSENT_CELL + "') — "
+        "Headway never invents or zero-fills a cell it did not compute.",
+        f"Year-over-year columns show the prior year month's ({prior_month}) "
+        f"persisted figure verbatim with its own provenance id; Headway "
+        f"deliberately does not derive a delta in an export — comparison "
+        f"arithmetic lives in GET /metrics/compare (exact-decimal, "
+        f"sign-neutral).",
+        "Day-type figures (average weekday/Saturday/Sunday UPT, Days "
+        "Operated per schedule) are classified by calc daytype_v0 0.1.0: "
+        "agency-declared overrides in app.service_day_overrides govern "
+        "(holiday reassignments per 2026 NTD Policy Manual p. 156; "
+        "atypical-day flags); otherwise day-of-week. Basis quoted in "
+        "services/calc/REGULATORY_TRACKER.md, 'Verified — Days Operated "
+        "and day-type schedules'.",
+        "Typical/atypical splits appear only where the agency declared "
+        "atypical days; an unflagged month is all typical — stated on each "
+        "average row, never silently assumed.",
+        "Known absences (honest scope, handoff 0020): "
+        + WORKBOOK_MISSED_TRIPS_NOTE
+        + " "
+        + WORKBOOK_VAMS_NOTE,
+        "The Operations sheet mixes NTD figures (VOMS) with OPERATIONS "
+        "metrics (on-time performance, headway adherence). "
+        + WORKBOOK_OPS_BADGE,
+    ]
+    if cells.any_simulated() or prior.any_simulated():
+        banner.append(SIMULATED_BANNER)
+    banner.extend(str(line) for line in certificate_lines)
+
+    # --- Ridership by mode ---------------------------------------------------
+    ridership: list[list[str]] = []
+    mode_scopes = cells.plain_mode_scopes()
+    for scope in ["agency"] + mode_scopes:
+        label = "all modes (agency)" if scope == "agency" else scope
+        ridership.append(
+            _workbook_row(
+                "Unlinked Passenger Trips (month total)",
+                label,
+                cells.get("upt", scope),
+                prior.get("upt", scope),
+            )
+        )
+    for day_type in _DAY_TYPES:
+        scope = f"daytype:{day_type}"
+        cell = cells.get("upt_avg", scope)
+        ridership.append(
+            _workbook_row(
+                f"Average {day_type} UPT (typical days)",
+                "all modes (agency)",
+                cell,
+                prior.get("upt_avg", scope),
+                note=_avg_note(cell),
+            )
+        )
+        atypical_cell = cells.get("upt_avg", f"{scope}:atypical")
+        if atypical_cell is not None:
+            ridership.append(
+                _workbook_row(
+                    f"Average {day_type} UPT (agency-declared atypical days)",
+                    "all modes (agency)",
+                    atypical_cell,
+                    prior.get("upt_avg", f"{scope}:atypical"),
+                    note=_avg_note(atypical_cell),
+                )
+            )
+    for mode_scope in mode_scopes:
+        for day_type in _DAY_TYPES:
+            scope = f"{mode_scope}:daytype:{day_type}"
+            cell = cells.get("upt_avg", scope)
+            ridership.append(
+                _workbook_row(
+                    f"Average {day_type} UPT (typical days)",
+                    mode_scope,
+                    cell,
+                    prior.get("upt_avg", scope),
+                    note=_avg_note(cell),
+                )
+            )
+            atypical_cell = cells.get("upt_avg", f"{scope}:atypical")
+            if atypical_cell is not None:
+                ridership.append(
+                    _workbook_row(
+                        f"Average {day_type} UPT (agency-declared atypical "
+                        f"days)",
+                        mode_scope,
+                        atypical_cell,
+                        prior.get("upt_avg", f"{scope}:atypical"),
+                        note=_avg_note(atypical_cell),
+                    )
+                )
+    for day_type in _DAY_TYPES:
+        scope = f"daytype:{day_type}"
+        cell = cells.get("days_operated", scope)
+        ridership.append(
+            _workbook_row(
+                f"Days operated ({day_type} schedule)",
+                "all modes (agency)",
+                cell,
+                prior.get("days_operated", scope),
+                note=_days_operated_note(cell),
+            )
+        )
+    ridership.append(
+        _workbook_row(
+            "Days not operated (strikes / declared emergencies)",
+            "all modes (agency)",
+            None,
+            None,
+            note=WORKBOOK_DAYS_NOT_OPERATED_NOTE,
+        )
+    )
+    ridership.append(
+        _workbook_row(
+            "Missed trips / trips not operated",
+            "all modes (agency)",
+            None,
+            None,
+            note=WORKBOOK_MISSED_TRIPS_NOTE,
+        )
+    )
+
+    # --- Operations ----------------------------------------------------------
+    operations: list[list[str]] = []
+    for scope in ["agency"] + mode_scopes:
+        label = "all modes (agency)" if scope == "agency" else scope
+        operations.append(
+            _workbook_row(
+                "Vehicles Operated in Maximum Service (VOMS)",
+                label,
+                cells.get("voms", scope),
+                prior.get("voms", scope),
+            )
+        )
+    operations.append(
+        _workbook_row(
+            "Vehicles Available for Maximum Service (VAMS)",
+            "all modes (agency)",
+            None,
+            None,
+            note=WORKBOOK_VAMS_NOTE,
+        )
+    )
+    for metric, measure in (
+        ("otp", "On-time performance (share of observed passages on time)"),
+        (
+            "headway_adherence",
+            "Headway adherence (coefficient of variation of headways)",
+        ),
+    ):
+        cell = cells.get(metric, "agency")
+        operations.append(
+            _workbook_row(
+                measure,
+                "all modes (agency)",
+                cell,
+                prior.get(metric, "agency"),
+                note=WORKBOOK_OPS_BADGE,
+            )
+        )
+
+    sheets = [
+        SheetGrid(WORKBOOK_SHEET_RIDERSHIP, WORKBOOK_HEADER, ridership),
+        SheetGrid(WORKBOOK_SHEET_OPERATIONS, WORKBOOK_HEADER, operations),
+    ]
+    return banner, sheets

@@ -148,6 +148,48 @@ are `Decimal`, never float.
   for vrm/vrh/upt) and `tests/golden/mr20/` (canned metric rows → the exact
   package JSON), each with its own hand-worked `BASIS.md`.
 
+## Day-type calendar + day-type figures — daytype_v0 0.1.0 (handoff 0020)
+
+`headway_calc.daytype` adds the day-type service calendar and the two figures
+built on it (basis: 2026 NTD Policy Manual pp. 154–156, quoted verbatim in
+`REGULATORY_TRACKER.md`, "Verified — Days Operated and day-type schedules"):
+
+- **daytype_v0 0.1.0 (classification, never persisted itself):** each date of
+  a period is a weekday/saturday/sunday SCHEDULE day. Agency declarations in
+  `app.service_day_overrides` (migration 0031; audited API surface
+  `PUT /settings/service-days/{date}`) govern — holiday reassignments per the
+  p. 156 rule and atypical-day flags (v0: declared only, never auto-detected);
+  otherwise day-of-week. Documented divergences: canonical carries no GTFS
+  calendar/calendar_dates, and a "day" is the UTC calendar date (the voms_v0
+  convention). The classification identity + every governing override row
+  snapshot into the consuming figures' detail JSONB.
+- **daytype_days_operated_v0 0.1.0** → metric `days_operated`, scope
+  `daytype:<type>`: the count of the day type's dates with ≥1 operated trip
+  observed (p. 155 per-schedule Days Operated; p. 156 partial-day rule).
+  Blocking-free (an observation gap only understates a count); unobserved
+  dates raise the `daytype_days_unobserved` warning — an observed lower
+  bound, stated. Lineage: the earliest in-trip position record per counted
+  date.
+- **daytype_upt_avg_v0 0.1.0** → metric `upt_avg`, scopes
+  `daytype:<type>[:atypical]` and `mode:<mode>:daytype:<type>[:atypical]`
+  (`--per-mode`): the mean of PER-DAY upt_v0 0.2.0 figures over the split's
+  operated days (per-day input selection — the mode-scoping precedent; the
+  p. 146 rule, p. 151 validations, simulated-source rule and statistician
+  attestations all apply per day). **Refusal discipline is inherited**: any
+  refused day blocks the whole split (`daytype_average_over_refused_days` +
+  the day's own findings propagated date-prefixed — the same receipts); zero
+  operated days refuse (`daytype_no_operated_days`) — an average is never
+  invented and 0 is never a stand-in. Typical averages exclude declared
+  atypical days (their own split rows; an unflagged period is all-typical,
+  STATED in detail).
+
+Run: `python -m headway_calc.runner --period-start … --period-end … --daytype
+[--per-mode]` — a separate entry point (the ops-runner precedent) with the
+same two-transaction fail-loudly-first design. Goldens:
+`tests/golden/daytype_v0/` (hand-worked February 2026 with a holiday
+reassignment + an atypical Saturday, and a refused-day case) with its own
+`BASIS.md`.
+
 ## OPERATIONS metrics — otp_v0 + headway_adherence_v0 0.1.0 (handoff 0014)
 
 **Not NTD figures — THE HONESTY BOUNDARY.** `headway_calc/passages.py`
@@ -706,6 +748,26 @@ position-derived haversine (trip-distance authority deferred to slice 2 per
 handoff 0001).
 
 ## Verification status
+
+### What ran (2026-07-15, handoff 0020 — day-type calendar + figures)
+
+- Full suite: `python3 -m pytest tests/ -q` → **567 passed** (was 537;
+  +30: `test_daytype.py` 20, `test_golden_daytype.py` 4,
+  `test_runner_daytype.py` 6).
+- Goldens: `tests/golden/daytype_v0/` — hand-worked February 2026
+  (holiday reassignment 2026-02-16 → sunday; declared atypical Saturday
+  2026-02-14; averages 45.00/25.00/60.00/15.00 hand-worked in BASIS.md)
+  plus the refused-day case pinning the binding refusal inheritance.
+- LIVE (dev box, MBTA-fed database, 2026-07-15):
+  `python -m headway_calc.runner --period-start 2026-07-01 --period-end
+  2026-08-01 --daytype --per-mode` over 2,279,421 positions + 204,524
+  passenger events + 2 live-declared overrides → 9 rows persisted
+  (days_operated weekday 2 / saturday 1 / sunday 0; average
+  weekday-atypical UPT 238,100.00 agency-wide with per-mode splits),
+  18 outcomes honestly REFUSED (typical weekday/saturday day-level p. 146
+  refusals at 58%/100% missing shares — receipts propagated; sunday: no
+  operated days). Every figure simulated-flagged (`tides_simulated`).
+  Evidence: handoff 0020, "Outputs — backend evidence".
 
 ### What ran (2026-07-15, handoff 0019 — statistician attestations)
 

@@ -7,10 +7,13 @@ import {
   renderApp,
   signInAs,
 } from "./helpers";
+import type { DqIssue } from "../api/types";
 import {
+  attestationRecord,
   attestedBlockingIssue,
   blockingIssue,
   resolvedIssue,
+  revokedAttestationRecord,
   warningIssue,
 } from "./fixtures";
 
@@ -22,6 +25,18 @@ function mockIssues() {
     },
   });
 }
+
+/**
+ * An OPEN p. 146 refusal issue — the one class with a statistician cure
+ * (the attestedBlockingIssue fixture is the same class already closed).
+ */
+const openRefusalIssue: DqIssue = {
+  ...attestedBlockingIssue,
+  issue_id: "dq-att-open",
+  status: "open",
+  resolved_at: null,
+  resolution: null,
+};
 
 describe("/dq", () => {
   it("treats an ATTESTED blocking issue as closed (migration 0029): visible with its resolution story, not counted open, no resolve form, no blocking note", async () => {
@@ -412,6 +427,207 @@ describe("/dq", () => {
     // The issue is still shown as open — a failed resolution never looks done.
     const card = screen
       .getByRole("heading", { name: /Bus 1207/ })
+      .closest("article") as HTMLElement;
+    expect(card).toHaveTextContent("open");
+  });
+
+  it("closes a p. 146 refusal issue under a recorded attestation: dialog with the verbatim rule, standing attestations only, POST, toast, the attested chip", async () => {
+    signInAs("data_steward");
+    const calls = mockApi({
+      "GET /dq/issues": {
+        status: 200,
+        body: [openRefusalIssue, blockingIssue],
+      },
+      "GET /attestations": {
+        status: 200,
+        body: [attestationRecord, revokedAttestationRecord],
+      },
+      [`POST /dq/issues/${openRefusalIssue.issue_id}/attest`]: {
+        status: 200,
+        body: {
+          issue_id: openRefusalIssue.issue_id,
+          status: "attested",
+          resolved_at: "2026-07-15T18:00:00Z",
+          resolution:
+            "Closed under statistician attestation #att-3 (p. 146): the factoring method was approved.",
+          attestation_id: "att-3",
+          audit_event_id: 901,
+        },
+      },
+    });
+    const user = userEvent.setup();
+    renderApp("/dq");
+
+    // The attest action is offered ONLY on the p. 146 refusal class: the
+    // telemetry_gap blocking issue takes no attest button — no other gap
+    // has a statistician cure (the server enforces the same wall).
+    const attestButton = await screen.findByRole("button", {
+      name: `Attest: ${openRefusalIssue.title}`,
+    });
+    expect(
+      screen.queryByRole("button", { name: /^Attest:.*Bus 1207/ }),
+    ).not.toBeInTheDocument();
+    // Both blocking issues are open before the closure.
+    expect(
+      screen.getByRole("button", { name: /Blocking open/ }),
+    ).toHaveTextContent("2");
+
+    await user.click(attestButton);
+    const dialog = await screen.findByRole("dialog", {
+      name: "Close this issue under a statistician attestation",
+    });
+    // The p. 146 rule renders VERBATIM via the existing quote map — the
+    // plain-language framing never stands alone.
+    expect(dialog).toHaveTextContent(
+      "qualified statistician approve the factoring method",
+    );
+    // Only STANDING attestations are offered; the revoked one (att-2)
+    // stays on the /attestations record but is never offered here.
+    const picker = within(dialog).getByLabelText(
+      "Which recorded attestation covers this gap?",
+    );
+    expect(
+      within(picker).getByRole("option", { name: /#att-3 — Dr. Maria Chen/ }),
+    ).toBeInTheDocument();
+    expect(
+      within(picker).queryByRole("option", { name: /att-2/ }),
+    ).not.toBeInTheDocument();
+
+    // Submitting without a pick is refused with an announced explanation.
+    await user.click(
+      within(dialog).getByRole("button", {
+        name: "Close this issue as attested",
+      }),
+    );
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent(
+      "Pick the recorded attestation that covers this issue.",
+    );
+    expect(calls.filter((c) => c.method === "POST")).toHaveLength(0);
+
+    // Zero axe violations WITH the dialog open.
+    await expectNoAxeViolations();
+
+    await user.selectOptions(picker, "att-3");
+    await user.click(
+      within(dialog).getByRole("button", {
+        name: "Close this issue as attested",
+      }),
+    );
+
+    // The POST carries only the reference — the server builds the story.
+    expect(await screen.findByRole("log")).toHaveTextContent(
+      "is closed as attested",
+    );
+    const post = calls.find((c) => c.method === "POST");
+    expect(post?.path).toBe(`/dq/issues/${openRefusalIssue.issue_id}/attest`);
+    expect(post?.body).toEqual({ attestation_id: "att-3" });
+
+    // The card now wears the attested state (the existing chip vocabulary)
+    // with the server-built resolution story, and takes no further action.
+    const card = screen
+      .getByRole("heading", { name: openRefusalIssue.title })
+      .closest("article") as HTMLElement;
+    expect(card).toHaveTextContent("attested");
+    expect(card).toHaveTextContent(
+      "Closed under statistician attestation #att-3 (p. 146): the factoring method was approved.",
+    );
+    expect(
+      within(card).queryByRole("button", { name: /^Resolve:/ }),
+    ).not.toBeInTheDocument();
+    expect(
+      within(card).queryByRole("button", { name: /^Attest:/ }),
+    ).not.toBeInTheDocument();
+    // The attested issue no longer counts open — screen and server tell
+    // the same story as the certification gate.
+    expect(
+      screen.getByRole("button", { name: /Blocking open/ }),
+    ).toHaveTextContent("1");
+
+    await expectNoAxeViolations();
+  }, 15000);
+
+  it("offers no attest action to a viewer (UX mirror of the API's data_steward+ rule)", async () => {
+    signInAs("viewer");
+    mockApi({ "GET /dq/issues": { status: 200, body: [openRefusalIssue] } });
+    renderApp("/dq");
+
+    await screen.findByRole("heading", { name: openRefusalIssue.title });
+    expect(
+      screen.queryByRole("button", { name: /^Attest:/ }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("states plainly when no standing attestation exists — the dialog references approvals, it never creates one", async () => {
+    signInAs("data_steward");
+    mockApi({
+      "GET /dq/issues": { status: 200, body: [openRefusalIssue] },
+      // Only a REVOKED attestation on record: nothing standing to offer.
+      "GET /attestations": { status: 200, body: [revokedAttestationRecord] },
+    });
+    const user = userEvent.setup();
+    renderApp("/dq");
+
+    await user.click(
+      await screen.findByRole("button", {
+        name: `Attest: ${openRefusalIssue.title}`,
+      }),
+    );
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog).toHaveTextContent(
+      "No standing attestation is on record, so this issue cannot be closed this way yet.",
+    );
+    expect(
+      within(dialog).getByRole("link", { name: "Go to the Attestations page" }),
+    ).toHaveAttribute("href", "/attestations");
+    expect(
+      within(dialog).queryByRole("button", {
+        name: "Close this issue as attested",
+      }),
+    ).not.toBeInTheDocument();
+    await expectNoAxeViolations();
+  });
+
+  it("shows an attest refusal from the API verbatim and keeps the issue open", async () => {
+    signInAs("data_steward");
+    const refusal =
+      "The attestation att-3 was revoked on 2026-07-14 and can no longer " +
+      "close issues. Record a new attestation if a statistician has " +
+      "approved a method.";
+    mockApi({
+      "GET /dq/issues": { status: 200, body: [openRefusalIssue] },
+      "GET /attestations": { status: 200, body: [attestationRecord] },
+      [`POST /dq/issues/${openRefusalIssue.issue_id}/attest`]: {
+        status: 409,
+        body: { detail: refusal },
+      },
+    });
+    const user = userEvent.setup();
+    renderApp("/dq");
+
+    await user.click(
+      await screen.findByRole("button", {
+        name: `Attest: ${openRefusalIssue.title}`,
+      }),
+    );
+    const dialog = await screen.findByRole("dialog");
+    await user.selectOptions(
+      within(dialog).getByLabelText(
+        "Which recorded attestation covers this gap?",
+      ),
+      "att-3",
+    );
+    await user.click(
+      within(dialog).getByRole("button", {
+        name: "Close this issue as attested",
+      }),
+    );
+
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent(
+      refusal,
+    );
+    // A failed closure never looks done.
+    const card = screen
+      .getByRole("heading", { name: openRefusalIssue.title })
       .closest("article") as HTMLElement;
     expect(card).toHaveTextContent("open");
   });

@@ -1,4 +1,142 @@
 {
+  "daytype_days_operated_v0": [
+    {
+      "quote": "Verified — Passenger Miles Traveled",
+      "citation": "Day-type schedule vocabulary — the average-schedules sentence (p. 154), verbatim — 2026 NTD Policy Manual, Full Reporting, the Exhibit 44 / non-mandatory-year PMT context already partially quoted under \"Verified — Passenger Miles Traveled\""
+    },
+    {
+      "quote": "Full Reporters determine their average trip length (PMT/UPT) by mode and TOS during their mandatory sampling year for their Average Weekday Schedule, Average Saturday Schedule (if applicable), Average Sunday Schedule (if applicable), and Annual Total.",
+      "citation": "Day-type schedule vocabulary — the average-schedules sentence (p. 154), verbatim — 2026 NTD Policy Manual, Full Reporting, the Exhibit 44 / non-mandatory-year PMT context already partially quoted under \"Verified — Passenger Miles Traveled\""
+    },
+    {
+      "quote": "Full Reporters must provide the following data: • Days Operated (days on which service was actually operated) • Days Not Operated Due to Strikes (days that service would normally have operated but did not due to a transit labor strike) • Days Not Operated Due to Officially Declared Emergencies (days that service would normally have operated but did not due to an officially declared emergency)",
+      "citation": "Days Operated data points — 2026 NTD Policy Manual, Full Reporting, p. 155"
+    },
+    {
+      "quote": "Within each of these categories, Full Reporters must report the total number of days operated for the weekday schedule, Saturday schedule, and Sunday schedule service. Many transit agencies operate different schedules on weekdays, Saturdays, and Sundays. An agency must report the number of days they operated during each schedule.",
+      "citation": "The per-schedule breakdown — 2026 NTD Policy Manual, Full Reporting, p. 155"
+    },
+    {
+      "quote": "Transit agencies must report holiday service under the day that most closely reflects the service. For example, if an agency operates the Sunday schedule on Christmas Day, they must indicate that this is an additional day of Sunday service (regardless of the day on which the holiday falls).",
+      "citation": "Holiday rule — 2026 NTD Policy Manual, Full Reporting, p. 156"
+    },
+    {
+      "quote": "most closely reflects",
+      "citation": "Holiday rule — 2026 NTD Policy Manual, Full Reporting, p. 156"
+    },
+    {
+      "quote": "For fixed-route modes and DR services, report days operated when service was available, even if no rides were provided. For VP modes, only report days operated when service was provided. If the service was available but no trips took place, this does not count as a day operated.",
+      "citation": "Availability rule — 2026 NTD Policy Manual, Full Reporting, p. 156"
+    },
+    {
+      "quote": "available",
+      "citation": "Availability rule — 2026 NTD Policy Manual, Full Reporting, p. 156"
+    },
+    {
+      "quote": "A partial day operated counts as a day operated. Days in which all service, all day is cancelled for the given mode are not days operated.",
+      "citation": "Partial-day rule — 2026 NTD Policy Manual, Full Reporting, p. 156"
+    },
+    {
+      "quote": "VOMS excludes atypical days or one-time special events.",
+      "citation": "Atypical-day exclusion — pointer, monthly manual — 2026 NTD Policy Manual, Full Reporting, already quoted at calc voms_v0"
+    },
+    {
+      "quote": "atypical days",
+      "citation": "Atypical-day exclusion — pointer, monthly manual — 2026 NTD Policy Manual, Full Reporting, already quoted at calc voms_v0"
+    }
+  ],
+  "daytype_upt_avg_v0": [
+    {
+      "quote": "Verified — Passenger Miles Traveled",
+      "citation": "Day-type schedule vocabulary — the average-schedules sentence (p. 154), verbatim — 2026 NTD Policy Manual, Full Reporting, the Exhibit 44 / non-mandatory-year PMT context already partially quoted under \"Verified — Passenger Miles Traveled\""
+    },
+    {
+      "quote": "Full Reporters determine their average trip length (PMT/UPT) by mode and TOS during their mandatory sampling year for their Average Weekday Schedule, Average Saturday Schedule (if applicable), Average Sunday Schedule (if applicable), and Annual Total.",
+      "citation": "Day-type schedule vocabulary — the average-schedules sentence (p. 154), verbatim — 2026 NTD Policy Manual, Full Reporting, the Exhibit 44 / non-mandatory-year PMT context already partially quoted under \"Verified — Passenger Miles Traveled\""
+    },
+    {
+      "quote": "Full Reporters must provide the following data: • Days Operated (days on which service was actually operated) • Days Not Operated Due to Strikes (days that service would normally have operated but did not due to a transit labor strike) • Days Not Operated Due to Officially Declared Emergencies (days that service would normally have operated but did not due to an officially declared emergency)",
+      "citation": "Days Operated data points — 2026 NTD Policy Manual, Full Reporting, p. 155"
+    },
+    {
+      "quote": "Within each of these categories, Full Reporters must report the total number of days operated for the weekday schedule, Saturday schedule, and Sunday schedule service. Many transit agencies operate different schedules on weekdays, Saturdays, and Sundays. An agency must report the number of days they operated during each schedule.",
+      "citation": "The per-schedule breakdown — 2026 NTD Policy Manual, Full Reporting, p. 155"
+    },
+    {
+      "quote": "Transit agencies must report holiday service under the day that most closely reflects the service. For example, if an agency operates the Sunday schedule on Christmas Day, they must indicate that this is an additional day of Sunday service (regardless of the day on which the holiday falls).",
+      "citation": "Holiday rule — 2026 NTD Policy Manual, Full Reporting, p. 156"
+    },
+    {
+      "quote": "most closely reflects",
+      "citation": "Holiday rule — 2026 NTD Policy Manual, Full Reporting, p. 156"
+    },
+    {
+      "quote": "For fixed-route modes and DR services, report days operated when service was available, even if no rides were provided. For VP modes, only report days operated when service was provided. If the service was available but no trips took place, this does not count as a day operated.",
+      "citation": "Availability rule — 2026 NTD Policy Manual, Full Reporting, p. 156"
+    },
+    {
+      "quote": "available",
+      "citation": "Availability rule — 2026 NTD Policy Manual, Full Reporting, p. 156"
+    },
+    {
+      "quote": "A partial day operated counts as a day operated. Days in which all service, all day is cancelled for the given mode are not days operated.",
+      "citation": "Partial-day rule — 2026 NTD Policy Manual, Full Reporting, p. 156"
+    },
+    {
+      "quote": "VOMS excludes atypical days or one-time special events.",
+      "citation": "Atypical-day exclusion — pointer, monthly manual — 2026 NTD Policy Manual, Full Reporting, already quoted at calc voms_v0"
+    },
+    {
+      "quote": "atypical days",
+      "citation": "Atypical-day exclusion — pointer, monthly manual — 2026 NTD Policy Manual, Full Reporting, already quoted at calc voms_v0"
+    }
+  ],
+  "daytype_v0": [
+    {
+      "quote": "Verified — Passenger Miles Traveled",
+      "citation": "Day-type schedule vocabulary — the average-schedules sentence (p. 154), verbatim — 2026 NTD Policy Manual, Full Reporting, the Exhibit 44 / non-mandatory-year PMT context already partially quoted under \"Verified — Passenger Miles Traveled\""
+    },
+    {
+      "quote": "Full Reporters determine their average trip length (PMT/UPT) by mode and TOS during their mandatory sampling year for their Average Weekday Schedule, Average Saturday Schedule (if applicable), Average Sunday Schedule (if applicable), and Annual Total.",
+      "citation": "Day-type schedule vocabulary — the average-schedules sentence (p. 154), verbatim — 2026 NTD Policy Manual, Full Reporting, the Exhibit 44 / non-mandatory-year PMT context already partially quoted under \"Verified — Passenger Miles Traveled\""
+    },
+    {
+      "quote": "Full Reporters must provide the following data: • Days Operated (days on which service was actually operated) • Days Not Operated Due to Strikes (days that service would normally have operated but did not due to a transit labor strike) • Days Not Operated Due to Officially Declared Emergencies (days that service would normally have operated but did not due to an officially declared emergency)",
+      "citation": "Days Operated data points — 2026 NTD Policy Manual, Full Reporting, p. 155"
+    },
+    {
+      "quote": "Within each of these categories, Full Reporters must report the total number of days operated for the weekday schedule, Saturday schedule, and Sunday schedule service. Many transit agencies operate different schedules on weekdays, Saturdays, and Sundays. An agency must report the number of days they operated during each schedule.",
+      "citation": "The per-schedule breakdown — 2026 NTD Policy Manual, Full Reporting, p. 155"
+    },
+    {
+      "quote": "Transit agencies must report holiday service under the day that most closely reflects the service. For example, if an agency operates the Sunday schedule on Christmas Day, they must indicate that this is an additional day of Sunday service (regardless of the day on which the holiday falls).",
+      "citation": "Holiday rule — 2026 NTD Policy Manual, Full Reporting, p. 156"
+    },
+    {
+      "quote": "most closely reflects",
+      "citation": "Holiday rule — 2026 NTD Policy Manual, Full Reporting, p. 156"
+    },
+    {
+      "quote": "For fixed-route modes and DR services, report days operated when service was available, even if no rides were provided. For VP modes, only report days operated when service was provided. If the service was available but no trips took place, this does not count as a day operated.",
+      "citation": "Availability rule — 2026 NTD Policy Manual, Full Reporting, p. 156"
+    },
+    {
+      "quote": "available",
+      "citation": "Availability rule — 2026 NTD Policy Manual, Full Reporting, p. 156"
+    },
+    {
+      "quote": "A partial day operated counts as a day operated. Days in which all service, all day is cancelled for the given mode are not days operated.",
+      "citation": "Partial-day rule — 2026 NTD Policy Manual, Full Reporting, p. 156"
+    },
+    {
+      "quote": "VOMS excludes atypical days or one-time special events.",
+      "citation": "Atypical-day exclusion — pointer, monthly manual — 2026 NTD Policy Manual, Full Reporting, already quoted at calc voms_v0"
+    },
+    {
+      "quote": "atypical days",
+      "citation": "Atypical-day exclusion — pointer, monthly manual — 2026 NTD Policy Manual, Full Reporting, already quoted at calc voms_v0"
+    }
+  ],
   "dr_pmt_v0": [
     {
       "quote": "a transit mode operating on roadways in response to requests from passengers or their agents to the transit operator, who groups rides together when possible and dispatches a vehicle to provide the rides. Vehicles do not operate over a fixed route or on a fixed schedule unless temporarily satisfying a special transit need. Many transit systems operate DR service to meet the requirements of the ADA.",

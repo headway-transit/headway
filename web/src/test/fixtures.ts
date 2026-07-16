@@ -1,6 +1,7 @@
 import type {
   AttestationRecord,
   CertificationCertificate,
+  CertificationRecord,
   CompareResponse,
   DqIssue,
   LineageNode,
@@ -292,6 +293,33 @@ export const certificateFixture: CertificationCertificate = {
   signature: "ZWQyNTUxOS1zaWduYXR1cmUtYnl0ZXM=",
   document: certificateDocumentFixture,
   verification: verifiedResultFixture,
+};
+
+/** certificateFixture as GET /certifications lists it (the index room). */
+export const signedCertificationRecord: CertificationRecord = {
+  certification_id: "cert-42",
+  metric_value_ids: ["mv-vrm-1", "mv-vrh-1"],
+  certified_by: "certifier",
+  certified_at: "2026-07-02T15:00:00Z",
+  attestation: certificationIntentFixture.intent_statement,
+  signed: true,
+  key_fingerprint: FINGERPRINT,
+  signer_full_name: "Alex Rivera",
+  signer_title: "NTD Certifying Official",
+};
+
+/** A pre-signature record as the index lists it: signed=false, null
+ *  signer fields — honest history, never backfilled. */
+export const legacyCertificationRecord: CertificationRecord = {
+  certification_id: "cert-7",
+  metric_value_ids: ["mv-vrm-0"],
+  certified_by: "certifier",
+  certified_at: "2026-07-01T12:00:00Z",
+  attestation: "I reviewed these figures and they are correct.",
+  signed: false,
+  key_fingerprint: null,
+  signer_full_name: null,
+  signer_title: null,
 };
 
 /** A certification recorded BEFORE the signing key existed (design 4:

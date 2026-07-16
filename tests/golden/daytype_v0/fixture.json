@@ -1,0 +1,59 @@
+{
+  "period_start": "2026-02-01",
+  "period_end": "2026-03-01",
+  "overrides": [
+    {
+      "service_date": "2026-02-16",
+      "assigned_day_type": "sunday",
+      "atypical": false,
+      "reason": "Washington's Birthday - agency operates the Sunday schedule (2026 NTD Policy Manual p. 156 holiday rule)",
+      "updated_by": "certifier",
+      "updated_at": "2026-02-01T00:00:00+00:00"
+    },
+    {
+      "service_date": "2026-02-14",
+      "assigned_day_type": null,
+      "atypical": true,
+      "reason": "Downtown winter festival - one-time special event service pattern",
+      "updated_by": "certifier",
+      "updated_at": "2026-02-01T00:00:00+00:00"
+    }
+  ],
+  "typical_month": {
+    "positions": [
+      {"time": "2026-02-02T08:00:00+00:00", "vehicle_id": "v1", "trip_id": "t-a", "latitude": 42.35, "longitude": -71.06, "source_record_id": "p-0202-a"},
+      {"time": "2026-02-02T09:00:00+00:00", "vehicle_id": "v2", "trip_id": "t-b", "latitude": 42.35, "longitude": -71.06, "source_record_id": "p-0202-b"},
+      {"time": "2026-02-03T08:00:00+00:00", "vehicle_id": "v1", "trip_id": "t-c", "latitude": 42.35, "longitude": -71.06, "source_record_id": "p-0203-a"},
+      {"time": "2026-02-07T08:00:00+00:00", "vehicle_id": "v1", "trip_id": "t-d", "latitude": 42.35, "longitude": -71.06, "source_record_id": "p-0207-a"},
+      {"time": "2026-02-08T08:00:00+00:00", "vehicle_id": "v1", "trip_id": "t-f", "latitude": 42.35, "longitude": -71.06, "source_record_id": "p-0208-a"},
+      {"time": "2026-02-14T08:00:00+00:00", "vehicle_id": "v1", "trip_id": "t-e", "latitude": 42.35, "longitude": -71.06, "source_record_id": "p-0214-a"},
+      {"time": "2026-02-16T08:00:00+00:00", "vehicle_id": "v1", "trip_id": "t-g", "latitude": 42.35, "longitude": -71.06, "source_record_id": "p-0216-a"}
+    ],
+    "events": [
+      {"event_timestamp": "2026-02-02T09:00:00+00:00", "service_date": "2026-02-02", "passenger_event_id": "e1", "vehicle_id": "v1", "trip_id": "t-a", "trip_stop_sequence": 1, "event_type": "Passenger boarded", "event_count": 30, "source": "tides", "source_record_id": "r-e1"},
+      {"event_timestamp": "2026-02-02T09:05:00+00:00", "service_date": "2026-02-02", "passenger_event_id": "e2", "vehicle_id": "v1", "trip_id": "t-a", "trip_stop_sequence": 2, "event_type": "Passenger alighted", "event_count": 30, "source": "tides", "source_record_id": "r-e2"},
+      {"event_timestamp": "2026-02-02T10:00:00+00:00", "service_date": "2026-02-02", "passenger_event_id": "e3", "vehicle_id": "v2", "trip_id": "t-b", "trip_stop_sequence": 1, "event_type": "Passenger boarded", "event_count": 20, "source": "tides", "source_record_id": "r-e3"},
+      {"event_timestamp": "2026-02-02T10:05:00+00:00", "service_date": "2026-02-02", "passenger_event_id": "e4", "vehicle_id": "v2", "trip_id": "t-b", "trip_stop_sequence": 2, "event_type": "Passenger alighted", "event_count": 20, "source": "tides", "source_record_id": "r-e4"},
+      {"event_timestamp": "2026-02-03T09:00:00+00:00", "service_date": "2026-02-03", "passenger_event_id": "e5", "vehicle_id": "v1", "trip_id": "t-c", "trip_stop_sequence": 1, "event_type": "Passenger boarded", "event_count": 40, "source": "tides", "source_record_id": "r-e5"},
+      {"event_timestamp": "2026-02-03T09:05:00+00:00", "service_date": "2026-02-03", "passenger_event_id": "e6", "vehicle_id": "v1", "trip_id": "t-c", "trip_stop_sequence": 2, "event_type": "Passenger alighted", "event_count": 40, "source": "tides", "source_record_id": "r-e6"},
+      {"event_timestamp": "2026-02-07T09:00:00+00:00", "service_date": "2026-02-07", "passenger_event_id": "e7", "vehicle_id": "v1", "trip_id": "t-d", "trip_stop_sequence": 1, "event_type": "Passenger boarded", "event_count": 25, "source": "tides", "source_record_id": "r-e7"},
+      {"event_timestamp": "2026-02-07T09:05:00+00:00", "service_date": "2026-02-07", "passenger_event_id": "e8", "vehicle_id": "v1", "trip_id": "t-d", "trip_stop_sequence": 2, "event_type": "Passenger alighted", "event_count": 25, "source": "tides", "source_record_id": "r-e8"},
+      {"event_timestamp": "2026-02-08T09:00:00+00:00", "service_date": "2026-02-08", "passenger_event_id": "e11", "vehicle_id": "v1", "trip_id": "t-f", "trip_stop_sequence": 1, "event_type": "Passenger boarded", "event_count": 12, "source": "tides", "source_record_id": "r-e11"},
+      {"event_timestamp": "2026-02-08T09:05:00+00:00", "service_date": "2026-02-08", "passenger_event_id": "e12", "vehicle_id": "v1", "trip_id": "t-f", "trip_stop_sequence": 2, "event_type": "Passenger alighted", "event_count": 12, "source": "tides", "source_record_id": "r-e12"},
+      {"event_timestamp": "2026-02-14T09:00:00+00:00", "service_date": "2026-02-14", "passenger_event_id": "e9", "vehicle_id": "v1", "trip_id": "t-e", "trip_stop_sequence": 1, "event_type": "Passenger boarded", "event_count": 60, "source": "tides", "source_record_id": "r-e9"},
+      {"event_timestamp": "2026-02-14T09:05:00+00:00", "service_date": "2026-02-14", "passenger_event_id": "e10", "vehicle_id": "v1", "trip_id": "t-e", "trip_stop_sequence": 2, "event_type": "Passenger alighted", "event_count": 60, "source": "tides", "source_record_id": "r-e10"},
+      {"event_timestamp": "2026-02-16T09:00:00+00:00", "service_date": "2026-02-16", "passenger_event_id": "e13", "vehicle_id": "v1", "trip_id": "t-g", "trip_stop_sequence": 1, "event_type": "Passenger boarded", "event_count": 18, "source": "tides", "source_record_id": "r-e13"},
+      {"event_timestamp": "2026-02-16T09:05:00+00:00", "service_date": "2026-02-16", "passenger_event_id": "e14", "vehicle_id": "v1", "trip_id": "t-g", "trip_stop_sequence": 2, "event_type": "Passenger alighted", "event_count": 18, "source": "tides", "source_record_id": "r-e14"}
+    ]
+  },
+  "refused_day": {
+    "positions": [
+      {"time": "2026-02-02T08:00:00+00:00", "vehicle_id": "v1", "trip_id": "t-a", "latitude": 42.35, "longitude": -71.06, "source_record_id": "p-0202-a"},
+      {"time": "2026-02-02T09:00:00+00:00", "vehicle_id": "v2", "trip_id": "t-b", "latitude": 42.35, "longitude": -71.06, "source_record_id": "p-0202-b"}
+    ],
+    "events": [
+      {"event_timestamp": "2026-02-02T09:00:00+00:00", "service_date": "2026-02-02", "passenger_event_id": "e1", "vehicle_id": "v1", "trip_id": "t-a", "trip_stop_sequence": 1, "event_type": "Passenger boarded", "event_count": 10, "source": "tides", "source_record_id": "r-e1"},
+      {"event_timestamp": "2026-02-02T09:05:00+00:00", "service_date": "2026-02-02", "passenger_event_id": "e2", "vehicle_id": "v1", "trip_id": "t-a", "trip_stop_sequence": 2, "event_type": "Passenger alighted", "event_count": 10, "source": "tides", "source_record_id": "r-e2"}
+    ]
+  }
+}

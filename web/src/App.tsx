@@ -13,6 +13,7 @@ import { Layout } from "./components/Layout";
 import { AttestationsView } from "./views/AttestationsView";
 import { BrandingView } from "./views/BrandingView";
 import { CertificateView } from "./views/CertificateView";
+import { CertificationsView } from "./views/CertificationsView";
 import { CertifyView } from "./views/CertifyView";
 import { CompareView } from "./views/CompareView";
 import { DashboardView } from "./views/DashboardView";
@@ -88,6 +89,10 @@ export function AppRoutes() {
               signed-in role reads the record; recording one is gated in
               the UI and enforced by the API on POST /attestations. */}
           <Route path="/attestations" element={<AttestationsView />} />
+          {/* The certifications index (handoff 0019 follow-up): every
+              certification on record, list → certificate. Any signed-in
+              role reads it, exactly like the API's GET /certifications. */}
+          <Route path="/certifications" element={<CertificationsView />} />
           {/* Role-gated in the UI (nav link + in-page notice); the API
               enforces certifying_official on POST /certifications. */}
           <Route path="/certify" element={<CertifyView />} />

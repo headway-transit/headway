@@ -171,6 +171,92 @@ def export_mr20_report(
     )
 
 
+#: Latest row per (metric, scope) for one exact period — the workbook's
+#: read (the mr20 _SELECT_LATEST_SQL convention: newest computed_at,
+#: metric_value_id as the deterministic tie-break; earlier rows are
+#: history). BOTH categories are read deliberately: the Operations sheet
+#: serves ops rows BADGED as such (the migration-0024 wall is honesty-with-
+#: labels here, and the database CHECK guarantees no ops row can ever be
+#: certified).
+_SELECT_WORKBOOK_LATEST = (
+    "SELECT DISTINCT ON (metric, scope) metric, scope, metric_value_id, "
+    "value, unit, calc_name, calc_version, certification_status, category, "
+    "detail "
+    "FROM computed.metric_values "
+    "WHERE period_start = %s AND period_end = %s "
+    "AND metric IN ('upt', 'upt_avg', 'days_operated', 'voms', 'otp', "
+    "'headway_adherence') "
+    "ORDER BY metric, scope, computed_at DESC, metric_value_id DESC"
+)
+
+
+def _prior_year_month(month: str) -> str:
+    """The same calendar month one year earlier ('2026-07' → '2025-07') —
+    string arithmetic on the validated YYYY-MM form only."""
+    return f"{int(month[:4]) - 1:04d}-{month[5:7]}"
+
+
+@router.get(
+    "/reports/agency-workbook",
+    response_class=Response,
+    responses={
+        200: {
+            "description": (
+                "The monthly agency workbook (handoff 0020) as an XLSX or "
+                "CSV download — Headway's OWN generic layout: a 'Read "
+                "first' banner sheet (NOT-REPORTABLE, honest-scope "
+                "absences, certification block when figures are "
+                "certified), a Ridership-by-mode sheet (UPT month totals, "
+                "average weekday/Saturday/Sunday UPT with typical/atypical "
+                "splits, Days Operated per schedule type) and an "
+                "Operations sheet (VOMS plus migration-0024-badged "
+                "OTP/headway-adherence). Every data cell is the verbatim "
+                "served figure with a VISIBLE provenance column "
+                "(metric_value_id); absent cells are stated, never "
+                "invented or zero-filled; year-over-year columns show the "
+                "prior year month's figure verbatim with its own "
+                "provenance."
+            ),
+            "content": {exports.CSV_MEDIA_TYPE: {}, exports.XLSX_MEDIA_TYPE: {}},
+        }
+    },
+)
+def export_agency_workbook(
+    month: str = Query(..., description="Calendar month as YYYY-MM."),
+    format: str = Query(default="xlsx", pattern=exports.FORMAT_PATTERN),
+    identity: Identity = Depends(require_authenticated),
+    db=Depends(get_db),
+) -> Response:
+    """Download the monthly agency workbook (handoff 0020). One assembly
+    feeds both formats — XLSX cell values byte-equal to the CSV variant
+    (pinned by test); the CSV introduces each sheet with a '## <title>'
+    marker line. This endpoint queries and formats; it never computes a
+    figure (year-over-year deltas deliberately excluded — see
+    GET /metrics/compare)."""
+    _month_or_422(month)
+    period_start, period_end = mr20.month_period(month)
+    prior_month = _prior_year_month(month)
+    prior_start, prior_end = mr20.month_period(prior_month)
+    rows = db.execute(
+        _SELECT_WORKBOOK_LATEST, (period_start, period_end)
+    ).fetchall()
+    prior_rows = db.execute(
+        _SELECT_WORKBOOK_LATEST, (prior_start, prior_end)
+    ).fetchall()
+    banner, sheets = exports.agency_workbook(
+        month,
+        period_start,
+        period_end,
+        prior_month,
+        rows,
+        prior_rows,
+        certificate_lines=_certificate_lines(db, month),
+    )
+    return exports.sheets_export_response(
+        banner, sheets, format, f"headway-agency-workbook-{month}"
+    )
+
+
 @router.get(
     "/reports/ss50/export",
     response_class=Response,

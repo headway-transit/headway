@@ -155,6 +155,14 @@ export function Layout() {
                 <li>
                   <NavLink to="/attestations">{copy.nav.attestations}</NavLink>
                 </li>
+                {/* The certifications index (handoff 0019 follow-up): any
+                    signed-in role reads the record, like the API. Placed
+                    beside Certify — the room its records come from. */}
+                <li>
+                  <NavLink to="/certifications">
+                    {copy.nav.certifications}
+                  </NavLink>
+                </li>
                 {/* Shown only to the certifying official — UX, not security:
                     the API enforces the role on POST /certifications and on
                     every branding write. */}

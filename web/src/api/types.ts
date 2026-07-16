@@ -391,6 +391,32 @@ export interface ResolveResponse {
   audit_event_id: number;
 }
 
+/**
+ * POST /dq/issues/{issue_id}/attest body (handoff 0019, migration 0029):
+ * close ONE p. 146 refusal issue under a RECORDED statistician attestation.
+ * The caller supplies only the reference — the resolution text is built
+ * server-side from the attestation record, never typed here.
+ */
+export interface AttestRequest {
+  /** minLength 1 — the attestation_id of a standing (unrevoked) record. */
+  attestation_id: string;
+}
+
+/**
+ * POST /dq/issues/{issue_id}/attest response. status is the explicit
+ * 'attested' closed state — never a generic 'resolved', never a deletion.
+ */
+export interface AttestResponse {
+  issue_id: string;
+  status: string;
+  /** ISO date-time */
+  resolved_at: string;
+  /** Server-built resolution text naming the attestation, verbatim. */
+  resolution: string;
+  attestation_id: string;
+  audit_event_id: number;
+}
+
 // ---- /reports/mr20 ----
 
 /**

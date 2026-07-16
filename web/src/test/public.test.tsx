@@ -9,13 +9,14 @@
 
 import { describe, expect, it } from "vitest";
 import { screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import {
   expectNoAxeViolations,
   mockApi,
   renderApp,
   signInAs,
 } from "./helpers";
-import type { PublicMetricValue } from "../api/types";
+import type { PublicMetricValue, VerificationResult } from "../api/types";
 import { certifiedValue, simulatedUptValue } from "./fixtures";
 
 const DISCLAIMER =
@@ -79,7 +80,164 @@ describe("/public (certified open data)", () => {
       "Certified before digital signatures existed in Headway — no signature fingerprint.",
     );
 
+    // The verify affordance rides ONLY the signed row: a legacy record has
+    // nothing to verify, so it gets no button (the honest line stands).
+    expect(
+      within(vrmCard).getByRole("button", { name: /^Verify this signature/ }),
+    ).toBeInTheDocument();
+    expect(
+      within(uptCard).queryByRole("button", {
+        name: /^Verify this signature/,
+      }),
+    ).not.toBeInTheDocument();
+
     await expectNoAxeViolations();
+  });
+
+  it("verifies a signed row through the PUBLIC endpoint — no token sent — and renders the server's verified verdict verbatim", async () => {
+    // NO signInAs: the check must work for an anonymous visitor.
+    const signedRow: PublicMetricValue = {
+      ...certifiedValue,
+      certification: {
+        certification_id: "cert-42",
+        certified_at: "2026-07-15T23:00:05Z",
+        key_fingerprint: "ed25519:f0995b71ecc91f99d6c0794eee26297907fe2ae7",
+      },
+    };
+    const verdict: VerificationResult = {
+      certification_id: "cert-42",
+      signed: true,
+      verified: true,
+      verdict: "verified",
+      algorithm: "ed25519",
+      key_fingerprint: "ed25519:f0995b71ecc91f99d6c0794eee26297907fe2ae7",
+      certified_at: "2026-07-15T23:00:05Z",
+      message:
+        "Verified: the stored certificate is byte-identical to what was signed and the signature is valid under this installation's key.",
+    };
+    const calls = mockApi({
+      "GET /public/metrics/certified": { status: 200, body: [signedRow] },
+      "GET /public/certifications/cert-42/verify": {
+        status: 200,
+        body: verdict,
+      },
+    });
+    const user = userEvent.setup();
+    renderApp("/public");
+
+    const card = (
+      await screen.findByRole("heading", {
+        name: "Vehicle Revenue Miles (VRM)",
+      })
+    ).closest("article") as HTMLElement;
+    // The always-visible note says anyone can run the check.
+    expect(card).toHaveTextContent(
+      "Anyone can run this check, without an account",
+    );
+    await user.click(
+      within(card).getByRole("button", { name: /^Verify this signature/ }),
+    );
+
+    // The server's verdict, verbatim, in the success voice.
+    const status = await within(card).findByRole("status");
+    expect(status).toHaveTextContent("Signature verified.");
+    expect(status).toHaveTextContent(verdict.message);
+
+    // The verify call hit the PUBLIC endpoint and carried no token.
+    const verifyCall = calls.find((c) =>
+      c.path.endsWith("/certifications/cert-42/verify"),
+    );
+    expect(verifyCall?.path).toBe("/public/certifications/cert-42/verify");
+    expect(verifyCall?.headers.Authorization).toBeUndefined();
+
+    await expectNoAxeViolations();
+  });
+
+  it("renders a FAILED verdict loudly and verbatim — tamper evidence is never softened", async () => {
+    const signedRow: PublicMetricValue = {
+      ...certifiedValue,
+      certification: {
+        certification_id: "cert-99",
+        certified_at: "2026-07-15T23:00:05Z",
+        key_fingerprint: "ed25519:f0995b71ecc91f99d6c0794eee26297907fe2ae7",
+      },
+    };
+    const failedMessage =
+      "VERIFICATION FAILED: the stored record does not match its " +
+      "signature. The record has been tampered with since signing, or " +
+      "the stored signature is corrupt.";
+    mockApi({
+      "GET /public/metrics/certified": { status: 200, body: [signedRow] },
+      "GET /public/certifications/cert-99/verify": {
+        status: 200,
+        body: {
+          certification_id: "cert-99",
+          signed: true,
+          verified: false,
+          verdict: "failed",
+          algorithm: "ed25519",
+          key_fingerprint:
+            "ed25519:f0995b71ecc91f99d6c0794eee26297907fe2ae7",
+          certified_at: "2026-07-15T23:00:05Z",
+          message: failedMessage,
+        } satisfies VerificationResult,
+      },
+    });
+    const user = userEvent.setup();
+    renderApp("/public");
+
+    const card = (
+      await screen.findByRole("heading", {
+        name: "Vehicle Revenue Miles (VRM)",
+      })
+    ).closest("article") as HTMLElement;
+    await user.click(
+      within(card).getByRole("button", { name: /^Verify this signature/ }),
+    );
+
+    const alert = await within(card).findByRole("alert");
+    expect(alert).toHaveTextContent("SIGNATURE VERIFICATION FAILED.");
+    expect(alert).toHaveTextContent(failedMessage);
+
+    await expectNoAxeViolations();
+  });
+
+  it("treats a failure to reach the verify endpoint as a loud failure to verify (e.g. the public rate limit), verbatim", async () => {
+    const signedRow: PublicMetricValue = {
+      ...certifiedValue,
+      certification: {
+        certification_id: "cert-42",
+        certified_at: "2026-07-15T23:00:05Z",
+        key_fingerprint: "ed25519:f0995b71ecc91f99d6c0794eee26297907fe2ae7",
+      },
+    };
+    mockApi({
+      "GET /public/metrics/certified": { status: 200, body: [signedRow] },
+      "GET /public/certifications/cert-42/verify": {
+        status: 429,
+        body: {
+          detail:
+            "Too many requests from this address. Wait a moment and try again.",
+        },
+      },
+    });
+    const user = userEvent.setup();
+    renderApp("/public");
+
+    const card = (
+      await screen.findByRole("heading", {
+        name: "Vehicle Revenue Miles (VRM)",
+      })
+    ).closest("article") as HTMLElement;
+    await user.click(
+      within(card).getByRole("button", { name: /^Verify this signature/ }),
+    );
+
+    const alert = await within(card).findByRole("alert");
+    expect(alert).toHaveTextContent("SIGNATURE VERIFICATION FAILED.");
+    expect(alert).toHaveTextContent(
+      "Too many requests from this address. Wait a moment and try again.",
+    );
   });
 
   it("renders the certified figures as receipt-lite cards WITHOUT any sign-in, values verbatim, no token sent", async () => {

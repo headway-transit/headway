@@ -33,6 +33,10 @@ preserved end to end; floating point never touches a figure).
 | GET | `/reports/mr20?month=YYYY-MM` | any signed-in role | The `headway_calc.mr20` MR-20 preview package for the month, served **VERBATIM** (NOT-REPORTABLE banner + caveats included; this API never edits a figure). Plain-language 422 on a bad month. |
 | GET | `/reports/mr20/export` | any signed-in role | The MR-20 package as CSV/XLSX (`month`, `format`): one row per (scope, metric) cell, values verbatim, missing cells with their explicit reasons; the NOT-REPORTABLE banner + every enumerated caveat lead the CSV / form the XLSX first sheet (handoff 0017 export discipline — see `/metrics/values/export`). |
 | GET | `/reports/ss50/export` | any signed-in role | The `headway_calc.ss50` S&S-50 non-major monthly summary as CSV/XLSX: one row per (mode, TOS) cell INCLUDING explicit zero rows; banner + citations + caveats + the excluded-event accounting lead. Same export discipline. |
+| GET | `/reports/agency-workbook` | any signed-in role | The monthly agency workbook (handoff 0020; `month=YYYY-MM`, `format=xlsx\|csv`, default xlsx) — Headway's OWN generic layout, never a partner file's: a "Read first" banner sheet (NOT-REPORTABLE, how-to-read, honest-scope absences — missed trips / VAMS / days-not-operated stated as not computed — the migration-0024 ops badge statement, the simulated banner when applicable, and the period's certificate block), a **Ridership by mode** sheet (UPT month totals per mode, average weekday/Saturday/Sunday UPT with typical/atypical split rows, Days Operated per schedule type) and an **Operations** sheet (VOMS + ops-badged OTP/headway-adherence, VAMS stated absent). Every data cell is the VERBATIM served string with a VISIBLE `provenance_metric_value_id` column; absent cells are STATED, never invented or zero-filled; year-over-year columns show the prior year month's figure verbatim with its own provenance (no derived deltas — `/metrics/compare` is the comparison surface). Multi-sheet export discipline: the CSV introduces each sheet with a `## <title>` marker line; XLSX cells are byte-equal to the CSV cells (pinned by test). |
+| GET | `/settings/service-days` | any signed-in role | The agency's service-day declarations (migration 0031): holiday day-type reassignments + atypical-day flags, each with its required reason and audit attribution. Optional half-open range (`from_date`, `to_date` — both or neither). |
+| PUT | `/settings/service-days/{date}` | `certifying_official` | Declare/replace one date's override: `assigned_day_type` (`weekday\|saturday\|sunday` or null) and/or `atypical`, plus a required `reason`. A declaration that declares nothing is a plain-language 422 (the migration-0031 CHECK, surfaced kindly). Old→new in the audit detail; figures computed under the old declaration keep their own snapshot (the calc persists the governing row into detail JSONB). |
+| DELETE | `/settings/service-days/{date}` | `certifying_official` | Remove one declaration (the date returns to day-of-week, typical); the removed declaration lands in the audit trail. 404 when nothing is declared for the date. |
 | POST | `/machine/keys` | `certifying_official` (v0 admin) | Issues a machine API key. The full key appears ONCE in this response with an explicit warning; only its SHA-256 hash is stored. Audited. |
 | GET | `/machine/keys` | `certifying_official` | Lists keys: prefix, name, scopes, source label, created/revoked — never hashes, never key material. |
 | DELETE | `/machine/keys/{id}` | `certifying_official` | Revokes a key (sets `revoked_at`; rows are never deleted — audit history). Audited. |
@@ -404,6 +408,18 @@ python3 -m pytest tests/ -q
 
 ## Verification status
 
+- `pytest tests/ -q`: **296 passed** (2026-07-15, day-type workbook wave,
+  handoff 0020) — prior suite plus 17 new: service-day override
+  declare/replace/delete with authz, validation (vocabulary, meaningful,
+  required reason) and old→new audit; the agency workbook (multi-sheet
+  CSV/XLSX byte-equality, banner statements, stated-absent cells, visible
+  provenance column, migration-0024 ops badging, verbatim YoY columns,
+  certificate block). Live end-to-end 2026-07-15: migration 0031 applied +
+  CHECKs proven by attack; two declarations entered through the live API
+  (audit rows psql-verified); `--daytype --per-mode` run persisted 9
+  scoped figures over live MBTA-fed data; workbook XLSX + CSV downloaded
+  and verified cell-for-cell equal with the certificate block present —
+  handoff 0020, "Outputs — backend evidence".
 - `pytest tests/ -q`: **279 passed** (2026-07-15, attestation + signature
   wave, handoff 0019) — prior suite plus 34 new: statistician attestation
   entry/list/revoke with authz + audit; the explicit `attested` DQ closure

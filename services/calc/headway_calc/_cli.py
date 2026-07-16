@@ -136,6 +136,22 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--daytype",
+        action="store_true",
+        help=(
+            "Run the DAY-TYPE calcs INSTEAD of the default NTD calcs: "
+            "daytype_days_operated_v0 + daytype_upt_avg_v0 over the period "
+            "(handoff 0020) — Days Operated per weekday/Saturday/Sunday "
+            "schedule and average UPT per day type and typical/atypical "
+            "split, classified by daytype_v0 0.1.0 (agency-declared "
+            "overrides in app.service_day_overrides govern; otherwise "
+            "day-of-week). Persisted under scope 'daytype:<type>' "
+            "(+':atypical'); --per-mode adds 'mode:<mode>:daytype:<type>' "
+            "rows. Basis: REGULATORY_TRACKER.md, 'Verified — Days Operated "
+            "and day-type schedules'."
+        ),
+    )
+    parser.add_argument(
         "--otp-early-tolerance-seconds",
         type=int,
         default=None,
@@ -196,8 +212,26 @@ def main(argv: list[str] | None = None) -> int:
             "installed. Install it with: pip install 'headway-calc[persist]'"
         ) from exc
 
+    if args.ops and args.daytype:
+        raise SystemExit(
+            "--ops and --daytype are separate runs by design (operations, "
+            "NTD and day-type figures never share a run); give one flag."
+        )
+
     with psycopg.connect(database_url) as conn:
-        if args.ops:
+        if args.daytype:
+            from headway_calc.runner import run_daytype_period
+
+            report = run_daytype_period(
+                conn,
+                period_start=args.period_start,
+                period_end=args.period_end,
+                missing_trip_threshold=args.missing_trip_threshold,
+                imbalance_threshold=args.imbalance_threshold,
+                read_settings=not args.ignore_settings,
+                per_mode=args.per_mode,
+            )
+        elif args.ops:
             from headway_calc.runner import run_ops_period
 
             report = run_ops_period(

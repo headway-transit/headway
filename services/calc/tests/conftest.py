@@ -23,6 +23,7 @@ from headway_calc.types import (
     DrTrip,
     OpsScheduledStop,
     PassengerEvent,
+    ServiceDayOverride,
     StopTime,
     VehiclePosition,
 )
@@ -39,6 +40,25 @@ SAMPLING_GOLDEN_DIR = (
     Path(__file__).resolve().parents[3] / "tests" / "golden" / "sampling_v0"
 )
 OPS_GOLDEN_DIR = Path(__file__).resolve().parents[3] / "tests" / "golden" / "ops_v0"
+DAYTYPE_GOLDEN_DIR = (
+    Path(__file__).resolve().parents[3] / "tests" / "golden" / "daytype_v0"
+)
+
+
+def load_overrides(raw: dict) -> list[ServiceDayOverride]:
+    """Map the daytype fixture's override rows onto ServiceDayOverride
+    (handoff 0020, migration 0031)."""
+    return [
+        ServiceDayOverride(
+            service_date=date.fromisoformat(o["service_date"]),
+            assigned_day_type=o["assigned_day_type"],
+            atypical=o["atypical"],
+            reason=o["reason"],
+            updated_by=o["updated_by"],
+            updated_at=datetime.fromisoformat(o["updated_at"]),
+        )
+        for o in raw["overrides"]
+    ]
 
 
 def load_positions(raw: dict) -> list[VehiclePosition]:
@@ -287,6 +307,20 @@ def ops_golden_expected() -> dict:
 
 
 @pytest.fixture(scope="session")
+def daytype_golden_fixture() -> dict:
+    """Day-type fixture (handoff 0020): a hand-worked February 2026 with a
+    holiday reassignment + a declared atypical Saturday, and a refused-day
+    case — see tests/golden/daytype_v0/BASIS.md."""
+    return json.loads((DAYTYPE_GOLDEN_DIR / "fixture.json").read_text())
+
+
+@pytest.fixture(scope="session")
+def daytype_golden_expected() -> dict:
+    """Hand-worked day-type expectations — tests/golden/daytype_v0/BASIS.md."""
+    return json.loads((DAYTYPE_GOLDEN_DIR / "expected.json").read_text())
+
+
+@pytest.fixture(scope="session")
 def voms_golden_fixture() -> dict:
     """VOMS fixture for voms_v0 0.1.0 (handoff 0009): 3 service days with
     distinct-vehicle counts 2/3/2 → maximum 3 — see
@@ -474,7 +508,17 @@ class RecordingCursor:
             # Dispatch canned rows per reader query (handoff 0005 added the
             # passenger-events and operated-trips SELECTs alongside the
             # positions SELECT).
-            if "app.settings" in sql:
+            if "app.service_day_overrides" in sql:
+                # The daytype overrides SELECT (handoff 0020, migration
+                # 0031); a pre-0031 database is modeled by the missing flag
+                # (SQLSTATE 42P01, the app.settings precedent). Checked
+                # BEFORE app.settings: both name the app schema.
+                if conn.service_day_overrides_table_missing:
+                    raise FakeUndefinedTable(
+                        'relation "app.service_day_overrides" does not exist'
+                    )
+                self._pending_all = list(conn.service_day_override_rows)
+            elif "app.settings" in sql:
                 if conn.settings_table_missing:
                     raise FakeUndefinedTable(
                         'relation "app.settings" does not exist'
@@ -581,6 +625,8 @@ class RecordingConnection:
         agency_timezone_rows: list[tuple] | None = None,
         attestation_rows: list[tuple] | None = None,
         attestations_table_missing: bool = False,
+        service_day_override_rows: list[tuple] | None = None,
+        service_day_overrides_table_missing: bool = False,
     ):
         self.position_rows = position_rows or []
         # The ops slice (handoff 0014): schedule + agency timezone reads.
@@ -594,6 +640,12 @@ class RecordingConnection:
         # missing flag models a pre-0029 database (SQLSTATE 42P01 path).
         self.attestation_rows = attestation_rows or []
         self.attestations_table_missing = attestations_table_missing
+        # Service-day overrides (handoff 0020, migration 0031); the missing
+        # flag models a pre-0031 database (SQLSTATE 42P01 path).
+        self.service_day_override_rows = service_day_override_rows or []
+        self.service_day_overrides_table_missing = (
+            service_day_overrides_table_missing
+        )
         # The DR calcs' trip rows (handoff 0013, migration 0021).
         self.dr_trip_rows = dr_trip_rows or []
         self.metric_value_rows = metric_value_rows or []

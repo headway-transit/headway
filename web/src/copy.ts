@@ -61,6 +61,7 @@ export const copy = {
     dq: "Data quality",
     sandbox: "Settings sandbox",
     attestations: "Attestations",
+    certifications: "Certifications",
     certify: "Certify",
     branding: "Branding",
     /** Visible signed-in AND signed-out: the public page needs no account. */
@@ -300,7 +301,8 @@ export const copy = {
    */
   certificate: {
     heading: "Certification certificate",
-    crumbCertify: "Certify",
+    /** The breadcrumb's first crumb: the index room (list → certificate). */
+    crumbList: "Certifications",
     crumbSelf: (id: string) => `Certificate ${id}`,
     intro:
       "This is the permanent record of one certification: who signed, what the signature covers, and the digital signature the server recorded. Nothing on this page is recalculated — it is the stored record.",
@@ -345,6 +347,49 @@ export const copy = {
     attestationsLink: "See the attestations page",
     loadErrorLead:
       "Headway could not load this certificate. The server said:",
+  },
+
+  /**
+   * The certifications index (/certifications — the "list → certificate"
+   * follow-up recorded in handoff 0019's frontend evidence). Every row is
+   * the API's record verbatim, oldest first; digitally signed records and
+   * records that predate signatures are both listed honestly — history is
+   * never hidden, and legacy records are never backfilled.
+   */
+  certifications: {
+    heading: "Certifications",
+    intro:
+      "Every certification on record, oldest first: who put their name on which figures, when, and — for digitally signed records — the signing-key fingerprint. Each entry opens its full certificate, where the signature can be verified.",
+    empty:
+      "No certifications are on record yet. One appears here the moment a certifying official signs figures on the Certify page.",
+    loading: "Loading the certifications on record…",
+    /** Summary cards = filter toggles (handoff 0017 #2). Counts are
+     *  workflow tallies of records in the list, never figures. */
+    summaryLabel: "Certifications at a glance — filter by signature state",
+    cardLabels: {
+      signed: "Digitally signed",
+      legacy: "Recorded before signatures",
+    } as Record<string, string>,
+    /** Filtering hides nothing silently: the held-back count is stated. */
+    filteredNote: (count: string) =>
+      `${count} certification record${count === "1" ? " is" : "s are"} outside the pressed filter — out of view here, never off the record. Press the card again to show everything.`,
+    listLabel: "Certifications on record",
+    recordLabel: (id: string) => `Certification ${id}`,
+    signedTag: "Signed",
+    /** The honest state of a pre-signature record — never a blank. */
+    legacyTag: "No digital signature",
+    legacyNote:
+      "Recorded before digital signatures existed in Headway — no signature fingerprint. Honest history, never backfilled.",
+    signerLine: (name: string, title: string) =>
+      `Signed by ${name}, ${title}`,
+    certifiedByLine: (username: string) =>
+      `Certified by the account ${username}.`,
+    certifiedAtLabel: "Certified at",
+    fingerprintLabel: "Signing key fingerprint",
+    /** metric_value_ids.length — a workflow count of covered figures. */
+    coversLine: (count: string) =>
+      `Covers ${count} figure${count === "1" ? "" : "s"}.`,
+    viewCertificate: (id: string) => `Open certificate ${id}`,
   },
 
   /**
@@ -567,6 +612,44 @@ export const copy = {
      */
     summaryEffort: (hours: string) =>
       `≈${hours} hours of documented data-quality work`,
+
+    /**
+     * The attest closure (handoff 0019 follow-up: POST
+     * /dq/issues/{id}/attest gets its UI room). Offered ONLY on the
+     * p. 146 refusal class — no other gap has a statistician cure — and
+     * gated in UX at data_steward+, mirroring the API's enforced rule
+     * exactly (the same rule as every resolution). The p. 146 rule itself
+     * always renders as the verbatim quote beside these words.
+     */
+    attest: {
+      button: (title: string) => `Attest: ${title}`,
+      dialogHeading: "Close this issue under a statistician attestation",
+      /** Plain-language framing ONLY — the rule renders verbatim below. */
+      intro:
+        "This issue is Headway's refusal to adjust a figure because more than 2% of its trips are missing passenger counts. Federal rules allow that adjustment when a qualified statistician has approved the adjustment method. Closing this issue records that a statistician's approval already on record covers this gap: the issue moves to the permanent “attested” state (closed, never deleted), and the calculation applies the approved method on its next run — stamping the attestation into the figure's receipt. The rule, word for word:",
+      pickLabel: "Which recorded attestation covers this gap?",
+      pickHint:
+        "Only standing (unrevoked) attestations are offered. The server checks that the one you pick actually covers this issue's metric, scope, and period — a mismatch is refused, and the refusal is shown here word for word.",
+      optionLabel: (
+        id: string,
+        statistician: string,
+        metric: string,
+        pattern: string,
+        start: string,
+        end: string,
+      ) =>
+        `#${id} — ${statistician} — ${metric}, ${pattern}, ${start} to ${end}`,
+      noneAvailable:
+        "No standing attestation is on record, so this issue cannot be closed this way yet. Record the statistician's approval on the Attestations page first — this dialog only references approvals that already exist.",
+      attestationsLink: "Go to the Attestations page",
+      loadingAttestations: "Loading the attestations on record…",
+      pickRequired:
+        "Pick the recorded attestation that covers this issue.",
+      submit: "Close this issue as attested",
+      cancel: "Cancel",
+      success: (title: string) =>
+        `“${title}” is closed as attested. The resolution names the attestation permanently.`,
+    },
   },
 
   /**
@@ -889,6 +972,17 @@ export const copy = {
         "The file is served by the API and covers every figure computed for this month — including any beyond the three ridership metrics shown above — with each figure's scope, category, and provenance id, and the preview disclaimer first.",
     },
     /**
+     * The monthly agency workbook (handoff 0020, design point 3): the
+     * familiar hand-assembled monthly workbook, assembled by the API
+     * instead — a receipt behind every cell. The note states coverage in
+     * the handoff's own terms; absent figures are stated, never invented.
+     */
+    workbook: {
+      label: "Download the monthly agency workbook",
+      note:
+        "One workbook for the picked month, assembled by the API: ridership by mode and operations figures (clearly badged as operations metrics), each data cell carrying its figure's provenance id, with a read-first notes sheet leading. A figure Headway has not computed is stated as absent — never invented, never zero-filled.",
+    },
+    /**
      * The MR-20 package section (docket #2): a rendering of GET
      * /reports/mr20. Everything regulatory in it — the banner, the citation,
      * the caveats, every value and null-reason — is the API's text VERBATIM;
@@ -957,6 +1051,17 @@ export const copy = {
     fingerprintLabel: "Signature key fingerprint",
     fingerprintLegacy:
       "Certified before digital signatures existed in Headway — no signature fingerprint.",
+    /**
+     * The public verify affordance (handoff 0019 follow-up): the button
+     * asks the SERVER's public verify endpoint — no account, no token —
+     * and the verdict renders verbatim, verified or FAILED. Only these
+     * frame words are this page's own.
+     */
+    verifyButton: (metric: string, period: string) =>
+      `Verify this signature — ${metric}, ${period}`,
+    verifying: "Asking the server to verify the signature…",
+    verifyNote:
+      "Anyone can run this check, without an account: the server re-checks the stored certificate against its digital signature and reports the verdict.",
     statusCertified: "Certified",
     calcLine: (name: string, version: string) =>
       `Calculated by ${name} (version ${version}).`,

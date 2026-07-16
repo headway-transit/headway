@@ -276,7 +276,14 @@ describe("monthly ridership server export (replaced the client-side CSV, 2026-07
     // What changed is stated out loud, right at the control.
     expect(screen.getByText(copy.report.export.note)).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: /Download CSV/ }));
+    // Scoped to THIS control's group: the workbook export control (handoff
+    // 0020) also offers a CSV button on this page.
+    const exportControl = screen.getByRole("group", {
+      name: copy.report.export.label,
+    });
+    await user.click(
+      within(exportControl).getByRole("button", { name: /Download CSV/ }),
+    );
     await waitFor(() => expect(captured).toHaveLength(1));
 
     // The request is the server export, scoped to the picked month.

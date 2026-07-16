@@ -24,9 +24,11 @@ import {
   ApiError,
   listPublicCertifiedValues,
   publicCertifiedValuesUrl,
+  publicVerifyCertification,
 } from "../api/client";
-import type { PublicMetricValue } from "../api/types";
+import type { PublicMetricValue, VerificationResult } from "../api/types";
 import { SimulatedBadge } from "../components/SimulatedBadge";
+import { VerificationVerdict } from "../components/VerificationVerdict";
 import { copy } from "../copy";
 import { coverageSummary, isSimulated } from "../detail";
 
@@ -126,6 +128,18 @@ function PublicFigureCard({ value }: { value: PublicMetricValue }) {
           </>
         )}
       </dl>
+      {/* The public verify affordance (handoff 0019 follow-up): a row that
+          carries a signature fingerprint offers the SERVER's public
+          tamper-evidence check — no account, no token — and the verdict
+          renders verbatim, verified or FAILED. Legacy rows have nothing to
+          verify and get no button (the honest line above stands). */}
+      {value.certification?.key_fingerprint && (
+        <PublicVerify
+          certificationId={value.certification.certification_id}
+          metric={metric}
+          period={period}
+        />
+      )}
       {simulated && (
         <p>
           <SimulatedBadge /> {copy.simulated.tooltip}
@@ -136,5 +150,74 @@ function PublicFigureCard({ value }: { value: PublicMetricValue }) {
         {copy.publicData.calcLine(value.calc_name, value.calc_version)}
       </p>
     </article>
+  );
+}
+
+/**
+ * One card's verify control: GET /public/certifications/{id}/verify (the
+ * deliberately unauthenticated tamper-evidence endpoint — no token is ever
+ * sent). The verdict is the SERVER's, rendered verbatim through the same
+ * component the certificate view uses; a failure to reach the server is a
+ * FAILURE to verify — loud, never an ignorable note.
+ */
+function PublicVerify({
+  certificationId,
+  metric,
+  period,
+}: {
+  certificationId: string;
+  metric: string;
+  period: string;
+}) {
+  const [state, setState] = useState<
+    | { kind: "idle" }
+    | { kind: "running" }
+    | { kind: "done"; result: VerificationResult }
+    | { kind: "error"; message: string }
+  >({ kind: "idle" });
+
+  const handleVerify = async () => {
+    setState({ kind: "running" });
+    try {
+      setState({
+        kind: "done",
+        result: await publicVerifyCertification(certificationId),
+      });
+    } catch (err) {
+      setState({
+        kind: "error",
+        message: err instanceof ApiError ? err.message : String(err),
+      });
+    }
+  };
+
+  return (
+    <div className="public-verify">
+      <p>
+        {/* The metric + period ride in the accessible name so several
+            verify buttons on one page stay uniquely labeled. */}
+        <button
+          type="button"
+          aria-disabled={state.kind === "running" || undefined}
+          onClick={() => {
+            if (state.kind !== "running") void handleVerify();
+          }}
+        >
+          {copy.publicData.verifyButton(metric, period)}
+        </button>
+      </p>
+      <p className="field-hint">{copy.publicData.verifyNote}</p>
+      {state.kind === "running" && (
+        <p role="status">{copy.publicData.verifying}</p>
+      )}
+      {state.kind === "done" && <VerificationVerdict result={state.result} />}
+      {state.kind === "error" && (
+        <div role="alert" className="alert certificate-failed">
+          <p>
+            <strong>{copy.certificate.failedLead}</strong> {state.message}
+          </p>
+        </div>
+      )}
+    </div>
   );
 }

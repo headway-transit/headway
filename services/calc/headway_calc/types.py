@@ -17,6 +17,16 @@ SEVERITY_INFO = "info"
 
 _ALLOWED_SEVERITIES = (SEVERITY_BLOCKING, SEVERITY_WARNING, SEVERITY_INFO)
 
+#: Day-type schedule vocabulary (handoff 0020; daytype_v0). The three
+#: schedule types the 2026 NTD Policy Manual's Days Operated section names
+#: verbatim ("the weekday schedule, Saturday schedule, and Sunday schedule
+#: service", p. 155 — REGULATORY_TRACKER.md, "Verified — Days Operated and
+#: day-type schedules").
+DAY_TYPE_WEEKDAY = "weekday"
+DAY_TYPE_SATURDAY = "saturday"
+DAY_TYPE_SUNDAY = "sunday"
+DAY_TYPES = (DAY_TYPE_WEEKDAY, DAY_TYPE_SATURDAY, DAY_TYPE_SUNDAY)
+
 
 @dataclass(frozen=True)
 class VehiclePosition:
@@ -991,6 +1001,168 @@ class DrPmtDetail:
 
 
 @dataclass(frozen=True)
+class ServiceDayOverride:
+    """One agency-declared service-day override (app.service_day_overrides,
+    migration 0031; handoff 0020) — the audited input of the daytype_v0
+    classification.
+
+    - ``assigned_day_type`` — the holiday reassignment (2026 NTD Policy
+      Manual p. 156: "report holiday service under the day that most closely
+      reflects the service" — REGULATORY_TRACKER.md, "Verified — Days
+      Operated and day-type schedules"): 'weekday' | 'saturday' | 'sunday',
+      or None (the date keeps its day-of-week schedule type).
+    - ``atypical`` — the agency-declared atypical-day flag (v0: declared
+      only, never auto-detected).
+    - ``reason`` — required plain-language reason; an override without one
+      would be an unexplainable calendar change.
+    - ``updated_by`` / ``updated_at`` — the row's audit attribution (the
+      app.settings pattern); carried into every consuming figure's detail
+      JSONB so the declaration's provenance rides the figure permanently.
+
+    A row that neither reassigns nor flags is meaningless and refused (the
+    migration-0031 CHECK, re-asserted here for fake/test inputs).
+    """
+
+    service_date: date
+    assigned_day_type: str | None
+    atypical: bool
+    reason: str
+    updated_by: str
+    updated_at: datetime
+
+    def __post_init__(self) -> None:
+        if self.assigned_day_type is not None and self.assigned_day_type not in DAY_TYPES:
+            raise ValueError(
+                f"ServiceDayOverride.assigned_day_type must be one of "
+                f"{DAY_TYPES} or None; got {self.assigned_day_type!r} "
+                f"({self.service_date.isoformat()})"
+            )
+        if self.assigned_day_type is None and not self.atypical:
+            raise ValueError(
+                f"ServiceDayOverride for {self.service_date.isoformat()} "
+                f"neither reassigns a day type nor flags the day atypical — "
+                f"a meaningless override row (migration-0031 CHECK)."
+            )
+        if not self.reason or not self.reason.strip():
+            raise ValueError(
+                f"ServiceDayOverride for {self.service_date.isoformat()} "
+                f"carries no reason — every calendar declaration must be "
+                f"explainable."
+            )
+
+    def to_provenance_dict(self) -> dict:
+        """JSON-safe snapshot for detail JSONB: the full declaration rides
+        every figure computed under it (provenance, not a lookup)."""
+        return {
+            "service_date": self.service_date.isoformat(),
+            "assigned_day_type": self.assigned_day_type,
+            "atypical": self.atypical,
+            "reason": self.reason,
+            "updated_by": self.updated_by,
+            "updated_at": self.updated_at.isoformat(),
+        }
+
+
+@dataclass(frozen=True)
+class DaysOperatedDetail:
+    """Detail of one daytype_days_operated_v0 result (handoff 0020) — one
+    day type's Days Operated count with its full classification provenance.
+
+    Counts and date lists are OBSERVATION-DERIVED (dates with at least one
+    in-trip vehicle position): ``unobserved_dates`` are the day type's dates
+    with no in-trip telemetry — the observed-lower-bound caveat carried by
+    the 'daytype_days_unobserved' warning. ``overrides_applied`` snapshots
+    every app.service_day_overrides row that shaped this day type's dates
+    (ServiceDayOverride.to_provenance_dict). ``atypical_flags_declared``
+    states whether ANY atypical declaration exists in the whole period —
+    False means "all days typical" is a stated fact, never an assumption.
+    """
+
+    day_type: str
+    daytype_version: str
+    days_in_period_of_type: int
+    operated_dates: tuple[str, ...]
+    operated_typical_dates: tuple[str, ...]
+    operated_atypical_dates: tuple[str, ...]
+    unobserved_dates: tuple[str, ...]
+    atypical_dates: tuple[str, ...]
+    overrides_applied: tuple[dict, ...]
+    atypical_flags_declared: bool
+
+    def to_dict(self) -> dict:
+        return {
+            "day_type": self.day_type,
+            "daytype_version": self.daytype_version,
+            "days_in_period_of_type": self.days_in_period_of_type,
+            "days_operated": len(self.operated_dates),
+            "days_operated_typical": len(self.operated_typical_dates),
+            "days_operated_atypical": len(self.operated_atypical_dates),
+            "operated_dates": list(self.operated_dates),
+            "operated_typical_dates": list(self.operated_typical_dates),
+            "operated_atypical_dates": list(self.operated_atypical_dates),
+            "unobserved_dates": list(self.unobserved_dates),
+            "atypical_dates": list(self.atypical_dates),
+            "overrides_applied": [dict(o) for o in self.overrides_applied],
+            "atypical_flags_declared": self.atypical_flags_declared,
+        }
+
+
+@dataclass(frozen=True)
+class DaytypeUptAvgDetail:
+    """Detail of one daytype_upt_avg_v0 result (handoff 0020) — one
+    (day type, split) average with the complete per-day accounting.
+
+    - ``split`` — 'typical' or 'atypical' (atypical splits exist only where
+      the agency declared atypical days; ``atypical_flags_declared`` False
+      STATES that every day was typical).
+    - ``per_day`` — one JSON-safe dict per operated day of the split:
+      {date, value, blocked, boardings_counted, operated_trips,
+      missing_trips, factor_applied[, attestation]} — the day-level upt_v0
+      evidence the average is built from (present on blocked results too).
+    - ``sum_upt`` / ``average`` — the exact whole-boarding sum over the
+      split's days and the reported mean (0.01 ROUND_HALF_EVEN, engineering
+      convention); None when the result refused.
+    - ``source_mix`` — event counts per envelope source aggregated over the
+      split's days (the handoff-0005 simulated-data rule).
+    """
+
+    day_type: str
+    split: str
+    daytype_version: str
+    days_in_period_of_type: int
+    days_operated: int
+    dates: tuple[str, ...]
+    per_day: tuple[dict, ...]
+    sum_upt: str | None
+    average: str | None
+    source_mix: dict[str, int]
+    missing_trip_threshold: Decimal
+    imbalance_threshold: Decimal
+    overrides_applied: tuple[dict, ...]
+    atypical_dates: tuple[str, ...]
+    atypical_flags_declared: bool
+
+    def to_dict(self) -> dict:
+        return {
+            "day_type": self.day_type,
+            "split": self.split,
+            "daytype_version": self.daytype_version,
+            "days_in_period_of_type": self.days_in_period_of_type,
+            "days_operated": self.days_operated,
+            "dates": list(self.dates),
+            "per_day": [dict(d) for d in self.per_day],
+            "sum_upt": self.sum_upt,
+            "average": self.average,
+            "source_mix": {k: self.source_mix[k] for k in sorted(self.source_mix)},
+            "missing_trip_threshold": str(self.missing_trip_threshold),
+            "imbalance_threshold": str(self.imbalance_threshold),
+            "overrides_applied": [dict(o) for o in self.overrides_applied],
+            "atypical_dates": list(self.atypical_dates),
+            "atypical_flags_declared": self.atypical_flags_declared,
+        }
+
+
+@dataclass(frozen=True)
 class CalcResult:
     """The output of one calculation run.
 
@@ -1029,6 +1201,8 @@ class CalcResult:
         | DrPmtDetail
         | OtpDetail
         | HeadwayAdherenceDetail
+        | DaysOperatedDetail
+        | DaytypeUptAvgDetail
         | None
     ) = None
 

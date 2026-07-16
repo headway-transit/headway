@@ -1182,6 +1182,174 @@
         }
       }
     },
+    "/settings/service-days": {
+      "get": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "List Service Day Overrides",
+        "description": "Every declared service-day override (optionally bounded to\n[from_date, to_date), half-open \u2014 the calc period convention), with its\nreason and audit attribution. Any signed-in role may read \u2014 the\ncalendar policy must be visible to the people it governs.",
+        "operationId": "list_service_day_overrides_settings_service_days_get",
+        "parameters": [
+          {
+            "name": "from_date",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "From Date"
+            }
+          },
+          {
+            "name": "to_date",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "To Date"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ServiceDayOverride"
+                  },
+                  "title": "Response List Service Day Overrides Settings Service Days Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/settings/service-days/{service_date}": {
+      "put": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Put Service Day Override",
+        "description": "Declare (or replace) one service day's override \u2014 a holiday\nschedule reassignment and/or an atypical-day flag, with a required\nreason (certifying official only). The old and new declarations land\ntogether in the audit trail; figures already computed under the old\ndeclaration are untouched (each carries its governing declaration in\nits own detail).",
+        "operationId": "put_service_day_override_settings_service_days__service_date__put",
+        "parameters": [
+          {
+            "name": "service_date",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date",
+              "title": "Service Date"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PutServiceDayOverrideRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PutServiceDayOverrideResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Delete Service Day Override",
+        "description": "Remove one service day's override (certifying official only): the\ndate returns to its day-of-week schedule type, typical. Removing a\ndeclaration is a policy change too \u2014 the removed declaration lands in\nthe audit trail, and figures computed under it keep their snapshot.",
+        "operationId": "delete_service_day_override_settings_service_days__service_date__delete",
+        "parameters": [
+          {
+            "name": "service_date",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date",
+              "title": "Service Date"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteServiceDayOverrideResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/settings": {
       "get": {
         "tags": [
@@ -1488,6 +1656,59 @@
         "responses": {
           "200": {
             "description": "The MR-20 preview package as a CSV or XLSX download: one row per (scope, metric) cell, values VERBATIM from the package; the NOT-REPORTABLE banner and every enumerated caveat lead the CSV and form the XLSX's first sheet.",
+            "content": {
+              "text/csv; charset=utf-8": {},
+              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {}
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/reports/agency-workbook": {
+      "get": {
+        "tags": [
+          "reports"
+        ],
+        "summary": "Export Agency Workbook",
+        "description": "Download the monthly agency workbook (handoff 0020). One assembly\nfeeds both formats \u2014 XLSX cell values byte-equal to the CSV variant\n(pinned by test); the CSV introduces each sheet with a '## <title>'\nmarker line. This endpoint queries and formats; it never computes a\nfigure (year-over-year deltas deliberately excluded \u2014 see\nGET /metrics/compare).",
+        "operationId": "export_agency_workbook_reports_agency_workbook_get",
+        "parameters": [
+          {
+            "name": "month",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Calendar month as YYYY-MM.",
+              "title": "Month"
+            },
+            "description": "Calendar month as YYYY-MM."
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^(csv|xlsx)$",
+              "default": "xlsx",
+              "title": "Format"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The monthly agency workbook (handoff 0020) as an XLSX or CSV download \u2014 Headway's OWN generic layout: a 'Read first' banner sheet (NOT-REPORTABLE, honest-scope absences, certification block when figures are certified), a Ridership-by-mode sheet (UPT month totals, average weekday/Saturday/Sunday UPT with typical/atypical splits, Days Operated per schedule type) and an Operations sheet (VOMS plus migration-0024-badged OTP/headway-adherence). Every data cell is the verbatim served figure with a VISIBLE provenance column (metric_value_id); absent cells are stated, never invented or zero-filled; year-over-year columns show the prior year month's figure verbatim with its own provenance.",
             "content": {
               "text/csv; charset=utf-8": {},
               "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {}
@@ -3979,6 +4200,30 @@
         ],
         "title": "DeadlinesResponse"
       },
+      "DeleteServiceDayOverrideResponse": {
+        "properties": {
+          "service_date": {
+            "type": "string",
+            "format": "date",
+            "title": "Service Date"
+          },
+          "removed": {
+            "type": "boolean",
+            "title": "Removed"
+          },
+          "audit_event_id": {
+            "type": "integer",
+            "title": "Audit Event Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "service_date",
+          "removed",
+          "audit_event_id"
+        ],
+        "title": "DeleteServiceDayOverrideResponse"
+      },
       "DqIssue": {
         "properties": {
           "issue_id": {
@@ -5649,6 +5894,88 @@
         "title": "PublicMetricValue",
         "description": "A certified figure, publishable form. No PII, no certifier identity."
       },
+      "PutServiceDayOverrideRequest": {
+        "properties": {
+          "assigned_day_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assigned Day Type"
+          },
+          "atypical": {
+            "type": "boolean",
+            "title": "Atypical",
+            "default": false
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "reason"
+        ],
+        "title": "PutServiceDayOverrideRequest"
+      },
+      "PutServiceDayOverrideResponse": {
+        "properties": {
+          "service_date": {
+            "type": "string",
+            "format": "date",
+            "title": "Service Date"
+          },
+          "assigned_day_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assigned Day Type"
+          },
+          "atypical": {
+            "type": "boolean",
+            "title": "Atypical"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason"
+          },
+          "updated_by": {
+            "type": "string",
+            "title": "Updated By"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "audit_event_id": {
+            "type": "integer",
+            "title": "Audit Event Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "service_date",
+          "assigned_day_type",
+          "atypical",
+          "reason",
+          "updated_by",
+          "updated_at",
+          "audit_event_id"
+        ],
+        "title": "PutServiceDayOverrideResponse"
+      },
       "RequirementResponse": {
         "properties": {
           "mode": {
@@ -6402,6 +6729,53 @@
           "settings_flow_note"
         ],
         "title": "SandboxPreviewResponse"
+      },
+      "ServiceDayOverride": {
+        "properties": {
+          "service_date": {
+            "type": "string",
+            "format": "date",
+            "title": "Service Date"
+          },
+          "assigned_day_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assigned Day Type"
+          },
+          "atypical": {
+            "type": "boolean",
+            "title": "Atypical"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason"
+          },
+          "updated_by": {
+            "type": "string",
+            "title": "Updated By"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "service_date",
+          "assigned_day_type",
+          "atypical",
+          "reason",
+          "updated_by",
+          "updated_at"
+        ],
+        "title": "ServiceDayOverride"
       },
       "Setting": {
         "properties": {

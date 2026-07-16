@@ -34,6 +34,7 @@ jobs:
     outputs:
       go: ${{ steps.filter.outputs.go }}
       python: ${{ steps.filter.outputs.python }}
+      client: ${{ steps.filter.outputs.client }}
       web: ${{ steps.filter.outputs.web }}
       integration: ${{ steps.filter.outputs.integration }}
       adapters: ${{ steps.filter.outputs.adapters }}
@@ -67,6 +68,7 @@ jobs:
           {
             echo "go=$(hit '^services/ingestion/|^scripts/license|^\.github/workflows/')"
             echo "python=$(hit '^services/(calc|transform|api|ai)/|^db/|^scripts/license|^\.github/workflows/')"
+            echo "client=$(hit '^clients/python/|^\.github/workflows/')"
             echo "web=$(hit '^web/|^scripts/license|^\.github/workflows/')"
             echo "integration=$(hit '^services/api/|^db/|^tests/integration/|^\.github/workflows/')"
             echo "adapters=$(hit '^adapters/|^contracts/|^services/transform/|^\.github/workflows/')"
@@ -123,6 +125,33 @@ jobs:
         if: matrix.service == 'ai'
         working-directory: services/ai
         run: python -m headway_ai.regression
+
+  python-client:
+    # Analyst Python client (handoff 0018). Unit tests run against a FAKE
+    # in-process API (httpx.MockTransport) — no live stack, no database.
+    # A separate job rather than a python-services matrix entry: the client
+    # lives under clients/ (not services/), and it deliberately depends on
+    # httpx ONLY — no headway-calc sibling install (the matrix's calc
+    # co-install exists for api's `headway-calc>=0.5`; the client has no
+    # such requirement, verified against clients/python/pyproject.toml).
+    # The pandas extra is installed because tests/test_frames.py imports
+    # pandas at module scope (the DataFrame helpers are part of the suite).
+    name: python / client
+    needs: changes
+    if: needs.changes.outputs.client == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: clients/python/pyproject.toml
+      - name: install client with pandas + test extras
+        run: python -m pip install -e "clients/python[pandas,test]"
+      - name: pytest
+        working-directory: clients/python
+        run: python -m pytest -q
 
   adapter-harness:
     # Vendor adapter framework (handoff 0015): every registered mapping spec
