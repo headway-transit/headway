@@ -4,7 +4,7 @@
 # Two stages, same shape as services/ingestion/Dockerfile: the node toolchain
 # never reaches the runtime image; nginx runs as the non-root `nginx` user on
 # an unprivileged port (see deploy/nginx.conf).
-FROM node:22-alpine AS build
+FROM node:26-alpine AS build
 WORKDIR /src
 COPY package.json package-lock.json ./
 RUN npm ci
@@ -17,7 +17,7 @@ ARG VITE_API_BASE_URL=
 ENV VITE_API_BASE_URL=${VITE_API_BASE_URL}
 RUN npm run build
 
-FROM nginx:1.29-alpine-slim
+FROM nginx:1.31-alpine-slim
 # Patch base-image packages: the release gate blocks fixable vulns (see .grype.yaml policy)
 RUN apk upgrade --no-cache
 COPY deploy/nginx.conf /etc/nginx/nginx.conf
