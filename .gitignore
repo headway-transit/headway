@@ -64,3 +64,10 @@ docs/reference/vendor/*
 # Third-party UI reference imagery stays local (docs/reference/ui-inspiration/README.md)
 docs/reference/ui-inspiration/*
 !docs/reference/ui-inspiration/README.md
+
+# Claude Code operational files never belong in the public repo
+# (.claude/roles/ is the deliberate exception: the public engineering constitution)
+CLAUDE.md
+CLAUDE.local.md
+.claude/*
+!.claude/roles/
