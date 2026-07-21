@@ -85,7 +85,7 @@ jobs:
         working-directory: services/ingestion
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         with:
           go-version-file: services/ingestion/go.mod
           cache-dependency-path: services/ingestion/go.sum
@@ -107,7 +107,7 @@ jobs:
         service: [calc, transform, api, ai]
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: pip
@@ -142,7 +142,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: pip
@@ -166,7 +166,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: pip
@@ -190,7 +190,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: pip
@@ -204,7 +204,7 @@ jobs:
         run: |
           python3 scripts/export_openapi.py
           git diff --exit-code openapi.json
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: "20"
       - name: quotes.json matches the regulatory tracker (regenerate + diff)
@@ -221,7 +221,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - name: install pytest
@@ -263,7 +263,7 @@ jobs:
       HEADWAY_IT_ADMIN_URL: postgres://postgres:headway-ci-only@localhost:5432/postgres
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: pip
@@ -293,7 +293,7 @@ jobs:
             echo "present=false" >> "$GITHUB_OUTPUT"
             echo "web/package.json not present — web job is a no-op this run"
           fi
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         if: steps.guard.outputs.present == 'true'
         with:
           node-version: "20"
@@ -327,7 +327,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - name: install nbformat
@@ -363,11 +363,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         with:
           go-version-file: services/ingestion/go.mod
           cache-dependency-path: services/ingestion/go.sum
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - name: install go-licenses
@@ -383,7 +383,7 @@ jobs:
             -e "services/ai[test,ollama]" \
             -e "clients/python[pandas,test]" \
             -r db/requirements.txt
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         if: hashFiles('web/package.json') != ''
         with:
           node-version: "20"
@@ -430,7 +430,7 @@ jobs:
           retention-days: 7
           if-no-files-found: error
       - name: "grype scan (gate: severity >= critical for pushes/PRs)"
-        uses: anchore/scan-action@v6
+        uses: anchore/scan-action@v7
         with:
           sbom: headway-source.cdx.json
           fail-build: true
@@ -442,7 +442,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - name: install pyyaml
