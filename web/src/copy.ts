@@ -52,6 +52,7 @@ export const copy = {
   } as Record<string, string>,
 
   nav: {
+    today: "Today",
     dashboard: "Dashboard",
     metrics: "Metrics",
     compare: "Compare",
@@ -160,7 +161,13 @@ export const copy = {
       "Some of these numbers come from an early calculation that has not yet been checked against FTA rules. They are not certifiable figures yet. Each one is marked “Pre-verification” below.",
     preVerificationTag: "Pre-verification",
     explainLink: "How this number was made",
-    empty: "No computed values yet. Values appear here after the pipeline runs.",
+    /** Teaching empty state (handoff 0021, design point 4): one warm
+     *  sentence + the concrete first action — never a blank. */
+    empty:
+      "Nothing computed yet — that is the honest state of a fresh Headway, not an error. Figures appear here the moment the calculation service produces one.",
+    emptyAction: "To produce the first figures, run the calculation service:",
+    emptyCommand:
+      "python -m headway_calc.runner --period-start <start> --period-end <end>",
     certifyMoved:
       "Certification has moved to its own room. This page is for reading figures; signing them happens on the Certify page, which shows exactly what your signature would cover.",
     certifyMovedLink: "Go to the Certify page",
@@ -360,8 +367,13 @@ export const copy = {
     heading: "Certifications",
     intro:
       "Every certification on record, oldest first: who put their name on which figures, when, and — for digitally signed records — the signing-key fingerprint. Each entry opens its full certificate, where the signature can be verified.",
+    /** Teaching empty state (handoff 0021 #4): warm + the first action
+     *  (the Certify door renders for the certifying official). */
     empty:
-      "No certifications are on record yet. One appears here the moment a certifying official signs figures on the Certify page.",
+      "No certifications are on record yet — records appear here the moment a certifying official signs figures, and they stay forever.",
+    emptyActionOfficial:
+      "When figures are ready, the Certify page shows exactly what your signature would cover before it arms.",
+    emptyDoor: "Go to the Certify page",
     loading: "Loading the certifications on record…",
     /** Summary cards = filter toggles (handoff 0017 #2). Counts are
      *  workflow tallies of records in the list, never figures. */
@@ -1220,8 +1232,13 @@ export const copy = {
     heading: "Dashboard",
     intro:
       "The agency's computed figures at a glance. Every number here is shown exactly as the calculation service computed it — the charts scale the picture, never the figures.",
+    /** Teaching empty state (handoff 0021 #4): warm + the first action. */
     empty:
-      "No computed values yet. Charts appear here after the pipeline runs.",
+      "No charts yet, because nothing has been computed yet — an empty dashboard is a truthful one. The first pipeline run fills this page in.",
+    emptyAction:
+      "To produce the first figures, run the calculation service:",
+    emptyCommand:
+      "python -m headway_calc.runner --period-start <start> --period-end <end>",
     tilesHeading: "Latest certified figures",
     tilesIntro:
       "The most recent figure of each kind that a certifying official has attested to.",
@@ -1327,6 +1344,201 @@ export const copy = {
        */
       dqOutsideRange: (count: string) =>
         `${count} unresolved issue${count === "1" ? " falls" : "s fall"} outside the selected dates. The queue still holds ${count === "1" ? "it" : "them"} — go to the data-quality queue for the full list.`,
+    },
+  },
+
+  /**
+   * The Today briefing home (/today — handoff 0021, design point 1): the
+   * product greets you with YOUR situation, composed client-side from
+   * existing endpoints. Binding rules restated where the copy lives:
+   * every number on a card keeps its receipt door (a figure opens its
+   * Receipt; a workflow tally links to exactly the list it was counted
+   * over); a card with nothing to say says so warmly and never invents
+   * urgency; deltas are SERVER-computed and sign-neutral unless the
+   * metric's registry defines a direction.
+   */
+  today: {
+    heading: "Today",
+    intro:
+      "Your agency's situation right now. Every number on this page is shown exactly as computed or counted by the server — and every one opens into its receipt.",
+    /** The month label for workflow lines ("July 2026"). */
+    monthLine: (monthLabel: string) => `${monthLabel} so far`,
+    takeTourLink: "Take the tour",
+
+    /** ---- certification briefing (certifying official leads) ---- */
+    certification: {
+      heading: "Certification",
+      /** "July figures: N awaiting your signature, M blockers open." */
+      readyLine: (monthLabel: string, ready: string) =>
+        `${monthLabel} figures: ${ready} computed and not yet certified.`,
+      blockersLine: (count: string) =>
+        `${count} blocking data-quality issue${count === "1" ? "" : "s"} open — certification stays off until ${count === "1" ? "it is" : "they are"} resolved.`,
+      noBlockersLine:
+        "No blocking data-quality issues are open. Certification is allowed.",
+      certifiedLine: (count: string) =>
+        `${count} certification${count === "1" ? "" : "s"} on record.`,
+      /** Warm empty: nothing pending is a fine morning, not a gap. */
+      empty: (monthLabel: string) =>
+        `Nothing is waiting for your signature for ${monthLabel}. When the pipeline computes new figures, they appear here with their receipts.`,
+      door: "Go to the Certify page",
+      recordDoor: "See the certifications on record",
+      blockersDoor: "Review the blocking issues",
+    },
+
+    /** ---- DQ briefing (data steward leads) ---- */
+    dq: {
+      heading: "Data-quality queue",
+      /** Counts are the server's own, over exactly the rows /dq serves. */
+      openLine: (open: string, owned: string) =>
+        `${open} open and ${owned} owned issue${owned === "1" ? "" : "s"} in the queue.`,
+      blockingLine: (count: string) =>
+        `${count} of the unresolved issues ${count === "1" ? "is" : "are"} blocking — ${count === "1" ? "it stops" : "they stop"} certification until resolved.`,
+      noBlockingLine: "None of the open issues are blocking. Certification is not being held up by the queue.",
+      attestedLine: (count: string) =>
+        `${count} issue${count === "1" ? "" : "s"} closed under a recorded statistician attestation.`,
+      resolvedLine: (count: string) =>
+        `${count} resolved issue${count === "1" ? "" : "s"} on record.`,
+      /** Warm empty — a clear queue is a good day, said plainly. */
+      empty:
+        "The data-quality queue is empty. New gaps and conflicts surface here as pipelines run — none are open right now.",
+      door: "Go to the data-quality queue",
+    },
+
+    /** ---- safety briefing (certifier + steward) ---- */
+    safety: {
+      heading: "Safety & security",
+      monthCounts: (monthLabel: string, total: string, major: string) =>
+        `${total} event${total === "1" ? "" : "s"} recorded for ${monthLabel} — ${major} major.`,
+      monthNone: (monthLabel: string) =>
+        `No safety events recorded for ${monthLabel}. If the month stays event-free, the zero-event S&S-50 summary is still due — the deadline below covers it.`,
+      ss40Line: (count: string) =>
+        `${count} S&S-40 major-event report${count === "1" ? "" : "s"} due (30 days from each event).`,
+      ss50Line: (count: string, dueDate: string) =>
+        `S&S-50 monthly summaries: ${count} mode${count === "1" ? "" : "s"} due by ${dueDate} — zero-event months included.`,
+      door: "Go to Safety & security",
+    },
+
+    /** ---- report readiness + sampling (report preparer leads) ---- */
+    report: {
+      heading: "Monthly report readiness",
+      /** measuresWithFigures of measuresTotal is a workflow tally over
+       *  which measures have any figure — never a sum of figures. */
+      readiness: (monthLabel: string, have: string, total: string) =>
+        `${have} of the ${total} monthly report measures (VRM, VRH, UPT, VOMS) have a computed figure for ${monthLabel}.`,
+      empty: (monthLabel: string) =>
+        `No ${monthLabel} figures have been computed yet for the monthly report measures. The report preview and exports fill in as the pipeline runs.`,
+      door: "Open the monthly ridership report",
+      workbookNote:
+        "The agency workbook and CSV/XLSX exports are on the report page — every export carries its provenance column.",
+    },
+    sampling: {
+      heading: "PMT sampling progress",
+      planLine: (plan: string) => `Plan ${plan}`,
+      progressText: (measured: string, required: string) =>
+        `${measured} of ${required} required units measured.`,
+      meterLabel: (plan: string) => `Sampling progress for plan ${plan}`,
+      readyTag: "Ready to estimate",
+      morePlans: (count: string) =>
+        `${count} more plan${count === "1" ? "" : "s"} on the sampling page.`,
+      /** Warm empty + the concrete first action. */
+      empty:
+        "No sampling plans yet. When passenger miles need a statistical sample, the sampling page walks you through creating the first plan — the required sample sizes come straight from the manual's own tables.",
+      door: "Go to PMT sampling",
+    },
+
+    /** ---- KPI cards (everyone) ---- */
+    kpi: {
+      heading: "Latest figures",
+      intro:
+        "The newest computed figure of each kind, with its certification status. Differences are computed by the server in exact arithmetic — this page never subtracts two figures.",
+      /** The receipt door ON the figure: the number is the button. */
+      receiptToggle: (metric: string, period: string) =>
+        `Receipt for ${metric}, ${period}`,
+      periodLine: (start: string, end: string) => `${start} to ${end}`,
+      /** Names the compared period EXPLICITLY: periods of different
+       *  lengths do get compared (the server compares what exists), and
+       *  the reader must see that at a glance, not discover it. */
+      vsPrevious: (start: string, end: string) =>
+        `the previous period (${start} to ${end})`,
+      firstFigure:
+        "First figure of its kind — nothing earlier to compare against.",
+      deltaUnavailable: (message: string) =>
+        `The server could not compare this period with the previous one: ${message}`,
+      /** Warm empty per metric — no urgency invented. */
+      empty: (metric: string) =>
+        `No ${metric} figure has been computed yet. When the pipeline runs, the newest figure appears here with its receipt.`,
+      emptyAll:
+        "No figures have been computed yet — that is the honest state of a fresh Headway, not an error. To produce the first ones, connect a data source and run the calculation service:",
+      emptyAllCommand:
+        "python -m headway_calc.runner --period-start <start> --period-end <end>",
+      metricsDoor: "See every computed figure",
+    },
+
+    /** ---- ops cards (everyone; always badged) ---- */
+    ops: {
+      heading: "Operations pulse",
+      intro:
+        "How the service ran, measured from vehicle positions. Operations figures are never NTD reported figures — each carries its badge and its industry-basis receipt.",
+      otpLine: (value: string) =>
+        `${value}% of observed passages were on time, agency-wide.`,
+      cvhLine: (value: string) =>
+        `Agency-wide headway adherence (cvh): ${value}. Lower is steadier.`,
+      /** Warm empty: ops runs are separate; absence is stated plainly. */
+      empty:
+        "No operations metrics have been computed yet. They come from a separate ops run and appear here with their receipts when one lands.",
+      door: "See the operations dashboard",
+    },
+  },
+
+  /**
+   * The first-run guided tour (handoff 0021, design point 3): a hand-rolled,
+   * focus-managed overlay that teaches THE THESIS — every number can prove
+   * itself. Skippable at every step (button + Escape), keyboard-accessible,
+   * restartable from the nav. Plain language throughout.
+   */
+  tour: {
+    label: "Guided tour",
+    stepCount: (current: string, total: string) =>
+      `Step ${current} of ${total}`,
+    next: "Next",
+    back: "Back",
+    skip: "Skip the tour",
+    finish: "Done",
+    /** Announced with the panel; also the Escape hint. */
+    escapeHint: "Press Escape to leave the tour at any time.",
+    steps: {
+      today: {
+        title: "This page is your briefing",
+        body:
+          "Today greets you with your agency's situation: the newest figures, what needs attention, and what is due. Nothing here is decoration — every number is shown exactly as the server computed or counted it.",
+      },
+      receipt: {
+        title: "Every number opens into a receipt",
+        body:
+          "The figure itself is a button. Its receipt shows the coverage behind the number, what was excluded and why, and the flags it carries. A number in Headway is never just a number.",
+        /** Honest fallback when the board has no figure yet. */
+        noTarget:
+          "There is no computed figure on the board yet, so there is no receipt to open right now — but every figure that ever appears here will have one.",
+      },
+      quote: {
+        title: "The federal rule, word for word",
+        body:
+          "Inside the receipt is the rule the calculation implements — quoted verbatim from the published FTA manual, with its page citation. Headway never paraphrases a rule and never lets a model write one.",
+        noTarget:
+          "When a figure is on the board, its receipt quotes the exact federal rule it implements, with the page citation.",
+      },
+      lineage: {
+        title: "Walk the number to its raw records",
+        body:
+          "This is one step of the walk: the figure connects to the computation that produced it, and onward to the immutable raw records it came from. Nothing in between is hidden.",
+        noTarget:
+          "Every figure carries a “walk this number” door that traces it back to the raw records that produced it.",
+      },
+      done: {
+        title: "Every number here can prove itself",
+        body:
+          "Now you know how to check: open the receipt, read the rule, walk the lineage. That works on every figure in Headway — and it always will, or the figure refuses to exist.",
+      },
     },
   },
 
@@ -1651,8 +1863,14 @@ export const copy = {
         `Showing ${shown} of ${total} recorded events. An event with no classification on file always stays visible, and no event leaves the record by being filtered out.`,
       clearFilter: "Show all events",
       loading: "Loading events…",
+      /** Teaching empty state (handoff 0021 #4): warm + first action,
+       *  role-aware (the steward's action vs the reader's orientation). */
       empty:
-        "No events recorded yet. Events appear here as they are recorded — and they stay here permanently: corrections add a new record instead of changing an old one.",
+        "No events recorded yet — an empty log is a good month, stated plainly. Events stay here permanently once recorded: corrections add a new record instead of changing an old one.",
+      emptyActionSteward:
+        "When something happens, record it with the form above — the classifier answers with the federal rule it applied, word for word.",
+      emptyActionReader:
+        "A data steward records events; each one appears here with the federal rule its classification came from, word for word.",
       /** "Collision on 2026-07-02 (Bus)" — heading + accessible names. */
       eventLabel: (category: string, date: string, mode: string) =>
         `${category} on ${date} (${mode})`,
@@ -1836,8 +2054,14 @@ export const copy = {
         `Sampling progress for ${planLabel}`,
       readyTag: "Ready to estimate",
       loading: "Loading sampling plans…",
+      /** Teaching empty state (handoff 0021 #4): warm + first action,
+       *  role-aware (stewards create; everyone else reads). */
       empty:
-        "No sampling plans yet. Create one above — the plan fixes the unit, option, frequency, and required sample sizes before any unit is drawn.",
+        "No sampling plans yet — nothing needs sampling until passenger miles call for a statistical estimate.",
+      emptyActionSteward:
+        "Create the first plan above: it takes a minute, and the required sample sizes come straight from the manual's own tables — you never pick a number.",
+      emptyActionReader:
+        "A data steward creates the first plan; everything they record — draws, seeds, measurements — becomes readable here.",
       statusUnknown: (status: string) =>
         `This plan has a status this version of Headway does not label yet (\u201c${status}\u201d). It is shown raw so nothing is hidden.`,
       createdLine: (by: string, at: string) => `Created by ${by} at ${at}`,

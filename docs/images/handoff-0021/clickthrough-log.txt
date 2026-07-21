@@ -1,0 +1,30 @@
+certifier: tour auto-offered on first visit = true
+certifier: tour walked to lineage view = true
+certifier: tour finish set headway-tour-seen = 1
+certifier: fully settled in 9977 ms after KPI render
+certifier: card/section headings = ["Certification","Safety & security","Latest figures","Operations pulse"]
+paint-measure: fully settled in 3212 ms after KPI render
+certifier: /today first paint = {"domReadyMs":20.299999713897705,"firstFrameMs":35.59999990463257,"skeletonsAtFirstFrame":28,"settledMs":11095,"fullySettled":true}
+certifier: verbatim quotes inside the open receipt = 10
+certifier: receipt → lineage walk OK
+dsteward: fully settled in 8789 ms after KPI render
+dsteward: DQ lead card =
+---
+Data-quality queue
+
+41,365 open and 0 owned issues in the queue.
+
+30 of the unresolved issues are blocking — they stop certification until resolved.
+
+2 issues closed under a recorded statistician attestation.
+
+279 resolved issues on record.
+
+Go to the data-quality queue
+---
+dsteward: certification lead card present = false (must be false)
+reduced-motion: {"media":true,"skeletonAnimation":"none","cardAnimation":"none"} (both animations must be "none")
+reduced-motion: fully settled in 7940 ms after KPI render
+no-preference control: {"skeletonAnimation":"hw-shimmer","cardAnimation":"hw-rise-in"} (shimmer + rise expected)
+themed-chrome: fully settled in 5091 ms after KPI render
+themed chrome on /today: {"dataChrome":"on","headerBg":"rgb(11, 61, 46)"}

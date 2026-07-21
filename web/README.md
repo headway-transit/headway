@@ -79,7 +79,8 @@ entirely. Any 401 clears the session and returns you to `/login`.
 
 | Route | What it does |
 |---|---|
-| `/login` | Local-account sign-in (ADR-0011). Failures announced via `role="alert"`, verbatim. |
+| `/login` | Local-account sign-in (ADR-0011). Failures announced via `role="alert"`, verbatim. Lands on `/today`. |
+| `/today` | The **role-aware briefing home** (handoff 0021, design point 1; `src/views/TodayView.tsx`) — the post-login landing ("/" redirects here; the dashboard keeps its nav place). Briefing cards composed CLIENT-SIDE from existing endpoints, including the handoff-0017 counts endpoints consumed here for the first time (`GET /dq/issues/counts` — per-status only, never unfiltered: a live 41k-issue queue made the unfiltered count seconds-slow; `GET /safety/events/counts`). Composition: certifying official leads with certification state (month tally of uncertified figures + blocking-issue count + certifications on record) and safety deadlines; data steward with the DQ queue (open/owned/blocking/attested/resolved — counted server-side, never downloaded) and safety; report preparer with monthly-report readiness (which of VRM/VRH/UPT/VOMS have a figure this month — a workflow tally, never a sum) and sampling progress (house RowProgress per plan); viewer goes straight to the figures. Everyone gets KPI cards (latest VRM/VRH/UPT verbatim; the figure IS a button disclosing its full Receipt inline; delta vs the previous period SERVER-computed via `GET /metrics/compare` and rendered sign-neutrally through DeltaFigure; a first figure's missing delta is stated) and ops cards (OTP + cvh, always badged, same receipt door). Binding: every number keeps its receipt door (figures → Receipt + lineage; tallies → the exact list they were counted over); empty cards are warm honest statements, never invented urgency; per-slice skeletons while loading; per-slice errors verbatim, unanimated. |
 | `/dashboard` | Operational dashboard (handoff 0008, pillar B; any signed-in role). Hero stat tiles show the latest **certified** VRM/VRH/UPT verbatim (SimulatedBadge where flagged, provenance link on every tile). Four hand-rolled SVG charts follow the dataviz discipline: UPT line with crosshair + tooltip; VRM & VRH as **small multiples** (one axis each — never dual-axis, asserted structurally in tests); coverage-over-time from the detail JSONB with the coverage threshold as a dashed reference line; unresolved DQ issues as thin stacked bars in reserved status colors with icon + label. Every chart has a keyboard reader (arrow keys walk the points), direct end labels, and a table-view toggle (the WCAG-clean equivalent carrying provenance links). Series colors come only from the validated `--series-*` tokens — never brand colors. |
 | `/settings/branding` | Agency branding (handoff 0008, pillar C; certifying official). Display name, two brand colors with live preview, and logo upload (SVG/PNG ≤ 512 KiB, multipart to `POST /branding/logo`). The **server** refuses colors that fail WCAG AA against the app surfaces (plain-language 422, surfaced verbatim). Saved branding restyles CHROME only: the shell fetches `GET /branding` on load, shows the display name + logo in the header, and overrides `--brand-primary`/`--brand-accent`; the dark theme pins its own accent (the server guardrail covers light surfaces only), and charts never read brand tokens. |
 | `/metrics` | Computed values table: metric, unit, period, value (verbatim string), calculation name+version, certification status. Calc versions below 1.0.0 carry a "Pre-verification" tag and a plain-language banner (they are marked PRE-VERIFICATION in `services/calc/REGULATORY_TRACKER.md` — not certifiable figures yet). EVERY figure's "Details" opens its **Receipt** (`src/components/Receipt.tsx`): story line, coverage meter + exclusions, the verbatim FTA rule + citation, flags, and the walk to raw records. Read-only: the certify flow moved to `/certify`; certifying officials see a plain note linking there. |
@@ -210,12 +211,48 @@ API verbatim.
   first, bar as the visual echo, with the estimate-ready state visually
   distinct (success fill + "Ready to estimate" tag).
 
+### Today home, motion, tour, teaching empty states (handoff 0021)
+
+- **Skeleton loading states** (`src/components/Skeleton.tsx`): the main
+  views (/today, /dashboard, /metrics, /dq, /safety, /sampling,
+  /certifications, /metrics/:id/lineage) sketch the shape of the coming
+  content instead of a bare "Loading…" line. The blocks are decorative
+  (`aria-hidden`); a visually-hidden `role="status"` line carries the
+  view's own plain-language loading text. Skeletons never imitate a
+  figure — grey blocks only.
+- **Motion discipline** (styles.css, the `@media
+  (prefers-reduced-motion: no-preference)` block): ALL motion — skeleton
+  shimmer, card/toast/dialog enter (150–250ms, CSS-first), interactive-card
+  hover lift — lives behind `prefers-reduced-motion`; reduced = INSTANT,
+  never slower. Honesty-critical reveals never animate: refusals, load
+  errors and FAILED verdicts render as `.alert`/`.banner`/
+  `.certificate-failed` with no animation class, and an `:has()` guard
+  strips the card-enter animation from any card arriving with an alert
+  inside. The tour's scrollIntoView uses `behavior: "auto"` under reduced
+  motion.
+- **Guided tour** (`src/tour.ts` + `src/components/Tour.tsx`): hand-rolled
+  (no tour library), five steps teaching the thesis — /today → a KPI
+  receipt opens → the verbatim FTA quote → one lineage step through the
+  receipt's own walk door (SPA navigation) → "every number here can prove
+  itself". A NON-modal dialog: no backdrop, no focus trap — the page stays
+  fully usable (never blocks); focus moves to each step's heading; Escape
+  leaves from anywhere; a skip control is on every step. Auto-offers once
+  (`headway-tour-seen` in localStorage; finishing or skipping sets it);
+  "Take the tour" in the nav restarts it any time. A step whose on-screen
+  target does not exist (fresh Headway, no figures) says so honestly after
+  the target search gives up — it never fabricates a number to point at.
+- **Teaching empty states**: the main views' empty states carry one warm
+  sentence + the concrete first action (link or command), role-aware where
+  the action belongs to a role. Empty is stated warmly — never urgency,
+  never blank.
+
 ### Automated checks
 
 Every view test asserts zero axe-core violations (helpers in
-`src/test/helpers.tsx`), including with the certify dialog open. A negative
-control was exercised during development (an unlabeled input correctly
-produced a `label` violation), so the gate demonstrably detects problems.
+`src/test/helpers.tsx`), including with the certify dialog open and the
+tour overlay open. A negative control was exercised during development (an
+unlabeled input correctly produced a `label` violation), so the gate
+demonstrably detects problems.
 
 **Pending (honest gaps):** a manual screen-reader pass (NVDA/VoiceOver) and a
 real-browser keyboard walkthrough have not been done in this environment —

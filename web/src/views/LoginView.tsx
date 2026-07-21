@@ -34,7 +34,8 @@ export function LoginView() {
         role: response.role,
       });
       const from = (location.state as { from?: string } | null)?.from;
-      navigate(from ?? "/metrics", { replace: true });
+      // /today is the post-login landing (handoff 0021, design point 1).
+      navigate(from ?? "/today", { replace: true });
     } catch (err) {
       // API messages are plain-language by design: show them verbatim.
       setError(err instanceof ApiError ? err.message : String(err));

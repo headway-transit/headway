@@ -26,6 +26,7 @@ import { PublicDataView } from "./views/PublicDataView";
 import { SafetyView } from "./views/SafetyView";
 import { SamplingView } from "./views/SamplingView";
 import { SandboxView } from "./views/SandboxView";
+import { TodayView } from "./views/TodayView";
 
 function RequireAuth() {
   const session = useSession();
@@ -64,7 +65,10 @@ export function AppRoutes() {
         {/* UNAUTHENTICATED by design: certified figures are public record. */}
         <Route path="/public" element={<PublicDataView />} />
         <Route element={<RequireAuth />}>
-          <Route path="/" element={<Navigate to="/metrics" replace />} />
+          {/* /today is the post-login landing (handoff 0021, design point
+              1); the dashboard keeps its place in the nav. */}
+          <Route path="/" element={<Navigate to="/today" replace />} />
+          <Route path="/today" element={<TodayView />} />
           {/* Any authenticated role (handoff 0008, pillar B). */}
           <Route path="/dashboard" element={<DashboardView />} />
           <Route path="/metrics" element={<MetricsView />} />

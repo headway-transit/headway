@@ -52,6 +52,7 @@ import { Breadcrumbs } from "../components/Breadcrumbs";
 import { ExportButtons } from "../components/ExportButtons";
 import { QuoteFigure } from "../components/QuoteFigure";
 import { SeverityIcon } from "../components/SeverityIcon";
+import { Skeleton } from "../components/Skeleton";
 import { SummaryCards } from "../components/SummaryCards";
 import { copy } from "../copy";
 import { pushToast } from "../toasts";
@@ -1291,8 +1292,13 @@ export function SafetyView() {
           {deadlinesError}
         </div>
       )}
+      {/* Skeleton (handoff 0021 #2): the panel's shape while it loads. */}
       {!deadlines && !deadlinesError && (
-        <p>{copy.safety.deadlines.loading}</p>
+        <Skeleton
+          variant="lines"
+          count={3}
+          label={copy.safety.deadlines.loading}
+        />
       )}
       {deadlines && <DeadlinesPanel deadlines={deadlines} />}
 
@@ -1327,8 +1333,26 @@ export function SafetyView() {
             {eventsError}
           </div>
         )}
-        {!events && !eventsError && <p>{copy.safety.events.loading}</p>}
-        {events && events.length === 0 && <p>{copy.safety.events.empty}</p>}
+        {/* Skeleton (handoff 0021 #2): the list's shape while it loads. */}
+        {!events && !eventsError && (
+          <Skeleton
+            variant="table"
+            count={4}
+            label={copy.safety.events.loading}
+          />
+        )}
+        {/* Teaching empty state (handoff 0021 #4): warm + the first
+            action, role-aware — never a blank. */}
+        {events && events.length === 0 && (
+          <>
+            <p>{copy.safety.events.empty}</p>
+            <p>
+              {mayEnter
+                ? copy.safety.events.emptyActionSteward
+                : copy.safety.events.emptyActionReader}
+            </p>
+          </>
+        )}
         {events && events.length > 0 && (
           <>
             {/* Classification summary cards = filter toggles (handoff 0017

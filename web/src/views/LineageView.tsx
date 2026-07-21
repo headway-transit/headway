@@ -5,6 +5,7 @@ import { ApiError, getLineage } from "../api/client";
 import type { LineageNode } from "../api/types";
 import { Breadcrumbs } from "../components/Breadcrumbs";
 import { LineageGraph } from "../components/LineageGraph";
+import { Skeleton } from "../components/Skeleton";
 import { copy } from "../copy";
 
 /**
@@ -65,7 +66,8 @@ export function LineageView() {
           {error}
         </div>
       )}
-      {!root && !error && <p>{copy.loading}</p>}
+      {/* Skeleton (handoff 0021 #2): the tree's shape while it loads. */}
+      {!root && !error && <Skeleton variant="table" count={5} />}
       {root && (
         <>
           {/* The toggle is ALWAYS visible: the graph is never the only path. */}

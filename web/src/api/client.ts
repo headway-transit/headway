@@ -27,6 +27,7 @@ import type {
   VerificationResult,
   CompareResponse,
   DqIssue,
+  DqIssueCounts,
   ErrorEnvelope,
   LineageNode,
   LoginRequest,
@@ -38,6 +39,7 @@ import type {
   ResolveRequest,
   ResolveResponse,
   SafetyDeadlines,
+  SafetyEventCounts,
   SafetyEventCreated,
   SafetyEventRecord,
   SafetyEventRequest,
@@ -357,6 +359,18 @@ export function listDqIssues(status?: string): Promise<DqIssue[]> {
 }
 
 /**
+ * GET /dq/issues/counts (built in handoff 0017, consumed by /today per
+ * handoff 0021): server-side counts over EXACTLY the rows GET /dq/issues
+ * serves under the same status filter — a briefing card total can never
+ * disagree with the queue behind its door, and /today never downloads the
+ * whole issue list just to count it.
+ */
+export function getDqIssueCounts(status?: string): Promise<DqIssueCounts> {
+  const qs = status ? `?${new URLSearchParams({ status })}` : "";
+  return request<DqIssueCounts>("GET", `/dq/issues/counts${qs}`);
+}
+
+/**
  * GET /reports/mr20?month=YYYY-MM. Returns BOTH the parsed package (for
  * rendering) and the raw response text: the "Download package (JSON)" button
  * saves the raw text so the file is byte-identical to what the API served —
@@ -457,6 +471,25 @@ export function supersedeSafetyEvent(
     "POST",
     `/safety/events/${encodeURIComponent(eventId)}/supersede`,
     body,
+  );
+}
+
+/**
+ * GET /safety/events/counts (built in handoff 0017, consumed by /today per
+ * handoff 0021): server-side counts over EXACTLY the rows GET
+ * /safety/events serves under the same filters — the month card's tallies
+ * can never disagree with the events list behind its door.
+ */
+export function getSafetyEventCounts(
+  filters: Pick<SafetyEventFilters, "month" | "mode"> = {},
+): Promise<SafetyEventCounts> {
+  const params = new URLSearchParams();
+  if (filters.month) params.set("month", filters.month);
+  if (filters.mode) params.set("mode", filters.mode);
+  const qs = params.toString();
+  return request<SafetyEventCounts>(
+    "GET",
+    `/safety/events/counts${qs ? `?${qs}` : ""}`,
   );
 }
 

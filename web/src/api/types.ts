@@ -373,6 +373,19 @@ export interface DqIssue {
   resolution_minutes?: number | null;
 }
 
+/**
+ * GET /dq/issues/counts (handoff 0017, design point 2 — consumed by /today
+ * per handoff 0021): counts computed over EXACTLY the rows GET /dq/issues
+ * serves under the same filter, so a card total can never disagree with
+ * the queue behind its door. Missing severities/statuses are explicit
+ * zeros. Workflow tallies, never regulatory figures.
+ */
+export interface DqIssueCounts {
+  total: number;
+  by_severity: Record<string, number>;
+  by_status: Record<string, number>;
+}
+
 export interface ResolveRequest {
   /** minLength 1 */
   resolution: string;
@@ -732,6 +745,22 @@ export interface SafetyDeadlines {
   ss40_note: string;
   ss50: Ss50Deadline[];
   ss50_citation: string;
+}
+
+/**
+ * GET /safety/events/counts (handoff 0017, design point 2 — consumed by
+ * /today per handoff 0021): counted over EXACTLY the rows GET
+ * /safety/events serves under the same filters. Classification is each
+ * event's LATEST verdict; an unclassified event is counted as such (never
+ * guessed); superseded events are counted separately AND inside their
+ * classification bucket, exactly as the list shows them. Workflow
+ * tallies, never regulatory figures.
+ */
+export interface SafetyEventCounts {
+  total: number;
+  by_classification: Record<string, number>;
+  unclassified: number;
+  superseded: number;
 }
 
 // ---- /sampling (handoff 0012 — NTD sampling support v0) ----

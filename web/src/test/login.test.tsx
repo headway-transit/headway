@@ -40,7 +40,10 @@ describe("/login", () => {
     await expectNoAxeViolations();
   });
 
-  it("signs in entirely by keyboard and lands on the metrics page", async () => {
+  it("signs in entirely by keyboard and lands on the Today briefing (handoff 0021)", async () => {
+    // The tour auto-offers on a true first visit; this test covers the
+    // login path, so mark it seen (tour.test.tsx owns the tour).
+    window.localStorage.setItem("headway-tour-seen", "1");
     const calls = mockApi({
       "POST /auth/login": {
         status: 200,
@@ -66,7 +69,7 @@ describe("/login", () => {
     await user.keyboard("pw123{Enter}");
 
     expect(
-      await screen.findByRole("heading", { name: "Computed metric values" }),
+      await screen.findByRole("heading", { name: "Today" }),
     ).toBeInTheDocument();
     expect(calls[0].body).toEqual({
       username: "maria.ops",

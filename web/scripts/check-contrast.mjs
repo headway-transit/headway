@@ -119,6 +119,16 @@ const PAIRS = [
   ["exception tag text + icon on exception background", "#4c2889", "#f1eafb", 4.5],
   ["exception callout border on card background (non-text, 3:1)", "#4c2889", "#ffffff", 3.0],
 
+  // Handoff 0021 (Today home + tour + skeletons): the tour panel's accent
+  // border and the tour-target highlight ring are non-text marks reusing
+  // the accent (checked here explicitly for the audit trail); the today
+  // cards, deltas and doors reuse pairs registered above. Skeleton
+  // placeholder fills are DECORATIVE (aria-hidden, words carry the loading
+  // state) and are deliberately NOT registered — they are not UI
+  // information under SC 1.4.11.
+  ["tour panel border / target ring on card background (non-text, 3:1)", "#0b57d0", "#ffffff", 3.0],
+  ["tour panel border / target ring on page plane (non-text, 3:1)", "#0b57d0", "#f6f8fa", 3.0],
+
   // ---- DARK theme (handoff 0008 pillar A) ----
   // Card/content surface #161b22, page plane #0d1117. Brand color overrides
   // are NOT applied to dark text/controls (server guardrail covers light
@@ -162,6 +172,10 @@ const PAIRS = [
   // Handoff 0019, dark counterparts of the exception family.
   ["dark: exception tag text + icon on exception background", "#cdb4f6", "#251a3d", 4.5],
   ["dark: exception callout border on card background (non-text, 3:1)", "#cdb4f6", "#161b22", 3.0],
+
+  // Handoff 0021, dark counterparts (tour border/ring on both surfaces).
+  ["dark: tour panel border / target ring on card background (non-text, 3:1)", "#58a6ff", "#161b22", 3.0],
+  ["dark: tour panel border / target ring on page plane (non-text, 3:1)", "#58a6ff", "#0d1117", 3.0],
 ];
 
 let failed = false;

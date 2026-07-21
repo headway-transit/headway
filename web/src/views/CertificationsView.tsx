@@ -19,6 +19,8 @@ import { useEffect, useId, useState } from "react";
 import { Link } from "react-router-dom";
 import { ApiError, listCertifications } from "../api/client";
 import type { CertificationRecord } from "../api/types";
+import { canCertify, useSession } from "../auth/session";
+import { Skeleton } from "../components/Skeleton";
 import { SummaryCards } from "../components/SummaryCards";
 import { copy } from "../copy";
 
@@ -28,6 +30,7 @@ function formatCount(count: number): string {
 }
 
 export function CertificationsView() {
+  const session = useSession();
   const [records, setRecords] = useState<CertificationRecord[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   /** null = no filter (all records shown). */
@@ -58,8 +61,28 @@ export function CertificationsView() {
           {error}
         </div>
       )}
-      {!records && !error && <p>{copy.certifications.loading}</p>}
-      {records && records.length === 0 && <p>{copy.certifications.empty}</p>}
+      {/* Skeleton (handoff 0021 #2): the record list's shape while it
+          loads; the words stay the room's own loading line. */}
+      {!records && !error && (
+        <Skeleton
+          variant="table"
+          count={4}
+          label={copy.certifications.loading}
+        />
+      )}
+      {/* Teaching empty state (handoff 0021 #4): warm + the first action
+          (the Certify door renders for the certifying official). */}
+      {records && records.length === 0 && (
+        <>
+          <p>{copy.certifications.empty}</p>
+          {canCertify(session) && (
+            <p>
+              {copy.certifications.emptyActionOfficial}{" "}
+              <Link to="/certify">{copy.certifications.emptyDoor}</Link>
+            </p>
+          )}
+        </>
+      )}
       {records && records.length > 0 && (
         <>
           {/* Signature-state cards ARE the filter toggles (handoff 0017

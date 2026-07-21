@@ -265,6 +265,17 @@ h3 {
   color: var(--chrome-header-text, var(--color-text-muted));
   font-size: var(--text-sm);
 }
+/* The "Take the tour" control is a BUTTON in the nav list (it navigates
+   AND starts the tour — not a plain link). On a themed header the accent-
+   blue link color could vanish against the chrome background (2026-07-20
+   live click-through finding), so it takes the server-verified header
+   text color there; neutral chrome keeps body text — both AA pairs. The
+   underline keeps it recognizable as an action either way. */
+.app-header nav button.link-like {
+  color: var(--chrome-header-text, var(--color-text));
+  padding: var(--space-1) var(--space-2);
+}
+
 /* The signed-out "Sign in" link sits on the (possibly themed) header bar:
    on a chrome theme it takes the server-verified header text color — the
    accent-blue default would vanish on a dark themed bar (2026-07-14 live
@@ -2227,6 +2238,243 @@ button.cell-receipt {
   font-weight: 400;
 }
 
+/* ---- The Today briefing (/today — handoff 0021, design point 1) ----
+   Every color here is an EXISTING AA-verified token pair
+   (scripts/check-contrast.mjs); the cards reuse .card + .stat-tile
+   anatomy. No new pairs to add. */
+
+.today-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(19rem, 1fr));
+  gap: var(--space-3);
+  margin: var(--space-3) 0;
+}
+.today-card {
+  padding: var(--space-3);
+}
+/* Lead-card headings are h2 (they sit directly under the page h1 —
+   axe heading-order), styled to card scale. */
+.today-card h2 {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-base);
+}
+.today-line {
+  font-weight: 600;
+}
+.today-door {
+  margin-bottom: 0;
+  font-weight: 600;
+}
+.today-plan {
+  margin: var(--space-2) 0;
+}
+.today-plan .today-line {
+  margin: 0 0 var(--space-1);
+}
+.kpi-delta-note {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+.kpi-delta {
+  margin: var(--space-1) 0;
+}
+/* The figure IS the receipt door (the compare cell-receipt precedent):
+   link-styled button at tile size, left-aligned, wrappable. */
+button.figure-button {
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+/* ---- Skeleton loading states (handoff 0021, design point 2) ----
+   Decorative placeholders (aria-hidden; the visually-hidden status line
+   carries the words). The fills are DELIBERATELY low-contrast — they are
+   not UI information (WCAG 1.4.11 does not apply to placeholders whose
+   meaning is carried by the text alternative), so no contrast pairs are
+   registered for them. The shimmer lives ENTIRELY behind
+   prefers-reduced-motion below: reduced motion gets this static block. */
+
+.skeleton-group {
+  margin: var(--space-3) 0;
+}
+.skeleton-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  gap: var(--space-3);
+}
+.skeleton-card {
+  padding: var(--space-3);
+  display: grid;
+  gap: var(--space-2);
+  align-content: start;
+}
+.skeleton-lines {
+  display: grid;
+  gap: var(--space-2);
+}
+.skeleton {
+  display: block;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-1);
+  min-height: 0.9rem;
+}
+.skeleton-figure {
+  min-height: 2.2rem;
+  width: 55%;
+}
+.skeleton-row {
+  width: 100%;
+  min-height: 1.2rem;
+}
+.skeleton-w-40 {
+  width: 40%;
+}
+.skeleton-w-60 {
+  width: 60%;
+}
+.skeleton-w-80 {
+  width: 80%;
+}
+
+/* ---- The guided tour (handoff 0021, design point 3) ----
+   A non-modal, hand-rolled panel: card surface, accent border (an
+   AA-verified non-text pair in both themes), fixed at the bottom so it
+   never covers the element it points at. The highlight ring reuses the
+   focus-ring accent (>= 3:1 on both themes' surfaces — already
+   registered). No backdrop: the tour never blocks. */
+
+.tour-panel {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: var(--space-3);
+  z-index: 30; /* above the toast region (20) */
+  width: calc(100% - 2 * var(--space-3));
+  max-width: 28rem;
+  padding: var(--space-3);
+  border: 2px solid var(--color-accent);
+}
+.tour-panel h2 {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-base);
+}
+.tour-panel h2:focus {
+  outline: none; /* programmatic focus target on step change */
+}
+.tour-panel p {
+  margin: 0 0 var(--space-2);
+}
+.tour-step-count,
+.tour-escape-hint {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+.tour-no-target {
+  font-weight: 600;
+}
+.tour-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+/* The element a step points at: the accent ring, offset so the element's
+   own border stays visible; scroll-margin keeps it clear of the panel. */
+.tour-target {
+  outline: 3px solid var(--color-accent);
+  outline-offset: 4px;
+  border-radius: var(--radius-1);
+  scroll-margin: 6rem;
+}
+
+/* ---- Motion polish (handoff 0021, design point 2) — BINDING RULES ----
+   1. ALL motion lives inside this prefers-reduced-motion block: reduced
+      motion = INSTANT (elements simply appear), never "slower".
+   2. Honesty-critical reveals NEVER animate: refusals, load errors and
+      FAILED verdicts render as .alert/.banner/.certificate-failed, which
+      carry no animation class — and the :has() guard below strips the
+      card-enter animation from any card that arrives carrying an alert,
+      so a refusal can never ride in on a cute entrance.
+   3. Micro only: 150–250ms, CSS-first, opacity + tiny translate/scale. */
+
+@media (prefers-reduced-motion: no-preference) {
+  /* Card enter (the /today briefing + KPI tiles). */
+  .anim-rise {
+    animation: hw-rise-in 200ms ease-out;
+  }
+  /* A card that arrives with a refusal/error inside appears INSTANTLY. */
+  .anim-rise:has(.alert),
+  .anim-rise:has(.banner) {
+    animation: none;
+  }
+  /* Toast enter (action confirmations only — never refusals). */
+  .toast {
+    animation: hw-rise-in 180ms ease-out;
+  }
+  /* Skeleton shimmer — reduced motion keeps the static block instead. */
+  .skeleton {
+    background: linear-gradient(
+      90deg,
+      var(--color-surface) 25%,
+      var(--color-border) 50%,
+      var(--color-surface) 75%
+    );
+    background-size: 200% 100%;
+    animation: hw-shimmer 1.4s ease-in-out infinite;
+  }
+  @keyframes hw-shimmer {
+    from {
+      background-position: 200% 0;
+    }
+    to {
+      background-position: -200% 0;
+    }
+  }
+  /* Dialog enter (receipt modals, the hand-rolled Modal). */
+  .modal {
+    animation: hw-dialog-in 160ms ease-out;
+  }
+  /* Hover/focus affordances on interactive cards: a gentle lift. The
+     elevation change itself also applies outside this block (instant
+     state change, not motion) — only the TRANSITION is motion-gated. */
+  .summary-card,
+  .today-card {
+    transition:
+      box-shadow 150ms ease,
+      transform 150ms ease;
+  }
+  .summary-card:hover,
+  .summary-card:focus-visible {
+    transform: translateY(-2px);
+  }
+
+  @keyframes hw-rise-in {
+    from {
+      opacity: 0;
+      transform: translateY(4px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  @keyframes hw-dialog-in {
+    from {
+      opacity: 0;
+      transform: scale(0.98);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+}
+/* The instant (non-motion) half of the hover affordance: elevation. */
+.summary-card:hover,
+.summary-card:focus-visible {
+  box-shadow: var(--shadow-2);
+}
+
 /* ---- print: the drawn-sample worksheet (handoff 0012, design point 3).
    Printing the page keeps each plan's worksheet (heading, seed, verbatim
    §63.03 rules, the units table) and drops the app chrome, forms, and
@@ -2234,6 +2482,8 @@ button.cell-receipt {
 @media print {
   .app-header,
   .skip-link,
+  .tour-panel,
+  .toast-region,
   .no-print {
     display: none !important;
   }

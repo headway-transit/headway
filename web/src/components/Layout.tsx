@@ -28,7 +28,9 @@ import { copy } from "../copy";
 import { canCertify, clearSession, useSession } from "../auth/session";
 import { initTheme, setTheme, useTheme } from "../theme";
 import { clearToasts } from "../toasts";
+import { startTour } from "../tour";
 import { ToastRegion } from "./Toasts";
+import { TourOverlay } from "./Tour";
 
 export function Layout() {
   const session = useSession();
@@ -125,6 +127,10 @@ export function Layout() {
                 security: the API enforces authentication on every call. */}
             {session && (
               <>
+                {/* The briefing home leads the nav (handoff 0021 #1). */}
+                <li>
+                  <NavLink to="/today">{copy.nav.today}</NavLink>
+                </li>
                 <li>
                   <NavLink to="/dashboard">{copy.nav.dashboard}</NavLink>
                 </li>
@@ -184,6 +190,22 @@ export function Layout() {
             <li>
               <NavLink to="/public">{copy.nav.publicData}</NavLink>
             </li>
+            {/* "Take the tour" (handoff 0021 #3): restartable any time.
+                SPA navigation to /today, then the tour starts at step 1. */}
+            {session && (
+              <li>
+                <button
+                  type="button"
+                  className="link-like"
+                  onClick={() => {
+                    navigate("/today");
+                    startTour();
+                  }}
+                >
+                  {copy.today.takeTourLink}
+                </button>
+              </li>
+            )}
           </ul>
         </nav>
         <div className="session-info">
@@ -219,6 +241,10 @@ export function Layout() {
           persistent aria-live polite, so confirmations pushed from any
           view are reliably announced. */}
       <ToastRegion />
+      {/* The guided tour (handoff 0021 #3): shell-level so it survives the
+          walk from /today into the lineage view. Signed-in only — the tour
+          teaches authenticated surfaces. */}
+      {session && <TourOverlay />}
     </>
   );
 }

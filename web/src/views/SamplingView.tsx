@@ -79,6 +79,7 @@ import { Breadcrumbs } from "../components/Breadcrumbs";
 import { ExportButtons } from "../components/ExportButtons";
 import { QuoteFigure } from "../components/QuoteFigure";
 import { RowProgress } from "../components/RowProgress";
+import { Skeleton } from "../components/Skeleton";
 import { copy } from "../copy";
 import { pushToast } from "../toasts";
 import { quoteContaining } from "../regulatory/quotes";
@@ -1516,8 +1517,22 @@ export function SamplingView() {
             {plansError}
           </div>
         )}
-        {!plans && !plansError && <p>{s.plans.loading}</p>}
-        {plans && plans.length === 0 && <p>{s.plans.empty}</p>}
+        {/* Skeleton (handoff 0021 #2): the list's shape while it loads. */}
+        {!plans && !plansError && (
+          <Skeleton variant="table" count={3} label={s.plans.loading} />
+        )}
+        {/* Teaching empty state (handoff 0021 #4): warm + the first
+            action, role-aware — never a blank. */}
+        {plans && plans.length === 0 && (
+          <>
+            <p>{s.plans.empty}</p>
+            <p>
+              {mayManage
+                ? s.plans.emptyActionSteward
+                : s.plans.emptyActionReader}
+            </p>
+          </>
+        )}
         {plans && plans.length > 0 && (
           <ul className="plan-list">
             {plans.map((plan) => (

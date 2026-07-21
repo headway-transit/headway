@@ -45,6 +45,7 @@ import { SeverityStackedBar } from "../components/charts/SeverityStackedBar";
 import type { StackedBar } from "../components/charts/SeverityStackedBar";
 import { OpsBadge } from "../components/OpsBadge";
 import { SimulatedBadge } from "../components/SimulatedBadge";
+import { Skeleton } from "../components/Skeleton";
 import { copy } from "../copy";
 import { isOps, isSimulated, refusalLines } from "../detail";
 import { detailValueToString, ratioToPercentString } from "../format";
@@ -589,7 +590,8 @@ export function DashboardView() {
           {issuesError}
         </div>
       )}
-      {!values && !valuesError && <p>{copy.loading}</p>}
+      {/* Skeleton (handoff 0021 #2): the tiles' shape while they load. */}
+      {!values && !valuesError && <Skeleton variant="cards" count={3} />}
 
       {values && (
         <>
@@ -604,7 +606,14 @@ export function DashboardView() {
           </section>
 
           {all.length === 0 ? (
-            <p>{copy.dashboard.empty}</p>
+            /* Teaching empty state (handoff 0021 #4): warm + the action. */
+            <>
+              <p>{copy.dashboard.empty}</p>
+              <p>
+                {copy.dashboard.emptyAction}{" "}
+                <code>{copy.dashboard.emptyCommand}</code>
+              </p>
+            </>
           ) : (
             <>
             {/* ONE filter row, above everything it scopes (interaction.md):

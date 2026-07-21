@@ -13,6 +13,7 @@ import { canResolveDqIssues, useSession } from "../auth/session";
 import { Modal } from "../components/Modal";
 import { QuoteFigure } from "../components/QuoteFigure";
 import { SeverityIcon } from "../components/SeverityIcon";
+import { Skeleton } from "../components/Skeleton";
 import { SummaryCards } from "../components/SummaryCards";
 import { copy } from "../copy";
 import { quoteContaining } from "../regulatory/quotes";
@@ -118,7 +119,8 @@ export function DqView() {
           {error}
         </div>
       )}
-      {!issues && !error && <p>{copy.loading}</p>}
+      {/* Skeleton (handoff 0021 #2): the queue's shape while it loads. */}
+      {!issues && !error && <Skeleton variant="table" count={5} />}
       {issues && issues.length === 0 && <p>{copy.dq.empty}</p>}
       {issues && issues.length > 0 && (
         <>

@@ -4,6 +4,7 @@ import "@testing-library/jest-dom/vitest";
 import { clearSession } from "../auth/session";
 import { clearBranding } from "../branding";
 import { clearToasts } from "../toasts";
+import { resetTour } from "../tour";
 
 afterEach(() => {
   cleanup();
@@ -11,6 +12,7 @@ afterEach(() => {
   clearSession(); // module-state session must not leak between tests
   clearBranding(); // module-state branding must not leak between tests
   clearToasts(); // module-state toast stack must not leak between tests
+  resetTour(); // module-state tour must not leak between tests
   // Theme + brand chrome must not leak between tests either: the toggle
   // persists to localStorage and stamps <html>, and the shell sets the
   // --brand-* / --chrome-* custom properties on <html>.

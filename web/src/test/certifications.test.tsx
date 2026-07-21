@@ -136,17 +136,34 @@ describe("/certifications (the index room)", () => {
     await expectNoAxeViolations();
   });
 
-  it("states the empty record plainly", async () => {
+  it("states the empty record warmly, with the Certify door for the official (handoff 0021 #4)", async () => {
     signInAs("viewer");
     mockRecords([]);
     renderApp("/certifications");
 
     expect(
       await screen.findByText(
-        "No certifications are on record yet. One appears here the moment a certifying official signs figures on the Certify page.",
+        "No certifications are on record yet — records appear here the moment a certifying official signs figures, and they stay forever.",
       ),
     ).toBeInTheDocument();
+    // The viewer gets no Certify door (the action is not theirs to take).
+    expect(
+      screen.queryByRole("link", { name: "Go to the Certify page" }),
+    ).not.toBeInTheDocument();
     await expectNoAxeViolations();
+  });
+
+  it("gives the certifying official the concrete first action on the empty record", async () => {
+    signInAs("certifying_official");
+    mockRecords([]);
+    renderApp("/certifications");
+
+    expect(
+      await screen.findByText(/No certifications are on record yet/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: "Go to the Certify page" }),
+    ).toHaveAttribute("href", "/certify");
   });
 
   it("shows an API error verbatim", async () => {

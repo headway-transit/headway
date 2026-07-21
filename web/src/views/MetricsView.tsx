@@ -12,6 +12,7 @@ import { ExportButtons } from "../components/ExportButtons";
 import { OpsBadge } from "../components/OpsBadge";
 import { Receipt } from "../components/Receipt";
 import { SimulatedBadge } from "../components/SimulatedBadge";
+import { Skeleton } from "../components/Skeleton";
 import { copy } from "../copy";
 import { isOps, isPreVerification, isSimulated } from "../detail";
 import { parseDrScope } from "../regulatory/drRules";
@@ -87,8 +88,18 @@ export function MetricsView() {
         </div>
       )}
 
-      {values && values.length === 0 && <p>{copy.metrics.empty}</p>}
-      {!values && !loadError && <p>{copy.loading}</p>}
+      {/* Teaching empty state (handoff 0021 #4): warm + the concrete
+          first action — never a blank. */}
+      {values && values.length === 0 && (
+        <>
+          <p>{copy.metrics.empty}</p>
+          <p>
+            {copy.metrics.emptyAction} <code>{copy.metrics.emptyCommand}</code>
+          </p>
+        </>
+      )}
+      {/* Skeleton (handoff 0021 #2): the table's shape while it loads. */}
+      {!values && !loadError && <Skeleton variant="table" count={6} />}
 
       {values && values.length > 0 && (
         /* role/tabIndex: a horizontally scrollable region must be
