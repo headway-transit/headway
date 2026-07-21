@@ -1,0 +1,110 @@
+# Headway dependency updates — Dependabot (handoff 0022).
+#
+# Why Dependabot and not Renovate (the decision, recorded): the CI policy is
+# first-party / self-hostable only (see ci.yml header). Renovate's zero-infra
+# form is the Mend-hosted app — a third-party service holding write access to
+# the repo, which is exactly what the policy exists to refuse; running
+# Renovate self-hosted means new always-on infrastructure plus a scheduled
+# workflow built on a large third-party action, for grouping features v0 does
+# not need. Dependabot is GitHub-native — the same first-party trust boundary
+# as Actions/ghcr that the project already stands on, no new token, no new
+# service. Recorded honestly: Dependabot is first-party but NOT self-hostable;
+# if the project ever leaves GitHub, this file is the component to replace
+# (Renovate self-hosted becomes the natural successor). Reasoning also in
+# docs/supply-chain.md, "How updates reach the project".
+#
+# Posture (binding, handoff 0022): grouped WEEKLY PRs per ecosystem,
+# auto-labeled, gated by the full existing CI (test suites + license gate +
+# drift gates + SBOM/vuln scan — ci.yml runs all of it on every PR, and the
+# license gate + sbom-scan run unconditionally). NO auto-merge in v0: a
+# dependency bump is a change to what agencies run and gets human review like
+# any other change. Auto-merge for patch-level bumps is an open question in
+# the handoff, to be revisited once trust accrues — not silently enabled.
+#
+# Not covered here, stated plainly: the infra image pins in
+# deploy/compose/compose.yaml (Kafka, TimescaleDB, Apicurio, MinIO,
+# Prometheus, Grafana, Caddy). Those stay deliberate manual bumps for now —
+# each is an operational upgrade for agencies, not a library bump. The weekly
+# rebuild-scan workflow (.github/workflows/rebuild-scan.yml) is the alarm for
+# published-image vulnerabilities.
+
+version: 2
+
+updates:
+  # Go — the ingestion service (services/ingestion/go.mod).
+  - package-ecosystem: gomod
+    directory: /services/ingestion
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Etc/UTC
+    labels: [dependencies]
+    groups:
+      go-dependencies:
+        patterns: ["*"]
+
+  # Python — every pyproject/requirements tree (services + client + db).
+  - package-ecosystem: pip
+    directories:
+      - /services/calc
+      - /services/transform
+      - /services/api
+      - /services/ai
+      - /clients/python
+      - /db
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Etc/UTC
+    labels: [dependencies]
+    groups:
+      python-dependencies:
+        patterns: ["*"]
+
+  # Node — the web frontend (web/package.json).
+  - package-ecosystem: npm
+    directory: /web
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Etc/UTC
+    labels: [dependencies]
+    groups:
+      web-dependencies:
+        patterns: ["*"]
+
+  # Dockerfile base images (FROM lines) for the five released images.
+  - package-ecosystem: docker
+    directories:
+      - /services/ingestion
+      - /services/api
+      - /services/transform
+      - /services/ai
+      - /web
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Etc/UTC
+    labels: [dependencies]
+    groups:
+      base-images:
+        patterns: ["*"]
+
+  # GitHub Actions pins (majors are pinned per repo convention; exact pins
+  # where a bare major once matched an advisory — see the v0.1.0-alpha
+  # release story in docs/supply-chain.md).
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Etc/UTC
+    labels: [dependencies]
+    groups:
+      actions:
+        patterns: ["*"]

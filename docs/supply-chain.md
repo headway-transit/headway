@@ -112,6 +112,51 @@ release past a red gate" guardrail).
   the source-tree SBOM path have been exercised. The ingestion image remains
   unbuilt in this environment (Go toolchain image pull not attempted here).
 
+## How updates flow (handoff 0022)
+
+Three pieces, each honest about what it is:
+
+- **Dependency updates in (Dependabot, `.github/dependabot.yml`):** grouped
+  weekly PRs across `go.mod` / `pyproject` / `package.json` / Dockerfile
+  base images / Actions pins, labeled `dependencies`, **no auto-merge** —
+  every bump rides the full CI (suites, license gate, drift gates,
+  SBOM + Grype) and gets human review. *Why Dependabot and not Renovate:*
+  the CI policy is first-party/self-hostable only; Renovate's zero-infra
+  form is the Mend-hosted third-party app with repo write access (exactly
+  what the policy refuses), and self-hosting it means new always-on
+  infrastructure for grouping features v0 does not need. Dependabot sits
+  inside the GitHub trust boundary the project already stands on. Stated
+  honestly: Dependabot is first-party but **not** self-hostable — if the
+  project ever leaves GitHub, this is the component to replace (self-hosted
+  Renovate is the natural successor). Full reasoning in the config header.
+- **Published-image aging alarm (`.github/workflows/rebuild-scan.yml`):**
+  weekly Grype scan of the five *published* release images under the same
+  `.grype.yaml` policy as the release gate. A release is scanned once at
+  release time and then ages; this workflow is what notices when a fixable
+  high+ CVE lands against a shipped image — it fails loudly and opens (or
+  updates) an alarm issue. Remediation is a patch release: the rebuild
+  pulls fixed base layers and re-passes the whole release gate. (The
+  workflow header records a deliberate deviation from handoff 0022's
+  "rebuild then scan" wording, with reasoning: scanning a fresh rebuild
+  under-detects, because rebuilds pick up patched base layers and can scan
+  clean while the published artifact stays vulnerable.)
+- **Updates out to agencies (`install/install.sh --upgrade`):** agencies
+  replace signed images atomically — cosign-verified against this
+  document's identity *before* anything switches, pulled by verified
+  digest, migrations applied by the idempotent runner, health-gated, with
+  the previous tag recorded for rollback. Plain-language story:
+  [`docs/updating.md`](updating.md). No phone-home: the release-list query
+  happens only when an admin runs `--check-updates`/`--upgrade`.
+
+- **Found 2026-07-20 (handoff 0022 verification), OPEN:** the five ghcr
+  packages are **private** — anonymous pulls get 401 and `cosign verify`
+  cannot even fetch the signatures without a `read:packages` token. Until
+  a maintainer flips each package public (GitHub package settings →
+  Danger Zone → Change visibility; not automatable via the REST API), no
+  agency can pull a release image and `--upgrade` refuses (honestly) at
+  the verification step. The signatures themselves were verified against
+  the public Rekor transparency log instead — evidence in handoff 0022.
+
 ## Scan policy: fixable findings gate; "won't fix" distro findings do not
 
 As of 2026-07-12 (`.grype.yaml`): the release gate fails on fixable vulnerabilities of high severity or above. Findings the upstream distribution has explicitly marked won't-fix (common in Debian-based Python images: libc, perl-base, ncurses) cannot be remediated by us or by any image consumer; they are excluded from the gate but remain fully visible in every release's published SBOM. The long-term remediation is distroless runtime bases (the ingestion image already uses one and passes untouched) — tracked in ROADMAP.md.

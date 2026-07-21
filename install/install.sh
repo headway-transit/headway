@@ -15,6 +15,15 @@
 #                                   change the answer to "Where will people
 #                                   use Headway from?" on an existing
 #                                   installation (both directions, any time)
+#   ./install/install.sh --check-updates
+#                                   read-only: compare this installation's
+#                                   version with the newest Headway release
+#                                   (asks GitHub only when YOU run this)
+#   ./install/install.sh --upgrade [vX.Y.Z]
+#                                   update an existing installation to a
+#                                   release: verify every image signature
+#                                   (cosign), pull, switch, migrate,
+#                                   health-check, print how to go back
 #
 # SECRETS POLICY (no secrets in the log, by construction):
 #   - Generated passwords and typed passwords exist only in shell variables
@@ -31,10 +40,29 @@ set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(dirname "$SCRIPT_DIR")"
-COMPOSE_DIR="$REPO_DIR/deploy/compose"
+# The HEADWAY_* overrides below are TEST SEAMS, not user options: they let a
+# disposable verification stack (its own compose dir, project name and log)
+# exercise this script without touching a live installation — see handoff
+# 0022. Production installs never set them; the defaults are the real paths.
+COMPOSE_DIR="${HEADWAY_COMPOSE_DIR:-$REPO_DIR/deploy/compose}"
+COMPOSE_PROJECT="${HEADWAY_COMPOSE_PROJECT:-headway}"
 ENV_EXAMPLE="$COMPOSE_DIR/.env.example"
 ENV_FILE="$COMPOSE_DIR/.env"
-LOG_FILE="$SCRIPT_DIR/install.log"
+LOG_FILE="${HEADWAY_LOG_FILE:-$SCRIPT_DIR/install.log}"
+
+# Where releases live. HEADWAY_UPGRADE_REPO exists for forks that run their
+# own releases: it changes BOTH where --check-updates/--upgrade look for
+# releases AND the signing identity --upgrade demands of every image — a
+# fork's images signed by the fork's own release workflow verify against the
+# fork, never silently against ours (or vice versa).
+UPGRADE_REPO="${HEADWAY_UPGRADE_REPO:-headway-transit/headway}"
+# Image namespace is fixed to the upstream project: the signed images the
+# stack runs are published by headway-transit's release pipeline.
+IMAGE_NAMESPACE="ghcr.io/headway-transit"
+# The app services --upgrade switches to released images. web is deliberately
+# absent: its API address is baked in at build time, so it is REBUILT locally
+# from the release's source instead of pulled (docs/updating.md explains).
+UPGRADE_IMAGES=(ingestion transform api)
 
 # Files this script creates (the log, .env) are private to your user account.
 umask 077
@@ -42,6 +70,9 @@ umask 077
 CHECK_ONLY=0
 ASSUME_YES=0
 RECONFIGURE=0
+CHECK_UPDATES=0
+UPGRADE=0
+UPGRADE_TARGET=""
 FAILURES=0
 WARNINGS=0
 
@@ -118,6 +149,22 @@ Usage:
                                   opening Headway to the office, or making it
                                   private to this computer again — and is
                                   safe to run repeatedly.
+  ./install/install.sh --check-updates
+                                  Read-only. Compares this installation's
+                                  version with the newest Headway release and
+                                  prints where to read what changed. Headway
+                                  NEVER checks on its own — the internet is
+                                  contacted only when you run this command,
+                                  and nothing about your installation is sent.
+  ./install/install.sh --upgrade [vX.Y.Z]
+                                  Update an existing installation. Without a
+                                  version it asks GitHub for the newest
+                                  release; with one (like v0.3.0) it updates
+                                  to exactly that. Every downloaded image's
+                                  signature is verified before anything
+                                  changes; your data is never touched. The
+                                  full story, including how to go back, is
+                                  in docs/updating.md.
   ./install/install.sh --help     Show this message.
 
 Everything the installer does is recorded in install/install.log.
@@ -131,6 +178,17 @@ for arg in "$@"; do
     --check) CHECK_ONLY=1 ;;
     --yes)   ASSUME_YES=1 ;;
     --reconfigure-access) RECONFIGURE=1 ;;
+    --check-updates) CHECK_UPDATES=1 ;;
+    --upgrade) UPGRADE=1 ;;
+    v[0-9]*)
+      # A release version like v0.2.0-alpha — only meaningful with --upgrade.
+      if ! printf '%s' "$arg" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.-]+)?$'; then
+        echo "That does not look like a Headway release version: $arg"
+        echo "Versions look like v0.2.0 or v0.2.0-alpha."
+        exit 1
+      fi
+      UPGRADE_TARGET="$arg"
+      ;;
     --help|-h) usage; exit 0 ;;
     *)
       echo "Unknown option: $arg"
@@ -139,6 +197,12 @@ for arg in "$@"; do
       ;;
   esac
 done
+
+if [ -n "$UPGRADE_TARGET" ] && [ "$UPGRADE" -ne 1 ]; then
+  echo "A version ($UPGRADE_TARGET) only makes sense together with --upgrade."
+  echo "Did you mean: ./install/install.sh --upgrade $UPGRADE_TARGET"
+  exit 1
+fi
 
 # --- Logging and output helpers ----------------------------------------------
 
@@ -173,7 +237,16 @@ log "installer started: check-only=$CHECK_ONLY non-interactive=$ASSUME_YES recon
 
 # --- Small utilities ----------------------------------------------------------
 
-dc() { docker compose --project-directory "$COMPOSE_DIR" "$@"; }
+dc() { docker compose -p "$COMPOSE_PROJECT" --project-directory "$COMPOSE_DIR" "$@"; }
+
+# The Docker network helper containers join (migrations, admin account).
+# Matches compose.yaml's `networks.headway.name` default; a disposable test
+# stack overrides it via HEADWAY_NETWORK in its own .env (see handoff 0022).
+compose_network() {
+  local net=""
+  [ -f "$ENV_FILE" ] && net="$(read_env_value HEADWAY_NETWORK)"
+  printf '%s' "${net:-headway}"
+}
 
 port_in_use() {
   local port="$1"
@@ -437,10 +510,11 @@ refuse_existing_install() {
   say "To protect your data, this installer will not overwrite an existing"
   say "installation. What you can do instead:"
   say ""
-  say "  - If you want to UPGRADE Headway: an '--upgrade' option is planned"
-  say "    for a future release. Until then, please follow the upgrade notes"
-  say "    in deploy/compose/README.md, or ask for help (install/README.md,"
-  say "    section 'Getting help')."
+  say "  - If you want to UPDATE Headway to a newer release: run"
+  say "    ./install/install.sh --check-updates   (read-only, shows versions)"
+  say "    ./install/install.sh --upgrade         (does the update)"
+  say "    What an update does — and how to go back — is explained in plain"
+  say "    words in docs/updating.md."
   say "  - If a previous install attempt stopped partway and you want to"
   say "    start over: run ./install/uninstall.sh first. It will ask before"
   say "    deleting anything, and your data is only removed if you say so."
@@ -462,12 +536,12 @@ passwords, so a Headway installation (or a previous attempt) is present."
   # prerequisite checks that follow will explain that problem properly.
   if docker info >/dev/null 2>&1; then
     local containers
-    containers="$(docker ps -aq --filter label=com.docker.compose.project=headway 2>/dev/null || true)"
+    containers="$(docker ps -aq --filter "label=com.docker.compose.project=$COMPOSE_PROJECT" 2>/dev/null || true)"
     if [ -n "$containers" ]; then
       refuse_existing_install \
-"Docker containers belonging to a Headway installation (project 'headway')
+"Docker containers belonging to a Headway installation (project '$COMPOSE_PROJECT')
 already exist on this computer:
-$(docker ps -a --filter label=com.docker.compose.project=headway --format '  - {{.Names}} ({{.Status}})' 2>/dev/null)"
+$(docker ps -a --filter "label=com.docker.compose.project=$COMPOSE_PROJECT" --format '  - {{.Names}} ({{.Status}})' 2>/dev/null)"
     fi
   fi
 }
@@ -596,8 +670,8 @@ detect_lan_address() {
 # Is OUR office doorway already running? (Then ports 80/443 being busy is
 # expected, not a conflict — matters when --reconfigure-access re-picks lan.)
 caddy_is_ours_running() {
-  docker ps --filter name=headway-caddy-1 --format '{{.Names}}' 2>/dev/null \
-    | grep -qx 'headway-caddy-1'
+  docker ps --filter "name=$COMPOSE_PROJECT-caddy-1" --format '{{.Names}}' 2>/dev/null \
+    | grep -qx "$COMPOSE_PROJECT-caddy-1"
 }
 
 # Option (b) details: ports free? address detected + human-confirmed?
@@ -904,7 +978,7 @@ wait_for_healthy() {
     for svc in "${expected[@]}"; do
       local status
       status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' \
-        "headway-$svc-1" 2>/dev/null || echo "not started")"
+        "$COMPOSE_PROJECT-$svc-1" 2>/dev/null || echo "not started")"
       [ "$status" = "healthy" ] || not_ready+=("$(service_label "$svc")")
     done
     if [ "${#not_ready[@]}" -eq 0 ]; then all_ok=1; break; fi
@@ -930,15 +1004,15 @@ wait_for_healthy() {
   for helper in bootstrap-kafka bootstrap-minio; do
     local hdl=$((SECONDS + 120)) state="" code=""
     while [ "$SECONDS" -lt "$hdl" ]; do
-      state="$(docker inspect --format '{{.State.Status}}' "headway-$helper-1" 2>/dev/null || echo missing)"
+      state="$(docker inspect --format '{{.State.Status}}' "$COMPOSE_PROJECT-$helper-1" 2>/dev/null || echo missing)"
       [ "$state" = "exited" ] && break
       sleep 5
     done
-    code="$(docker inspect --format '{{.State.ExitCode}}' "headway-$helper-1" 2>/dev/null || echo 1)"
+    code="$(docker inspect --format '{{.State.ExitCode}}' "$COMPOSE_PROJECT-$helper-1" 2>/dev/null || echo 1)"
     if [ "$state" != "exited" ] || [ "$code" != "0" ]; then
       fail "The one-time setup helper '$helper' did not finish cleanly."
       fixln "See its messages with:"
-      fixln "    docker logs headway-$helper-1"
+      fixln "    docker logs $COMPOSE_PROJECT-$helper-1"
       fixln "and install/README.md, section 'If the installer stops'."
       exit 1
     fi
@@ -963,7 +1037,7 @@ run_migrations() {
   # PGPASSWORD travels via environment inheritance (-e with no value):
   # it never appears in the command line or the log.
   if ! PGPASSWORD="$pg_pass" docker run --rm \
-      --network headway \
+      --network "$(compose_network)" \
       -v "$REPO_DIR/db:/db:ro" \
       -e PGHOST=timescaledb \
       -e PGPORT=5432 \
@@ -1051,7 +1125,7 @@ create_admin_user() {
        HEADWAY_ADMIN_USERNAME="$ADMIN_USERNAME" \
        HEADWAY_ADMIN_PASSWORD="$ADMIN_PASSWORD" \
        docker run --rm -i \
-      --network headway \
+      --network "$(compose_network)" \
       -e PGHOST=timescaledb \
       -e PGPORT=5432 \
       -e PGUSER="$pg_user" \
@@ -1283,6 +1357,391 @@ reconfigure_access() {
   esac
 }
 
+# --- Updates: --check-updates (read-only) and --upgrade --------------------------
+# Design contract: docs/handoffs/0022-from-devops-to-devops-updates.md.
+# Plain-language guide for agencies: docs/updating.md.
+#
+# Privacy posture, stated once and honored everywhere: Headway NEVER contacts
+# the internet on its own to look for updates. The one and only version query
+# happens when a person runs one of these two commands, and it is a plain
+# read of the public release list — nothing about this installation is sent.
+
+require_curl() {
+  if ! command -v curl >/dev/null 2>&1; then
+    fail "The 'curl' tool is missing. It is used (only when you run this"
+    fixln "command) to read the public list of Headway releases."
+    fixln "To fix on Ubuntu/Debian:   sudo apt install curl"
+    fixln "To fix on RHEL/Fedora:     sudo dnf install curl"
+    exit 1
+  fi
+}
+
+require_cosign() {
+  if command -v cosign >/dev/null 2>&1; then
+    ok "cosign is installed ($(cosign version 2>/dev/null | awk '/GitVersion/ {print $2; exit}' || true))."
+    return
+  fi
+  fail "The 'cosign' tool is not installed. Headway will not switch to"
+  fixln "downloaded software whose signature it cannot check, so upgrades"
+  fixln "require cosign — the standard open-source tool (from the Sigstore"
+  fixln "project) that verifies each Headway image really was built and"
+  fixln "signed by the Headway release pipeline."
+  fixln "To fix: install cosign, then run this command again. Options:"
+  fixln "  - Your package manager, if it has it (e.g. 'sudo dnf install"
+  fixln "    cosign' on recent Fedora)."
+  fixln "  - The official release binary: download 'cosign-linux-amd64'"
+  fixln "    (or -arm64) from https://github.com/sigstore/cosign/releases,"
+  fixln "    then run:"
+  fixln "        chmod +x cosign-linux-amd64"
+  fixln "        sudo mv cosign-linux-amd64 /usr/local/bin/cosign"
+  fixln "    (The installer never runs sudo commands for you.)"
+  exit 1
+}
+
+# Ask GitHub (only now, because a person ran this) for the newest release tag.
+fetch_latest_release_tag() {
+  local body
+  if ! body="$(curl -fsS --max-time 30 \
+      "https://api.github.com/repos/$UPGRADE_REPO/releases/latest" 2>>"$LOG_FILE")"; then
+    fail "Could not read the release list from GitHub."
+    fixln "Usually this means no internet connection from this computer, or"
+    fixln "GitHub is briefly unreachable. Nothing was changed; try again"
+    fixln "later. (The address asked was:"
+    fixln "https://api.github.com/repos/$UPGRADE_REPO/releases/latest )"
+    exit 1
+  fi
+  local tag
+  tag="$(printf '%s' "$body" | sed -n 's/.*"tag_name" *: *"\([^"]*\)".*/\1/p' | head -n 1)"
+  if [ -z "$tag" ]; then
+    fail "GitHub answered, but no release could be found for $UPGRADE_REPO."
+    fixln "Nothing was changed. If this persists, ask for help"
+    fixln "(install/README.md, section 'Getting help')."
+    exit 1
+  fi
+  printf '%s' "$tag"
+}
+
+current_version_label() {
+  local cur=""
+  [ -f "$ENV_FILE" ] && cur="$(read_env_value HEADWAY_IMAGE_TAG)"
+  case "${cur:-local}" in
+    local|"") echo "built from the source code on this computer (no release version recorded)" ;;
+    *)        echo "$cur" ;;
+  esac
+}
+
+check_updates() {
+  blank
+  say "--- Checking for Headway updates (read-only) ---"
+  say ""
+  say "Headway never checks for updates by itself; this question is being"
+  say "asked now only because you ran this command, and nothing about your"
+  say "installation is sent — it is a plain read of the public release list."
+  blank
+  require_curl
+  local latest current
+  latest="$(fetch_latest_release_tag)"
+  if [ ! -f "$ENV_FILE" ]; then
+    note "Headway is not installed on this computer (no configuration file"
+    fixln "at $ENV_FILE)."
+  fi
+  current="$(current_version_label)"
+  say "  This installation is running:  $current"
+  say "  The newest Headway release is: $latest"
+  say "  What changed in it:            https://github.com/$UPGRADE_REPO/releases/tag/$latest"
+  blank
+  case "$current" in
+    "$latest")
+      say "You are on the newest release. Nothing to do."
+      ;;
+    *)
+      say "To update, when you are ready (updates never touch your data,"
+      say "and docs/updating.md explains every step first):"
+      say "    ./install/install.sh --upgrade"
+      ;;
+  esac
+  log "check-updates: current='$current' latest='$latest'"
+}
+
+# Verify ONE image's signature, then pull exactly the bytes that were
+# verified (by digest, not by movable tag), then give them the tag locally.
+# Refuses loudly on any mismatch; nothing running has changed at this point.
+verify_and_pull_image() {
+  local name="$1" target="$2"
+  local ref="$IMAGE_NAMESPACE/headway-$name:$target"
+  local tag_re="${target//./\\.}"
+  local identity_re="^https://github.com/$UPGRADE_REPO/\\.github/workflows/release\\.yml@refs/tags/$tag_re\$"
+  local verify_out
+  say "  Checking the signature of headway-$name $target ..."
+  if ! verify_out="$(cosign verify \
+      --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+      --certificate-identity-regexp "$identity_re" \
+      "$ref" 2>>"$LOG_FILE")"; then
+    blank
+    fail "The signature on $ref"
+    fixln "did NOT verify. Headway REFUSES to install it, and nothing on"
+    fixln "this computer has been changed."
+    fixln ""
+    fixln "What this means: the image could not be proven to come from the"
+    fixln "Headway release pipeline (expected signer:"
+    fixln "https://github.com/$UPGRADE_REPO/.github/workflows/release.yml"
+    fixln "for release $target). That can be a wrong version name, a"
+    fixln "network problem — or someone offering you software that is not"
+    fixln "Headway's. Details are in $LOG_FILE."
+    fixln "If this persists on a version you took from"
+    fixln "https://github.com/$UPGRADE_REPO/releases, please report it"
+    fixln "(SECURITY.md) — do not work around it."
+    exit 1
+  fi
+  local digest
+  digest="$(printf '%s' "$verify_out" \
+    | sed -n 's/.*"docker-manifest-digest" *: *"\(sha256:[a-f0-9]*\)".*/\1/p' | head -n 1)"
+  if [ -z "$digest" ]; then
+    fail "The signature check passed but did not name the exact image it"
+    fixln "verified (its digest), so Headway cannot guarantee it would run"
+    fixln "the same bytes that were checked. Refusing to continue; nothing"
+    fixln "was changed. Details in $LOG_FILE."
+    exit 1
+  fi
+  ok "Signature verified for headway-$name $target (digest ${digest:0:19}...)."
+  log "verified $ref digest $digest"
+  say "  Downloading exactly what was verified ..."
+  if ! docker pull "$IMAGE_NAMESPACE/headway-$name@$digest" >>"$LOG_FILE" 2>&1; then
+    fail "Downloading headway-$name $target failed after its signature"
+    fixln "verified. Nothing running has changed; it is safe to run"
+    fixln "./install/install.sh --upgrade again. Details in $LOG_FILE."
+    exit 1
+  fi
+  docker tag "$IMAGE_NAMESPACE/headway-$name@$digest" "$ref"
+  ok "Downloaded headway-$name $target."
+}
+
+# After the switch: every long-running service must come back healthy.
+# Services that publish no health endpoint (the two pipeline loops) must at
+# least be running. Fails loudly with the go-back instructions.
+upgrade_health_gate() {
+  blank
+  say "--- Waiting for every service to report healthy on the new version ---"
+  local expected=("${HEALTH_SERVICES[@]}") running_only=()
+  local profiles
+  profiles="$(read_env_value COMPOSE_PROFILES)"
+  case ",$profiles," in *",app,"*)
+    expected+=(api web)
+    running_only=(ingestion transform)
+  ;; esac
+  case ",$profiles," in *",lan,"*) expected+=(caddy) ;; esac
+
+  local deadline=$((SECONDS + 420)) all_ok=0
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    local not_ready=()
+    for svc in "${expected[@]}"; do
+      local status
+      status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' \
+        "$COMPOSE_PROJECT-$svc-1" 2>/dev/null || echo "not started")"
+      [ "$status" = "healthy" ] || not_ready+=("$(service_label "$svc")")
+    done
+    for svc in "${running_only[@]}"; do
+      local status
+      status="$(docker inspect --format '{{.State.Status}}' \
+        "$COMPOSE_PROJECT-$svc-1" 2>/dev/null || echo "not started")"
+      [ "$status" = "running" ] || not_ready+=("$svc (pipeline service)")
+    done
+    if [ "${#not_ready[@]}" -eq 0 ]; then all_ok=1; break; fi
+    local joined=""
+    for item in "${not_ready[@]}"; do joined="${joined:+$joined, }$item"; done
+    say "  Still starting: $joined — this is normal, please wait..."
+    sleep 15
+  done
+
+  if [ "$all_ok" -ne 1 ]; then
+    blank
+    fail "Some services did not become healthy within 7 minutes of the"
+    fixln "update. Your data is untouched. To see what a service says:"
+    fixln "    docker compose --project-directory $COMPOSE_DIR logs api"
+    fixln "You can go back to the previous version's app images — the"
+    fixln "'going back' section of docs/updating.md has the exact steps,"
+    fixln "and the previous version is recorded in $ENV_FILE"
+    fixln "as HEADWAY_PREVIOUS_IMAGE_TAG."
+    exit 1
+  fi
+  ok "All services are healthy on the new version."
+}
+
+print_rollback_info() {
+  local prev="$1" target="$2"
+  say "--- If something seems wrong after this update ---"
+  say ""
+  say "Your data was not touched — updates never delete the data volumes,"
+  say "and going back never does either."
+  case "$prev" in
+    local|"")
+      say "Before this update, Headway ran images built from the source code"
+      say "on this computer. To go back to that:"
+      say "    1. Put the Headway folder back on your previous version"
+      say "       (if you use git: git checkout <the commit you were on>)."
+      say "    2. In $ENV_FILE set HEADWAY_IMAGE_TAG=local"
+      say "    3. Run: docker compose --project-directory $COMPOSE_DIR --profile app up -d --build"
+      ;;
+    *)
+      say "The version you were on before ($prev) is recorded in"
+      say "$ENV_FILE as HEADWAY_PREVIOUS_IMAGE_TAG."
+      say "To go back to it (signatures are verified again on the way back):"
+      say "    ./install/install.sh --upgrade $prev"
+      ;;
+  esac
+  say ""
+  say "One honest limit, so nothing surprises you: database table changes"
+  say "are forward-only. Going back swaps the app software; the database"
+  say "keeps any new tables the update added. Headway updates only ever ADD"
+  say "tables and columns — your recorded data is not rewritten — so older"
+  say "app versions keep working against the newer tables."
+}
+
+run_upgrade() {
+  blank
+  say "--- Updating Headway ---"
+  if [ ! -f "$ENV_FILE" ]; then
+    blank
+    fail "No Headway configuration file was found at"
+    fixln "$ENV_FILE, so there is nothing to update."
+    fixln "To install Headway on this computer, run: ./install/install.sh"
+    exit 1
+  fi
+  if ! docker info >/dev/null 2>&1; then
+    fail "Docker did not answer, and the update needs it. Run"
+    fixln "./install/install.sh --check — it explains exactly what is wrong"
+    fixln "with Docker and how to fix it. Nothing was changed."
+    exit 1
+  fi
+  require_cosign
+
+  # Which version are we going to?
+  local target="$UPGRADE_TARGET"
+  if [ -z "$target" ]; then
+    require_curl
+    say "No version was named, so the newest release will be used."
+    say "(Asking GitHub now — only because you ran this command.)"
+    target="$(fetch_latest_release_tag)"
+  fi
+  local current
+  current="$(read_env_value HEADWAY_IMAGE_TAG)"; current="${current:-local}"
+  blank
+  say "  This installation is running:  $(current_version_label)"
+  say "  Updating to:                   $target"
+  say "  What changed in it:            https://github.com/$UPGRADE_REPO/releases/tag/$target"
+  if [ "$current" = "$target" ]; then
+    note "That is the version already recorded here. Continuing is safe —"
+    fixln "the images are re-verified and re-applied, which also repairs an"
+    fixln "installation where a previous update stopped partway."
+  fi
+
+  # The migrations and the website are built from THIS folder, so the folder
+  # should hold the release being installed. Verify when we can (a git
+  # checkout); warn loudly when it does not match, and never guess silently.
+  if [ -d "$REPO_DIR/.git" ] && command -v git >/dev/null 2>&1; then
+    local head_rev tag_rev
+    head_rev="$(git -C "$REPO_DIR" rev-parse HEAD 2>/dev/null || true)"
+    tag_rev="$(git -C "$REPO_DIR" rev-parse -q --verify "refs/tags/$target^{commit}" 2>/dev/null || true)"
+    if [ -n "$tag_rev" ] && [ "$tag_rev" = "$head_rev" ]; then
+      ok "This Headway folder is on release $target — folder and images match."
+    else
+      warn "This Headway folder does not appear to be on release $target."
+      fixln "The database table updates and the website are built from this"
+      fixln "folder, so folder and images should match. To put the folder on"
+      fixln "the release first:"
+      fixln "    git -C $REPO_DIR fetch --tags"
+      fixln "    git -C $REPO_DIR checkout $target"
+      fixln "then run this update again."
+      if [ "$ASSUME_YES" -eq 1 ]; then
+        if [ "${HEADWAY_UPGRADE_SOURCE_MISMATCH_OK:-}" != "yes" ]; then
+          fail "Running with --yes, so nobody can confirm this mismatch is"
+          fixln "intended. Refusing; nothing was changed. (Automation that"
+          fixln "really means it sets HEADWAY_UPGRADE_SOURCE_MISMATCH_OK=yes.)"
+          exit 1
+        fi
+        note "Continuing despite the mismatch (HEADWAY_UPGRADE_SOURCE_MISMATCH_OK=yes)."
+      else
+        printf 'Continue anyway? (yes/no): '
+        local answer; read -r answer
+        case "$answer" in
+          y|Y|yes|YES|Yes) note "Continuing at your request despite the mismatch." ;;
+          *) say "Stopping at your request. Nothing was changed."; exit 0 ;;
+        esac
+      fi
+    fi
+  else
+    note "This folder is not a git checkout, so the installer cannot prove"
+    fixln "it holds release $target. Please make sure you downloaded the"
+    fixln "$target source before updating (docs/updating.md, step 1)."
+  fi
+
+  # 1. Verify every signature, then pull — BEFORE anything switches.
+  blank
+  say "--- Verifying release signatures (before anything changes) ---"
+  say "Each downloaded piece of Headway is checked against the Headway"
+  say "release pipeline's signing identity. If any check fails, the update"
+  say "stops and nothing on this computer changes."
+  for name in "${UPGRADE_IMAGES[@]}"; do
+    verify_and_pull_image "$name" "$target"
+  done
+
+  # 2. Record the way back, then switch the version in the configuration.
+  blank
+  say "--- Switching to $target ---"
+  set_env_value HEADWAY_PREVIOUS_IMAGE_TAG "$current"
+  set_env_value HEADWAY_IMAGE_TAG "$target"
+  ok "Configuration now points at $target (previous: $current, recorded)."
+  log "upgrade: switched HEADWAY_IMAGE_TAG $current -> $target"
+
+  # 3. The website is rebuilt on this computer from the release's source,
+  #    because the address it calls is baked in when it is built — this
+  #    keeps your answer to "Where will people use Headway from?" exactly
+  #    as it was (nothing about network access is changed by an update).
+  local profiles
+  profiles="$(read_env_value COMPOSE_PROFILES)"
+  case ",$profiles," in *",app,"*)
+    say "Rebuilding the Headway website from the release's source (its"
+    say "address settings are kept exactly as they were) — this is usually"
+    say "the slowest step, a few minutes..."
+    blank
+    if ! dc --profile app build web 2>&1 | tee -a "$LOG_FILE"; then
+      blank
+      fail "Rebuilding the website failed. The services were NOT restarted;"
+      fixln "the previous version is still running. Details are above and in"
+      fixln "$LOG_FILE. It is safe to run this update again."
+      exit 1
+    fi
+  ;; esac
+
+  # 4. Restart onto the new images.
+  say "Restarting Headway's services on the new version..."
+  blank
+  if ! dc up -d 2>&1 | tee -a "$LOG_FILE"; then
+    blank
+    fail "Docker could not restart the Headway services on the new version."
+    fixln "Details are above and in $LOG_FILE. Your data is untouched."
+    print_rollback_info "$current" "$target"
+    exit 1
+  fi
+
+  # 5. Database table updates (idempotent; safe to repeat).
+  run_migrations
+
+  # 6. Nothing is declared done until every service reports healthy.
+  upgrade_health_gate
+
+  blank
+  say "=================================================================="
+  say " Headway is updated to $target"
+  say "=================================================================="
+  blank
+  print_rollback_info "$current" "$target"
+  say ""
+  say "Everything above was recorded (without passwords) in:"
+  say "  $LOG_FILE"
+  log "upgrade completed: $current -> $target"
+}
+
 # =============================================================================
 # Main
 # =============================================================================
@@ -1298,13 +1757,27 @@ if [ ! -f "$ENV_EXAMPLE" ]; then
   exit 1
 fi
 
+# Modes are one at a time; each promises something different (--check and
+# --check-updates promise to change nothing; --upgrade and
+# --reconfigure-access exist to change things).
+MODES=$((CHECK_ONLY + RECONFIGURE + CHECK_UPDATES + UPGRADE))
+if [ "$MODES" -gt 1 ]; then
+  fail "Those options cannot be combined. Please run one at a time:"
+  fixln "--check, --check-updates, --upgrade, or --reconfigure-access."
+  exit 1
+fi
+
+if [ "$CHECK_UPDATES" -eq 1 ]; then
+  check_updates
+  exit 0
+fi
+
+if [ "$UPGRADE" -eq 1 ]; then
+  run_upgrade
+  exit 0
+fi
+
 if [ "$RECONFIGURE" -eq 1 ]; then
-  if [ "$CHECK_ONLY" -eq 1 ]; then
-    fail "--check and --reconfigure-access cannot be combined: --check"
-    fixln "promises to change nothing, and --reconfigure-access exists to"
-    fixln "change things. Run them one at a time."
-    exit 1
-  fi
   reconfigure_access
   exit 0
 fi

@@ -68,6 +68,11 @@ and answer **b**. Either way the installer:
 To go back to "just this computer", run the same command and answer **a**.
 Both directions are safe to run as many times as you like.
 
+Your answer also survives updates: `./install/install.sh --upgrade` (see
+[`docs/updating.md`](updating.md)) rebuilds the website with the same
+address and changes nothing about network access — you never re-answer
+this question because of an update.
+
 ## The browser warning, and removing it for good
 
 The first time anyone opens the shared address, their browser shows a

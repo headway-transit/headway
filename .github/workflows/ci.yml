@@ -455,7 +455,8 @@ jobs:
 
           targets = sorted(
               ["deploy/compose/compose.yaml",
-               "deploy/compose/prometheus/prometheus.yml"]
+               "deploy/compose/prometheus/prometheus.yml",
+               ".github/dependabot.yml"]
               + glob.glob(".github/workflows/*.yml")
               + glob.glob(".github/workflows/*.yaml")
               + glob.glob("adapters/**/mapping.v0.yaml", recursive=True))

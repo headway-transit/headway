@@ -121,8 +121,10 @@ problem **and** prints the commands that fix it. The common cases:
   means Headway (or another database/web server) is already running here.
   The message tells you how to find the program using the port.
 - **"Headway is already installed on this computer."** The installer
-  refuses to overwrite an existing installation, to protect your data.
-  Upgrading in place will be handled by a future `--upgrade` option. If a
+  refuses to overwrite an existing installation, to protect your data. To
+  move an existing installation to a newer release, use
+  `./install/install.sh --upgrade` instead — the whole update story, in
+  plain words, is [`docs/updating.md`](../docs/updating.md). If a
   previous install attempt stopped partway and you want a clean start,
   run `./install/uninstall.sh` first — it asks before deleting anything.
 - **A step fails partway** (download interrupted, disk filled up, …).
@@ -152,6 +154,13 @@ asking for help.
   the browser-warning explanation, the certificate install steps per
   operating system, and the secure-tunnel alternative are all in
   [`docs/network-access.md`](../docs/network-access.md).
+- **Keep Headway up to date.** `./install/install.sh --check-updates`
+  compares your version with the newest release (read-only — and Headway
+  never checks by itself; the internet is contacted only when you run the
+  command). When you are ready, `./install/install.sh --upgrade` does the
+  update: every downloaded image's signature is verified before anything
+  switches, your data is never touched, and the way back is printed at the
+  end. The full story: [`docs/updating.md`](../docs/updating.md).
 - Keep `deploy/compose/.env` safe. It holds this installation's
   passwords. Do not email it or commit it anywhere.
 

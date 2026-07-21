@@ -23,7 +23,12 @@ name: headway
 
 networks:
   headway:
-    name: headway
+    # Fixed name by default so helper containers (installer migrations,
+    # admin-account creation) can join with `docker run --network headway`.
+    # HEADWAY_NETWORK exists ONLY so a disposable parallel test stack can
+    # avoid sharing DNS with a live one (see handoff 0022); production
+    # installs never set it.
+    name: ${HEADWAY_NETWORK:-headway}
 
 volumes:
   kafka-data:
@@ -261,10 +266,31 @@ services:
   # Build contexts point into the monorepo (ADR-0010); services land in slice
   # waves, so only what exists is uncommented.
   # ===========================================================================
+  # ---------------------------------------------------------------------------
+  # Image tags (handoff 0022): HEADWAY_IMAGE_TAG in .env selects which app
+  # images run. `local` (the default) keeps today's behavior — images are
+  # built from this source tree. A release tag (e.g. v0.2.0-alpha) runs the
+  # signed images published to ghcr.io — the installer's `--upgrade` verifies
+  # each signature with cosign BEFORE pulling, then sets the tag here.
+  #
+  # HAZARD, stated plainly: compose keeps `build:` next to `image:` so the
+  # local-development flow still works. If HEADWAY_IMAGE_TAG is set to a
+  # release tag, `docker compose up --build` would OVERWRITE the pulled,
+  # signature-verified image with a local build wearing the release's name.
+  # With a release tag set, never pass --build — let the installer manage
+  # images (docs/updating.md).
+  #
+  # `web` is the deliberate exception: its API address is baked into the JS
+  # bundle at BUILD time (see the VITE_API_BASE_URL note below), so the web
+  # image is always built on the installation's own computer and keeps the
+  # `local` tag. The upgrade rebuilds it from the release's source instead
+  # of pulling it — documented in docs/updating.md.
+  # ---------------------------------------------------------------------------
   ingestion:
     profiles: [app]
     build:
       context: ../../services/ingestion
+    image: ghcr.io/headway-transit/headway-ingestion:${HEADWAY_IMAGE_TAG:-local}
     restart: unless-stopped
     networks: [headway]
     depends_on:
@@ -314,7 +340,7 @@ services:
     build:
       context: ../..
       dockerfile: services/transform/Dockerfile
-    image: ghcr.io/headway-transit/headway-transform:local
+    image: ghcr.io/headway-transit/headway-transform:${HEADWAY_IMAGE_TAG:-local}
     restart: unless-stopped
     networks: [headway]
     depends_on:
@@ -361,7 +387,7 @@ services:
       # landed — found live 2026-07-13 by the lan-profile boot test.
       context: ../..
       dockerfile: services/api/Dockerfile
-    image: ghcr.io/headway-transit/headway-api:local
+    image: ghcr.io/headway-transit/headway-api:${HEADWAY_IMAGE_TAG:-local}
     restart: unless-stopped
     networks: [headway]
     ports:

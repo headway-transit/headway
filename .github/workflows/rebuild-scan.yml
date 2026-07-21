@@ -1,0 +1,160 @@
+# Headway weekly published-image scan — the "your published images have
+# known-fixed CVEs" alarm (handoff 0022).
+#
+# What it does, weekly: resolve the latest release tag, Grype-scan each of
+# the five PUBLISHED images at that tag under the same .grype.yaml policy as
+# the release gate (won't-fix distro findings excluded; per-CVE pins carry
+# their rationale), and fail loudly + open/update an issue when a published
+# image carries a FIXABLE vulnerability of high severity or above. A release
+# is scanned once at release time and then ages; new CVEs are published (and
+# fixed upstream) against its frozen contents every week after — this
+# workflow is what notices.
+#
+# DELIBERATE DEVIATION from handoff 0022's wording, recorded here and in the
+# handoff's evidence section: the design said "rebuild all five images from
+# the latest release tag, Grype-scan them". Scanning a fresh REBUILD would
+# under-detect, because a rebuild picks up patched base layers (the
+# Dockerfiles run apk/apt upgrades and use moving base patch tags) and can
+# scan clean while the image agencies actually pull stays vulnerable. The
+# alarm therefore scans the PUBLISHED artifacts — the thing agencies run.
+# The remediation for a red week is exactly the design's rebuild: cut a
+# patch release from the same source, which re-pulls fixed base layers and
+# re-runs the full release gate (release.yml).
+#
+# Action policy: first-party actions plus the documented supply-chain
+# exception (anchore/scan-action IS the Grype tooling — same exception as
+# ci.yml/release.yml). Issue creation uses the gh CLI, no third-party action.
+#
+# Thresholds are Security-role policy (docs/supply-chain.md): fixable >= high
+# blocks a release, so a published release found carrying fixable >= high is
+# alarm-worthy by the same bar. Changing the bar is a Security-role decision.
+#
+# What only the first REAL scheduled run can prove (recorded honestly):
+# the schedule actually firing (GitHub disables cron workflows after 60 days
+# without repo activity — a quiet repo silences its own alarm; watch for the
+# disable notice), GITHUB_TOKEN auth from a schedule context, ghcr pulls by
+# Grype inside the runner, and the issue-creation permission path. Everything
+# else below is exercisable today via workflow_dispatch.
+
+name: rebuild-scan
+
+on:
+  schedule:
+    # Mondays 06:23 UTC — offset from the hour to dodge GitHub's peak-load
+    # schedule delays; same week cadence as dependabot.yml.
+    - cron: "23 6 * * 1"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to scan (empty = latest release)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rebuild-scan
+  cancel-in-progress: false
+
+jobs:
+  release-tag:
+    name: resolve the release to scan
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.resolve.outputs.tag }}
+    steps:
+      - id: resolve
+        name: latest release tag (or the dispatch input)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          if [ -n "${INPUT_TAG}" ]; then
+            TAG="${INPUT_TAG}"
+            echo "scanning dispatch-requested tag: ${TAG}"
+          else
+            TAG="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq .tag_name)"
+            echo "latest release: ${TAG}"
+          fi
+          if [ -z "${TAG}" ]; then
+            echo "FAIL: no release tag could be resolved (no releases yet?)"
+            exit 1
+          fi
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+
+  scan:
+    name: scan published / ${{ matrix.image }}
+    needs: release-tag
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false # every image gets scanned even after the first red one
+      matrix:
+        image:
+          - headway-ingestion
+          - headway-api
+          - headway-transform
+          - headway-ai
+          - headway-web
+    steps:
+      # Checkout is for .grype.yaml ONLY (Grype reads it from the working
+      # directory): the current default-branch policy governs the scan, so a
+      # newly pinned-with-rationale CVE takes effect without a re-release.
+      - uses: actions/checkout@v7
+
+      - name: "grype scan of the published image (gate: fixable >= high)"
+        uses: anchore/scan-action@v6
+        with:
+          image: ghcr.io/headway-transit/${{ matrix.image }}:${{ needs.release-tag.outputs.tag }}
+          fail-build: true
+          severity-cutoff: high
+          output-format: table
+
+  alarm:
+    # Runs only when a scan leg failed; the workflow run itself stays red
+    # (the scan failures) — the alarm never converts red to green.
+    name: open or update the alarm issue
+    needs: [release-tag, scan]
+    # Specifically a red SCAN (a failed tag-resolve stays red on its own
+    # without filing a misleading vulnerability issue).
+    if: ${{ always() && needs.scan.result == 'failure' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: create the issue, or add this week's finding to it
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.release-tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          TITLE="Published ${TAG} images carry fixable high+ vulnerabilities (weekly scan)"
+          RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          BODY="$(cat <<EOF
+          The weekly published-image scan found fixable vulnerabilities of high
+          severity or above in one or more of the ${TAG} images agencies pull
+          from ghcr. Per-image Grype tables (which images, which CVEs, which
+          fixed versions) are in the failed scan legs of this run:
+
+          ${RUN_URL}
+
+          Remediation (the handoff 0022 design): cut a patch release from the
+          same source — the rebuild pulls fixed base layers and every image
+          re-passes the full release gate (Grype >= high, before push) or the
+          release does not publish. If a finding is genuinely unactionable,
+          pinning it is a Security-role decision recorded per-CVE with
+          rationale in .grype.yaml — never a silent threshold change.
+
+          Filed automatically by .github/workflows/rebuild-scan.yml.
+          EOF
+          )"
+          EXISTING="$(gh issue list --state open --search "\"${TITLE}\" in:title" \
+            --json number --jq '.[0].number // empty')"
+          if [ -n "${EXISTING}" ]; then
+            echo "updating existing issue #${EXISTING}"
+            gh issue comment "${EXISTING}" --body "Still failing as of this week's scan: ${RUN_URL}"
+          else
+            gh issue create --title "${TITLE}" --body "${BODY}"
+          fi

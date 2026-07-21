@@ -37,6 +37,20 @@ re-verify certificates it signed (see `services/api/README.md`).
 To stop: `docker compose down`. Data survives in named volumes; add `-v` only
 if you intend to erase everything.
 
+## Which app images run: `HEADWAY_IMAGE_TAG`
+
+`HEADWAY_IMAGE_TAG` in `.env` (handoff 0022) selects the app images for
+`ingestion`, `transform` and `api`: `local` (default) means images built
+from this source tree; a release tag (e.g. `v0.2.0-alpha`) means the
+cosign-signed images published to ghcr. The supported way to move between
+releases is `./install/install.sh --upgrade`, which verifies every
+signature *before* pulling and records the previous tag for rollback —
+plain-language guide in [`docs/updating.md`](../../docs/updating.md).
+Two honest notes: with a release tag set, never run `up --build` (a local
+build would overwrite the verified image under the release's name), and
+`web` always stays a local build because its API address is baked in at
+build time (see the compose file's comments).
+
 ## Bootstrap (automatic provisioning)
 
 Plain `docker compose up` also runs two one-shot init containers — no manual
