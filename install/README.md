@@ -33,6 +33,71 @@ prepares the numbers you report to the National Transit Database (NTD).
   schedule feed and GTFS-Realtime vehicle positions feed. See "What the
   installer will ask you" below. You can skip both and add them later.
 
+## Starting from a brand-new computer (nothing installed yet)
+
+If your computer is a fresh Linux install, three things need to exist
+before the installer can help you: `git` (to download Headway), Docker
+(to run it), and a copy of Headway itself. This section takes about ten
+minutes. If `docker --version` and `git --version` both already print
+version numbers, skip straight to "Getting Headway" below.
+
+**1. Install git** (Ubuntu/Debian):
+
+```
+sudo apt update
+sudo apt install -y git
+```
+
+**2. Install Docker.** Use Docker's official package repository — on
+Ubuntu, avoid the snap version of Docker (it has permission quirks that
+make troubleshooting harder). These commands are Docker's own documented
+setup, condensed:
+
+```
+sudo apt install -y ca-certificates curl
+sudo install -m 0755 -d /etc/apt/keyrings
+sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+sudo chmod a+r /etc/apt/keyrings/docker.asc
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] \
+  https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" \
+  | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+sudo apt update
+sudo apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+```
+
+If that final `sudo apt update` complains it cannot find a release for
+your Ubuntu version (this can happen for a few weeks after a brand-new
+Ubuntu release, before Docker publishes packages for it), use Ubuntu's
+own packages instead — they work fine with Headway:
+
+```
+sudo apt install -y docker.io docker-compose-v2
+```
+
+**3. Let your account use Docker without sudo:**
+
+```
+sudo usermod -aG docker $USER
+```
+
+Then **log out and log back in** (over SSH: type `exit`, reconnect) so
+the change takes effect. Check it worked — this should print a friendly
+message with no permission errors:
+
+```
+docker run --rm hello-world
+```
+
+**4. Getting Headway:**
+
+```
+git clone https://github.com/headway-transit/headway.git
+cd headway
+```
+
+You are now "in the Headway folder" that the rest of this guide talks
+about, and ready for the dry run below.
+
 ## Try a dry run first (recommended)
 
 From the Headway folder, run:
