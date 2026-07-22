@@ -11,7 +11,12 @@ license = { text = "Apache-2.0" }
 dependencies = [
     "fastapi>=0.110",
     "uvicorn>=0.29",
-    "psycopg[binary]>=3.1",
+    "psycopg[binary,pool]>=3.1",  # pool extra (psycopg-pool, same upstream,
+                          # same LGPL-3.0-with-exception allowlist tier —
+                          # pre-approved on scripts/license_allowlist.toml):
+                          # per-request pooled connections so sibling requests
+                          # never serialize behind one connection lock
+                          # (handoff 0023, design point 1)
     "PyJWT>=2.8",         # MIT
     "bcrypt>=4.1",        # Apache-2.0 — password hashing choice (ADR-0001: OSI permissive)
     "httpx>=0.27",        # BSD-3-Clause — signed webhook delivery (handoff 0006);

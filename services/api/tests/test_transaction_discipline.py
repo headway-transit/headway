@@ -29,34 +29,61 @@ from fastapi import FastAPI
 
 
 @pytest.mark.anyio
-async def test_lifespan_opens_connection_with_autocommit_true(monkeypatch):
-    """The production connection MUST be autocommit=True (see module docstring)."""
+async def test_lifespan_pool_configures_connections_autocommit_true(monkeypatch):
+    """Every POOLED connection MUST be configured autocommit=True (see module
+    docstring — the same 2026-07-10 invariant, now enforced at the pool's
+    ``configure`` hook since handoff 0023 moved production to per-request
+    pooled connections)."""
     recorded = {}
 
-    class FakeConn:
+    class FakePool:
+        def __init__(self, dsn, **kwargs):
+            recorded["dsn"] = dsn
+            recorded["kwargs"] = kwargs
+
         def close(self):
             pass
-
-    def fake_connect(dsn, **kwargs):
-        recorded["dsn"] = dsn
-        recorded["kwargs"] = kwargs
-        return FakeConn()
 
     monkeypatch.setenv("HEADWAY_DATABASE_URL", "postgresql://x@localhost/x")
     app = FastAPI()
     app.state.db = None
     with mock.patch.dict("sys.modules"):
-        import psycopg  # noqa: F401 — ensure importable name exists to patch
+        import psycopg_pool  # noqa: F401 — ensure importable name exists to patch
 
-        monkeypatch.setattr("psycopg.connect", fake_connect)
+        monkeypatch.setattr("psycopg_pool.ConnectionPool", FakePool)
         async with lifespan(app):
             pass
 
-    assert recorded["kwargs"].get("autocommit") is True, (
-        "lifespan opened the database connection without autocommit=True — "
-        "psycopg3's implicit-transaction trap makes every router "
-        "transaction() block a never-committed SAVEPOINT (2026-07-10 bug)."
+    configure = recorded["kwargs"].get("configure")
+    assert configure is not None, (
+        "lifespan opened the pool without a configure hook — pooled "
+        "connections would keep psycopg3's default autocommit=False, and "
+        "the implicit-transaction trap makes every router transaction() "
+        "block a never-committed SAVEPOINT (2026-07-10 bug)."
     )
+
+    class FakeConn:
+        autocommit = False
+
+    conn = FakeConn()
+    configure(conn)
+    assert conn.autocommit is True, (
+        "the pool's configure hook did not set autocommit=True on the "
+        "connection (2026-07-10 bug, handoff 0023 pool increment)."
+    )
+
+
+@pytest.mark.anyio
+async def test_lifespan_leaves_injected_connection_alone(monkeypatch):
+    """An injected app.state.db (tests, embedding) means NO pool is opened —
+    the injected connection keeps serving every request unchanged."""
+    monkeypatch.setenv("HEADWAY_DATABASE_URL", "postgresql://x@localhost/x")
+    app = FastAPI()
+    injected = object()
+    app.state.db = injected
+    async with lifespan(app):
+        assert app.state.db is injected
+        assert getattr(app.state, "db_pool", None) is None
 
 
 class Psycopg3SemanticsFake:

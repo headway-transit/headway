@@ -21,10 +21,13 @@ from .routers import (
     branding,
     certify,
     dq,
+    geometry,
+    history,
     ingest,
     machine_keys,
     machine_read,
     metrics,
+    ops,
     public,
     reports,
     safety,
@@ -131,6 +134,9 @@ def create_app(
 
     app.include_router(auth.router)
     app.include_router(metrics.router)
+    app.include_router(history.router)
+    app.include_router(ops.router)
+    app.include_router(geometry.router)
     app.include_router(certify.router)
     app.include_router(attestations.router)
     app.include_router(dq.router)

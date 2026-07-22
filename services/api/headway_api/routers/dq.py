@@ -189,6 +189,16 @@ class DqIssueCounts(BaseModel):
 #: Severity vocabulary as the calc/AI writers use it (headway_calc.dq).
 KNOWN_SEVERITIES = ("blocking", "warning", "info")
 
+#: The counts query: the SAME table and the SAME optional status filter as
+#: GET /dq/issues, but counted by the database instead of fetching every row
+#: (handoff 0023, design point 1). The previous implementation pulled all
+#: rows (41,646 live) and counted in Python: ~4.6–5.9 s measured server-side;
+#: this GROUP BY measured ~21 ms on the same live queue (EXPLAIN ANALYZE in
+#: handoff 0023 evidence). No pre-aggregation, no staleness: every request
+#: counts the live rows. A card total still can never disagree with the
+#: table below it — same WHERE clause, same rows, grouped not re-derived.
+_COUNT_ISSUES = "SELECT severity, status, count(*) FROM dq.issues"
+
 
 @router.get("/dq/issues/counts", response_model=DqIssueCounts)
 def count_issues(
@@ -197,18 +207,35 @@ def count_issues(
     db=Depends(get_db),
 ) -> DqIssueCounts:
     """Severity/status counts over the same rows (and the same optional
-    status filter) as GET /dq/issues — composition of the one issues query,
-    counted in the open, no new tables (handoff 0017)."""
-    issues = list_issues(status=status, identity=identity, db=db)
+    status filter) as GET /dq/issues — counted by the database in one
+    GROUP BY over exactly the rows the list serves (handoff 0017 guarantee
+    kept; handoff 0023 made the counting SQL-side for speed)."""
+    if status is not None and status not in VALID_STATUSES:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"'{status}' is not a data-quality status Headway knows. "
+                f"Valid statuses are: {', '.join(VALID_STATUSES)}."
+            ),
+        )
+    sql = _COUNT_ISSUES
+    params: tuple = ()
+    if status is not None:
+        sql += " WHERE status = %s"
+        params = (status,)
+    sql += " GROUP BY severity, status"
+    rows = db.execute(sql, params).fetchall()
     by_severity = {s: 0 for s in KNOWN_SEVERITIES}
     by_status = {s: 0 for s in VALID_STATUSES}
-    for issue in issues:
+    total = 0
+    for severity, row_status, count in rows:
         # An unexpected vocabulary value still counts, honestly, under its
         # own key — never dropped, never bucketed as something else.
-        by_severity[issue.severity] = by_severity.get(issue.severity, 0) + 1
-        by_status[issue.status] = by_status.get(issue.status, 0) + 1
+        by_severity[severity] = by_severity.get(severity, 0) + count
+        by_status[row_status] = by_status.get(row_status, 0) + count
+        total += count
     return DqIssueCounts(
-        total=len(issues), by_severity=by_severity, by_status=by_status
+        total=total, by_severity=by_severity, by_status=by_status
     )
 
 

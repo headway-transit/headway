@@ -23,7 +23,7 @@ import datetime as dt
 from decimal import Decimal
 from typing import Any, Optional
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
 from ..db import get_db
@@ -113,12 +113,13 @@ def _certification_refs_by_metric_value(db) -> dict[str, PublicCertificationRef]
 
 
 @router.get("/public/metrics/certified", response_model=list[PublicMetricValue])
-def list_certified_values(request: Request) -> list[PublicMetricValue]:
+def list_certified_values(
+    request: Request, db=Depends(get_db)
+) -> list[PublicMetricValue]:
     # UNAUTHENTICATED by design (see module docstring) — so no identity
     # dependency, and the only per-caller control is the IP token bucket.
     client_ip = request.client.host if request.client else "unknown"
     enforce_rate_limit(request.app.state.public_rate_limiter, client_ip)
-    db = get_db(request)
     rows = db.execute(_SELECT_CERTIFIED, ()).fetchall()
     certification_refs = _certification_refs_by_metric_value(db)
     return [
@@ -147,7 +148,7 @@ def list_certified_values(request: Request) -> list[PublicMetricValue]:
     response_model=VerificationResult,
 )
 def public_verify_certification(
-    certification_id: str, request: Request
+    certification_id: str, request: Request, db=Depends(get_db)
 ) -> VerificationResult:
     """Public tamper-evidence check (handoff 0019, design point 6/7):
     re-verifies the stored certificate bytes against the stored Ed25519
@@ -160,7 +161,6 @@ def public_verify_certification(
     certification_id + fingerprint this endpoint verifies)."""
     client_ip = request.client.host if request.client else "unknown"
     enforce_rate_limit(request.app.state.public_rate_limiter, client_ip)
-    db = get_db(request)
     row = db.execute(_SELECT_CERTIFICATION_ROW, (certification_id,)).fetchone()
     if row is None:
         raise HTTPException(

@@ -387,6 +387,255 @@
         }
       }
     },
+    "/metrics/history": {
+      "get": {
+        "tags": [
+          "metrics"
+        ],
+        "summary": "Metric History",
+        "description": "The period-series read for audience views: persisted figures grouped\nby calendar bucket, each point receipt-linkable via metric_value_id and\ncarrying its simulated + certification + ops-category labels. Ordering\nis stable (period_start, metric, scope, computed_at, metric_value_id);\nthe response is bounded (cap + truncated + total_matching honesty).",
+        "operationId": "metric_history_metrics_history_get",
+        "parameters": [
+          {
+            "name": "metric",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to one metric, e.g. 'vrm' or 'upt'.",
+              "title": "Metric"
+            },
+            "description": "Filter to one metric, e.g. 'vrm' or 'upt'."
+          },
+          {
+            "name": "mode",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Convenience filter for per-mode figures: 'bus' selects scope 'mode:bus'. Mutually exclusive with ``scope``.",
+              "title": "Mode"
+            },
+            "description": "Convenience filter for per-mode figures: 'bus' selects scope 'mode:bus'. Mutually exclusive with ``scope``."
+          },
+          {
+            "name": "scope",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Exact scope filter, e.g. 'agency' or 'mode:bus'.",
+              "title": "Scope"
+            },
+            "description": "Exact scope filter, e.g. 'agency' or 'mode:bus'."
+          },
+          {
+            "name": "calc_version",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to one calculation version.",
+              "title": "Calc Version"
+            },
+            "description": "Filter to one calculation version."
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only figures whose period starts on or after this date.",
+              "title": "From"
+            },
+            "description": "Only figures whose period starts on or after this date."
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only figures whose period ends on or before this date.",
+              "title": "To"
+            },
+            "description": "Only figures whose period ends on or before this date."
+          },
+          {
+            "name": "bucket",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^(day|week|month|quarter)$",
+              "description": "Calendar grouping for the returned points (grouping only \u2014 never arithmetic; see grouping_note).",
+              "default": "month",
+              "title": "Bucket"
+            },
+            "description": "Calendar grouping for the returned points (grouping only \u2014 never arithmetic; see grouping_note)."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HistoryResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ops/vehicles/latest": {
+      "get": {
+        "tags": [
+          "operations"
+        ],
+        "summary": "Latest Vehicles",
+        "description": "Latest position per vehicle for the live map (any signed-in role).\n\nPoll guidance: the upstream GTFS-RT connector polls its feed every ~30 s\n(deploy default POLL_INTERVAL=30s), so polling this endpoint faster than\n~15 s cannot surface newer data \u2014 15\u201330 s is the recommended map poll\ninterval. There is no push transport (honest scope, handoff 0023; SSE is\na recorded open question if polling ever measurably hurts).",
+        "operationId": "latest_vehicles_ops_vehicles_latest_get",
+        "parameters": [
+          {
+            "name": "max_age_seconds",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 86400,
+              "minimum": 1,
+              "description": "Staleness window: only vehicles whose latest position is at most this many seconds old (by the database clock) are served.",
+              "default": 300,
+              "title": "Max Age Seconds"
+            },
+            "description": "Staleness window: only vehicles whose latest position is at most this many seconds old (by the database clock) are served."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpsVehiclesLatest"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/geometry/stops": {
+      "get": {
+        "tags": [
+          "geometry"
+        ],
+        "summary": "Stops Geojson",
+        "description": "GeoJSON FeatureCollection of every canonical stop with coordinates\n(any signed-in role). Cacheable: a strong content-hash ETag \u2014 a matching\nIf-None-Match returns 304 (the hash still reads the rows; the saving is\nserialization and transfer, recorded honestly in handoff 0023).",
+        "operationId": "stops_geojson_geometry_stops_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StopsCollection"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/geometry/routes": {
+      "get": {
+        "tags": [
+          "geometry"
+        ],
+        "summary": "Routes Geojson",
+        "description": "Schematic route lines (any signed-in role): per route, a straight-line\npolyline through the ordered stops of its most common trip pattern \u2014\nlabeled ``schematic_stop_sequence`` because that is exactly what it is\n(no shapes.txt has ever been ingested; street-level geometry is the\nrecorded v1).\n\nThe collection is computed at most once per ROUTES_CACHE_TTL_SECONDS per\nprocess (the aggregation walks every stop_times row); ``computed_at``\nand ``cache_ttl_seconds`` state the staleness bound, and the ETag lets\nclients revalidate cheaply.",
+        "operationId": "routes_geojson_geometry_routes_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoutesCollection"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/certifications/intent": {
       "get": {
         "tags": [
@@ -818,7 +1067,7 @@
           "data-quality"
         ],
         "summary": "Count Issues",
-        "description": "Severity/status counts over the same rows (and the same optional\nstatus filter) as GET /dq/issues \u2014 composition of the one issues query,\ncounted in the open, no new tables (handoff 0017).",
+        "description": "Severity/status counts over the same rows (and the same optional\nstatus filter) as GET /dq/issues \u2014 counted by the database in one\nGROUP BY over exactly the rows the list serves (handoff 0017 guarantee\nkept; handoff 0023 made the counting SQL-side for speed).",
         "operationId": "count_issues_dq_issues_counts_get",
         "parameters": [
           {
@@ -4716,6 +4965,229 @@
         "type": "object",
         "title": "HTTPValidationError"
       },
+      "HistoryBucket": {
+        "properties": {
+          "bucket_key": {
+            "type": "string",
+            "title": "Bucket Key"
+          },
+          "points": {
+            "items": {
+              "$ref": "#/components/schemas/HistoryPoint"
+            },
+            "type": "array",
+            "title": "Points"
+          }
+        },
+        "type": "object",
+        "required": [
+          "bucket_key",
+          "points"
+        ],
+        "title": "HistoryBucket"
+      },
+      "HistoryPoint": {
+        "properties": {
+          "metric_value_id": {
+            "type": "string",
+            "title": "Metric Value Id"
+          },
+          "metric": {
+            "type": "string",
+            "title": "Metric"
+          },
+          "unit": {
+            "type": "string",
+            "title": "Unit"
+          },
+          "period_start": {
+            "type": "string",
+            "format": "date",
+            "title": "Period Start"
+          },
+          "period_end": {
+            "type": "string",
+            "format": "date",
+            "title": "Period End"
+          },
+          "scope": {
+            "type": "string",
+            "title": "Scope"
+          },
+          "value": {
+            "type": "string",
+            "title": "Value"
+          },
+          "calc_name": {
+            "type": "string",
+            "title": "Calc Name"
+          },
+          "calc_version": {
+            "type": "string",
+            "title": "Calc Version"
+          },
+          "computed_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Computed At"
+          },
+          "certification_status": {
+            "type": "string",
+            "title": "Certification Status"
+          },
+          "detail": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Detail",
+            "default": {}
+          },
+          "category": {
+            "type": "string",
+            "title": "Category"
+          },
+          "simulated": {
+            "type": "boolean",
+            "title": "Simulated"
+          }
+        },
+        "type": "object",
+        "required": [
+          "metric_value_id",
+          "metric",
+          "unit",
+          "period_start",
+          "period_end",
+          "scope",
+          "value",
+          "calc_name",
+          "calc_version",
+          "computed_at",
+          "certification_status",
+          "category",
+          "simulated"
+        ],
+        "title": "HistoryPoint",
+        "description": "A full metric-value row (verbatim, provenance-bearing) plus the\nsimulated label the audience chart must render (mirror of the export\nsurfaces' simulated flag \u2014 derived from detail.source_mix, a label,\nnever a number)."
+      },
+      "HistoryResponse": {
+        "properties": {
+          "bucket": {
+            "type": "string",
+            "title": "Bucket"
+          },
+          "metric": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metric"
+          },
+          "scope": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scope"
+          },
+          "calc_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Calc Version"
+          },
+          "period_from": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Period From"
+          },
+          "period_to": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Period To"
+          },
+          "buckets": {
+            "items": {
+              "$ref": "#/components/schemas/HistoryBucket"
+            },
+            "type": "array",
+            "title": "Buckets"
+          },
+          "point_count": {
+            "type": "integer",
+            "title": "Point Count"
+          },
+          "total_matching": {
+            "type": "integer",
+            "title": "Total Matching"
+          },
+          "cap": {
+            "type": "integer",
+            "title": "Cap",
+            "default": 5000
+          },
+          "truncated": {
+            "type": "boolean",
+            "title": "Truncated",
+            "default": false
+          },
+          "grouping_note": {
+            "type": "string",
+            "title": "Grouping Note",
+            "default": "Buckets group persisted figures by the calendar bucket their period starts in. The server never sums, averages, or otherwise derives a new number from grouped figures \u2014 every value is a calculation library figure served verbatim with its metric_value_id receipt. A true quarterly or annual rollup is a calculation library job, not this endpoint's."
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "type": "object",
+        "required": [
+          "bucket",
+          "metric",
+          "scope",
+          "calc_version",
+          "period_from",
+          "period_to",
+          "buckets",
+          "point_count",
+          "total_matching"
+        ],
+        "title": "HistoryResponse"
+      },
       "IngestResponse": {
         "properties": {
           "record_id": {
@@ -4824,6 +5296,30 @@
         ],
         "title": "KeyListItem",
         "description": "Listing shape: prefix + metadata only \u2014 never the hash, never the key."
+      },
+      "LineStringGeometry": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "title": "Type",
+            "default": "LineString"
+          },
+          "coordinates": {
+            "items": {
+              "items": {
+                "type": "number"
+              },
+              "type": "array"
+            },
+            "type": "array",
+            "title": "Coordinates"
+          }
+        },
+        "type": "object",
+        "required": [
+          "coordinates"
+        ],
+        "title": "LineStringGeometry"
       },
       "LineageNode": {
         "properties": {
@@ -5312,6 +5808,180 @@
         ],
         "title": "MetricValue"
       },
+      "OpsVehicle": {
+        "properties": {
+          "vehicle_id": {
+            "type": "string",
+            "title": "Vehicle Id"
+          },
+          "latitude": {
+            "type": "number",
+            "title": "Latitude"
+          },
+          "longitude": {
+            "type": "number",
+            "title": "Longitude"
+          },
+          "recorded_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Recorded At"
+          },
+          "age_seconds": {
+            "type": "integer",
+            "title": "Age Seconds"
+          },
+          "bearing": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bearing"
+          },
+          "speed_mps": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Speed Mps"
+          },
+          "trip_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trip Id"
+          },
+          "route_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Route Id"
+          },
+          "source_record_id": {
+            "type": "string",
+            "title": "Source Record Id"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "simulated": {
+            "type": "boolean",
+            "title": "Simulated"
+          }
+        },
+        "type": "object",
+        "required": [
+          "vehicle_id",
+          "latitude",
+          "longitude",
+          "recorded_at",
+          "age_seconds",
+          "source_record_id",
+          "source",
+          "simulated"
+        ],
+        "title": "OpsVehicle",
+        "description": "One vehicle's latest position, verbatim from\ncanonical.vehicle_positions (nullable fields stay null \u2014 an unassigned\nposition is served unassigned, never guessed)."
+      },
+      "OpsVehiclesLatest": {
+        "properties": {
+          "as_of": {
+            "type": "string",
+            "format": "date-time",
+            "title": "As Of"
+          },
+          "max_age_seconds": {
+            "type": "integer",
+            "title": "Max Age Seconds"
+          },
+          "category": {
+            "type": "string",
+            "title": "Category",
+            "default": "ops"
+          },
+          "ops_note": {
+            "type": "string",
+            "title": "Ops Note",
+            "default": "Operations data \u2014 not an NTD reported figure. Live vehicle positions are never certifiable, never part of any submission, and never a gate on certification (migration 0024 boundary)."
+          },
+          "vehicles": {
+            "items": {
+              "$ref": "#/components/schemas/OpsVehicle"
+            },
+            "type": "array",
+            "title": "Vehicles"
+          },
+          "vehicle_count": {
+            "type": "integer",
+            "title": "Vehicle Count"
+          },
+          "total_in_window": {
+            "type": "integer",
+            "title": "Total In Window"
+          },
+          "cap": {
+            "type": "integer",
+            "title": "Cap",
+            "default": 5000
+          },
+          "truncated": {
+            "type": "boolean",
+            "title": "Truncated",
+            "default": false
+          },
+          "newest_position_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Newest Position At"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "type": "object",
+        "required": [
+          "as_of",
+          "max_age_seconds",
+          "vehicles",
+          "vehicle_count",
+          "total_in_window"
+        ],
+        "title": "OpsVehiclesLatest"
+      },
       "OptionsResponse": {
         "properties": {
           "modes": {
@@ -5607,6 +6277,27 @@
           "created_at"
         ],
         "title": "PlanRecord"
+      },
+      "PointGeometry": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "title": "Type",
+            "default": "Point"
+          },
+          "coordinates": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Coordinates"
+          }
+        },
+        "type": "object",
+        "required": [
+          "coordinates"
+        ],
+        "title": "PointGeometry"
       },
       "PreviewMetricImpact": {
         "properties": {
@@ -6184,6 +6875,122 @@
           "audit_event_id"
         ],
         "title": "RevokeSubscriptionResponse"
+      },
+      "RouteFeature": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "title": "Type",
+            "default": "Feature"
+          },
+          "geometry": {
+            "$ref": "#/components/schemas/LineStringGeometry"
+          },
+          "properties": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Properties"
+          }
+        },
+        "type": "object",
+        "required": [
+          "geometry",
+          "properties"
+        ],
+        "title": "RouteFeature"
+      },
+      "RoutesCollection": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "title": "Type",
+            "default": "FeatureCollection"
+          },
+          "features": {
+            "items": {
+              "$ref": "#/components/schemas/RouteFeature"
+            },
+            "type": "array",
+            "title": "Features"
+          },
+          "category": {
+            "type": "string",
+            "title": "Category",
+            "default": "ops"
+          },
+          "ops_note": {
+            "type": "string",
+            "title": "Ops Note",
+            "default": "Operations data \u2014 not an NTD reported figure. Live vehicle positions are never certifiable, never part of any submission, and never a gate on certification (migration 0024 boundary)."
+          },
+          "geometry_kind": {
+            "type": "string",
+            "title": "Geometry Kind",
+            "default": "schematic_stop_sequence"
+          },
+          "geometry_note": {
+            "type": "string",
+            "title": "Geometry Note",
+            "default": "Schematic geometry: each route line connects the stops of the route's most common trip pattern with straight segments. It shows structure, not streets \u2014 Headway has not ingested shapes.txt (street-level geometry is a recorded future increment), and this line must not be presented as the path vehicles drive."
+          },
+          "route_count": {
+            "type": "integer",
+            "title": "Route Count"
+          },
+          "routes_without_geometry": {
+            "type": "integer",
+            "title": "Routes Without Geometry"
+          },
+          "cap": {
+            "type": "integer",
+            "title": "Cap",
+            "default": 2000
+          },
+          "truncated": {
+            "type": "boolean",
+            "title": "Truncated",
+            "default": false
+          },
+          "total_routes_with_trips": {
+            "type": "integer",
+            "title": "Total Routes With Trips"
+          },
+          "computed_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Computed At"
+          },
+          "cache_ttl_seconds": {
+            "type": "integer",
+            "title": "Cache Ttl Seconds",
+            "default": 900
+          },
+          "cache_note": {
+            "type": "string",
+            "title": "Cache Note",
+            "default": "Served from a per-process cache for up to cache_ttl_seconds after computed_at; schedule geometry changes only when a new static GTFS feed is ingested."
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "type": "object",
+        "required": [
+          "features",
+          "route_count",
+          "routes_without_geometry",
+          "total_routes_with_trips",
+          "computed_at"
+        ],
+        "title": "RoutesCollection"
       },
       "SafetyEventCounts": {
         "properties": {
@@ -6884,6 +7691,97 @@
           "zero_event"
         ],
         "title": "Ss50Deadline"
+      },
+      "StopFeature": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "title": "Type",
+            "default": "Feature"
+          },
+          "geometry": {
+            "$ref": "#/components/schemas/PointGeometry"
+          },
+          "properties": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Properties"
+          }
+        },
+        "type": "object",
+        "required": [
+          "geometry",
+          "properties"
+        ],
+        "title": "StopFeature"
+      },
+      "StopsCollection": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "title": "Type",
+            "default": "FeatureCollection"
+          },
+          "features": {
+            "items": {
+              "$ref": "#/components/schemas/StopFeature"
+            },
+            "type": "array",
+            "title": "Features"
+          },
+          "category": {
+            "type": "string",
+            "title": "Category",
+            "default": "ops"
+          },
+          "ops_note": {
+            "type": "string",
+            "title": "Ops Note",
+            "default": "Operations data \u2014 not an NTD reported figure. Live vehicle positions are never certifiable, never part of any submission, and never a gate on certification (migration 0024 boundary)."
+          },
+          "stop_count": {
+            "type": "integer",
+            "title": "Stop Count"
+          },
+          "stops_without_coordinates": {
+            "type": "integer",
+            "title": "Stops Without Coordinates"
+          },
+          "cap": {
+            "type": "integer",
+            "title": "Cap",
+            "default": 50000
+          },
+          "truncated": {
+            "type": "boolean",
+            "title": "Truncated",
+            "default": false
+          },
+          "total_stops": {
+            "type": "integer",
+            "title": "Total Stops"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "type": "object",
+        "required": [
+          "features",
+          "stop_count",
+          "stops_without_coordinates",
+          "total_stops"
+        ],
+        "title": "StopsCollection",
+        "description": "GeoJSON FeatureCollection of canonical.stops. The extra members are\nGeoJSON foreign members (RFC 7946 \u00a76.1) carrying Headway's honesty\nmetadata."
       },
       "SubscriptionResponse": {
         "properties": {

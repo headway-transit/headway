@@ -17,6 +17,10 @@ preserved end to end; floating point never touches a figure).
 | GET | `/metrics/values` | any signed-in role | Computed values from `computed.metric_values`; filter by `metric`, `period_start`, `period_end`, `category` (`ntd`\|`ops`, migration 0024). `value` is a string. Every row carries its `category` — the UI badges `ops` rows "Operations metric — not an NTD reported figure". |
 | GET | `/metrics/compare` | any signed-in role | Comparison surface (handoff 0017): one `metric` across 2–4 `comparand`s (`<start>..<end>` optionally `@<calc_name>:<calc_version>` — periods, or calc versions of the same figure) per `scope` row. COMPOSITION ONLY of the `/metrics/values` reader (mr20-style latest-row pick per cell); cells are FULL verbatim rows (receipt affordance intact), missing cells carry explicit reasons, deltas are exact-Decimal strings (comparison affordances, never figures), direction metadata comes from the calc library's registry (`coverage` only — everything else sign-neutral), certified/uncertified mixes are flagged. |
 | GET | `/metrics/values/export` | any signed-in role | `/metrics/values` as a CSV or XLSX download (`format=csv\|xlsx`, same filters as the list). ONE row assembly feeds both formats — XLSX values byte-equal to CSV values cell-for-cell (pinned by test), every XLSX cell TEXT (an Excel number cell is an IEEE double — it would corrupt an exact figure). The preview disclaimer (+ a simulated-data warning when any row is simulated) leads the CSV and forms the XLSX's first sheet. |
+| GET | `/metrics/history` | any signed-in role | Period series for audience views (handoff 0023): persisted figures ONLY, VERBATIM (full row incl. `metric_value_id` receipt, `detail`, `category`, `certification_status`, plus the export surfaces' `simulated` label), filterable by `metric`, `mode` (shorthand for scope `mode:<mode>`) or exact `scope`, `calc_version`, `from`/`to`. `bucket=day\|week\|month\|quarter` (default month) GROUPS points under a calendar key derived from each figure's own period start — **grouping, never arithmetic**: the server never sums or averages (a true rollup is a calc-library job — recorded open question). Stable ordering; bounded (cap 5,000 points) with `truncated` + `total_matching` honesty. |
+| GET | `/ops/vehicles/latest` | any signed-in role | The live-map feed (handoff 0023): latest position per vehicle within `max_age_seconds` (default 300, max 86,400), rows VERBATIM from `canonical.vehicle_positions` (null trip/route stays null) + the raw record's `source` label with a per-vehicle `simulated` flag. **OPS CATEGORY stated in the envelope** (migration 0024 boundary): never certifiable, never gates certification. `as_of` (database clock), per-row `age_seconds`, cap 5,000 with `truncated` + `total_in_window` honesty, `newest_position_at` + a plain-language staleness note when the window is empty (a stale feed must never look like an empty fleet). Poll ~15–30 s (matches the upstream GTFS-RT poll cadence); no push transport (honest scope). |
+| GET | `/geometry/stops` | any signed-in role | GeoJSON FeatureCollection of `canonical.stops` (Point per stop, `[lon, lat]`; properties `stop_id`, `name`). Stops with NULL coordinates (legal per GTFS) are EXCLUDED AND COUNTED (`stops_without_coordinates`), never given an invented point. Ops-category foreign members; strong content-hash `ETag` (canonical.stops has no ingest-time column — recorded choice) + `Cache-Control: private, max-age=300`; matching `If-None-Match` → 304. Cap 50,000 with truncation honesty. |
+| GET | `/geometry/routes` | any signed-in role | v0 **HONEST SCHEMATIC** (handoff 0023): per route, a LineString through the ordered stops of its most common trip pattern (straight lines between stops; deterministic tie-break). Labeled `geometry_kind: "schematic_stop_sequence"` at collection level AND per feature — shapes.txt has never been ingested and the map must not imply street geometry (shapes.txt ingestion is the recorded v1). Undrawable routes (<2 located stops) excluded and counted; per-feature `stops_missing_coordinates`. The pattern aggregation walks every `stop_times` row (~3.6 s live over 3.1M rows) so the collection is cached per process ≤ 900 s — staleness bounded and STATED (`computed_at` + `cache_ttl_seconds` in the response) — with a content-hash `ETag` for cheap revalidation. |
 | GET | `/metrics/values/{id}/lineage` | any signed-in role, **or** machine key scope `read:metrics` | "Explain this number": recursive traversal of `lineage.edges` (recursive CTE) from the figure down to `raw.records`, returned as a tree `{kind, id, transform_name, transform_version, inputs: [...]}`. A figure with no lineage is a loud 500, never an empty 200. Machine path rate-limited per key + audited (actor `key:<prefix>`); every auth failure is one generic 401 that never reveals which credential type was expected. |
 | POST | `/certifications` | `certifying_official` only | The SIGNING certification (handoff 0019): the certifier's typed full name + title are entered against the intent statement; the server assembles the canonical document (figures + receipt hashes + certifier identity + acknowledgments incl. statistician attestations + timestamp), signs it Ed25519 with the installation key, inserts `cert.certifications` (document + signature + key fingerprint, migration 0030), marks the figures `certified`, and writes the `audit.events` row — all in ONE transaction. Refuses 409 while any blocking DQ issue is open/owned (`resolved` and `attested` are the closed states); refuses 503 (nothing written) when no signing key is configured — a certification is never recorded unsigned. |
 | GET | `/certifications` | any signed-in role | Certification records: covered ids, certifier, timestamp, signed flag, key fingerprint, typed signer name/title (parsed from the signed document). Pre-signature records read `signed=false` honestly — never backfilled. |
@@ -28,7 +32,7 @@ preserved end to end; floating point never touches a figure).
 | POST | `/attestations/{id}/revoke` | `certifying_official` only | Revoke (never delete): sets revoked_at/by/reason once — the migration-0029 trigger enforces exactly that shape. Figures already factored keep their provenance; FUTURE runs stop factoring under it. Audited. |
 | POST | `/dq/issues/{id}/attest` | `data_steward` or above | Close ONE p. 146 refusal issue (`apc_missing_trips_above_fta_threshold`) to the explicit `attested` state, referencing a live attestation; the resolution text is built server-side from the attestation. Refuses any other issue_type — no other gap has a statistician cure ('agencies must not collect a smaller sample than the chosen sampling plan prescribes', p. 149). Audited. |
 | GET | `/dq/issues` | any signed-in role | Data-quality issues; filter by `status`. Rows include `resolution_minutes` (migration 0016) — null when the effort was not recorded. |
-| GET | `/dq/issues/counts` | any signed-in role | Severity/status counts for the /dq summary cards (handoff 0017): counted over EXACTLY the rows `/dq/issues` serves under the same `status` filter (composition, no new tables), missing buckets explicit zeros. |
+| GET | `/dq/issues/counts` | any signed-in role | Severity/status counts for the /dq summary cards (handoff 0017): counted by the database in ONE `GROUP BY` over EXACTLY the rows `/dq/issues` serves under the same `status` filter (handoff 0023 — the previous fetch-all-rows-and-count-in-Python implementation measured 4.8–5.9 s on a 41,646-issue live queue; this measures 33–49 ms, no pre-aggregation, no staleness), missing buckets explicit zeros. |
 | POST | `/dq/issues/{id}/resolve` | `data_steward` or above | Resolves an issue with a resolution note + audit event, in one transaction. Optional `resolution_minutes` (int ≥ 0; plain-language 422 otherwise) records the effort, audited old→new. Post-commit, dispatches the `dq.issue.resolved` webhook (best-effort — a delivery problem never fails the resolve). |
 | GET | `/reports/mr20?month=YYYY-MM` | any signed-in role | The `headway_calc.mr20` MR-20 preview package for the month, served **VERBATIM** (NOT-REPORTABLE banner + caveats included; this API never edits a figure). Plain-language 422 on a bad month. |
 | GET | `/reports/mr20/export` | any signed-in role | The MR-20 package as CSV/XLSX (`month`, `format`): one row per (scope, metric) cell, values verbatim, missing cells with their explicit reasons; the NOT-REPORTABLE banner + every enumerated caveat lead the CSV / form the XLSX first sheet (handoff 0017 export discipline — see `/metrics/values/export`). |
@@ -399,6 +403,17 @@ export HEADWAY_DATABASE_URL=postgresql://.../agency_db
 uvicorn "headway_api.app:create_app" --factory
 ```
 
+Database connections (handoff 0023): production opens a **psycopg_pool
+ConnectionPool** (min `HEADWAY_DB_POOL_MIN`, default 2; max
+`HEADWAY_DB_POOL_MAX`, default 8 — sized for a small agency box) and checks a
+connection out per request, so sibling requests genuinely overlap instead of
+serializing behind one connection's lock (measured: a 1.5 ms count queued to
+3.7 s behind a slow sibling on the old single connection; 13 ms overlapped on
+the pool). Every pooled connection is configured `autocommit=True` — the
+2026-07-10 phantom-write invariant, now enforced at the pool's `configure`
+hook and pinned by test. An injected `app.state.db` (tests, embedding) still
+wins and no pool is opened.
+
 Tests (no database needed — a fake connection with honest transaction
 rollback stands in):
 
@@ -408,6 +423,28 @@ python3 -m pytest tests/ -q
 
 ## Verification status
 
+- `pytest tests/ -q`: **332 passed** (2026-07-22, map/history/speed wave,
+  handoff 0023) — prior suite plus 36 new/changed: `/ops/vehicles/latest`
+  (authz matrix, latest-per-vehicle, staleness window + bounds, verbatim
+  nullable fields, per-vehicle simulated flag, ops envelope, stale-feed and
+  never-ingested notes, loud cap), `/geometry/stops` (FeatureCollection
+  shape, `[lon, lat]` order, missing-coordinate honesty, content-hash ETag +
+  304 + change-detection, loud cap), `/geometry/routes` (most-common-pattern
+  selection, deterministic tie-break, schematic labels collection- and
+  feature-level, missing-coordinate counting, undrawable-route exclusion,
+  per-process cache with stated staleness + ETag 304), `/metrics/history`
+  (verbatim values + receipts + simulated/certification/category flags,
+  bucket keys day/week/month/quarter, grouping-never-arithmetic pinned by
+  shape, mode/scope/calc_version/window filters, mode+scope 422, loud cap),
+  and the pool lifespan tests (configure hook sets autocommit=True; an
+  injected connection means no pool). Live verified 2026-07-22 against the
+  compose TimescaleDB (41,646-issue DQ queue, 15M vehicle_positions):
+  `/dq/issues/counts` 4.8–5.9 s → 33–49 ms; concurrency proven (5.7 s
+  sibling + 13 ms count overlapped); 1,002 real MBTA vehicles served;
+  stops/routes GeoJSON + 304s + history series live-inspected — evidence in
+  handoff 0023, "Outputs — evidence". openapi.json regenerated: **54 paths**
+  (+4: /ops/vehicles/latest, /geometry/stops, /geometry/routes,
+  /metrics/history).
 - `pytest tests/ -q`: **296 passed** (2026-07-15, day-type workbook wave,
   handoff 0020) — prior suite plus 17 new: service-day override
   declare/replace/delete with authz, validation (vocabulary, meaningful,

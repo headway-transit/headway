@@ -252,7 +252,7 @@ async def upload_logo(
         404: {"description": "No logo has been uploaded yet."},
     },
 )
-def get_logo(request: Request) -> Response:
+def get_logo(request: Request, db=Depends(get_db)) -> Response:
     """Serve the agency logo. UNAUTHENTICATED by design — the app shell and
     public pages show it before sign-in; the only per-caller control is the
     same per-IP token bucket as the public open-data endpoint. The logo is
@@ -260,7 +260,6 @@ def get_logo(request: Request) -> Response:
     chose to publish."""
     client_ip = request.client.host if request.client else "unknown"
     enforce_rate_limit(request.app.state.public_rate_limiter, client_ip)
-    db = get_db(request)
 
     content_type = _setting_value(db, LOGO_META_KEY)
     if content_type == LOGO_META_UNSET:
@@ -297,14 +296,13 @@ def get_logo(request: Request) -> Response:
 
 
 @router.get("/branding", response_model=BrandingResponse)
-def get_branding(request: Request) -> BrandingResponse:
+def get_branding(request: Request, db=Depends(get_db)) -> BrandingResponse:
     """The branding bundle for the app shell: display name, the two brand
     colors (contrast-guaranteed at write time), and whether a logo exists.
     UNAUTHENTICATED by design, per-IP rate limited — the shell brands itself
     before sign-in, and nothing here is sensitive."""
     client_ip = request.client.host if request.client else "unknown"
     enforce_rate_limit(request.app.state.public_rate_limiter, client_ip)
-    db = get_db(request)
     chrome_values = {key: _setting_value(db, key) for key in CHROME_KEYS}
     chrome = (
         ChromeTheme(

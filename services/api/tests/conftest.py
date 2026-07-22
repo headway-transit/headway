@@ -87,6 +87,14 @@ class FakeConn:
         # Service-day overrides (handoff 0020 / migration 0031), keyed by
         # ISO date string.
         self.service_day_overrides: dict[str, dict] = {}
+        # Map wave (handoff 0023): live vehicle positions + GTFS-static
+        # geometry (canonical.stops / canonical.trips / canonical.stop_times
+        # / canonical.routes).
+        self.vehicle_positions: list[dict] = []
+        self.stops: dict[str, dict] = {}
+        self.canonical_routes: dict[str, dict] = {}
+        self.canonical_trips: dict[str, dict] = {}
+        self.stop_times: list[dict] = []
         self._next_classification_id = 1
         self._next_event_id = 1
         self.executed: list[tuple[str, tuple]] = []
@@ -188,6 +196,13 @@ class FakeConn:
             if "metric = %s" in q:
                 rows = [r for r in rows if r["metric"] == params[i]]
                 i += 1
+            if "scope = %s" in q:
+                # /metrics/history (handoff 0023) filter.
+                rows = [r for r in rows if r["scope"] == params[i]]
+                i += 1
+            if "calc_version = %s" in q:
+                rows = [r for r in rows if r["calc_version"] == params[i]]
+                i += 1
             if "period_start >= %s" in q:
                 rows = [r for r in rows if r["period_start"] >= params[i]]
                 i += 1
@@ -197,7 +212,19 @@ class FakeConn:
             if "category = %s" in q:
                 rows = [r for r in rows if r["category"] == params[i]]
                 i += 1
-            rows.sort(key=lambda r: (r["period_start"], r["metric"]))
+            if "ORDER BY period_start, metric, scope, computed_at, metric_value_id" in q:
+                # /metrics/history: the fully deterministic ordering.
+                rows.sort(
+                    key=lambda r: (
+                        r["period_start"], r["metric"], r["scope"],
+                        r["computed_at"], str(r["metric_value_id"]),
+                    )
+                )
+            else:
+                rows.sort(key=lambda r: (r["period_start"], r["metric"]))
+            if "LIMIT %s" in q:
+                rows = rows[: params[i]]
+                i += 1
             return FakeCursor(
                 [
                     (
@@ -226,6 +253,20 @@ class FakeConn:
                 if i in wanted
             ]
             return FakeCursor(rows)
+
+        if q.startswith("SELECT severity, status, count(*) FROM dq.issues"):
+            # /dq/issues/counts (handoff 0023): the SQL-side GROUP BY over
+            # exactly the rows /dq/issues serves under the same filter.
+            rows = list(self.dq_issues.values())
+            if "WHERE status = %s" in q:
+                rows = [r for r in rows if r["status"] == params[0]]
+            grouped: dict[tuple, int] = {}
+            for r in rows:
+                key = (r["severity"], r["status"])
+                grouped[key] = grouped.get(key, 0) + 1
+            return FakeCursor(
+                [(sev, st, n) for (sev, st), n in sorted(grouped.items())]
+            )
 
         if "count(*) FROM dq.issues" in q:
             n = sum(
@@ -991,6 +1032,120 @@ class FakeConn:
             att["revocation_reason"] = reason
             return FakeCursor([self._attestation_row(att)])
 
+        # -- Map wave (handoff 0023): vehicles + geometry ---------------------
+        if q.startswith("SELECT DISTINCT ON (vp.vehicle_id)"):
+            # ops._SELECT_LATEST: latest row per vehicle within the window,
+            # source label joined from the row's own source (the fake stores
+            # it inline instead of a raw.records join).
+            max_age, limit = params
+            cutoff = dt.datetime.now(UTC) - dt.timedelta(seconds=max_age)
+            latest: dict[str, dict] = {}
+            for p in self.vehicle_positions:
+                if p["time"] < cutoff:
+                    continue
+                held = latest.get(p["vehicle_id"])
+                if held is None or p["time"] > held["time"]:
+                    latest[p["vehicle_id"]] = p
+            rows = [
+                (
+                    p["vehicle_id"], p["time"], p["latitude"], p["longitude"],
+                    p["bearing"], p["speed_mps"], p["trip_id"], p["route_id"],
+                    p["source_record_id"], p["source"],
+                )
+                for _vid, p in sorted(latest.items())
+            ]
+            return FakeCursor(rows[:limit])
+
+        if q.startswith("SELECT count(DISTINCT vehicle_id)"):
+            max_age = params[0]
+            cutoff = dt.datetime.now(UTC) - dt.timedelta(seconds=max_age)
+            vids = {
+                p["vehicle_id"]
+                for p in self.vehicle_positions
+                if p["time"] >= cutoff
+            }
+            return FakeCursor([(len(vids),)])
+
+        if q.startswith("SELECT now(), max(time) FROM canonical.vehicle_positions"):
+            newest = max(
+                (p["time"] for p in self.vehicle_positions), default=None
+            )
+            return FakeCursor([(dt.datetime.now(UTC), newest)])
+
+        if q.startswith("SELECT stop_id, name, latitude, longitude"):
+            limit = params[0]
+            rows = [
+                (s["stop_id"], s["name"], s["latitude"], s["longitude"])
+                for s in sorted(self.stops.values(), key=lambda s: s["stop_id"])
+            ]
+            return FakeCursor(rows[:limit])
+
+        if q.startswith("SELECT count(*) FROM canonical.stops"):
+            return FakeCursor([(len(self.stops),)])
+
+        if q.startswith("WITH trip_patterns AS"):
+            # geometry._SELECT_ROUTE_PATTERNS, modeled honestly: per trip
+            # the ordered stop ids, per route the most frequent pattern
+            # (trip_count DESC, then the lexicographically first stop_ids —
+            # the SQL's deterministic tie-break), joined to routes.
+            limit = params[0]
+            per_trip: dict[str, list] = {}
+            for st in sorted(
+                self.stop_times, key=lambda s: (s["trip_id"], s["stop_sequence"])
+            ):
+                per_trip.setdefault(st["trip_id"], []).append(st["stop_id"])
+            pattern_counts: dict[tuple, int] = {}
+            for trip_id, stop_ids in per_trip.items():
+                trip = self.canonical_trips.get(trip_id)
+                if trip is None:
+                    continue  # the SQL join drops stop_times without a trip
+                key = (trip["route_id"], tuple(stop_ids))
+                pattern_counts[key] = pattern_counts.get(key, 0) + 1
+            chosen: dict[str, tuple] = {}
+            for (route_id, stop_ids), n in pattern_counts.items():
+                held = chosen.get(route_id)
+                if held is None or (-n, list(stop_ids)) < (-held[1], list(held[0])):
+                    chosen[route_id] = (stop_ids, n)
+            rows = []
+            for route_id in sorted(chosen):
+                route = self.canonical_routes.get(route_id)
+                if route is None:
+                    continue  # the SQL join requires a canonical.routes row
+                stop_ids, n = chosen[route_id]
+                rows.append(
+                    (
+                        route_id, route["short_name"], route["long_name"],
+                        route["mode"], list(stop_ids), n,
+                    )
+                )
+            return FakeCursor(rows[:limit])
+
+        if q.startswith("SELECT count(DISTINCT route_id) FROM canonical.trips"):
+            return FakeCursor(
+                [(len({t["route_id"] for t in self.canonical_trips.values()}),)]
+            )
+
+        if q.startswith("SELECT count(*) FROM computed.metric_values"):
+            # /metrics/history cap honesty — same filters as the row query.
+            rows = list(self.metric_values.values())
+            i = 0
+            if "metric = %s" in q:
+                rows = [r for r in rows if r["metric"] == params[i]]
+                i += 1
+            if "scope = %s" in q:
+                rows = [r for r in rows if r["scope"] == params[i]]
+                i += 1
+            if "calc_version = %s" in q:
+                rows = [r for r in rows if r["calc_version"] == params[i]]
+                i += 1
+            if "period_start >= %s" in q:
+                rows = [r for r in rows if r["period_start"] >= params[i]]
+                i += 1
+            if "period_end <= %s" in q:
+                rows = [r for r in rows if r["period_end"] <= params[i]]
+                i += 1
+            return FakeCursor([(len(rows),)])
+
         raise AssertionError(f"FakeConn has no handler for SQL: {q!r}")
 
     @staticmethod
@@ -1116,6 +1271,62 @@ class FakeConn:
         issue.update(overrides)
         self.dq_issues[issue["issue_id"]] = issue
         return issue
+
+    # -- Map wave seeders (handoff 0023) ------------------------------------
+    def add_vehicle_position(self, **overrides):
+        """Seed one canonical.vehicle_positions row (+ its raw source label,
+        which the real query joins from raw.records)."""
+        p = {
+            "time": dt.datetime.now(UTC),
+            "vehicle_id": "bus-1701",
+            "trip_id": None,     # nullable by design — never guessed
+            "route_id": None,
+            "latitude": 42.3601,
+            "longitude": -71.0589,
+            "bearing": None,
+            "speed_mps": None,
+            "source_record_id": "a" * 64,
+            "source": "gtfs_rt_vehicle_positions",
+        }
+        p.update(overrides)
+        self.vehicle_positions.append(p)
+        return p
+
+    def add_stop(self, stop_id, name="Test Stop", latitude=42.36,
+                 longitude=-71.06):
+        """Seed one canonical.stops row. Pass latitude/longitude None for a
+        coordinate-less stop (legal per GTFS; preserved, never invented)."""
+        self.stops[stop_id] = {
+            "stop_id": stop_id,
+            "name": name,
+            "latitude": latitude,
+            "longitude": longitude,
+        }
+        return self.stops[stop_id]
+
+    def add_canonical_route(self, route_id, short_name=None, long_name=None,
+                            mode="bus"):
+        self.canonical_routes[route_id] = {
+            "route_id": route_id,
+            "short_name": short_name,
+            "long_name": long_name,
+            "mode": mode,
+        }
+        return self.canonical_routes[route_id]
+
+    def add_canonical_trip(self, trip_id, route_id):
+        self.canonical_trips[trip_id] = {
+            "trip_id": trip_id,
+            "route_id": route_id,
+        }
+        return self.canonical_trips[trip_id]
+
+    def add_trip_stops(self, trip_id, stop_ids):
+        """Seed the ordered canonical.stop_times rows for one trip."""
+        for seq, stop_id in enumerate(stop_ids, start=1):
+            self.stop_times.append(
+                {"trip_id": trip_id, "stop_id": stop_id, "stop_sequence": seq}
+            )
 
     def add_api_key(self, name="test key", *, scopes=("ingest:tides",),
                     source_label="tides_simulated", revoked=False):
