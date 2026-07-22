@@ -305,9 +305,12 @@ check_docker() {
   if ! docker compose version >/dev/null 2>&1; then
     fail "The 'docker compose' command is missing. It is the part of Docker"
     fixln "that starts several containers together, and Headway needs it."
-    fixln "To fix: install the Docker Compose plugin:"
-    fixln "https://docs.docker.com/compose/install/linux/"
-    fixln "then run this installer again."
+    fixln "To fix on Ubuntu/Debian, run ONE of these (which one exists"
+    fixln "depends on where your Docker packages came from):"
+    fixln "    sudo apt install -y docker-compose-plugin"
+    fixln "    sudo apt install -y docker-compose-v2"
+    fixln "For other distributions: https://docs.docker.com/compose/install/linux/"
+    fixln "Then run this installer again."
   else
     ok "Docker Compose is installed ($(docker compose version --short 2>/dev/null || echo 'version unknown'))."
   fi
