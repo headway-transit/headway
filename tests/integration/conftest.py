@@ -20,8 +20,9 @@ Contract of this suite:
   scratch database WITH (FORCE) even on failure. The server's existing
   databases are never touched.
 - The app under test is built by the production factory and lifespan
-  (HEADWAY_DATABASE_URL -> psycopg.connect in headway_api.db.lifespan); the
-  database connection semantics exercised are the REAL ones, not a fake.
+  (HEADWAY_DATABASE_URL -> the psycopg_pool ConnectionPool in
+  headway_api.db.lifespan, handoff 0023); the database connection semantics
+  exercised are the REAL ones, not a fake.
 """
 
 from __future__ import annotations
@@ -161,8 +162,9 @@ def api_client(migrated_db, monkeypatch):
     """The API booted through the PRODUCTION path.
 
     create_app() with no injected db + TestClient's context manager runs the
-    real lifespan, which opens a real psycopg connection from
-    HEADWAY_DATABASE_URL (autocommit=True — the fix under regression test).
+    real lifespan, which opens the real connection pool from
+    HEADWAY_DATABASE_URL (every pooled connection autocommit=True via the
+    configure hook — the fix under regression test).
     """
     monkeypatch.setenv("HEADWAY_DATABASE_URL", migrated_db)
     monkeypatch.setenv("HEADWAY_SESSION_SECRET", TEST_SESSION_SECRET)

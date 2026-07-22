@@ -203,64 +203,99 @@ def test_certification_flow_persists_visibly_outside_the_app(
 
 
 # ---------------------------------------------------------------------------
-# Demonstration of the bug class (documentation-by-test): force the app's
-# connection back to autocommit=False and show that the API reports success
-# while a separate connection sees NOTHING. If this test ever flakes, mark it
-# xfail — the primary regression is the positive-path test above.
+# Demonstration of the bug class (documentation-by-test), pool era. The
+# pre-pool demo forced the app's single connection to autocommit=False and
+# showed a 200 response whose write no other connection would ever see. That
+# exact failure is now closed BY CONSTRUCTION: psycopg_pool's connection()
+# context applies `with conn:` semantics on return, so a cleanly finished
+# request commits even if the connection was left autocommit=False, and an
+# exception mid-request produces an error status, never a 2xx-with-no-row
+# (verified against psycopg_pool 3.3.1 source in handoff 0023's CI follow-up).
+#
+# What the configure-hook fence (_configure_pooled_connection) still governs
+# is WHEN a write commits: at write time (fence present) versus at
+# connection-return time (fence lost). Deferred commit is a real hazard, not
+# a nicety — it breaks store-before-produce ordering (handoff 0006: the
+# Kafka produce happens mid-handler, after the row is believed durable), and
+# it lets a later failure in the same request silently erase an "already
+# done" write. This demo pins all of that at the pool level, using the
+# production hook itself for the fenced half.
 # ---------------------------------------------------------------------------
 
 
-def test_demo_lost_autocommit_makes_api_writes_invisible_externally(
-    migrated_db, observer, seed_user, monkeypatch
-):
-    import psycopg
+def test_demo_autocommit_fence_governs_when_writes_commit(migrated_db, observer):
+    from psycopg_pool import ConnectionPool
 
-    from fastapi.testclient import TestClient
+    import headway_api.db as db_module
 
-    from headway_api.app import create_app
-
-    seed_user("trap.it", "trap-pass-1", "viewer")
-
-    real_connect = psycopg.connect
-
-    def connect_without_autocommit(conninfo="", **kwargs):
-        kwargs["autocommit"] = False  # re-create the pre-fix condition
-        return real_connect(conninfo, **kwargs)
-
-    monkeypatch.setenv("HEADWAY_DATABASE_URL", migrated_db)
-    monkeypatch.setenv("HEADWAY_SESSION_SECRET", TEST_SESSION_SECRET)
-    monkeypatch.setattr(psycopg, "connect", connect_without_autocommit)
-
-    app = create_app()
-    with TestClient(app) as client:
-        resp = client.post(
-            "/auth/login", json={"username": "trap.it", "password": "trap-pass-1"}
-        )
-        # The API believes everything worked...
-        assert resp.status_code == 200
-        # ...but the login audit event is trapped in a never-committed
-        # implicit transaction: invisible to any other connection.
-        assert (
-            count(
-                observer,
-                "SELECT count(*) FROM audit.events WHERE actor = %s",
-                ("trap.it",),
-            )
-            == 0
-        ), (
-            "With autocommit=False the write should be invisible externally; "
-            "if it is visible, this demo no longer models the bug class."
-        )
-    # Connection closed (lifespan shutdown): the implicit transaction rolled
-    # back, so the write is gone forever, not merely delayed.
-    assert (
-        count(
+    def audit_count(action: str) -> int:
+        return count(
             observer,
-            "SELECT count(*) FROM audit.events WHERE actor = %s",
-            ("trap.it",),
+            "SELECT count(*) FROM audit.events WHERE actor = 'fence.demo' "
+            "AND action = %s",
+            (action,),
         )
-        == 0
+
+    def insert_event(conn, action: str) -> None:
+        conn.execute(
+            "INSERT INTO audit.events (actor, action, detail) "
+            "VALUES ('fence.demo', %s, '{}')",
+            (action,),
+        )
+
+    # --- Fence LOST: writes are deferred to connection return. ------------
+    unfenced = ConnectionPool(
+        migrated_db,
+        min_size=1,
+        max_size=1,
+        configure=lambda conn: None,  # the lost fence
+        open=True,
     )
+    try:
+        with unfenced.connection() as conn:
+            insert_event(conn, "unfenced_write")
+            # Mid-request (the moment a handler would produce to Kafka or
+            # fire a webhook): the row is NOT yet visible to anyone else.
+            assert audit_count("unfenced_write") == 0, (
+                "Without the fence the write should be externally invisible "
+                "until the connection returns to the pool; if it is visible, "
+                "this demo no longer models the deferred-commit hazard."
+            )
+        # Clean return commits — the old 2xx-with-no-row class is closed by
+        # construction, the write was delayed, not lost.
+        assert audit_count("unfenced_write") == 1
+
+        # But a failure later in the same request erases the whole request's
+        # work, including writes the handler believed were already durable:
+        with pytest.raises(RuntimeError, match="later failure"):
+            with unfenced.connection() as conn:
+                insert_event(conn, "unfenced_lost")
+                raise RuntimeError("later failure in the same request")
+        assert audit_count("unfenced_lost") == 0  # silently rolled back
+    finally:
+        unfenced.close()
+
+    # --- Fence PRESENT (the production hook): done means done. ------------
+    fenced = ConnectionPool(
+        migrated_db,
+        min_size=1,
+        max_size=1,
+        configure=db_module._configure_pooled_connection,
+        open=True,
+    )
+    try:
+        with fenced.connection() as conn:
+            insert_event(conn, "fenced_write")
+            # Visible AT WRITE TIME, from a separate connection.
+            assert audit_count("fenced_write") == 1
+        # And a later failure in the same request cannot un-write it:
+        with pytest.raises(RuntimeError, match="later failure"):
+            with fenced.connection() as conn:
+                insert_event(conn, "fenced_survives")
+                raise RuntimeError("later failure in the same request")
+        assert audit_count("fenced_survives") == 1
+    finally:
+        fenced.close()
 
 
 # ---------------------------------------------------------------------------

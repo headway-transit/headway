@@ -356,3 +356,22 @@ truncated + total_matching + note honesty.
   `.github/` untouched, per scope. `git status` shows exactly:
   services/api/* (modified + new routers/tests), services/api/openapi.json,
   services/api/README.md, and this handoff file.
+
+### CI follow-up (orchestrator, 2026-07-22): the pool structurally closed the phantom-write class
+
+The first CI run on this wave failed honestly — in the real-Postgres integration
+job, `test_demo_lost_autocommit_makes_api_writes_invisible_externally` (the
+2026-07-10 bug-class demo) could no longer reproduce the bug: it forced
+autocommit=False at connect and the pool's configure hook corrected it. Removing
+the hook didn't reproduce it either, which exposed a structural finding:
+`psycopg_pool.connection()` applies `with conn:` semantics on return
+(commit-on-clean-exit, rollback-on-exception — verified in psycopg_pool 3.3.1
+source), so per-request checkout closes the exact 201-with-no-row failure **by
+construction**, fence or no fence. What the fence still governs is *when* a
+write commits: at write time (store-before-produce ordering, handoff 0006; a
+later in-request failure cannot erase a done write) versus at connection-return
+time. The demo was rewritten as
+`test_demo_autocommit_fence_governs_when_writes_commit`, pinning all four
+quadrants at the pool level with the production hook itself; conftest doc drift
+(single-connection wording) fixed. Verified locally against a scratch database
+on the live server: 6/6 passed.
