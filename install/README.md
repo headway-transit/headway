@@ -229,6 +229,36 @@ asking for help.
 - Keep `deploy/compose/.env` safe. It holds this installation's
   passwords. Do not email it or commit it anywhere.
 
+## Reboots, power loss, and stopping on purpose
+
+**You do not need to do anything after a reboot.** Headway is set up to
+come back by itself, in three layers:
+
+1. Docker starts with the operating system (its standard system service).
+2. Every Headway service is marked `restart: unless-stopped`, so whatever
+   was running when the computer went down starts again when Docker does.
+   At boot the services may come up in a scrambled order — that is fine
+   and expected: a service that wakes before the database is ready stops
+   loudly and is restarted automatically until everything is healthy.
+   Give it a couple of minutes after a reboot before worrying.
+3. Your data is in Docker volumes on disk, not inside the containers
+   (see above), and the database keeps a write-ahead log — the standard
+   protection that makes even a sudden power loss recoverable.
+
+**Stopping Headway on purpose** (for maintenance, or to reclaim the
+machine):
+
+```
+docker compose --project-directory deploy/compose --profile app stop
+```
+
+A deliberate stop is respected: Headway stays stopped across reboots
+until you start it again with:
+
+```
+docker compose --project-directory deploy/compose --profile app up -d
+```
+
 ## Installing without questions (for IT automation)
 
 `./install/install.sh --yes` asks nothing and reads its answers from
