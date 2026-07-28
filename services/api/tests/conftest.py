@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import copy
 import datetime as dt
+import json
 import sys
 import uuid
 from contextlib import contextmanager
@@ -93,6 +94,8 @@ class FakeConn:
         self.vehicle_positions: list[dict] = []
         # Sources status (handoff 0025): the raw.records ingest registry.
         self.raw_records: list[dict] = []
+        # Calc runs dispatched from the UI (handoff 0026 / migration 0033).
+        self.calc_runs: dict[str, dict] = {}
         self.stops: dict[str, dict] = {}
         self.canonical_routes: dict[str, dict] = {}
         self.canonical_trips: dict[str, dict] = {}
@@ -122,6 +125,7 @@ class FakeConn:
                 self.sampling_measurements,
                 self.attestations,
                 self.service_day_overrides,
+                self.calc_runs,
                 self._next_classification_id,
                 self._next_event_id,
             )
@@ -145,6 +149,7 @@ class FakeConn:
                 self.sampling_measurements,
                 self.attestations,
                 self.service_day_overrides,
+                self.calc_runs,
                 self._next_classification_id,
                 self._next_event_id,
             ) = snapshot
@@ -494,7 +499,10 @@ class FakeConn:
 
         if q.startswith("SELECT issue_id, issue_type"):
             rows = list(self.dq_issues.values())
-            if "WHERE status = %s" in q:
+            if "WHERE issue_id = %s" in q:
+                # GET /dq/issues/{id} (handoff 0026 deep link).
+                rows = [r for r in rows if r["issue_id"] == str(params[0])]
+            elif "WHERE status = %s" in q:
                 rows = [r for r in rows if r["status"] == params[0]]
             rows.sort(key=lambda r: r["created_at"])
             return FakeCursor(
@@ -1252,6 +1260,115 @@ class FakeConn:
                 )
             return FakeCursor(rows)
 
+        # -- calc runs (handoff 0026 / migration 0033) ------------------------
+        if q.startswith(
+            "SELECT run_id, requested_by, requested_at, period_start, "
+            "period_end, status, started_at, finished_at, runner_pid, "
+            "summary, stdout_tail FROM computed.calc_runs"
+        ):
+            rows = list(self.calc_runs.values())
+            if "WHERE run_id = %s" in q:
+                rows = [r for r in rows if r["run_id"] == str(params[0])]
+            else:
+                # Newest first, run_id tie-break, LIMIT — the list query.
+                rows.sort(key=lambda r: (r["requested_at"], r["run_id"]))
+                rows.reverse()
+                rows = rows[: params[0]]
+            return FakeCursor(
+                [
+                    (
+                        r["run_id"], r["requested_by"], r["requested_at"],
+                        r["period_start"], r["period_end"], r["status"],
+                        r["started_at"], r["finished_at"], r["runner_pid"],
+                        r["summary"], r["stdout_tail"],
+                    )
+                    for r in rows
+                ]
+            )
+
+        if q.startswith(
+            "SELECT run_id, requested_by, requested_at, period_start, "
+            "period_end, status, started_at FROM computed.calc_runs "
+            "WHERE status IN ('queued', 'running')"
+        ):
+            live = [
+                r for r in self.calc_runs.values()
+                if r["status"] in ("queued", "running")
+            ]
+            live.sort(key=lambda r: r["requested_at"], reverse=True)
+            return FakeCursor(
+                [
+                    (
+                        r["run_id"], r["requested_by"], r["requested_at"],
+                        r["period_start"], r["period_end"], r["status"],
+                        r["started_at"],
+                    )
+                    for r in live[:1]
+                ]
+            )
+
+        if q.startswith("INSERT INTO computed.calc_runs"):
+            requested_by, period_start, period_end = params
+            # Honest model of the calc_runs_single_flight partial unique
+            # index + ON CONFLICT DO NOTHING: a live row means NO row back.
+            if any(
+                r["status"] in ("queued", "running")
+                for r in self.calc_runs.values()
+            ):
+                return FakeCursor([])
+            assert period_start < period_end  # migration-0033 CHECK
+            run = {
+                "run_id": str(uuid.uuid4()),
+                "requested_by": requested_by,
+                "requested_at": dt.datetime.now(UTC),
+                "period_start": period_start,
+                "period_end": period_end,
+                "status": "queued",
+                "started_at": None,
+                "finished_at": None,
+                "runner_pid": None,
+                "summary": None,
+                "stdout_tail": None,
+            }
+            self.calc_runs[run["run_id"]] = run
+            return FakeCursor([(run["run_id"], run["requested_at"])])
+
+        if q.startswith("UPDATE computed.calc_runs SET status = 'failed'"):
+            # The stale-run reconcile: failed + finished_at + summary, only
+            # while the row is still live.
+            summary_json, run_id = params
+            run = self.calc_runs.get(str(run_id))
+            if run is None or run["status"] not in ("queued", "running"):
+                return FakeCursor([])
+            run["status"] = "failed"
+            run["finished_at"] = dt.datetime.now(UTC)
+            run["summary"] = json.loads(summary_json)
+            return FakeCursor([(run["run_id"],)])
+
+        if q.startswith("UPDATE computed.calc_runs SET status = 'running'"):
+            pid, run_id = params
+            run = self.calc_runs.get(str(run_id))
+            if run is None or run["status"] != "queued":
+                return FakeCursor([])
+            run["status"] = "running"
+            run["started_at"] = dt.datetime.now(UTC)
+            run["runner_pid"] = pid
+            return FakeCursor([(run["run_id"], run["started_at"])])
+
+        if q.startswith("UPDATE computed.calc_runs SET status = %s"):
+            status, summary_json, tail, run_id = params
+            # The migration-0033 CHECKs, honestly modeled: only a terminal
+            # status may carry finished_at.
+            assert status in ("succeeded", "refused", "failed")
+            run = self.calc_runs.get(str(run_id))
+            if run is None or run["status"] not in ("queued", "running"):
+                return FakeCursor([])
+            run["status"] = status
+            run["finished_at"] = dt.datetime.now(UTC)
+            run["summary"] = json.loads(summary_json)
+            run["stdout_tail"] = tail
+            return FakeCursor([(run["run_id"], run["finished_at"])])
+
         if q.startswith("SELECT count(*) FROM computed.metric_values"):
             # /metrics/history cap honesty — same filters as the row query.
             rows = list(self.metric_values.values())
@@ -1729,6 +1846,25 @@ class FakeConn:
         self.attestations[att["attestation_id"]] = att
         return att
 
+    def add_calc_run(self, **overrides):
+        """Seed one computed.calc_runs row (handoff 0026 / migration 0033)."""
+        run = {
+            "run_id": str(uuid.uuid4()),
+            "requested_by": "stella",
+            "requested_at": dt.datetime.now(UTC),
+            "period_start": dt.date(2026, 6, 1),
+            "period_end": dt.date(2026, 7, 1),
+            "status": "queued",
+            "started_at": None,
+            "finished_at": None,
+            "runner_pid": None,
+            "summary": None,
+            "stdout_tail": None,
+        }
+        run.update(overrides)
+        self.calc_runs[run["run_id"]] = run
+        return run
+
     def add_edge(self, output_kind, output_id, transform_name, transform_version,
                  input_kind, input_id):
         self.lineage_edges.append(
@@ -1778,6 +1914,18 @@ class FakeProducer:
     def produce(self, topic, key, value):
         self.call_log.append(("producer.produce", topic, key))
         self.produced.append((topic, key, value))
+
+
+class FakeCalcRunLauncher:
+    """Records calc-run launches (handoff 0026) instead of spawning a real
+    subprocess thread. Tests drive routers.calc_runs.execute_run directly
+    (with a fake spawn) to exercise the lifecycle synchronously."""
+
+    def __init__(self):
+        self.launched: list[tuple[str, dt.date, dt.date]] = []
+
+    def __call__(self, run_id, period_start, period_end):
+        self.launched.append((run_id, period_start, period_end))
 
 
 class FakeWebhookSender:
@@ -1842,14 +1990,20 @@ def test_signer():
 
 
 @pytest.fixture
+def fake_calc_launcher():
+    return FakeCalcRunLauncher()
+
+
+@pytest.fixture
 def app(fake_db, settings, fake_store, fake_producer, fake_webhook_sender,
-        test_signer):
+        test_signer, fake_calc_launcher):
     application = create_app(
         settings=settings,
         db=fake_db,
         object_store=fake_store,
         producer=fake_producer,
         webhook_sender=fake_webhook_sender,
+        calc_run_launcher=fake_calc_launcher,
     )
     # The installation signing key (handoff 0019), injected like every other
     # external seam — signing.get_signer serves this cached instance.

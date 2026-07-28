@@ -56,6 +56,9 @@ export const copy = {
     map: "Live map",
     dashboard: "Dashboard",
     metrics: "Metrics",
+    /** The calculations room (handoff 0026): plain words, not "calc runs".
+     *  Linked for data_steward+ (UX; the API enforces the role on POST). */
+    calcRuns: "Compute figures",
     compare: "Compare",
     reports: "Monthly ridership",
     safety: "Safety & security",
@@ -165,12 +168,19 @@ export const copy = {
     preVerificationTag: "Pre-verification",
     explainLink: "How this number was made",
     /** Teaching empty state (handoff 0021, design point 4): one warm
-     *  sentence + the concrete first action — never a blank. */
+     *  sentence + the concrete first action — never a blank. Since handoff
+     *  0026 the first action is the Compute figures room, not a CLI line
+     *  (developer invocation, for the curious: `python -m
+     *  headway_calc.runner --period-start <start> --period-end <end>` —
+     *  documented in services/api/README.md, never shown on a user
+     *  surface). */
     empty:
       "Nothing computed yet — that is the honest state of a fresh Headway, not an error. Figures appear here the moment the calculation service produces one.",
-    emptyAction: "To produce the first figures, run the calculation service:",
-    emptyCommand:
-      "python -m headway_calc.runner --period-start <start> --period-end <end>",
+    emptyActionAuthorized:
+      "The first figures are one step away: pick a period and start a calculation run.",
+    emptyDoor: "Compute figures",
+    emptyActionViewer:
+      "Figures are computed from the Compute figures page by a data steward, report preparer, or certifying official. Your viewer account sees every figure the moment one lands here.",
     certifyMoved:
       "Certification has moved to its own room. This page is for reading figures; signing them happens on the Certify page, which shows exactly what your signature would cover.",
     certifyMovedLink: "Go to the Certify page",
@@ -192,6 +202,126 @@ export const copy = {
       "The calculation recorded no extra detail for this figure.",
     /** The server export of exactly this table's rows (design point 5). */
     exportLabel: "Download the computed metric values",
+  },
+
+  /**
+   * The calculations room (/calc-runs — handoff 0026): ask the server to
+   * run the deterministic calculation service over a period, watch the run,
+   * and read every run's honest outcome. NOTHING on this page computes a
+   * number: the server dispatches the same versioned calculation runner the
+   * CLI runs, and every figure, count, and id shown here is the runner's
+   * own value served verbatim. Refusals are first-class: a run that
+   * withheld every figure over blocking data-quality findings is the
+   * product working, and this page says so in the house voice.
+   */
+  calcRuns: {
+    heading: "Compute figures",
+    intro:
+      "This page asks Headway's calculation service to compute the reporting figures — vehicle miles, vehicle hours, passenger trips, passenger miles — over a period you pick. The service is deterministic and versioned; this page only starts it and shows what it reported. No number is ever computed or edited here.",
+    refusalTeachingIntro:
+      "If the recorded data cannot support a certifiable figure, the calculation refuses and says exactly why. A refusal is Headway working as designed — never an error to hide.",
+
+    periodHeading: "Pick the period",
+    periodHint:
+      "Periods are half-open: the start date is included, the end date is not. “June 2026” means June 1 up to (not including) July 1.",
+    monthLabel: "Calendar month",
+    customOption: "Custom date range…",
+    customStartLabel: "First day (included)",
+    customEndLabel: "Day after the last day (not included)",
+
+    runButton: "Compute figures for this period",
+    runningButton: "A run is in progress…",
+    reasonLabel: "Why the run button is unavailable",
+    reasonPickPeriod: "Pick a calendar month or enter both custom dates first.",
+    reasonRunLive:
+      "A calculation run is already in progress. Headway runs one at a time — when it finishes, this button opens up again.",
+    /** Viewers: the read-only surface says who can compute, plainly. */
+    viewerNote:
+      "Your viewer account can read every run on this page. Starting a run is done by a data steward, report preparer, or certifying official.",
+
+    startedToast: "Calculation run started.",
+
+    historyHeading: "Runs",
+    historyIntro:
+      "Every run ever requested, newest first, with its honest outcome. A run keeps reporting here even if you leave the page or the server restarts.",
+    historyEmpty:
+      "No calculation runs yet. The first one you start will appear here with its outcome.",
+    tableCaption:
+      "Calculation runs, newest first. Each run shows its status, timing, and the per-calculation outcomes exactly as the calculation service reported them.",
+
+    /** Status labels: text carries the meaning (never color alone). */
+    statusLabels: {
+      queued: "Queued",
+      running: "Running",
+      succeeded: "Figures produced",
+      refused: "Refused — figures withheld",
+      failed: "Failed",
+    } as Record<string, string>,
+    statusExplanations: {
+      queued: "Waiting to start.",
+      running: "The calculation service is working.",
+      succeeded: "At least one figure was produced and recorded.",
+      refused:
+        "Every calculation withheld its figure because blocking data-quality findings stand in the way. The reasons are recorded in the data-quality queue.",
+      failed: "The run stopped before finishing. No figure was invented.",
+    } as Record<string, string>,
+
+    requestedLine: (by: string, at: string) => `Requested by ${by} at ${at}.`,
+    periodLine: (start: string, end: string) =>
+      `Period ${start} up to (not including) ${end}.`,
+    /** Honest liveness: a wall-clock start time, never a progress bar. */
+    runningSince: (time: string) => `Running since ${time}.`,
+    queuedAt: (time: string) => `Queued at ${time}.`,
+    /** Duration is the difference of two recorded timestamps. */
+    durationLine: (seconds: string) => `Took ${seconds}.`,
+
+    outcomesHeading: "What each calculation reported",
+    outcomeTableCaption: (period: string) =>
+      `Per-calculation outcomes for the run over ${period}, verbatim from the calculation service.`,
+    outcomeColumns: {
+      calc: "Calculation",
+      scope: "Scope",
+      outcome: "Outcome",
+      figure: "Figure",
+      links: "Where to look",
+    },
+    outcomePersisted: "Figure produced",
+    outcomeRefused: "Refused",
+    coverageLine: (coverage: string) => `Coverage: ${coverage}`,
+    /** Refusal detail: name the count and link the EXACT issues. */
+    refusedIssuesLead: (count: number) =>
+      count === 1
+        ? "1 blocking data-quality finding explains why:"
+        : `${count} blocking data-quality findings explain why:`,
+    refusedIssueLink: (n: number) => `Open blocking finding ${n}`,
+    persistedMetricsLink: "See it on the metrics page",
+    persistedReceiptLink: "How this number was made",
+
+    /** The first-run teaching moment (handoff 0026 design 3): shown when a
+     *  run ends refused — house voice, walks the user to the DQ queue. */
+    refusedTeachingHeading: "This refusal is Headway working as designed",
+    refusedTeachingBody:
+      "The calculation service looked at the recorded data and found it cannot support certifiable figures for this period — so it refused, and wrote down exactly why. Nothing was invented to fill the gap, and nothing was silently dropped. Each reason is a data-quality finding with an owner and a resolution path: resolve the findings and run the period again.",
+    refusedTeachingDoor: "Go to the data-quality queue",
+
+    failedLead:
+      "What went wrong, in the dispatcher's words (recorded with the run):",
+    outputTailToggle: "Show the runner's output (technical)",
+    outputTailLabel: "Runner output tail",
+
+    summaryCounts: (persisted: number, refused: number) =>
+      `${persisted} figure${persisted === 1 ? "" : "s"} produced, ${refused} calculation${refused === 1 ? "" : "s"} refused.`,
+    summaryContext: (positions: string, events: string) =>
+      `Inputs read for the period: ${positions} vehicle positions, ${events} passenger events.`,
+    thresholdContext: (threshold: string, source: string) =>
+      `Coverage threshold in force: ${threshold} (from ${source === "settings" ? "the agency's audited settings" : source === "default" ? "the calculation library's default" : source}).`,
+
+    /** v0 honest scope, stated on the page (handoff 0026 design 4). */
+    scopeNote:
+      "This page runs the standard calculation set over one period, one run at a time. Scheduled nightly runs, per-calculation selection, and canceling a run are on the roadmap — none of them is quietly pretended here. There is no progress percentage because Headway will not show a made-up one: a live run shows its real start time.",
+
+    /** Staleness (server-computed note rendered verbatim beside it). */
+    staleTag: "State unknown",
   },
 
   /**
@@ -549,6 +679,15 @@ export const copy = {
     intro:
       "Every gap, conflict, or failed check in the data is listed here until a person resolves it. Issues marked “Blocking” stop certification: no figure can be certified while one is open.",
     empty: "No data-quality issues. New issues appear here as pipelines run.",
+    /** Deep link from another room (handoff 0026: a calculation refusal
+     *  links straight to the exact finding that blocked it — /dq?issue=id). */
+    linked: {
+      heading: "Finding opened from a link",
+      intro:
+        "You followed a link to this exact finding — usually from a calculation run it blocked. The full queue is below.",
+      notFound: (issueId: string) =>
+        `The link pointed at finding ${issueId}, but no finding with that id is in the queue. It may have been recorded in a different Headway installation, or the link may be stale. The full queue is below.`,
+    },
     severityLabels: {
       blocking: "Blocking",
       warning: "Warning",
@@ -1238,13 +1377,15 @@ export const copy = {
     heading: "Dashboard",
     intro:
       "The agency's computed figures at a glance. Every number here is shown exactly as the calculation service computed it — the charts scale the picture, never the figures.",
-    /** Teaching empty state (handoff 0021 #4): warm + the first action. */
+    /** Teaching empty state (handoff 0021 #4): warm + the first action —
+     *  since handoff 0026, the Compute figures room, not a CLI line. */
     empty:
-      "No charts yet, because nothing has been computed yet — an empty dashboard is a truthful one. The first pipeline run fills this page in.",
-    emptyAction:
-      "To produce the first figures, run the calculation service:",
-    emptyCommand:
-      "python -m headway_calc.runner --period-start <start> --period-end <end>",
+      "No charts yet, because nothing has been computed yet — an empty dashboard is a truthful one. The first calculation run fills this page in.",
+    emptyActionAuthorized:
+      "To produce the first figures, pick a period and start a calculation run.",
+    emptyDoor: "Compute figures",
+    emptyActionViewer:
+      "Figures are computed from the Compute figures page by a data steward, report preparer, or certifying official.",
     tilesHeading: "Latest certified figures",
     tilesIntro:
       "The most recent figure of each kind that a certifying official has attested to.",
@@ -1532,9 +1673,12 @@ export const copy = {
       empty: (metric: string) =>
         `No ${metric} figure has been computed yet. When the pipeline runs, the newest figure appears here with its receipt.`,
       emptyAll:
-        "No figures have been computed yet — that is the honest state of a fresh Headway, not an error. To produce the first ones, connect a data source and run the calculation service:",
-      emptyAllCommand:
-        "python -m headway_calc.runner --period-start <start> --period-end <end>",
+        "No figures have been computed yet — that is the honest state of a fresh Headway, not an error. Once a data source is connected, the first calculation run produces them.",
+      /** Handoff 0026: the first action is the Compute figures room, not a
+       *  CLI line. Shown to data_steward+ (viewers see emptyAllViewer). */
+      emptyAllDoor: "Compute figures",
+      emptyAllViewer:
+        "Figures are computed from the Compute figures page by a data steward, report preparer, or certifying official.",
       metricsDoor: "See every computed figure",
     },
 

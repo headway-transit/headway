@@ -39,6 +39,7 @@ import type {
   HistoryResponse,
   MetricValue,
 } from "../api/types";
+import { canComputeFigures, useSession } from "../auth/session";
 import { HISTORY_BUCKETS } from "../reports/buckets";
 import type { HistoryBucketKind } from "../reports/buckets";
 import {
@@ -516,6 +517,7 @@ function LensBar({
 }
 
 export function DashboardView() {
+  const session = useSession();
   const [values, setValues] = useState<MetricValue[] | null>(null);
   const [issues, setIssues] = useState<DqIssue[] | null>(null);
   const [valuesError, setValuesError] = useState<string | null>(null);
@@ -823,13 +825,19 @@ export function DashboardView() {
           </section>
 
           {all.length === 0 ? (
-            /* Teaching empty state (handoff 0021 #4): warm + the action. */
+            /* Teaching empty state (handoff 0021 #4): warm + the action —
+               since handoff 0026 the Compute figures room, never a CLI
+               line on a user surface. */
             <>
               <p>{copy.dashboard.empty}</p>
-              <p>
-                {copy.dashboard.emptyAction}{" "}
-                <code>{copy.dashboard.emptyCommand}</code>
-              </p>
+              {canComputeFigures(session) ? (
+                <p>
+                  {copy.dashboard.emptyActionAuthorized}{" "}
+                  <Link to="/calc-runs">{copy.dashboard.emptyDoor}</Link>
+                </p>
+              ) : (
+                <p>{copy.dashboard.emptyActionViewer}</p>
+              )}
             </>
           ) : (
             <>

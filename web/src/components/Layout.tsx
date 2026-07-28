@@ -25,7 +25,12 @@ import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { brandingLogoUrl } from "../api/client";
 import { loadBranding, useBranding } from "../branding";
 import { copy } from "../copy";
-import { canCertify, clearSession, useSession } from "../auth/session";
+import {
+  canCertify,
+  canComputeFigures,
+  clearSession,
+  useSession,
+} from "../auth/session";
 import { initTheme, setTheme, useTheme } from "../theme";
 import { clearToasts } from "../toasts";
 import { startTour } from "../tour";
@@ -149,6 +154,16 @@ export function Layout() {
                 <li>
                   <NavLink to="/metrics">{copy.nav.metrics}</NavLink>
                 </li>
+                {/* The calculations room (handoff 0026): linked for the
+                    roles the API lets start a run — UX only, never
+                    security. Viewers can still read /calc-runs when routed
+                    there (e.g. from the metrics empty state's plain-words
+                    line). */}
+                {canComputeFigures(session) && (
+                  <li>
+                    <NavLink to="/calc-runs">{copy.nav.calcRuns}</NavLink>
+                  </li>
+                )}
                 <li>
                   <NavLink to="/compare">{copy.nav.compare}</NavLink>
                 </li>

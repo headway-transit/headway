@@ -16,6 +16,7 @@ import { AdminUsersView } from "./views/AdminUsersView";
 import { AdminView } from "./views/AdminView";
 import { AttestationsView } from "./views/AttestationsView";
 import { BrandingView } from "./views/BrandingView";
+import { CalcRunsView } from "./views/CalcRunsView";
 import { CertificateView } from "./views/CertificateView";
 import { CertificationsView } from "./views/CertificationsView";
 import { CertifyView } from "./views/CertifyView";
@@ -99,6 +100,10 @@ export function AppRoutes() {
           {/* Any authenticated role (handoff 0008, pillar B). */}
           <Route path="/dashboard" element={<DashboardView />} />
           <Route path="/metrics" element={<MetricsView />} />
+          {/* The calculations room (handoff 0026): any signed-in role READS
+              run history; starting a run is data_steward+ (UX only — the
+              API enforces the role on POST /calc/runs). */}
+          <Route path="/calc-runs" element={<CalcRunsView />} />
           {/* Comparison surface (handoff 0017 #1): any signed-in role. */}
           <Route path="/compare" element={<CompareView />} />
           <Route path="/metrics/:id/lineage" element={<LineageView />} />

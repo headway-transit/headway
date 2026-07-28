@@ -55,7 +55,7 @@ import type {
   SamplingPlanProgress,
   SamplingPlanRecord,
 } from "../api/types";
-import { useSession } from "../auth/session";
+import { canComputeFigures, useSession } from "../auth/session";
 import { DeltaFigure } from "../components/DeltaFigure";
 import { RowProgress } from "../components/RowProgress";
 import { OpsBadge } from "../components/OpsBadge";
@@ -822,11 +822,17 @@ export function TodayView() {
         {values.state === "ready" &&
           (kpis.every((k) => k.latest === null) ? (
             <div className="card today-card">
-              {/* The teaching empty state: warm + the concrete command. */}
+              {/* The teaching empty state: warm + the concrete first
+                  action — since handoff 0026 the Compute figures room,
+                  never a CLI line on a user surface. */}
               <p>{t.kpi.emptyAll}</p>
-              <p>
-                <code>{t.kpi.emptyAllCommand}</code>
-              </p>
+              {canComputeFigures(session) ? (
+                <p>
+                  <Link to="/calc-runs">{t.kpi.emptyAllDoor}</Link>
+                </p>
+              ) : (
+                <p>{t.kpi.emptyAllViewer}</p>
+              )}
             </div>
           ) : (
             <>

@@ -1,9 +1,10 @@
 import { useEffect, useId, useState } from "react";
 import type { FormEvent } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import {
   ApiError,
   attestDqIssue,
+  getDqIssue,
   getDqIssueCounts,
   listAttestations,
   listDqIssues,
@@ -44,6 +45,17 @@ import { pushToast } from "../toasts";
  */
 export function DqView() {
   const session = useSession();
+  // Deep link (handoff 0026): /dq?issue=<id> — a calculation refusal links
+  // straight to the exact finding that blocked it. The linked finding is
+  // rendered prominently above the queue; an unknown id is stated plainly,
+  // never silently ignored.
+  const [searchParams] = useSearchParams();
+  const linkedIssueId = searchParams.get("issue");
+  // The linked finding is fetched DIRECTLY (GET /dq/issues/{id}) so it
+  // renders immediately — the whole-queue list download (97k issues live)
+  // must never gate the link a refusal handed the user.
+  const [linkedIssue, setLinkedIssue] = useState<DqIssue | null>(null);
+  const [linkedError, setLinkedError] = useState<string | null>(null);
   const [issues, setIssues] = useState<DqIssue[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Whole-queue tallies from the server: unresolved severity split needs
@@ -77,6 +89,24 @@ export function DqView() {
     refreshCounts();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (linkedIssueId === null) {
+      setLinkedIssue(null);
+      setLinkedError(null);
+      return;
+    }
+    getDqIssue(linkedIssueId)
+      .then((issue) => {
+        setLinkedIssue(issue);
+        setLinkedError(null);
+      })
+      .catch((err) =>
+        // The server's 404 (or any refusal) verbatim — an unknown id is
+        // stated plainly, never silently ignored.
+        setLinkedError(err instanceof ApiError ? err.message : String(err)),
+      );
+  }, [linkedIssueId]);
 
   // Documented-effort total: UI ARITHMETIC ON EFFORT METADATA (the minutes
   // stewards typed into the resolve form) — a workflow tally like the issue
@@ -159,6 +189,34 @@ export function DqView() {
         <div role="alert" className="alert">
           {countsError}
         </div>
+      )}
+      {/* The linked finding (handoff 0026), above the queue — fetched
+          directly by id, so it paints without waiting for the whole-queue
+          download. An unknown id renders the server's own words. */}
+      {linkedIssueId !== null && linkedError !== null && (
+        <div role="alert" className="alert">
+          {copy.dq.linked.notFound(linkedIssueId)} {linkedError}
+        </div>
+      )}
+      {linkedIssue !== null && (
+        <section aria-label={copy.dq.linked.heading} className="dq-linked">
+          <h2>{copy.dq.linked.heading}</h2>
+          <p>{copy.dq.linked.intro}</p>
+          <ul className="issue-list">
+            <IssueCard
+              issue={linkedIssue}
+              mayResolve={mayResolve}
+              onResolved={(updated) => {
+                setLinkedIssue(updated);
+                handleResolved(updated);
+              }}
+              onAttested={(updated) => {
+                setLinkedIssue(updated);
+                handleAttested(updated);
+              }}
+            />
+          </ul>
+        </section>
       )}
       {queueEmpty && <p>{copy.dq.empty}</p>}
       {/* The queue-at-a-glance header paints from the SERVER counts the

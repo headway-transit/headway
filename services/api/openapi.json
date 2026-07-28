@@ -47,6 +47,139 @@
         }
       }
     },
+    "/calc/runs": {
+      "post": {
+        "tags": [
+          "calc-runs"
+        ],
+        "summary": "Start Calc Run",
+        "description": "Dispatch one calculation run over a half-open period.\n\ndata_steward OR ABOVE (report_preparer and certifying_official included\n\u2014 the recorded handoff-0026 decision; see the module docstring).\nSingle-flight; audited ``calc_run_requested`` in the same transaction as\nthe row. Returns 202: the runner may take minutes and runs in the\nbackground \u2014 poll GET /calc/runs/{run_id} (the row, not this response,\nis the truth).",
+        "operationId": "start_calc_run_calc_runs_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CalcRunRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CalcRunCreated"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "calc-runs"
+        ],
+        "summary": "List Calc Runs",
+        "description": "Run history, newest first, bounded. Any signed-in role.",
+        "operationId": "list_calc_runs_calc_runs_get",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/CalcRunRecord"
+                  },
+                  "title": "Response List Calc Runs Calc Runs Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/calc/runs/{run_id}": {
+      "get": {
+        "tags": [
+          "calc-runs"
+        ],
+        "summary": "Get Calc Run",
+        "description": "One run \u2014 the poll target while a run is live. Any signed-in role.",
+        "operationId": "get_calc_run_calc_runs__run_id__get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CalcRunRecord"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/metrics/values": {
       "get": {
         "tags": [
@@ -1094,6 +1227,49 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/DqIssueCounts"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/dq/issues/{issue_id}": {
+      "get": {
+        "tags": [
+          "data-quality"
+        ],
+        "summary": "Get Issue",
+        "description": "One issue by id (any signed-in role) \u2014 the deep-link target (handoff\n0026): a calculation refusal links straight to the exact finding that\nblocked it, and the UI must be able to show THAT finding without\ndownloading the whole queue (97k rows / hundreds of MB live). Registered\nafter /dq/issues/counts so the literal path wins.",
+        "operationId": "get_issue_dq_issues__issue_id__get",
+        "parameters": [
+          {
+            "name": "issue_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Issue Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DqIssue"
                 }
               }
             }
@@ -4031,6 +4207,212 @@
         ],
         "title": "BrandingResponse",
         "description": "What the app shell needs to brand itself. Colors here have already\npassed the WCAG AA contrast guardrail at write time."
+      },
+      "CalcRunCreated": {
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "title": "Run Id"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "requested_by": {
+            "type": "string",
+            "title": "Requested By"
+          },
+          "requested_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Requested At"
+          },
+          "period_start": {
+            "type": "string",
+            "format": "date",
+            "title": "Period Start"
+          },
+          "period_end": {
+            "type": "string",
+            "format": "date",
+            "title": "Period End"
+          },
+          "note": {
+            "type": "string",
+            "title": "Note"
+          },
+          "audit_event_id": {
+            "type": "integer",
+            "title": "Audit Event Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "run_id",
+          "status",
+          "requested_by",
+          "requested_at",
+          "period_start",
+          "period_end",
+          "note",
+          "audit_event_id"
+        ],
+        "title": "CalcRunCreated"
+      },
+      "CalcRunRecord": {
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "title": "Run Id"
+          },
+          "requested_by": {
+            "type": "string",
+            "title": "Requested By"
+          },
+          "requested_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Requested At"
+          },
+          "period_start": {
+            "type": "string",
+            "format": "date",
+            "title": "Period Start"
+          },
+          "period_end": {
+            "type": "string",
+            "format": "date",
+            "title": "Period End"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "runner_pid": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Runner Pid"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
+          },
+          "stdout_tail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stdout Tail"
+          },
+          "duration_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Seconds"
+          },
+          "stale": {
+            "type": "boolean",
+            "title": "Stale"
+          },
+          "stale_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stale Note"
+          }
+        },
+        "type": "object",
+        "required": [
+          "run_id",
+          "requested_by",
+          "requested_at",
+          "period_start",
+          "period_end",
+          "status",
+          "started_at",
+          "finished_at",
+          "runner_pid",
+          "summary",
+          "stdout_tail",
+          "duration_seconds",
+          "stale",
+          "stale_note"
+        ],
+        "title": "CalcRunRecord",
+        "description": "One run, verbatim from computed.calc_runs, plus the read-time\nstaleness presentation (stale/stale_note) \u2014 the honest answer when the\nAPI cannot know a run's state anymore."
+      },
+      "CalcRunRequest": {
+        "properties": {
+          "period_start": {
+            "type": "string",
+            "format": "date",
+            "title": "Period Start"
+          },
+          "period_end": {
+            "type": "string",
+            "format": "date",
+            "title": "Period End"
+          }
+        },
+        "type": "object",
+        "required": [
+          "period_start",
+          "period_end"
+        ],
+        "title": "CalcRunRequest",
+        "description": "One dispatch request: the half-open period only. No calc selection,\nno threshold knobs \u2014 the runner resolves thresholds exactly as the CLI\ndoes (explicit flag > audited app.settings row > code default; here\nthere are no explicit flags, so the audited settings govern)."
       },
       "CanonicalLiveness": {
         "properties": {

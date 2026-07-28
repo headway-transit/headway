@@ -87,6 +87,17 @@ export function canEnterAttestations(session: Session | null): boolean {
 }
 
 /**
+ * Mirrors the API (handoff 0026): POST /calc/runs — asking the server to
+ * compute figures — is data_steward or above (report_preparer and
+ * certifying_official included via the escalating hierarchy; the recorded
+ * decision: computing figures is stewardship, separation of duties bites at
+ * certification, not computation). UX only; the API enforces the role.
+ */
+export function canComputeFigures(session: Session | null): boolean {
+  return session !== null && ROLE_RANK[session.role] >= ROLE_RANK.data_steward;
+}
+
+/**
  * Mirrors the API (handoff 0025): GET /sources/status is data_steward or
  * above. The admin HUB is presented to the certifying official only, but a
  * steward may open /admin/sources directly — same rule as the API.

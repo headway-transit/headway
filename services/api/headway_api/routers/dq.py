@@ -9,6 +9,7 @@ unexplained gap becomes a finding in an FTA triennial review.
 from __future__ import annotations
 
 import datetime as dt
+import uuid
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -237,6 +238,35 @@ def count_issues(
     return DqIssueCounts(
         total=total, by_severity=by_severity, by_status=by_status
     )
+
+
+@router.get("/dq/issues/{issue_id}", response_model=DqIssue)
+def get_issue(
+    issue_id: str,
+    identity: Identity = Depends(require_authenticated),
+    db=Depends(get_db),
+) -> DqIssue:
+    """One issue by id (any signed-in role) — the deep-link target (handoff
+    0026): a calculation refusal links straight to the exact finding that
+    blocked it, and the UI must be able to show THAT finding without
+    downloading the whole queue (97k rows / hundreds of MB live). Registered
+    after /dq/issues/counts so the literal path wins."""
+    try:
+        uuid.UUID(issue_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=404,
+            detail="No data-quality issue with that id exists.",
+        )
+    row = db.execute(
+        _SELECT_ISSUES + " WHERE issue_id = %s", (issue_id,)
+    ).fetchone()
+    if row is None:
+        raise HTTPException(
+            status_code=404,
+            detail="No data-quality issue with that id exists.",
+        )
+    return _issue_from_row(row)
 
 
 @router.post("/dq/issues/{issue_id}/resolve", response_model=ResolveResponse)

@@ -420,7 +420,35 @@ describe("/today (the briefing home)", () => {
     ).toBeInTheDocument();
   });
 
-  it("says an empty board warmly, with the concrete first command — never invented urgency", async () => {
+  it("says an empty board warmly, with the concrete first action — never invented urgency", async () => {
+    signInAs("data_steward");
+    mockApi({
+      "GET /metrics/values": { status: 200, body: [] },
+      "GET /dq/issues/counts": dqCountsRoute,
+      "GET /safety/events/counts": { status: 200, body: safetyCounts },
+      "GET /safety/deadlines": { status: 200, body: deadlines },
+      "GET /sampling/plans": { status: 200, body: [] },
+    });
+    renderApp("/today");
+
+    expect(
+      await screen.findByText(/No figures have been computed yet — that is the honest state/),
+    ).toBeInTheDocument();
+    // Handoff 0026: the first action is the Compute figures room — the
+    // developer CLI line left the user surface.
+    expect(
+      screen.queryByText(/python -m headway_calc\.runner/),
+    ).not.toBeInTheDocument();
+    const doors = screen.getAllByRole("link", { name: "Compute figures" });
+    expect(doors.some((d) => d.getAttribute("href") === "/calc-runs")).toBe(
+      true,
+    );
+    // No alert, no warning voice: warmth is the binding rule.
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    await expectNoAxeViolations();
+  });
+
+  it("tells a viewer's empty board who computes figures, in plain words", async () => {
     signInAs("viewer");
     mockApi({ "GET /metrics/values": { status: 200, body: [] } });
     renderApp("/today");
@@ -429,11 +457,13 @@ describe("/today (the briefing home)", () => {
       await screen.findByText(/No figures have been computed yet — that is the honest state/),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(/python -m headway_calc\.runner/),
+      screen.getByText(
+        /computed from the Compute figures page by a data steward/,
+      ),
     ).toBeInTheDocument();
-    // No alert, no warning voice: warmth is the binding rule.
-    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-    await expectNoAxeViolations();
+    expect(
+      screen.queryByRole("link", { name: "Compute figures" }),
+    ).not.toBeInTheDocument();
   });
 
   it("renders skeletons (announced in words) while the briefing loads, and axe passes in the loading state", async () => {

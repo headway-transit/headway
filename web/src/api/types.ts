@@ -1471,6 +1471,103 @@ export interface HistoryResponse {
   note?: string | null;
 }
 
+// ---- calc runs (handoff 0026 / migration 0033) ----
+
+/** POST /calc/runs — the half-open period only: no calc selection, no
+ *  threshold knobs. The runner resolves thresholds exactly as the CLI does
+ *  (audited app.settings row > code default). */
+export interface CalcRunRequest {
+  /** ISO date, included. */
+  period_start: string;
+  /** ISO date, excluded (half-open period). */
+  period_end: string;
+}
+
+export interface CalcRunCreated {
+  run_id: string;
+  status: string; // 'queued'
+  requested_by: string;
+  requested_at: string;
+  period_start: string;
+  period_end: string;
+  note: string;
+  audit_event_id: number;
+}
+
+/**
+ * One per-calc outcome inside a run summary, VERBATIM from the runner's own
+ * RunReport: `persisted` names the figure's computed.metric_values id (the
+ * receipt path); `refused` names the exact blocking dq.issues ids. Values
+ * are the runner's strings — never recomputed by this UI.
+ */
+export interface CalcRunMetricOutcome {
+  calc_name: string | null;
+  calc_version: string | null;
+  metric: string | null;
+  unit: string | null;
+  scope: string | null;
+  outcome: "persisted" | "refused";
+  value: string | null;
+  metric_value_id: string | null;
+  coverage: string | null;
+  blocking_issue_ids: string[];
+  warning_issue_ids: string[];
+  info_issue_ids: string[];
+}
+
+/** calc_runs.summary — the runner's outcome map (null while live), or a
+ *  plain-language `error` for failed runs. */
+export interface CalcRunSummary {
+  runner?: string;
+  period_start?: string;
+  period_end?: string;
+  period_convention?: string;
+  persisted_count?: number | null;
+  blocked_count?: number | null;
+  routed_blocking_count?: number | null;
+  routed_warning_count?: number | null;
+  routed_info_count?: number | null;
+  coverage_threshold?: string | null;
+  threshold_sources?: Record<string, string> | null;
+  positions_loaded?: number | null;
+  passenger_events_loaded?: number | null;
+  operated_trips_loaded?: number | null;
+  dr_trips_loaded?: number | null;
+  metrics?: CalcRunMetricOutcome[];
+  /** Failed runs: the dispatcher's plain-language reason. */
+  error?: string;
+  exit_code?: number;
+  /** True when the run was reconciled after exceeding the staleness bound. */
+  stale?: boolean;
+}
+
+export type CalcRunStatus =
+  | "queued"
+  | "running"
+  | "succeeded"
+  | "refused"
+  | "failed";
+
+export interface CalcRunRecord {
+  run_id: string;
+  requested_by: string;
+  requested_at: string;
+  period_start: string;
+  period_end: string;
+  status: CalcRunStatus;
+  started_at: string | null;
+  finished_at: string | null;
+  runner_pid: number | null;
+  summary: CalcRunSummary | null;
+  stdout_tail: string | null;
+  /** Wall-clock seconds started→finished; timestamps' difference, not a figure. */
+  duration_seconds: number | null;
+  /** True when a queued/running row exceeded the server's staleness bound:
+   *  its real state is unknown (the API likely restarted mid-run). */
+  stale: boolean;
+  stale_note: string | null;
+}
+
 // ---- error envelopes (FastAPI) ----
 
 export interface ValidationErrorItem {

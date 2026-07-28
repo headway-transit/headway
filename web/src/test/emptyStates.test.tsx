@@ -21,23 +21,48 @@ const EMPTY_DEADLINES = {
 };
 
 describe("teaching empty states (handoff 0021 #4)", () => {
-  it("/metrics before data: warm sentence + the concrete first command", async () => {
-    signInAs("viewer");
+  it("/metrics before data: the steward gets the Compute figures door, never a CLI line", async () => {
+    signInAs("data_steward");
     mockApi({ "GET /metrics/values": { status: 200, body: [] } });
     renderApp("/metrics");
 
     expect(
       await screen.findByText(/Nothing computed yet — that is the honest state/),
     ).toBeInTheDocument();
+    // Handoff 0026: the developer CLI line left the user surface for good.
     expect(
-      screen.getByText(/python -m headway_calc\.runner/),
-    ).toBeInTheDocument();
+      screen.queryByText(/python -m headway_calc\.runner/),
+    ).not.toBeInTheDocument();
+    const doors = screen.getAllByRole("link", { name: "Compute figures" });
+    // The nav link plus the empty state's door both route to the room.
+    expect(doors.some((d) => d.getAttribute("href") === "/calc-runs")).toBe(
+      true,
+    );
     // Warm, not urgent: no alert voice on an empty room.
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
-  it("/dashboard before data: warm sentence + the concrete first command", async () => {
+  it("/metrics before data as viewer: plain words about who computes", async () => {
     signInAs("viewer");
+    mockApi({ "GET /metrics/values": { status: 200, body: [] } });
+    renderApp("/metrics");
+
+    expect(
+      await screen.findByText(
+        /computed from the Compute figures page by a data steward, report preparer, or certifying official/,
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/python -m headway_calc\.runner/),
+    ).not.toBeInTheDocument();
+    // Viewers get no nav link to the room (UX only; the API enforces).
+    expect(
+      screen.queryByRole("link", { name: "Compute figures" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("/dashboard before data: warm sentence + the Compute figures door", async () => {
+    signInAs("data_steward");
     mockApi({
       "GET /metrics/values": { status: 200, body: [] },
       "GET /dq/issues": { status: 200, body: [] },
@@ -48,8 +73,12 @@ describe("teaching empty states (handoff 0021 #4)", () => {
       await screen.findByText(/an empty dashboard is a truthful one/),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(/python -m headway_calc\.runner/),
-    ).toBeInTheDocument();
+      screen.queryByText(/python -m headway_calc\.runner/),
+    ).not.toBeInTheDocument();
+    const doors = screen.getAllByRole("link", { name: "Compute figures" });
+    expect(doors.some((d) => d.getAttribute("href") === "/calc-runs")).toBe(
+      true,
+    );
   });
 
   it("/safety with no events: the steward gets the first action, the reader gets the orientation", async () => {

@@ -698,3 +698,49 @@ describe("/dq", () => {
     ).toHaveTextContent("250");
   });
 });
+
+describe("the deep-linked finding (/dq?issue=<id> — handoff 0026)", () => {
+  it("renders the linked finding directly (own fetch), without waiting for the queue download", async () => {
+    signInAs("data_steward");
+    mockApi({
+      ...dqRoutes([blockingIssue, warningIssue]),
+      // The whole-queue list NEVER resolves in this test — the linked
+      // finding must not depend on it (97k rows live).
+      "GET /dq/issues": () => new Promise(() => {}),
+      [`GET /dq/issues/${blockingIssue.issue_id}`]: {
+        status: 200,
+        body: blockingIssue,
+      },
+    });
+    renderApp(`/dq?issue=${blockingIssue.issue_id}`);
+
+    expect(
+      await screen.findByText("Finding opened from a link"),
+    ).toBeInTheDocument();
+    const section = screen.getByLabelText("Finding opened from a link");
+    expect(
+      within(section).getByText(blockingIssue.title),
+    ).toBeInTheDocument();
+    await expectNoAxeViolations();
+  });
+
+  it("states an unknown linked id plainly, with the server's words", async () => {
+    signInAs("data_steward");
+    mockApi({
+      ...dqRoutes([]),
+      "GET /dq/issues/does-not-exist": {
+        status: 404,
+        body: { detail: "No data-quality issue with that id exists." },
+      },
+    });
+    renderApp("/dq?issue=does-not-exist");
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(
+      /The link pointed at finding does-not-exist/,
+    );
+    expect(alert).toHaveTextContent(
+      "No data-quality issue with that id exists.",
+    );
+  });
+});

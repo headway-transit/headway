@@ -19,6 +19,7 @@ from .machine_auth import RateLimiter
 from .routers import (
     attestations,
     branding,
+    calc_runs,
     certify,
     dq,
     geometry,
@@ -72,6 +73,7 @@ def create_app(
     object_store=None,
     producer=None,
     webhook_sender=None,
+    calc_run_launcher=None,
 ) -> FastAPI:
     """Build the API.
 
@@ -85,6 +87,9 @@ def create_app(
       plain-language 503 — never a silent accept.
     - ``webhook_sender``: injected webhook HTTP seam (fake in tests); omit
       for the httpx sender (httpx is a core dependency).
+    - ``calc_run_launcher``: injected calc-run dispatch seam (handoff 0026 —
+      a fake in tests records launches instead of spawning subprocesses);
+      omit for the real background-thread launcher in routers/calc_runs.py.
     """
     app = FastAPI(
         title="Headway API",
@@ -110,6 +115,9 @@ def create_app(
         if webhook_sender is not None
         else webhooks.HttpxWebhookSender()
     )
+    # None = the real background-thread launcher (routers/calc_runs.py picks
+    # it up at request time); tests inject a recording fake.
+    app.state.calc_run_launcher = calc_run_launcher
     app.state.machine_rate_limiter = RateLimiter(
         app.state.settings.machine_requests_per_minute
     )
@@ -135,6 +143,7 @@ def create_app(
         )
 
     app.include_router(auth.router)
+    app.include_router(calc_runs.router)
     app.include_router(metrics.router)
     app.include_router(history.router)
     app.include_router(ops.router)

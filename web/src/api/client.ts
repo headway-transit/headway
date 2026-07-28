@@ -20,6 +20,9 @@ import type {
   AttestationRevokeRequest,
   AttestationRevoked,
   Branding,
+  CalcRunCreated,
+  CalcRunRecord,
+  CalcRunRequest,
   ChangeRoleResponse,
   CreateUserRequest,
   CreateUserResponse,
@@ -368,6 +371,19 @@ export function publicVerifyCertification(
 export function listDqIssues(status?: string): Promise<DqIssue[]> {
   const qs = status ? `?${new URLSearchParams({ status })}` : "";
   return request<DqIssue[]>("GET", `/dq/issues${qs}`);
+}
+
+/**
+ * GET /dq/issues/{id} (handoff 0026): one finding directly — the deep-link
+ * target a calculation refusal points at (/dq?issue=<id>). Fetched on its
+ * own so the linked finding renders immediately, independent of the
+ * whole-queue download (97k issues / hundreds of MB on the live box).
+ */
+export function getDqIssue(issueId: string): Promise<DqIssue> {
+  return request<DqIssue>(
+    "GET",
+    `/dq/issues/${encodeURIComponent(issueId)}`,
+  );
 }
 
 /**
@@ -1062,6 +1078,38 @@ export function setUserRole(
     "POST",
     `/users/${encodeURIComponent(username)}/role`,
     { role },
+  );
+}
+
+// ---- calc runs (handoff 0026) ----
+
+/**
+ * POST /calc/runs (data_steward or above — enforced server-side; audited).
+ * Asks the server to run the deterministic calculation service over one
+ * half-open period. The server dispatches the SAME runner the CLI runs, in
+ * the background; the 202 response is just the queued row — poll
+ * getCalcRun for the truth. A second request while one run is live is a
+ * 409 whose plain-language message names the live run; it renders verbatim
+ * at the control. This UI never computes a figure.
+ */
+export function startCalcRun(body: CalcRunRequest): Promise<CalcRunCreated> {
+  return request<CalcRunCreated>("POST", "/calc/runs", body);
+}
+
+/** GET /calc/runs — run history, newest first, bounded (any signed-in role). */
+export function listCalcRuns(limit?: number): Promise<CalcRunRecord[]> {
+  const qs =
+    limit !== undefined
+      ? `?${new URLSearchParams({ limit: String(limit) })}`
+      : "";
+  return request<CalcRunRecord[]>("GET", `/calc/runs${qs}`);
+}
+
+/** GET /calc/runs/{id} — one run; the poll target while a run is live. */
+export function getCalcRun(runId: string): Promise<CalcRunRecord> {
+  return request<CalcRunRecord>(
+    "GET",
+    `/calc/runs/${encodeURIComponent(runId)}`,
   );
 }
 

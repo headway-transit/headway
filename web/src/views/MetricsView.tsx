@@ -6,7 +6,7 @@ import {
   listMetricValues,
 } from "../api/client";
 import type { MetricValue } from "../api/types";
-import { canCertify, useSession } from "../auth/session";
+import { canCertify, canComputeFigures, useSession } from "../auth/session";
 import { DrScopeBadge } from "../components/DrScopeBadge";
 import { ExportButtons } from "../components/ExportButtons";
 import { OpsBadge } from "../components/OpsBadge";
@@ -89,13 +89,22 @@ export function MetricsView() {
       )}
 
       {/* Teaching empty state (handoff 0021 #4): warm + the concrete
-          first action — never a blank. */}
+          first action — never a blank. Since handoff 0026 the action is
+          the Compute figures room (authorized roles) or plain words about
+          who computes (viewers) — never a developer CLI line. */}
       {values && values.length === 0 && (
         <>
           <p>{copy.metrics.empty}</p>
-          <p>
-            {copy.metrics.emptyAction} <code>{copy.metrics.emptyCommand}</code>
-          </p>
+          {canComputeFigures(session) ? (
+            <p>
+              {copy.metrics.emptyActionAuthorized}{" "}
+              <Link to="/calc-runs">
+                {copy.metrics.emptyDoor}
+              </Link>
+            </p>
+          ) : (
+            <p>{copy.metrics.emptyActionViewer}</p>
+          )}
         </>
       )}
       {/* Skeleton (handoff 0021 #2): the table's shape while it loads. */}

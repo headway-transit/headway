@@ -133,3 +133,44 @@ def test_resolve_already_resolved_409_no_second_audit_event(client, fake_db):
     assert r.status_code == 409
     assert "already closed" in r.json()["detail"]
     assert not any(e["action"] == "dq_resolve" for e in fake_db.audit_events)
+
+
+def test_get_one_issue_by_id_any_signed_in_role(client, fake_db):
+    """GET /dq/issues/{id} (handoff 0026): the deep-link target a calc-run
+    refusal points at — served directly, never via the whole-queue list."""
+    issue = fake_db.add_dq_issue(severity="blocking", title="coverage gap")
+    r = client.get(
+        f"/dq/issues/{issue['issue_id']}", headers=auth_header(fake_db, "vera")
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["issue_id"] == issue["issue_id"]
+    assert body["severity"] == "blocking"
+    assert body["title"] == "coverage gap"
+
+
+def test_get_one_issue_unknown_and_malformed_ids_are_404(client, fake_db):
+    r = client.get(
+        "/dq/issues/00000000-0000-0000-0000-000000000000",
+        headers=auth_header(fake_db, "vera"),
+    )
+    assert r.status_code == 404
+    r = client.get(
+        "/dq/issues/not-a-uuid", headers=auth_header(fake_db, "vera")
+    )
+    assert r.status_code == 404
+    assert "No data-quality issue with that id" in r.json()["detail"]
+
+
+def test_get_one_issue_requires_authentication(client, fake_db):
+    issue = fake_db.add_dq_issue()
+    assert client.get(f"/dq/issues/{issue['issue_id']}").status_code == 401
+
+
+def test_counts_path_still_wins_over_the_id_route(client, fake_db):
+    """Route-order pin: /dq/issues/counts must resolve to the counts
+    endpoint, never capture 'counts' as an issue id."""
+    fake_db.add_dq_issue()
+    r = client.get("/dq/issues/counts", headers=auth_header(fake_db, "vera"))
+    assert r.status_code == 200
+    assert r.json()["total"] == 1
