@@ -14,7 +14,14 @@ item is one line plus the source that demands it. The roadmap is governed in the
   requester recorded). Three honest rungs: (1) **visibility** — shipped (the
   `/admin/sources` status board); (2) **connection wizard** — the UI collects and
   validates feed URLs / vendor format and emits the exact server-side configuration,
-  while apply stays a printed command (no pretending a browser changed the server);
+  while apply stays a printed command (no pretending a browser changed the server) —
+  including **feed auto-discovery** (project-lead direction, 2026-07-28): deterministic
+  first — look the agency up in the open Mobility Database catalog and live-verify
+  every candidate (valid GTFS, parseable RT, header freshness) before offering it; an
+  AI-assisted crawl of the agency's own site covers only the registry's misses, and an
+  AI-proposed URL that fails live verification is never shown or written (grounding
+  contract, services/ai); runs only on explicit admin action — consent by click, no
+  phoning home; public feeds only (vendor/APC connection stays a deliberate human act);
   (3) **apply-from-UI** — gated on settings-driven ingestion, a Platform Architect
   trust-boundary decision, not a page. *(handoff 0025 Open Questions)*
 - **In-UI update visibility** — same UAT: a "Check for updates" affordance is
