@@ -470,6 +470,15 @@ services:
     networks: [headway]
     ports:
       - "127.0.0.1:8080:8080" # nginx listens unprivileged (non-root)
+    volumes:
+      # Self-hosted basemap (handoff 0027): nginx serves /basemap/ from this
+      # read-only mount with byte-range support (PMTiles is read by ranged
+      # requests; see web/deploy/nginx.conf). The directory is tracked (its
+      # .gitignore) so the mount exists even when no basemap has been
+      # downloaded — the map then simply renders without streets. Populated
+      # only by the admin-consented `install.sh --download-basemap`; the web
+      # container itself never downloads anything.
+      - ./basemap:/basemap:ro
     depends_on:
       api:
         condition: service_healthy

@@ -2527,6 +2527,33 @@ button.figure-button {
   outline-offset: -3px;
 }
 
+/* Basemap attribution overlay (handoff 0027): visible on the canvas
+   whenever street tiles render (ODbL). Solid token surface — body text on
+   card surface is a registered AA pair in both themes — so the credit is
+   readable over any map imagery. */
+.map-canvas-wrap {
+  position: relative;
+}
+.map-attribution {
+  position: absolute;
+  right: var(--space-2);
+  bottom: var(--space-2);
+  margin: 0;
+  padding: 2px 8px;
+  font-size: 0.78rem;
+  color: var(--color-text);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-2);
+  pointer-events: none; /* never blocks map panning underneath */
+}
+/* Legend key for the street background: the map surface tone, bordered
+   with the stop tone (a registered >= 3:1 non-text pair vs --map-bg). */
+.map-key-basemap {
+  background: var(--map-bg);
+  border: 1px solid var(--map-stop);
+}
+
 .map-status {
   display: flex;
   flex-wrap: wrap;

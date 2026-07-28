@@ -1,0 +1,17 @@
+2026-07-28T22:10:41.307Z logged in as dsteward
+2026-07-28T22:10:43.900Z attribution visible on canvas: true
+2026-07-28T22:10:44.256Z shot: dsteward-map-basemap-light
+2026-07-28T22:10:44.304Z legend: basemap line + ODbL credit + limitation + schematic line all visible
+2026-07-28T22:10:45.146Z shot: dsteward-map-legend
+2026-07-28T22:10:48.737Z shot: dsteward-map-basemap-dark (attribution still visible)
+2026-07-28T22:10:52.034Z logged in as certifier
+2026-07-28T22:10:55.880Z shot: certifier-map-basemap-light (no teaching line, as designed)
+2026-07-28T22:10:57.554Z logged in as certifier
+2026-07-28T22:10:58.506Z console error: Failed to load resource: the server responded with a status of 404 (Not Found)
+2026-07-28T22:10:58.882Z console error: Failed to load resource: the server responded with a status of 404 (Not Found)
+2026-07-28T22:11:00.029Z teaching line visible for certifying official with basemap absent: true
+2026-07-28T22:11:01.036Z shot: certifier-map-absent-teaching (canvas as before, no attribution)
+2026-07-28T22:11:01.036Z basemap file restored
+2026-07-28T22:11:01.160Z network: 373 requests, origins {"http://localhost:5173":295,"http://localhost:8000":78}, external=0
+2026-07-28T22:11:01.160Z ZERO external requests with basemap present: PROVEN
+2026-07-28T22:11:01.160Z done

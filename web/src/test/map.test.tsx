@@ -29,6 +29,12 @@ vi.mock("maplibre-gl", () => {
   class FakeMap {
     handlers: Record<string, (...args: unknown[]) => void> = {};
     canvas = document.createElement("canvas");
+    /** Sources added at runtime, by id (the basemap wave asserts the
+     *  pmtiles source is only ever added in the present state). */
+    sources: Record<string, unknown> = {};
+    /** addLayer calls in order: {id, before} — pins that every basemap
+     *  street layer is inserted BELOW the schematic route lines. */
+    layerAdds: { id: string; before?: string }[] = [];
     constructor() {
       fakeMaps.push(this);
     }
@@ -42,12 +48,18 @@ vi.mock("maplibre-gl", () => {
       if (event === "load") cb();
       return this;
     }
-    addSource() {}
-    addLayer() {}
+    addSource(id: string, spec: unknown) {
+      this.sources[id] = spec;
+    }
+    addLayer(layer: { id: string }, before?: string) {
+      this.layerAdds.push({ id: layer.id, before });
+    }
+    removeLayer() {}
     getLayer() {
       return { id: "x" };
     }
-    getSource() {
+    getSource(id: string) {
+      if (id === "basemap" && !(id in this.sources)) return undefined;
       return { setData: vi.fn() };
     }
     setPaintProperty() {}
@@ -63,9 +75,13 @@ vi.mock("maplibre-gl", () => {
     easeTo = vi.fn();
     remove() {}
   }
-  return { Map: FakeMap, setWorkerUrl: () => {} };
+  return { Map: FakeMap, setWorkerUrl: () => {}, addProtocol: () => {} };
 });
-const fakeMaps: unknown[] = [];
+const fakeMaps: FakeMapShape[] = [];
+interface FakeMapShape {
+  sources: Record<string, unknown>;
+  layerAdds: { id: string; before?: string }[];
+}
 
 // ---- fixtures mirroring the live envelopes (handoff 0023 evidence) ----
 
@@ -480,5 +496,155 @@ describe("/map", () => {
       expect(call.url.startsWith("/")).toBe(true);
     }
     expect(copy.map.intro).toContain("no request ever leaves this installation");
+  });
+
+  // ---- the self-hosted basemap (handoff 0027) ----------------------------
+
+  /** The present state: HEAD answers, and the ranged GET proves both byte
+   *  ranges and the PMTiles magic — exactly what the view checks live. */
+  const basemapPresentRoutes: Record<string, RouteHandler> = {
+    "HEAD /basemap/region.pmtiles": { status: 200, rawBody: "" },
+    "GET /basemap/region.pmtiles": {
+      status: 206,
+      rawBody: "PMTiles",
+      headers: {
+        "Content-Range": "bytes 0-6/12582912",
+        "Accept-Ranges": "bytes",
+      },
+    },
+  };
+
+  it("with NO basemap downloaded, the canvas stays exactly as before: no pmtiles source, no street layers, no attribution — and no teaching line for a data steward", async () => {
+    signInAs("data_steward");
+    mockApi({
+      ...geometryRoutes(),
+      "GET /ops/vehicles/latest": { status: 200, body: vehiclesLive },
+      // DEFAULT_ROUTES already answers the HEAD with 404 (absent).
+    });
+    renderApp("/map");
+    await screen.findByText("Live — newest position at 18:17:20 UTC");
+
+    const map = fakeMaps[fakeMaps.length - 1];
+    expect("basemap" in map.sources).toBe(false);
+    expect(
+      map.layerAdds.filter((l) => l.id.startsWith("basemap-")),
+    ).toHaveLength(0);
+    expect(
+      screen.queryByText(copy.map.basemap.attribution),
+    ).not.toBeInTheDocument();
+    // The quiet teaching line is for certifying officials ONLY.
+    expect(
+      screen.queryByText(copy.map.basemap.teachingAbsent),
+    ).not.toBeInTheDocument();
+  });
+
+  it("teaches the certifying official — one quiet line naming the installer command — when no basemap exists", async () => {
+    signInAs("certifying_official");
+    mockApi({
+      ...geometryRoutes(),
+      "GET /ops/vehicles/latest": { status: 200, body: vehiclesQuiet },
+    });
+    renderApp("/map");
+
+    expect(
+      await screen.findByText(copy.map.basemap.teachingAbsent),
+    ).toBeInTheDocument();
+    expect(copy.map.basemap.teachingAbsent).toContain(
+      "./install/install.sh --download-basemap",
+    );
+  });
+
+  it("with the basemap PRESENT: the self-hosted archive becomes a source, every street layer is inserted UNDER the schematic route lines, the POI icon layer is dropped (sprites not vendored, v0), and the ODbL attribution is visible on the map and in the legend — axe green", async () => {
+    signInAs("viewer");
+    mockApi({
+      ...geometryRoutes(),
+      "GET /ops/vehicles/latest": { status: 200, body: vehiclesLive },
+      ...basemapPresentRoutes,
+    });
+    renderApp("/map");
+
+    // Attribution ON the canvas whenever tiles render — non-negotiable.
+    expect(
+      await screen.findByText("© OpenStreetMap contributors · Protomaps"),
+    ).toBeInTheDocument();
+
+    const map = fakeMaps[fakeMaps.length - 1];
+    // The one source: this installation's own archive, via pmtiles://.
+    const src = map.sources["basemap"] as { url: string; attribution: string };
+    expect(src.url).toBe(
+      `pmtiles://${window.location.origin}/basemap/region.pmtiles`,
+    );
+    expect(src.attribution).toBe(copy.map.basemap.attribution);
+    // Streets exist and sit BELOW the overlay: every basemap layer was
+    // added with beforeId "routes-line".
+    const streetAdds = map.layerAdds.filter((l) =>
+      l.id.startsWith("basemap-"),
+    );
+    expect(streetAdds.length).toBeGreaterThan(0);
+    for (const add of streetAdds) {
+      expect(add.before).toBe("routes-line");
+    }
+    // Sprites are skipped in v0: the POI icon layer is not added at all.
+    expect(streetAdds.some((l) => l.id === "basemap-pois")).toBe(false);
+
+    // The legend carries the basemap line, the ODbL credit, and the
+    // limitation in plain words — while the schematic line STAYS.
+    const legend = await screen.findByRole("region", {
+      name: "What the map shows",
+    });
+    expect(legend).toHaveTextContent(copy.map.basemap.legendLine);
+    expect(legend).toHaveTextContent(/© OpenStreetMap contributors/);
+    expect(legend).toHaveTextContent(/without point-of-interest icons/);
+    expect(legend).toHaveTextContent(GEOMETRY_NOTE);
+
+    await expectNoAxeViolations();
+  });
+
+  it("EXTENDS the zero-external-requests pin to the basemap-present state: every request stays same-origin (detection HEAD + ranged magic GET included)", async () => {
+    signInAs("viewer");
+    const calls = mockApi({
+      ...geometryRoutes(),
+      "GET /ops/vehicles/latest": { status: 200, body: vehiclesLive },
+      ...basemapPresentRoutes,
+    });
+    renderApp("/map");
+    await screen.findByText("© OpenStreetMap contributors · Protomaps");
+
+    // The detection really ran: HEAD, then a ranged GET for the magic.
+    const head = calls.find(
+      (c) => c.method === "HEAD" && c.path === "/basemap/region.pmtiles",
+    );
+    const ranged = calls.find(
+      (c) => c.method === "GET" && c.path === "/basemap/region.pmtiles",
+    );
+    expect(head).toBeDefined();
+    expect(ranged?.headers["Range"]).toBe("bytes=0-6");
+    // And EVERY request in the log — API, detection, all of it — is a
+    // same-origin relative path. Nothing leaves this installation.
+    expect(calls.length).toBeGreaterThan(0);
+    for (const call of calls) {
+      expect(call.url.startsWith("/")).toBe(true);
+    }
+  });
+
+  it("fails LOUDLY when a basemap file answers without byte-range support: plain-language alert, no attribution, no street layers (the canvas still works)", async () => {
+    signInAs("viewer");
+    mockApi({
+      ...geometryRoutes(),
+      "GET /ops/vehicles/latest": { status: 200, body: vehiclesLive },
+      "HEAD /basemap/region.pmtiles": { status: 200, rawBody: "" },
+      // A server that ignores Range answers 200 — PMTiles cannot work.
+      "GET /basemap/region.pmtiles": { status: 200, rawBody: "PMTiles" },
+    });
+    renderApp("/map");
+
+    expect(
+      await screen.findByText(copy.map.basemap.unusable),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(copy.map.basemap.attribution),
+    ).not.toBeInTheDocument();
+    const map = fakeMaps[fakeMaps.length - 1];
+    expect("basemap" in map.sources).toBe(false);
   });
 });

@@ -1,0 +1,16 @@
+# Basemap drop directory (handoff 0027). Holds region.pmtiles — the
+# OpenStreetMap-derived street map for this installation's own service
+# area, downloaded once (with consent, stated first) by:
+#
+#     ./install/install.sh --download-basemap
+#
+# Runtime data, never source (same posture as ../tides-drop): the archive
+# is generated per-installation from the agency's own stop coordinates, so
+# nothing in here is committed. This .gitignore is tracked so the directory
+# always exists in a checkout — the web container bind-mounts it read-only
+# even before any basemap has been downloaded.
+#
+# Map data © OpenStreetMap contributors (ODbL), via the Protomaps daily
+# planet build. The map UI displays that credit whenever tiles render.
+*
+!.gitignore

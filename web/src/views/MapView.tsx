@@ -7,10 +7,18 @@
  *   - live vehicles from GET /ops/vehicles/latest, polled every 20 s (the
  *     endpoint's own guidance: the upstream feed updates ~every 30 s).
  *
- * NO EXTERNAL REQUESTS OF ANY KIND: the style below is inline, has no
- * tile sources, no `glyphs`, and no `sprite`, and no symbol layer exists —
- * so MapLibre never fetches fonts, sprites, or tiles. The no-phone-home
- * posture extends to maps; the background is a styled water-tone canvas.
+ * NO EXTERNAL REQUESTS OF ANY KIND — including with the basemap (handoff
+ * 0027). The style is inline; its only `glyphs` URL points at THIS
+ * installation's own vendored font files (/basemap-fonts/, same origin),
+ * and there is no `sprite`. When no basemap has been downloaded the map is
+ * the styled water-tone canvas exactly as before, with zero symbol layers
+ * and nothing to fetch. When an administrator has run the consented
+ * `install.sh --download-basemap`, streets appear from the SELF-HOSTED
+ * /basemap/region.pmtiles archive (PMTiles read by same-origin byte-range
+ * requests) under the schematic/stops/vehicle layers — attribution
+ * "© OpenStreetMap contributors · Protomaps" visible on the canvas
+ * whenever tiles render (ODbL). Either way the network log stays
+ * same-origin only, pinned by test in BOTH states.
  *
  * Honesty surfaces, all VERBATIM from the server envelopes:
  *   - the legend states that route lines are schematic (geometry_note,
@@ -36,10 +44,21 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Map as MapLibreMap, setWorkerUrl } from "maplibre-gl";
-import type { GeoJSONSource, MapLayerMouseEvent } from "maplibre-gl";
+import { Map as MapLibreMap, addProtocol, setWorkerUrl } from "maplibre-gl";
+import type {
+  GeoJSONSource,
+  LayerSpecification,
+  MapLayerMouseEvent,
+} from "maplibre-gl";
 import type { GeoJSON } from "geojson";
 import "maplibre-gl/dist/maplibre-gl.css";
+// PMTiles protocol (BSD-3-Clause, license-gate verified): teaches MapLibre
+// to read the single self-hosted /basemap/region.pmtiles archive via
+// same-origin byte-range requests. No tile server, no external host.
+import { Protocol as PmtilesProtocol } from "pmtiles";
+// Protomaps basemap themes (BSD-3-Clause, license-gate verified): the
+// light/dark street-layer definitions rendered from the archive.
+import { labels, noLabels } from "protomaps-themes-base";
 // MapLibre's own worker-URL guess is a SIBLING maplibre-gl-worker.mjs of
 // its bundle — a file a bundled app does not serve, so sources would never
 // parse (found live: a silent stall, no dots). `?worker&url` makes vite
@@ -49,6 +68,9 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import maplibreWorkerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url";
 
 setWorkerUrl(maplibreWorkerUrl);
+// Registered once per module load; the protocol only ever fetches the URL
+// the "basemap" source names — this installation's own /basemap path.
+addProtocol("pmtiles", new PmtilesProtocol().tile);
 import {
   ApiError,
   getLatestVehicles,
@@ -65,6 +87,7 @@ import { OpsBadge } from "../components/OpsBadge";
 import { SimulatedBadge } from "../components/SimulatedBadge";
 import { Skeleton } from "../components/Skeleton";
 import { copy } from "../copy";
+import { useSession } from "../auth/session";
 import { useTheme } from "../theme";
 
 /** One async slice: skeleton → verbatim error | data (house pattern). */
@@ -98,6 +121,78 @@ const WINDOW_OPTIONS: { seconds: number; label: string }[] = [
 
 /** Vehicle rows drawn in the list view at once — the cap is STATED. */
 const LIST_CAP = 100;
+
+// ---- the self-hosted basemap (handoff 0027) --------------------------------
+
+/** The one deployed basemap file: nginx serves it from the read-only
+ *  compose mount; the vite dev middleware serves the same path in dev. */
+const BASEMAP_PATH = "/basemap/region.pmtiles";
+
+/** The single vendored glyph stack (web/public/basemap-fonts — Noto Sans
+ *  Regular, SIL OFL 1.1). Every basemap label layer is rewritten to it so
+ *  no request for an unvendored font can ever fire. */
+const BASEMAP_FONT = "Noto Sans Regular";
+
+/**
+ * Detected at runtime, never assumed:
+ *   absent   → today's canvas exactly as-is (plus one quiet teaching line
+ *              for certifying officials);
+ *   present  → streets appear, attribution appears with them;
+ *   unusable → a file answered but not as a range-readable PMTiles archive
+ *              — said plainly (fail loudly), canvas falls back.
+ */
+type BasemapState = "checking" | "absent" | "present" | "unusable";
+
+/**
+ * HEAD first (does anything exist?), then a ranged GET of the archive's
+ * first 7 bytes — which verifies BOTH that byte ranges work through the
+ * serving stack (PMTiles requires them) and that the bytes are a PMTiles
+ * archive (magic "PMTiles"). Same-origin throughout.
+ */
+async function detectBasemap(): Promise<Exclude<BasemapState, "checking">> {
+  try {
+    const head = await fetch(BASEMAP_PATH, { method: "HEAD" });
+    if (!head.ok) return "absent";
+    const ranged = await fetch(BASEMAP_PATH, {
+      headers: { Range: "bytes=0-6" },
+    });
+    if (ranged.status !== 206) return "unusable";
+    const magic = new TextDecoder().decode(await ranged.arrayBuffer());
+    return magic.startsWith("PMTiles") ? "present" : "unusable";
+  } catch {
+    // No answer at all: treated as no basemap — the map never blocks on it.
+    return "absent";
+  }
+}
+
+/**
+ * The Protomaps street layers for one theme, adapted to this page's rules:
+ *   - ids namespaced "basemap-*" (this style already owns "background");
+ *   - the theme's own background dropped (the token water-tone canvas
+ *     stays, so the area outside the extracted region looks unchanged);
+ *   - the POI icon layer dropped and icon references stripped — sprites
+ *     are not vendored in v0 (limitation stated in the legend);
+ *   - every label layer forced onto the one vendored glyph stack.
+ */
+function basemapLayerSpecs(theme: "light" | "dark"): LayerSpecification[] {
+  const specs = [
+    ...noLabels("basemap", theme),
+    ...labels("basemap", theme, "en"),
+  ] as LayerSpecification[];
+  const out: LayerSpecification[] = [];
+  for (const spec of specs) {
+    if (spec.id === "background" || spec.id === "pois") continue;
+    const layer = JSON.parse(JSON.stringify(spec)) as LayerSpecification;
+    layer.id = `basemap-${layer.id}`;
+    if (layer.type === "symbol" && layer.layout) {
+      const layout = layer.layout as Record<string, unknown>;
+      if (layout["text-font"]) layout["text-font"] = [BASEMAP_FONT];
+      delete layout["icon-image"];
+    }
+    out.push(layer);
+  }
+  return out;
+}
 
 /** Map paint tokens, resolved from the stylesheet per theme (the canvas
  *  cannot read CSS custom properties itself). */
@@ -165,9 +260,14 @@ function quietDuration(res: OpsVehiclesLatest): string | null {
 
 export function MapView() {
   const theme = useTheme();
+  const session = useSession();
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
   const [mapReady, setMapReady] = useState(false);
+  const [basemap, setBasemap] = useState<BasemapState>("checking");
+  /** The basemap layer ids currently on the map (theme swaps remove and
+   *  re-add them; the overlay layers are never touched). */
+  const basemapLayerIds = useRef<string[]>([]);
 
   const [stops, setStops] = useState<Load<StopsCollection>>(LOADING);
   const [routes, setRoutes] = useState<Load<RoutesCollection>>(LOADING);
@@ -190,10 +290,14 @@ export function MapView() {
     const colors = mapColors();
     const map = new MapLibreMap({
       container: containerRef.current,
-      // Inline style, background only: NO tiles, NO glyphs, NO sprite —
-      // nothing for MapLibre to fetch. Zero external requests, by design.
+      // Inline style: no tile sources, no sprite. The one glyphs URL is
+      // THIS installation's own vendored font path (same origin) — and
+      // with no symbol layers in the style, nothing is fetched at all
+      // until (and unless) the self-hosted basemap is detected. Zero
+      // external requests, by design, in both states.
       style: {
         version: 8,
+        glyphs: `${window.location.origin}/basemap-fonts/{fontstack}/{range}.pbf`,
         sources: {},
         layers: [
           {
@@ -313,6 +417,43 @@ export function MapView() {
       map.setPaintProperty("vehicles-selected", "circle-stroke-color", c.vehicle);
     }
   }, [theme, mapReady]);
+
+  // ---- the self-hosted basemap: detected, never assumed ----
+  useEffect(() => {
+    let cancelled = false;
+    detectBasemap().then((state) => {
+      if (!cancelled) setBasemap(state);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Streets under everything: the archive source plus the theme's street
+  // layers, inserted BEFORE the schematic route lines so stops, routes and
+  // vehicles always draw on top. Theme switches swap the street layers in
+  // place; the overlay layers and their data are never touched.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady || basemap !== "present") return;
+    if (!map.getSource("basemap")) {
+      map.addSource("basemap", {
+        type: "vector",
+        url: `pmtiles://${window.location.origin}${BASEMAP_PATH}`,
+        // MapLibre-level attribution metadata; the VISIBLE credit is the
+        // always-on overlay + legend (ODbL is honored conspicuously).
+        attribution: copy.map.basemap.attribution,
+      });
+    }
+    for (const id of basemapLayerIds.current) {
+      if (map.getLayer(id)) map.removeLayer(id);
+    }
+    const specs = basemapLayerSpecs(theme);
+    for (const spec of specs) {
+      map.addLayer(spec, "routes-line");
+    }
+    basemapLayerIds.current = specs.map((s) => s.id);
+  }, [mapReady, basemap, theme]);
 
   // ---- geometry: fetched once ----
   useEffect(() => {
@@ -538,6 +679,13 @@ export function MapView() {
           {routes.message}
         </div>
       )}
+      {/* Fail loudly: a basemap file that answered wrong is SAID, not
+          silently skipped (the canvas still works without it). */}
+      {basemap === "unusable" && (
+        <div role="alert" className="alert">
+          {t.basemap.unusable}
+        </div>
+      )}
       {/* The server's own staleness/emptiness note, verbatim. */}
       {res?.note && <p className="banner">{res.note}</p>}
       {res && res.vehicle_count === 0 && (
@@ -567,13 +715,21 @@ export function MapView() {
       )}
 
       {/* ---- the canvas (presentation; equivalents beside it) ---- */}
-      <div
-        ref={containerRef}
-        className="map-canvas"
-        role="application"
-        aria-label={t.canvasLabel}
-        data-testid="map-canvas"
-      />
+      <div className="map-canvas-wrap">
+        <div
+          ref={containerRef}
+          className="map-canvas"
+          role="application"
+          aria-label={t.canvasLabel}
+          data-testid="map-canvas"
+        />
+        {/* ODbL attribution — visible ON the map whenever street tiles
+            render. Non-negotiable (handoff 0027); solid token surface so
+            the credit is readable over any imagery, both themes. */}
+        {basemap === "present" && (
+          <p className="map-attribution">{t.basemap.attribution}</p>
+        )}
+      </div>
 
       {/* ---- legend: the schematic honesty is VISIBLE ---- */}
       <section aria-label={t.legend.heading} className="map-legend">
@@ -591,13 +747,34 @@ export function MapView() {
             <span className="map-key map-key-vehicle" aria-hidden="true" />
             {t.legend.vehicles}
           </li>
+          {basemap === "present" && (
+            <li>
+              <span className="map-key map-key-basemap" aria-hidden="true" />
+              {t.basemap.legendLine}
+            </li>
+          )}
         </ul>
         {routes.state === "ready" && (
           <p className="chart-desc">
             {t.legend.schematicIntro} {routes.data.geometry_note}
           </p>
         )}
+        {/* Basemap present: the legend carries the ODbL credit and the
+            recorded v0 limitation (no POI icons); the schematic line above
+            STAYS — streets underneath change nothing about route honesty. */}
+        {basemap === "present" && (
+          <>
+            <p className="chart-desc">{t.basemap.legendCredit}</p>
+            <p className="chart-desc">{t.basemap.legendLimit}</p>
+          </>
+        )}
       </section>
+
+      {/* Quiet teaching line — certifying officials only, basemap absent:
+          the one person who could act learns the installer command. */}
+      {basemap === "absent" && session?.role === "certifying_official" && (
+        <p className="chart-desc">{t.basemap.teachingAbsent}</p>
+      )}
 
       {/* ---- selected vehicle details ---- */}
       {selected && (

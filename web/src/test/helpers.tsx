@@ -71,6 +71,11 @@ export type RouteHandler =
  * Tests exercising branding override the route.
  */
 const DEFAULT_ROUTES: Record<string, RouteHandler> = {
+  // The map detects the self-hosted basemap at runtime (handoff 0027) with
+  // a HEAD of /basemap/region.pmtiles. Default: 404 — no basemap
+  // downloaded, the canvas exactly as before. Basemap-present tests
+  // override this route (and the ranged GET) explicitly.
+  "HEAD /basemap/region.pmtiles": { status: 404, body: null },
   "GET /branding": {
     status: 200,
     body: {

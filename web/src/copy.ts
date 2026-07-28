@@ -1819,6 +1819,38 @@ export const copy = {
     /** Truncation honesty (cap fields from the envelopes), lead-in only —
      *  the server's own note renders verbatim. */
     truncatedIntro: "The server sent a bounded set, in its own words:",
+
+    /**
+     * The self-hosted basemap (handoff 0027). The street map is an
+     * OpenStreetMap-derived PMTiles archive for THIS agency's own service
+     * area, downloaded ONCE by an administrator with stated consent
+     * (install.sh --download-basemap) and served from this installation —
+     * the map page itself still makes zero external requests. Attribution
+     * is non-negotiable (ODbL): the credit is visible on the map whenever
+     * street tiles render.
+     */
+    basemap: {
+      /** ON the canvas whenever tiles render (ODbL requires the credit;
+       *  Protomaps built the archive format + daily extract source). */
+      attribution: "© OpenStreetMap contributors · Protomaps",
+      /** Legend entries for the basemap-present state. */
+      legendLine:
+        "Street map background — OpenStreetMap data stored on this computer; no request leaves this installation to draw it.",
+      legendCredit:
+        "Map data © OpenStreetMap contributors (Open Database License), extracted via Protomaps. Full credit: openstreetmap.org/copyright",
+      /** The recorded v0 limitation, stated where people look (sprites are
+       *  not vendored; labels use one vendored typeface). */
+      legendLimit:
+        "This first version shows streets and place names, without point-of-interest icons. Route lines stay schematic — the streets underneath are context, not the path vehicles drive.",
+      /** Quiet teaching line — certifying officials only, basemap absent:
+       *  names the installer command an administrator would run. */
+      teachingAbsent:
+        "Want streets under this map? An administrator can add an OpenStreetMap background for your service area — one consented download, stored on this computer — by running: ./install/install.sh --download-basemap",
+      /** Fail-loudly: a file exists at /basemap/region.pmtiles but cannot
+       *  be used. Stated plainly, never silently ignored. */
+      unusable:
+        "A basemap file exists on this installation but could not be used: the server did not answer a byte-range request with the expected map-archive format. The map falls back to the plain canvas. An administrator can re-run ./install/install.sh --download-basemap to replace the file.",
+    },
   },
 
   /**

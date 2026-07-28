@@ -226,6 +226,17 @@ asking for help.
   update: every downloaded image's signature is verified before anything
   switches, your data is never touched, and the way back is printed at the
   end. The full story: [`docs/updating.md`](../docs/updating.md).
+- **Put streets under the Live map** (optional): `./install/install.sh
+  --download-basemap`. The Live map draws your stops, routes and vehicles
+  with no outside map service at all; this command adds an OpenStreetMap
+  street background for your own service area. It is the one Headway
+  feature that downloads map data from the internet — and it happens only
+  right there, after the command explains exactly what it will fetch
+  (usually 10–50 MB, © OpenStreetMap contributors) and you say yes. The
+  map is stored on this computer; the map page itself never contacts the
+  internet. Re-run the command whenever you want newer map data. The full
+  story, including the path for computers with no internet access, is in
+  [`docs/basemap.md`](../docs/basemap.md).
 - **Forgot a sign-in password?** No reinstall needed. On the server, run
   `./install/install.sh --reset-admin-password` — it asks which account
   (and lists the existing usernames if you cannot remember those either),

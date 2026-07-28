@@ -74,9 +74,23 @@ CHECK_UPDATES=0
 UPGRADE=0
 RESET_PASSWORD=0
 UPDATE_SOURCE=0
+DOWNLOAD_BASEMAP=0
 UPGRADE_TARGET=""
 FAILURES=0
 WARNINGS=0
+
+# --- Basemap download pins (--download-basemap; handoff 0027) -----------------
+# The go-pmtiles release the basemap download uses, pinned by version AND
+# by the sha256 of each Linux tarball (same rigor as the cosign story in
+# --upgrade: nothing downloaded is run before it is verified). Computed
+# 2026-07-28 from https://github.com/protomaps/go-pmtiles/releases v1.31.2
+# and recorded here; a new version means updating all three lines together.
+PMTILES_VERSION="1.31.2"
+PMTILES_SHA256_X86_64="3ed7dbf4ec2e6dfe5e25b6f70d1ffc932729f93c86db353bf514dd71010a312f"
+PMTILES_SHA256_ARM64="f8bd47e7ea866863489cad588fbaf2f31f42e5821f7a03f009b3769f05801cb1"
+# Margin added around the stops' own bounding box, in degrees (~0.1° is
+# about 7 miles north-south). Stated to the user before anything downloads.
+BASEMAP_MARGIN_DEG="0.10"
 
 # Network access ("Where will people use Headway from?"), see docs/network-access.md.
 #   local = just this computer (default)   lan = other computers in the office
@@ -178,6 +192,20 @@ Usage:
                                   data is never touched. Installations
                                   that follow signed releases update with
                                   --upgrade instead.
+  ./install/install.sh --download-basemap
+                                  Add (or refresh) a street map for your
+                                  service area on the Live map page. This
+                                  is the ONE Headway feature that fetches
+                                  map data from the internet, and it only
+                                  ever happens right here, after this
+                                  command explains what it will download
+                                  and you say yes. The map data is from
+                                  OpenStreetMap (© OpenStreetMap
+                                  contributors), covers just your agency's
+                                  own service area, and is stored on this
+                                  computer — the map page itself never
+                                  contacts the internet. Safe to re-run
+                                  any time you want newer map data.
   ./install/install.sh --reset-admin-password
                                   Forgot a Headway sign-in password? This
                                   sets a new one for an existing account,
@@ -204,6 +232,7 @@ for arg in "$@"; do
     --upgrade) UPGRADE=1 ;;
     --reset-admin-password) RESET_PASSWORD=1 ;;
     --update-from-source) UPDATE_SOURCE=1 ;;
+    --download-basemap) DOWNLOAD_BASEMAP=1 ;;
     v[0-9]*)
       # A release version like v0.2.0-alpha — only meaningful with --upgrade.
       if ! printf '%s' "$arg" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.-]+)?$'; then
@@ -1425,6 +1454,343 @@ update_from_source() {
   say "update, reload it once (Ctrl+Shift+R) to pick up the new version."
 }
 
+# --- Basemap download (--download-basemap) ---------------------------------------
+# Design contract: docs/handoffs/0027-from-platform-to-frontend-devops-basemap.md.
+# Plain-language guide for agencies: docs/basemap.md.
+#
+# Consent posture, same as --check-updates/--upgrade: Headway NEVER fetches
+# map data on its own. This command states plainly what it will download and
+# from where, BEFORE any network contact, and only acts after you say yes.
+# Re-running it later (for newer map data) is the same consent again.
+# Everything downloaded is verified (pinned sha256) before it runs, and the
+# map file is written atomically — a failed run leaves nothing half-written.
+
+# The area to download, filled by basemap_choose_area (west,south,east,north).
+BM_WEST=""; BM_SOUTH=""; BM_EAST=""; BM_NORTH=""
+
+# Validate "a decimal number" without surprises (leading -, one dot).
+is_number() { printf '%s' "$1" | grep -Eq '^-?[0-9]+(\.[0-9]+)?$'; }
+
+# Ask for the four map-area numbers by hand (the fallback when no stop
+# coordinates exist yet, or the computed box is refused). Plain words first.
+basemap_ask_area() {
+  say ""
+  say "   Please type the map area as four numbers separated by commas:"
+  say "       west,south,east,north"
+  say "   'West' and 'east' are longitudes (east-west position, -180 to 180,"
+  say "   negative in the Americas); 'south' and 'north' are latitudes"
+  say "   (north-south position, -90 to 90). Any map website shows these —"
+  say "   right-click a spot southwest of your service area for the first"
+  say "   two, northeast of it for the last two."
+  say "   Example (the Tri-Cities area of Washington state):"
+  say "       -119.55,46.05,-118.85,46.45"
+  local typed w s e n
+  while true; do
+    printf '   Map area (west,south,east,north): '
+    read -r typed
+    w="$(printf '%s' "$typed" | cut -d, -f1 | tr -d ' ')"
+    s="$(printf '%s' "$typed" | cut -d, -f2 | tr -d ' ')"
+    e="$(printf '%s' "$typed" | cut -d, -f3 | tr -d ' ')"
+    n="$(printf '%s' "$typed" | cut -d, -f4 | tr -d ' ')"
+    if is_number "$w" && is_number "$s" && is_number "$e" && is_number "$n" \
+       && awk -v w="$w" -v s="$s" -v e="$e" -v n="$n" \
+         'BEGIN { exit !(w >= -180 && e <= 180 && w < e && s >= -90 && n <= 90 && s < n) }'; then
+      BM_WEST="$w"; BM_SOUTH="$s"; BM_EAST="$e"; BM_NORTH="$n"
+      return 0
+    fi
+    say "   That does not look like a valid area. Four numbers, separated by"
+    say "   commas; west smaller than east, south smaller than north."
+  done
+}
+
+# Compute the area from the agency's OWN stop coordinates (canonical.stops)
+# via the standard one-off container psql pattern, plus the stated margin.
+# Falls back to asking when there are no stops (or no reachable database).
+basemap_choose_area() {
+  local bbox_row="" count="" minlon="" minlat="" maxlon="" maxlat=""
+  if docker info >/dev/null 2>&1 \
+     && docker ps --format '{{.Names}}' 2>/dev/null | grep -q 'timescaledb'; then
+    local pg_user pg_db pg_pass
+    pg_user="$(read_env_value POSTGRES_USER)"; pg_user="${pg_user:-headway}"
+    pg_db="$(read_env_value POSTGRES_DB)";     pg_db="${pg_db:-headway}"
+    pg_pass="$(read_env_value POSTGRES_PASSWORD)"
+    # PGPASSWORD travels via environment inheritance; never on a command line.
+    bbox_row="$(PGPASSWORD="$pg_pass" docker run --rm \
+      --network "$(compose_network)" \
+      -e PGHOST=timescaledb -e PGPORT=5432 \
+      -e PGUSER="$pg_user" -e PGPASSWORD -e PGDATABASE="$pg_db" \
+      timescale/timescaledb:latest-pg16 \
+      psql -Atc "SELECT count(*), min(longitude), min(latitude), max(longitude), max(latitude) FROM canonical.stops WHERE longitude IS NOT NULL AND latitude IS NOT NULL" \
+      2>>"$LOG_FILE" || true)"
+    count="$(printf '%s' "$bbox_row" | cut -d'|' -f1)"
+    minlon="$(printf '%s' "$bbox_row" | cut -d'|' -f2)"
+    minlat="$(printf '%s' "$bbox_row" | cut -d'|' -f3)"
+    maxlon="$(printf '%s' "$bbox_row" | cut -d'|' -f4)"
+    maxlat="$(printf '%s' "$bbox_row" | cut -d'|' -f5)"
+  else
+    note "Headway's database is not running right now, so the map area"
+    fixln "cannot be read from your stop locations. You can type it instead."
+  fi
+
+  if [ -n "$count" ] && [ "$count" -gt 0 ] 2>/dev/null \
+     && is_number "$minlon" && is_number "$minlat" \
+     && is_number "$maxlon" && is_number "$maxlat"; then
+    # The stops' own box + the stated margin, rounded to 4 decimal places.
+    BM_WEST="$(awk -v v="$minlon" -v m="$BASEMAP_MARGIN_DEG" 'BEGIN { printf "%.4f", v - m }')"
+    BM_SOUTH="$(awk -v v="$minlat" -v m="$BASEMAP_MARGIN_DEG" 'BEGIN { printf "%.4f", v - m }')"
+    BM_EAST="$(awk -v v="$maxlon" -v m="$BASEMAP_MARGIN_DEG" 'BEGIN { printf "%.4f", v + m }')"
+    BM_NORTH="$(awk -v v="$maxlat" -v m="$BASEMAP_MARGIN_DEG" 'BEGIN { printf "%.4f", v + m }')"
+    say ""
+    say "Your map area, read from your own data: this installation has"
+    say "$count stops with coordinates, spanning"
+    say "    longitude $minlon to $maxlon, latitude $minlat to $maxlat."
+    say "With a margin of about 7 miles ($BASEMAP_MARGIN_DEG degrees) around the"
+    say "edge, the map would cover:"
+    say "    west $BM_WEST   south $BM_SOUTH   east $BM_EAST   north $BM_NORTH"
+    log "basemap area from canonical.stops: $count stops, bbox $BM_WEST,$BM_SOUTH,$BM_EAST,$BM_NORTH"
+    local answer
+    printf 'Use this area? (yes = use it / no = type a different one): '
+    read -r answer
+    case "$answer" in
+      y|Y|yes|YES|Yes) return 0 ;;
+      *) basemap_ask_area ;;
+    esac
+  else
+    if [ "${count:-}" = "0" ]; then
+      say ""
+      say "No stops with coordinates exist in this installation yet (the map"
+      say "area is normally read from your own schedule data). You can type"
+      say "the area instead — or ingest your GTFS schedule first and re-run"
+      say "this command to have it computed for you."
+    fi
+    basemap_ask_area
+  fi
+
+  # A very large area means a very large download; say so before consent.
+  if awk -v w="$BM_WEST" -v e="$BM_EAST" -v s="$BM_SOUTH" -v n="$BM_NORTH" \
+       'BEGIN { exit !((e - w) > 5 || (n - s) > 5) }'; then
+    warn "That area is more than 5 degrees across — several hundred miles."
+    fixln "The download will be much larger than the typical 10–50 MB, and"
+    fixln "Headway's map only needs your service area. Consider re-running"
+    fixln "with a smaller area unless this is intended."
+  fi
+}
+
+download_basemap() {
+  blank
+  say "--- Adding a street map for your service area ---"
+
+  if [ ! -f "$ENV_FILE" ]; then
+    fail "No Headway configuration file was found at"
+    fixln "$ENV_FILE, so there is no installation to add a"
+    fixln "map to. To install Headway first, run: ./install/install.sh"
+    exit 1
+  fi
+  if [ "$ASSUME_YES" -eq 1 ]; then
+    fail "This command downloads map data from the internet, so it always"
+    fixln "asks a person for consent first — it cannot run with --yes."
+    fixln "Run it without --yes and answer the questions."
+    exit 1
+  fi
+  require_curl
+
+  local arch sha
+  case "$(uname -m)" in
+    x86_64|amd64)  arch="x86_64"; sha="$PMTILES_SHA256_X86_64" ;;
+    aarch64|arm64) arch="arm64";  sha="$PMTILES_SHA256_ARM64" ;;
+    *)
+      fail "This computer's processor type ($(uname -m)) has no pinned"
+      fixln "map-extract tool build. Headway supports x86_64 and arm64 here."
+      fixln "See docs/basemap.md for the air-gapped path (run the extract on"
+      fixln "another computer and copy the file in)."
+      exit 1
+      ;;
+  esac
+
+  local basemap_dir="$COMPOSE_DIR/basemap"
+  local basemap_file="$basemap_dir/region.pmtiles"
+  mkdir -p "$basemap_dir"
+  # Unlike everything else this installer writes (umask 077 — private), the
+  # basemap is PUBLIC map data the web container's own nginx user must be
+  # able to read through the read-only mount. World-readable, deliberately.
+  # (Found live 2026-07-28: a 600 file answers 403 through nginx.)
+  chmod 755 "$basemap_dir"
+
+  # WHAT this does — stated plainly BEFORE any network contact.
+  say ""
+  say "Headway's Live map normally draws only your own data. This command"
+  say "adds a street map background for your service area. Here is exactly"
+  say "what will happen, and nothing else:"
+  say ""
+  say "  1. It figures out the map area from your own stop locations (or"
+  say "     asks you), and shows it to you before anything downloads."
+  say "  2. With your consent, it contacts the internet ONCE, for two"
+  say "     things: the map-extract tool from github.com (about 17 MB,"
+  say "     checked against a pinned fingerprint before it is run), and"
+  say "     your area's map data from build.protomaps.com (usually"
+  say "     10–50 MB for a service area)."
+  say "  3. The map data is saved as one file on this computer:"
+  say "     $basemap_file"
+  say "     After that, Headway never contacts either site again — the map"
+  say "     page serves the file from this computer only. When you want"
+  say "     newer map data (new streets get built), re-run this command."
+  say ""
+  say "The map data is from OpenStreetMap, © OpenStreetMap contributors,"
+  say "under the Open Database License; the map will always display that"
+  say "credit. The extract comes from Protomaps' daily build of it."
+  say ""
+
+  if [ -f "$basemap_file" ]; then
+    local existing_size existing_date
+    existing_size="$(du -h "$basemap_file" 2>/dev/null | cut -f1)"
+    existing_date="$(date -r "$basemap_file" '+%Y-%m-%d' 2>/dev/null || echo unknown)"
+    say "A street map already exists on this computer ($existing_size,"
+    say "downloaded $existing_date). You can keep it or replace it with"
+    say "fresh map data."
+    local keep_answer
+    printf 'Replace it with fresh map data? (yes = replace / no = keep it): '
+    read -r keep_answer
+    case "$keep_answer" in
+      y|Y|yes|YES|Yes) : ;;
+      *)
+        say "Keeping the existing map. Nothing was downloaded or changed."
+        log "download-basemap: kept existing $basemap_file"
+        exit 0
+        ;;
+    esac
+  fi
+
+  basemap_choose_area
+
+  say ""
+  say "Ready to download. One more time, in one line: this contacts"
+  say "github.com and build.protomaps.com once, downloads the map for the"
+  say "area above, saves it on this computer, and never phones anywhere"
+  say "again."
+  local consent
+  printf 'Download the map now? (yes/no): '
+  read -r consent
+  case "$consent" in
+    y|Y|yes|YES|Yes) : ;;
+    *)
+      say "Stopping at your request. Nothing was downloaded; nothing changed."
+      log "download-basemap: consent declined"
+      exit 0
+      ;;
+  esac
+  log "download-basemap: consent given for bbox $BM_WEST,$BM_SOUTH,$BM_EAST,$BM_NORTH"
+
+  # Everything below is network + temp files. The workspace lives INSIDE
+  # the basemap directory so the final move is an atomic same-filesystem
+  # rename; any failure leaves the old map (if any) untouched.
+  local workdir
+  workdir="$(mktemp -d "$basemap_dir/.download.XXXXXX")"
+  # shellcheck disable=SC2064
+  trap "rm -rf '$workdir'" EXIT
+
+  # 1. The most recent available daily build: probe today, step back a few
+  # days (the day's build appears partway through the day, UTC).
+  blank
+  say "--- Finding the most recent map-data build ---"
+  local build_day="" d candidate
+  for d in 0 1 2 3 4; do
+    candidate="$(date -u -d "-$d day" '+%Y%m%d')"
+    if curl -sIf --max-time 20 "https://build.protomaps.com/$candidate.pmtiles" >/dev/null 2>&1; then
+      build_day="$candidate"
+      break
+    fi
+  done
+  if [ -z "$build_day" ]; then
+    fail "No daily map-data build from the last 5 days answered at"
+    fixln "build.protomaps.com. Usually this means no internet connection"
+    fixln "from this computer, or the site is briefly unreachable. Nothing"
+    fixln "was changed; try again later."
+    exit 1
+  fi
+  ok "Using the map-data build of $build_day."
+  log "download-basemap: daily build $build_day"
+
+  # 2. The map-extract tool, pinned version + pinned sha256. Nothing
+  # downloaded is run before its fingerprint matches.
+  blank
+  say "--- Downloading the map-extract tool (verified before use) ---"
+  local tool_url="https://github.com/protomaps/go-pmtiles/releases/download/v$PMTILES_VERSION/go-pmtiles_${PMTILES_VERSION}_Linux_$arch.tar.gz"
+  if ! curl -fL --max-time 300 -o "$workdir/go-pmtiles.tar.gz" "$tool_url" 2>>"$LOG_FILE"; then
+    fail "Downloading the map-extract tool failed (the address was"
+    fixln "$tool_url )."
+    fixln "Nothing was changed; it is safe to run this command again."
+    exit 1
+  fi
+  if ! printf '%s  %s\n' "$sha" "$workdir/go-pmtiles.tar.gz" | sha256sum -c --quiet - >>"$LOG_FILE" 2>&1; then
+    fail "The downloaded map-extract tool does NOT match the fingerprint"
+    fixln "pinned in this installer, so Headway refuses to run it and has"
+    fixln "deleted it. That can be a corrupted download — or someone"
+    fixln "offering you software that is not the real tool. Try again; if"
+    fixln "it keeps failing, report it (SECURITY.md) — do not work around"
+    fixln "it."
+    exit 1
+  fi
+  ok "The tool's fingerprint matches the one pinned in this installer."
+  tar -xzf "$workdir/go-pmtiles.tar.gz" -C "$workdir" pmtiles
+  chmod +x "$workdir/pmtiles"
+  log "download-basemap: go-pmtiles v$PMTILES_VERSION ($arch) verified sha256=$sha"
+
+  # 3. The extract itself: only the tiles inside the area are fetched (the
+  # tool reads the big planet file with ranged requests — it does NOT
+  # download the whole planet).
+  blank
+  say "--- Downloading your area's map data ---"
+  say "(This reads just your area out of the big daily map file — the whole"
+  say "file is never downloaded.)"
+  blank
+  if ! "$workdir/pmtiles" extract "https://build.protomaps.com/$build_day.pmtiles" \
+      "$workdir/region.pmtiles" \
+      --bbox="$BM_WEST,$BM_SOUTH,$BM_EAST,$BM_NORTH" 2>&1 | tee -a "$LOG_FILE"; then
+    blank
+    fail "Downloading the map data failed (details above and in $LOG_FILE)."
+    fixln "Any existing map on this computer is untouched. It is safe to"
+    fixln "run this command again."
+    exit 1
+  fi
+
+  # 4. Sanity-check the produced archive before it replaces anything.
+  if ! "$workdir/pmtiles" show "$workdir/region.pmtiles" >>"$LOG_FILE" 2>&1; then
+    fail "The downloaded map file did not verify as a readable map archive."
+    fixln "Any existing map on this computer is untouched. It is safe to"
+    fixln "run this command again. Details are in $LOG_FILE."
+    exit 1
+  fi
+
+  # 5. Atomic move into place (same filesystem, single rename). Readable by
+  # everyone FIRST — it is public map data, and the web container's nginx
+  # user reads it through the mount (the umask-077 default would 403).
+  chmod 644 "$workdir/region.pmtiles"
+  mv -f "$workdir/region.pmtiles" "$basemap_file"
+  local final_size
+  final_size="$(du -h "$basemap_file" | cut -f1)"
+  ok "Street map saved: $basemap_file ($final_size)."
+  log "download-basemap: wrote $basemap_file ($final_size, build $build_day)"
+
+  blank
+  say "=================================================================="
+  say " The street map is ready"
+  say "=================================================================="
+  say ""
+  say "Open the Live map page and reload it (Ctrl+Shift+R): streets appear"
+  say "under your stops and routes, with the OpenStreetMap credit shown on"
+  say "the map. No internet connection is used to draw it — ever."
+  say ""
+  say "If Headway's website was already running when you ran this command"
+  say "for the FIRST time after updating Headway, refresh the services once"
+  say "so the website container can see the new file:"
+  say "    docker compose --project-directory $COMPOSE_DIR --profile app up -d"
+  say ""
+  say "When you want newer map data (streets change slowly — once or twice"
+  say "a year is plenty), just run this command again. The full story, and"
+  say "the path for computers with no internet access, is in"
+  say "docs/basemap.md."
+}
+
 # --- Step 7: summary -------------------------------------------------------------
 
 print_summary() {
@@ -2006,11 +2372,12 @@ fi
 # Modes are one at a time; each promises something different (--check and
 # --check-updates promise to change nothing; --upgrade and
 # --reconfigure-access exist to change things).
-MODES=$((CHECK_ONLY + RECONFIGURE + CHECK_UPDATES + UPGRADE + RESET_PASSWORD + UPDATE_SOURCE))
+MODES=$((CHECK_ONLY + RECONFIGURE + CHECK_UPDATES + UPGRADE + RESET_PASSWORD + UPDATE_SOURCE + DOWNLOAD_BASEMAP))
 if [ "$MODES" -gt 1 ]; then
   fail "Those options cannot be combined. Please run one at a time:"
   fixln "--check, --check-updates, --upgrade, --reconfigure-access,"
-  fixln "--reset-admin-password, or --update-from-source."
+  fixln "--reset-admin-password, --update-from-source, or"
+  fixln "--download-basemap."
   exit 1
 fi
 
@@ -2026,6 +2393,11 @@ fi
 
 if [ "$UPDATE_SOURCE" -eq 1 ]; then
   update_from_source
+  exit 0
+fi
+
+if [ "$DOWNLOAD_BASEMAP" -eq 1 ]; then
+  download_basemap
   exit 0
 fi
 
