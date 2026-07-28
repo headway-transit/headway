@@ -71,3 +71,4 @@ CLAUDE.md
 CLAUDE.local.md
 .claude/*
 !.claude/roles/
+deploy/compose/vendor-drop/

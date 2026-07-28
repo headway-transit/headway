@@ -219,6 +219,32 @@ you need to put it behind your own HTTPS reverse proxy with a certificate
 — the compose stack does not expose it publicly or terminate TLS for you
 today. Never send API keys over plain HTTP across a network.
 
+### Path C: your vendor system's own export files (adapters)
+
+If Headway has an **adapter** for your vendor's native export format, you
+do not need to reshape anything — drop the file your system already
+produces. Today's adapters: **TripSpark Streets APC** (label
+`tripspark_streets` — the headerless positional CSV its data warehouse
+exports). Two lines in `deploy/compose/.env` switch the path on:
+
+```
+VENDOR_DROP_DIR=/data/vendor-drop
+VENDOR_SOURCE=tripspark_streets
+```
+
+Restart the ingestion service once after setting them
+(`docker compose --profile app restart ingestion` from `deploy/compose`).
+From then on, files copied into `deploy/compose/vendor-drop/` are picked
+up **automatically within about half a minute** — no restart per file.
+Handled files move to `vendor-drop/processed/`; identical bytes are never
+double-counted. Every record carries dual lineage: the raw vendor file
+AND the exact adapter mapping version that interpreted it.
+
+The label is fail-closed in both directions: an unregistered
+`VENDOR_SOURCE` is refused outright, and synthetic/test files must never
+be dropped under a real vendor label — test data belongs in Path A with
+the `tides_simulated` label, where every figure it touches is flagged.
+
 ## 4. "My data lives in SQL Server / a data lake"
 
 The honest answer: **today Headway has no direct database or data-lake

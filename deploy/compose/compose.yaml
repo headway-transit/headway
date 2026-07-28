@@ -328,9 +328,17 @@ services:
       # tides_simulated (binding rule, contracts/topics.v0.md).
       TIDES_DROP_DIR: /data/tides-drop
       TIDES_SOURCE: ${TIDES_SOURCE:-tides_simulated}
+      # Native vendor-export drop (handoff 0015). OFF unless BOTH vars are
+      # set in .env (the connector refuses a drop dir with no source label —
+      # fail-closed). VENDOR_SOURCE must name a registered adapter label
+      # (e.g. tripspark_streets); the folder is scanned every POLL_INTERVAL.
+      VENDOR_DROP_DIR: ${VENDOR_DROP_DIR:-}
+      VENDOR_SOURCE: ${VENDOR_SOURCE:-}
     volumes:
       # Writable: the connector moves handled files to processed/ inside it.
       - ./tides-drop:/data/tides-drop
+      # Writable for the same reason; harmless when the vendor drop is off.
+      - ./vendor-drop:/data/vendor-drop
 
   # Python normalization: Kafka raw.* -> canonical.* with lineage + DQ
   # quarantine (services/transform). Build context is the REPO ROOT — the
