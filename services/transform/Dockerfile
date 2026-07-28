@@ -27,7 +27,10 @@ RUN pip install --no-cache-dir --no-index --find-links=/tmp/wheels \
 # from what this build was certified against: the envelope schema, plus the
 # adapter-mapping and demand_response_trip schemas the vendor adapter
 # runtime loads at import (handoff 0015).
-COPY contracts/raw-record-envelope.v0.schema.json \
+# --chmod on both host->runtime COPYs below: this image runs as nonroot,
+# and COPY preserves host file modes — a restrictive checkout umask must
+# never make the image unreadable (the web image's live 2026-07-28 lesson).
+COPY --chmod=644 contracts/raw-record-envelope.v0.schema.json \
      contracts/adapter-mapping.v0.schema.json \
      contracts/demand-response-trip.v0.schema.json /app/contracts/
 ENV HEADWAY_CONTRACTS_DIR=/app/contracts
@@ -35,7 +38,7 @@ ENV HEADWAY_CONTRACTS_DIR=/app/contracts
 # registration REQUIRES fixtures) ship with the image so raw.vendor.files
 # messages resolve out of the box; mount/override HEADWAY_ADAPTERS_DIR to
 # add agency-local adapters.
-COPY adapters /app/adapters
+COPY --chmod=755 adapters /app/adapters
 ENV HEADWAY_ADAPTERS_DIR=/app/adapters
 USER nonroot
 # Runtime config via env: KAFKA_BROKERS (required), PG*/DATABASE_URL
