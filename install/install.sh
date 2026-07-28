@@ -73,6 +73,7 @@ RECONFIGURE=0
 CHECK_UPDATES=0
 UPGRADE=0
 RESET_PASSWORD=0
+UPDATE_SOURCE=0
 UPGRADE_TARGET=""
 FAILURES=0
 WARNINGS=0
@@ -166,6 +167,17 @@ Usage:
                                   changes; your data is never touched. The
                                   full story, including how to go back, is
                                   in docs/updating.md.
+  ./install/install.sh --update-from-source
+                                  For installations that run code built on
+                                  this computer (the default when you
+                                  installed from a git clone): downloads
+                                  the latest Headway source code, applies
+                                  any new database updates, rebuilds and
+                                  restarts the services, and waits until
+                                  everything reports healthy again. Your
+                                  data is never touched. Installations
+                                  that follow signed releases update with
+                                  --upgrade instead.
   ./install/install.sh --reset-admin-password
                                   Forgot a Headway sign-in password? This
                                   sets a new one for an existing account,
@@ -191,6 +203,7 @@ for arg in "$@"; do
     --check-updates) CHECK_UPDATES=1 ;;
     --upgrade) UPGRADE=1 ;;
     --reset-admin-password) RESET_PASSWORD=1 ;;
+    --update-from-source) UPDATE_SOURCE=1 ;;
     v[0-9]*)
       # A release version like v0.2.0-alpha — only meaningful with --upgrade.
       if ! printf '%s' "$arg" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.-]+)?$'; then
@@ -1326,6 +1339,92 @@ PYEOF
   fi
 }
 
+# --- Source update (--update-from-source) ----------------------------------------
+# For git-clone installations that build their images locally (the default:
+# HEADWAY_IMAGE_TAG unset or "local"). Release-following installations are
+# refused and pointed at --upgrade — the two update stories must never blur.
+# Order matters: migrations run BEFORE the rebuild so old code (which ignores
+# new columns — migrations are additive by policy) briefly runs against the
+# new schema, never new code against the old schema.
+
+update_from_source() {
+  blank
+  say "--- Updating Headway from source ---"
+
+  local pg_pass tag
+  pg_pass="$(read_env_value POSTGRES_PASSWORD)"
+  if [ -z "$pg_pass" ]; then
+    fail "No Headway installation was found on this computer (there is no"
+    fixln "database password in deploy/compose/.env). If Headway was never"
+    fixln "installed here, run ./install/install.sh first."
+    exit 1
+  fi
+  tag="$(read_env_value HEADWAY_IMAGE_TAG)"
+  if [ -n "$tag" ] && [ "$tag" != "local" ]; then
+    fail "This installation runs signed release images (version $tag), not"
+    fixln "code built on this computer. To update it, use:"
+    fixln "    ./install/install.sh --upgrade"
+    exit 1
+  fi
+  if ! docker ps --format '{{.Names}}' 2>/dev/null | grep -q 'timescaledb'; then
+    fail "Headway's database container is not running, so database updates"
+    fixln "cannot be applied. Start Headway first:"
+    fixln "    docker compose --project-directory deploy/compose --profile app up -d"
+    fixln "then run this command again."
+    exit 1
+  fi
+
+  say "This will do four things, in order:"
+  say "  1. Download the latest Headway source code (git pull)."
+  say "  2. Apply any new database updates (your data is never touched)."
+  say "  3. Rebuild and restart the Headway services."
+  say "  4. Wait until every service reports healthy again."
+  blank
+
+  local before after
+  before="$(git -C "$REPO_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+  if ! git -C "$REPO_DIR" pull --ff-only 2>&1 | tee -a "$LOG_FILE"; then
+    blank
+    fail "Downloading the latest source code failed (the details are just"
+    fixln "above). The most common cause is a local change to a Headway"
+    fixln "file on this computer. See what changed with:"
+    fixln "    git -C \"$REPO_DIR\" status"
+    fixln "Nothing on this computer has been modified by this command."
+    exit 1
+  fi
+  after="$(git -C "$REPO_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+  if [ "$before" = "$after" ]; then
+    note "The source code was already the newest available ($after)."
+    note "Checking the database and services anyway — this also finishes a"
+    note "previous update that stopped partway."
+  else
+    ok "Source code updated: $before -> $after."
+  fi
+
+  run_migrations
+
+  blank
+  say "--- Rebuilding and restarting the Headway services ---"
+  say "This is the slowest step (a few minutes of compiling)."
+  if ! docker compose --project-directory "$COMPOSE_DIR" --profile app up -d --build 2>&1 | tee -a "$LOG_FILE"; then
+    blank
+    fail "Rebuilding the services failed (the details are just above and in"
+    fixln "$LOG_FILE). Your data is untouched. The services keep running"
+    fixln "the previous version wherever the rebuild did not reach."
+    exit 1
+  fi
+
+  wait_for_healthy
+
+  blank
+  say "=================================================================="
+  say " Update complete — Headway is running version $after"
+  say "=================================================================="
+  say "Everything came back healthy. Your data, accounts and settings are"
+  say "exactly as they were. If a page in the browser looks odd after an"
+  say "update, reload it once (Ctrl+Shift+R) to pick up the new version."
+}
+
 # --- Step 7: summary -------------------------------------------------------------
 
 print_summary() {
@@ -1907,11 +2006,11 @@ fi
 # Modes are one at a time; each promises something different (--check and
 # --check-updates promise to change nothing; --upgrade and
 # --reconfigure-access exist to change things).
-MODES=$((CHECK_ONLY + RECONFIGURE + CHECK_UPDATES + UPGRADE + RESET_PASSWORD))
+MODES=$((CHECK_ONLY + RECONFIGURE + CHECK_UPDATES + UPGRADE + RESET_PASSWORD + UPDATE_SOURCE))
 if [ "$MODES" -gt 1 ]; then
   fail "Those options cannot be combined. Please run one at a time:"
-  fixln "--check, --check-updates, --upgrade, --reconfigure-access, or"
-  fixln "--reset-admin-password."
+  fixln "--check, --check-updates, --upgrade, --reconfigure-access,"
+  fixln "--reset-admin-password, or --update-from-source."
   exit 1
 fi
 
@@ -1922,6 +2021,11 @@ fi
 
 if [ "$RESET_PASSWORD" -eq 1 ]; then
   reset_admin_password
+  exit 0
+fi
+
+if [ "$UPDATE_SOURCE" -eq 1 ]; then
+  update_from_source
   exit 0
 fi
 

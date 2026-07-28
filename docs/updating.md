@@ -61,6 +61,30 @@ your Headway folder — the updater checks that folder and release match, and
 tells you the exact commands if they do not. If you did not install from
 git, download the release's source from its notes page instead.)
 
+## Installations built from source
+
+If your installation builds its own images from a git clone (the default
+when nothing set a release version — `HEADWAY_IMAGE_TAG` in
+`deploy/compose/.env` is empty or `local`), you are following the source
+code, not signed releases. Your update is ONE command:
+
+```
+./install/install.sh --update-from-source
+```
+
+It downloads the latest source (`git pull`), applies any new database
+updates, rebuilds and restarts the services, and waits until everything
+reports healthy — in that order, so a database update is never skipped by
+accident. Your data, accounts and settings are untouched. It refuses to
+run on a release-following installation (and points at `--upgrade`), just
+as `--upgrade` is the wrong tool for a source-following one — the two
+stories never blur.
+
+Following source means you get changes as they land, hours after they are
+written — ideal for evaluation and UAT, and the trade-off is that you are
+ahead of the signed, scanned, release-gated images. For production, follow
+releases.
+
 ## What `--upgrade` does, step by step
 
 1. **Verifies every image's signature** against the Headway release
