@@ -1592,6 +1592,13 @@ export const copy = {
     pollNote:
       "Positions refresh about every 20 seconds. A vehicle's dot moves only when a new position is reported — Headway never animates a guess.",
     refresh: "Refresh positions now",
+    /** While the refresh is in flight: visible to sighted users too (UAT
+     *  2026-07-28: a silent button "doesn't appear to work"). */
+    refreshing: "Refreshing…",
+    /** "Checked" is the API round-trip, deliberately distinct from data
+     *  freshness (the chip): "I looked just now and this is still the
+     *  latest" must be visibly different from "nothing happened". */
+    lastChecked: (time: string) => `Last checked ${time}.`,
     vehiclesCount: (shown: string) =>
       `${shown} vehicle${shown === "1" ? "" : "s"} with a position in the selected window.`,
 

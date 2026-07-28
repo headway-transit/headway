@@ -281,6 +281,32 @@ describe("/map", () => {
     await expectNoAxeViolations();
   });
 
+  it("the refresh button visibly WORKS even when nothing changed: it re-asks the API and updates the last-checked stamp (UAT 2026-07-28: a silent refresh reads as broken)", async () => {
+    signInAs("viewer");
+    const calls = mockApi({
+      ...geometryRoutes(),
+      "GET /ops/vehicles/latest": { status: 200, body: vehiclesQuiet },
+    });
+    renderApp("/map");
+    const user = userEvent.setup();
+
+    // Initial load: one vehicles request, and the round-trip is stamped.
+    await screen.findByText(/No vehicle positions in the last/);
+    expect(await screen.findByText(/^Last checked /)).toBeInTheDocument();
+    const vehicleCalls = () =>
+      calls.filter((c) => c.path.startsWith("/ops/vehicles/latest")).length;
+    const before = vehicleCalls();
+
+    await user.click(
+      screen.getByRole("button", { name: copy.map.refresh }),
+    );
+
+    // The API was genuinely asked again — same quiet answer, but the page
+    // PROVES it checked rather than silently doing nothing.
+    expect(vehicleCalls()).toBe(before + 1);
+    expect(await screen.findByText(/^Last checked /)).toBeInTheDocument();
+  });
+
   it("widening the window requests max_age_seconds=86400, draws the last known positions, and KEEPS the quiet chip while the feed is stale (both honesty states at once)", async () => {
     signInAs("viewer");
     const calls = mockApi({

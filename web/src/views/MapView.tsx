@@ -172,6 +172,10 @@ export function MapView() {
   const [stops, setStops] = useState<Load<StopsCollection>>(LOADING);
   const [routes, setRoutes] = useState<Load<RoutesCollection>>(LOADING);
   const [vehicles, setVehicles] = useState<Load<OpsVehiclesLatest>>(LOADING);
+  // When the API was last ASKED — round-trip proof, distinct from data
+  // freshness (UAT 2026-07-28: with an unchanged quiet feed, a refresh with
+  // no visible effect reads as a broken button).
+  const [lastCheckedAt, setLastCheckedAt] = useState<Date | null>(null);
   const [polling, setPolling] = useState(false);
   const [windowSeconds, setWindowSeconds] = useState(300);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -364,11 +368,13 @@ export function MapView() {
           if (seq !== fetchSeq.current) return; // a newer fetch superseded us
           setVehicles({ state: "ready", data });
           setPolling(false);
+          setLastCheckedAt(new Date());
         })
         .catch((err) => {
           if (seq !== fetchSeq.current) return;
           setVehicles(toError(err));
           setPolling(false);
+          setLastCheckedAt(new Date());
         });
     },
     [],
@@ -498,12 +504,20 @@ export function MapView() {
             {t.vehiclesCount(res.vehicle_count.toLocaleString("en-US"))}
           </span>
         )}
-        <button type="button" onClick={() => fetchVehicles(windowSeconds)}>
-          {t.refresh}
+        <button
+          type="button"
+          aria-busy={polling}
+          onClick={() => {
+            if (!polling) fetchVehicles(windowSeconds);
+          }}
+        >
+          {polling ? t.refreshing : t.refresh}
         </button>
-        {polling && vehicles.state === "ready" && (
-          <span className="visually-hidden" role="status">
-            {t.chip.checking}
+        {lastCheckedAt && (
+          <span className="map-last-checked" role="status">
+            {t.lastChecked(
+              lastCheckedAt.toLocaleTimeString("en-US", { hour12: false }),
+            )}
           </span>
         )}
       </div>
