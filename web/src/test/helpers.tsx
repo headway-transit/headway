@@ -80,6 +80,33 @@ const DEFAULT_ROUTES: Record<string, RouteHandler> = {
       has_logo: false,
     },
   },
+  // The dashboard fetches its sparkline history on every mount (handoff
+  // 0024 #2); the default is an EMPTY series (no trend rendered), so the
+  // many pre-existing dashboard tests keep exercising exactly what they
+  // exercised. Sparkline/lens tests override this route with real buckets.
+  "GET /metrics/history": (call) => {
+    const bucket =
+      new URL(call.url, "http://test").searchParams.get("bucket") ?? "month";
+    return {
+      status: 200,
+      body: {
+        bucket,
+        metric: null,
+        scope: null,
+        calc_version: null,
+        period_from: null,
+        period_to: null,
+        buckets: [],
+        point_count: 0,
+        total_matching: 0,
+        cap: 5000,
+        truncated: false,
+        grouping_note:
+          "Buckets group persisted figures by the calendar bucket their period starts in. The server never sums, averages, or otherwise derives a new number from grouped figures — every value is a calculation library figure served verbatim with its metric_value_id receipt. A true quarterly or annual rollup is a calculation library job, not this endpoint's.",
+        note: null,
+      },
+    };
+  },
 };
 
 /**

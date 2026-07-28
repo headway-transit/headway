@@ -29,13 +29,16 @@ import type {
   DqIssue,
   DqIssueCounts,
   ErrorEnvelope,
+  HistoryResponse,
   LineageNode,
   LoginRequest,
   LoginResponse,
   LogoUploadResponse,
   MetricValue,
   Mr20Package,
+  OpsVehiclesLatest,
   PublicMetricValue,
+  RoutesCollection,
   ResolveRequest,
   ResolveResponse,
   SafetyDeadlines,
@@ -61,6 +64,7 @@ import type {
   SandboxPreviewRequest,
   SandboxPreviewResponse,
   Setting,
+  StopsCollection,
   UpdateSettingResponse,
 } from "./types";
 
@@ -834,6 +838,84 @@ export function downloadSamplingWorksheet(
   return requestExport(
     `/sampling/plans/${encodeURIComponent(planId)}/worksheet?${params}`,
     `headway-sampling-worksheet-${planId}.${format}`,
+  );
+}
+
+// ---- the living map + audience lenses (handoffs 0023/0024) ----
+
+/**
+ * GET /ops/vehicles/latest — latest position per vehicle within a staleness
+ * window (any signed-in role). OPS category: never certified, never a gate
+ * on certification; the map badges the surface and renders the envelope's
+ * honesty fields (note, newest_position_at) verbatim. Poll guidance from
+ * the endpoint's own docstring: the upstream GTFS-RT connector polls every
+ * ~30 s, so 15–30 s is the recommended map poll interval.
+ */
+export function getLatestVehicles(
+  maxAgeSeconds?: number,
+): Promise<OpsVehiclesLatest> {
+  const qs =
+    maxAgeSeconds !== undefined
+      ? `?${new URLSearchParams({ max_age_seconds: String(maxAgeSeconds) })}`
+      : "";
+  return request<OpsVehiclesLatest>("GET", `/ops/vehicles/latest${qs}`);
+}
+
+/**
+ * GET /geometry/stops — GeoJSON FeatureCollection of every canonical stop
+ * with coordinates (any signed-in role). Stops without coordinates are
+ * COUNTED in the envelope, never invented onto the map.
+ */
+export function getStopsGeojson(): Promise<StopsCollection> {
+  return request<StopsCollection>("GET", "/geometry/stops");
+}
+
+/**
+ * GET /geometry/routes — the honest schematic (any signed-in role):
+ * straight lines through each route's most common trip pattern, labeled
+ * `schematic_stop_sequence` by the server. The map legend renders the
+ * server's geometry_note VERBATIM — these lines show structure, not
+ * streets, and must never be presented as the path vehicles drive.
+ */
+export function getRoutesGeojson(): Promise<RoutesCollection> {
+  return request<RoutesCollection>("GET", "/geometry/routes");
+}
+
+export interface HistoryQuery {
+  metric?: string;
+  /** Convenience for scope "mode:<mode>"; mutually exclusive with scope. */
+  mode?: string;
+  scope?: string;
+  calc_version?: string;
+  /** ISO date: only figures whose period starts on or after. */
+  from?: string;
+  /** ISO date: only figures whose period ends on or before. */
+  to?: string;
+  /** Calendar grouping — a LABEL per figure, never arithmetic. */
+  bucket?: "day" | "week" | "month" | "quarter";
+}
+
+/**
+ * GET /metrics/history (handoff 0023, design point 4): persisted figures
+ * GROUPED by calendar bucket — the server never sums, averages, or derives
+ * a number from grouped figures, and neither does this UI. Every point is
+ * a full metric-value row verbatim with its metric_value_id receipt.
+ */
+export function getMetricsHistory(
+  query: HistoryQuery = {},
+): Promise<HistoryResponse> {
+  const params = new URLSearchParams();
+  if (query.metric) params.set("metric", query.metric);
+  if (query.mode) params.set("mode", query.mode);
+  if (query.scope) params.set("scope", query.scope);
+  if (query.calc_version) params.set("calc_version", query.calc_version);
+  if (query.from) params.set("from", query.from);
+  if (query.to) params.set("to", query.to);
+  if (query.bucket) params.set("bucket", query.bucket);
+  const qs = params.toString();
+  return request<HistoryResponse>(
+    "GET",
+    `/metrics/history${qs ? `?${qs}` : ""}`,
   );
 }
 

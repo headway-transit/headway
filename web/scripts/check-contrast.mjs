@@ -176,6 +176,20 @@ const PAIRS = [
   // Handoff 0021, dark counterparts (tour border/ring on both surfaces).
   ["dark: tour panel border / target ring on card background (non-text, 3:1)", "#58a6ff", "#161b22", 3.0],
   ["dark: tour panel border / target ring on page plane (non-text, 3:1)", "#58a6ff", "#0d1117", 3.0],
+
+  // Handoff 0024 (the living map): map marks are MEANINGFUL non-text
+  // (SC 1.4.11, 3:1) against the self-hosted water-tone canvas (--map-bg;
+  // there are no tiles, so the background is a token like any other).
+  // The staleness chip and legend text reuse pairs registered above; the
+  // sparkline line/points reuse --series-1, which — like every chart
+  // series — ships with direct equivalents (real buttons with accessible
+  // names, receipts, and the Metrics table) per the dataviz relief rule.
+  ["map route line on map canvas (non-text, 3:1)", "#5c7086", "#dce8f0", 3.0],
+  ["map stop dot on map canvas (non-text, 3:1)", "#57606a", "#dce8f0", 3.0],
+  ["map vehicle dot on map canvas (non-text, 3:1)", "#1a56a8", "#dce8f0", 3.0],
+  ["dark: map route line on map canvas (non-text, 3:1)", "#526a85", "#101823", 3.0],
+  ["dark: map stop dot on map canvas (non-text, 3:1)", "#9ea7b3", "#101823", 3.0],
+  ["dark: map vehicle dot on map canvas (non-text, 3:1)", "#6cb6ff", "#101823", 3.0],
 ];
 
 let failed = false;

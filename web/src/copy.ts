@@ -53,6 +53,7 @@ export const copy = {
 
   nav: {
     today: "Today",
+    map: "Live map",
     dashboard: "Dashboard",
     metrics: "Metrics",
     compare: "Compare",
@@ -1345,6 +1346,64 @@ export const copy = {
       dqOutsideRange: (count: string) =>
         `${count} unresolved issue${count === "1" ? " falls" : "s fall"} outside the selected dates. The queue still holds ${count === "1" ? "it" : "them"} — go to the data-quality queue for the full list.`,
     },
+
+    /**
+     * Audience lenses (handoff 0024, design point 2): NAMED LENS
+     * CONFIGURATIONS — grouping and framing only. A preset picks a calendar
+     * grouping for the trend sparklines and an order for the sections;
+     * nothing is recomputed, added together, or hidden. The grouping itself
+     * is the server's (/metrics/history bucket labels), and the server's
+     * own grouping_note renders verbatim beside these words.
+     */
+    lens: {
+      rowLabel: "Audience lens",
+      intro:
+        "A lens arranges this page for its reader — it changes the calendar grouping of the trend lines and the order of the sections, nothing else. Every figure stays exactly as computed; no lens ever adds numbers together or hides one.",
+      presets: {
+        board: "Board",
+        executive: "Executive",
+        operations: "Operations",
+      } as Record<string, string>,
+      presetHints: {
+        board:
+          "Board lens: trends grouped by quarter, certified figures leading. The same figures, framed for a board packet.",
+        executive:
+          "Executive lens: trends grouped by month — the reporting rhythm.",
+        operations:
+          "Operations lens: trends grouped by day, operations cards first.",
+      } as Record<string, string>,
+      bucketLabel: "Group trends by",
+      bucketOptions: {
+        day: "Day",
+        week: "Week",
+        month: "Month",
+        quarter: "Quarter",
+      } as Record<string, string>,
+      /** Lead-in only: the server's grouping_note renders verbatim after. */
+      groupingIntro: "How the grouping works, in the server's own words:",
+      historyUnavailable: (message: string) =>
+        `The trend history could not be loaded: ${message}`,
+    },
+
+    /**
+     * KPI sparklines (handoff 0024, design point 2): every point is a
+     * PERSISTED figure served by /metrics/history, one click from its full
+     * receipt; a calendar bucket with no figure renders as a visible gap —
+     * the line breaks, and nothing is ever interpolated across it.
+     */
+    sparkline: {
+      label: (metric: string) =>
+        `Trend of persisted ${metric} figures. Each point is a real figure — press it to open its receipt.`,
+      pointLabel: (value: string, unit: string, period: string, status: string) =>
+        `${value} ${unit}, ${period} (${status}) — open the receipt`,
+      /** Gaps are stated in words as well as drawn. */
+      gapsNote: (count: string) =>
+        `${count} ${count === "1" ? "bucket in this range has" : "buckets in this range have"} no figure — drawn as a gap, never filled in.`,
+      pointCap: (cap: string, total: string) =>
+        `Showing the ${cap} most recent of ${total} figures in this trend — nothing is summarized away; the Metrics page lists every figure.`,
+      empty: "No history yet for this figure.",
+      closeReceipt: "Close the receipt",
+    },
   },
 
   /**
@@ -1488,6 +1547,122 @@ export const copy = {
         "No operations metrics have been computed yet. They come from a separate ops run and appear here with their receipts when one lands.",
       door: "See the operations dashboard",
     },
+  },
+
+  /**
+   * The living map (/map — handoff 0024, design point 1). Everything drawn
+   * comes from Headway's own API: stops and schematic route lines from the
+   * /geometry endpoints, live vehicles from /ops/vehicles/latest. The page
+   * makes NO external requests — no tiles, no fonts, no sprites — and every
+   * honesty statement the server sends (staleness note, schematic geometry
+   * note, ops boundary note) is rendered VERBATIM; only the frame words
+   * here are this page's own.
+   */
+  map: {
+    heading: "Live map",
+    intro:
+      "Your system, drawn from your own data: every stop and route from the agency's schedule, and each vehicle's last reported position. Nothing on this page comes from an outside map service — no tiles, no external fonts, and no request ever leaves this installation.",
+    /** The canvas' accessible name; the readable equivalents (chip, counts,
+     *  vehicle list) live outside the canvas. */
+    canvasLabel:
+      "Map of the agency's stops, schematic route lines, and last reported vehicle positions. Use the arrow keys to pan and the plus and minus keys to zoom; the vehicle list below the map carries the same information as text.",
+    loading: "Loading the map data…",
+
+    /** ---- the staleness chip: fresh vs quiet, never faked ---- */
+    chip: {
+      /** Fresh: at least one vehicle reported inside the window. */
+      live: (time: string) => `Live — newest position at ${time}`,
+      /** Quiet: the feed has gone quiet — said plainly; the server's own
+       *  note renders verbatim beside this. The duration is date math on
+       *  the server's own two timestamps, never a guess. */
+      quiet: (duration: string) =>
+        `No vehicle positions in the last ${duration}`,
+      /** No position on record at all (a fresh install). */
+      none: "No vehicle positions on record",
+      /** While a poll is in flight the last honest state stays visible. */
+      checking: "Checking for new positions…",
+    },
+    /** The poll cadence, stated (the endpoint's own guidance: the upstream
+     *  feed updates about every 30 seconds). */
+    pollNote:
+      "Positions refresh about every 20 seconds. A vehicle's dot moves only when a new position is reported — Headway never animates a guess.",
+    refresh: "Refresh positions now",
+    vehiclesCount: (shown: string) =>
+      `${shown} vehicle${shown === "1" ? "" : "s"} with a position in the selected window.`,
+
+    /** ---- the staleness window control ---- */
+    window: {
+      label: "Show each vehicle's last position from",
+      /** Option labels; the value is the max_age_seconds sent. */
+      live: "The last 5 minutes (live)",
+      hour: "The last hour",
+      day: "The last 24 hours",
+      note:
+        "Widening the window shows the LAST KNOWN position of each vehicle inside it — useful when the feed is quiet. Every vehicle states how old its position is, and a dot never moves without a new report.",
+    },
+
+    /** ---- legend (the schematic honesty is VISIBLE here) ---- */
+    legend: {
+      heading: "What the map shows",
+      stops: "Stop (from the agency's schedule data)",
+      routes: "Route line — schematic",
+      vehicles: "Vehicle's last reported position",
+      /** Lead-in only: the server's geometry_note renders verbatim after. */
+      schematicIntro: "About the route lines, in the server's own words:",
+    },
+
+    /** ---- vehicle details (click a dot, or pick from the list) ---- */
+    vehicle: {
+      panelHeading: (id: string) => `Vehicle ${id}`,
+      close: "Close vehicle details",
+      /** age_seconds verbatim from the response that carried the vehicle. */
+      ageLine: (seconds: string) =>
+        `Position as of ${seconds} seconds ago (at the last refresh).`,
+      recordedLine: (timestamp: string) => `Reported at ${timestamp}.`,
+      routeLine: (routeId: string) => `Route ${routeId}`,
+      tripLine: (tripId: string) => `Trip ${tripId}`,
+      unassigned:
+        "Not assigned to a route or trip in this report — served unassigned, never guessed.",
+      sourceLine: (source: string) => `Source feed: ${source}`,
+      positionLine: (lat: string, lon: string) =>
+        `Position: ${lat}, ${lon}`,
+    },
+
+    /** ---- the accessible list equivalent of the dots ---- */
+    list: {
+      toggle: "List the vehicles",
+      heading: "Vehicles in the selected window",
+      caption:
+        "Each vehicle's last reported position in the selected window — the same information the dots on the map carry.",
+      columns: {
+        vehicle: "Vehicle",
+        route: "Route",
+        age: "Position age (seconds)",
+        source: "Source",
+      },
+      unassigned: "Not assigned",
+      /** The render cap, STATED (house rule) — nothing silently dropped. */
+      cap: (cap: string, total: string) =>
+        `Showing the first ${cap} of ${total} vehicles in the window. Nothing is dropped from the map or the counts — narrow the window to shorten the list.`,
+      select: (id: string) => `Show vehicle ${id} on the map`,
+    },
+
+    /** ---- teaching empty states (handoff 0021 pattern) ---- */
+    empty: {
+      /** No geometry at all: a fresh install. */
+      geometry:
+        "No stops or routes to draw yet — the map draws itself from your agency's own schedule data (GTFS static), and none has been ingested. That is the honest state of a fresh Headway, not an error.",
+      geometryAction:
+        "To draw the system, ingest the agency's GTFS static feed; stops and route lines appear the moment the pipeline lands them.",
+      /** No vehicles in window: the server's note renders verbatim above
+       *  this teaching line. */
+      vehiclesAction:
+        "Vehicle dots appear when a live vehicle-positions feed (GTFS-Realtime) is connected and reporting. If a feed is connected and this stays quiet, that silence is worth investigating — it is shown, never papered over.",
+    },
+
+    /** Truncation honesty (cap fields from the envelopes), lead-in only —
+     *  the server's own note renders verbatim. */
+    truncatedIntro: "The server sent a bounded set, in its own words:",
   },
 
   /**

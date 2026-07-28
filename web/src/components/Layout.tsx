@@ -131,6 +131,11 @@ export function Layout() {
                 <li>
                   <NavLink to="/today">{copy.nav.today}</NavLink>
                 </li>
+                {/* The living map (handoff 0024): beside Today — the two
+                    "what is happening right now" surfaces sit together. */}
+                <li>
+                  <NavLink to="/map">{copy.nav.map}</NavLink>
+                </li>
                 <li>
                   <NavLink to="/dashboard">{copy.nav.dashboard}</NavLink>
                 </li>

@@ -27,8 +27,20 @@
 
 import { useEffect, useId, useState } from "react";
 import { Link } from "react-router-dom";
-import { ApiError, listDqIssues, listMetricValues } from "../api/client";
-import type { DqIssue, MetricValue } from "../api/types";
+import {
+  ApiError,
+  getMetricsHistory,
+  listDqIssues,
+  listMetricValues,
+} from "../api/client";
+import type {
+  DqIssue,
+  HistoryPoint,
+  HistoryResponse,
+  MetricValue,
+} from "../api/types";
+import { HISTORY_BUCKETS } from "../reports/buckets";
+import type { HistoryBucketKind } from "../reports/buckets";
 import {
   GRANULARITIES,
   misalignedCount,
@@ -43,7 +55,10 @@ import {
 import type { ChartSeries, SeriesPoint } from "../components/charts/TimeSeriesChart";
 import { SeverityStackedBar } from "../components/charts/SeverityStackedBar";
 import type { StackedBar } from "../components/charts/SeverityStackedBar";
+import { Sparkline } from "../components/charts/Sparkline";
+import type { SparklinePoint } from "../components/charts/Sparkline";
 import { OpsBadge } from "../components/OpsBadge";
+import { Receipt } from "../components/Receipt";
 import { SimulatedBadge } from "../components/SimulatedBadge";
 import { Skeleton } from "../components/Skeleton";
 import { copy } from "../copy";
@@ -351,8 +366,52 @@ function OpsMetricCard({
   );
 }
 
-function StatTile({ values, metric }: { values: MetricValue[]; metric: string }) {
+function StatTile({
+  values,
+  metric,
+  spark,
+  bucket,
+  openSparkId,
+  onToggleSpark,
+}: {
+  values: MetricValue[];
+  metric: string;
+  /** Persisted history figures for this tile's trend (handoff 0024 #2). */
+  spark: SparklinePoint[];
+  bucket: HistoryBucketKind;
+  openSparkId: string | null;
+  onToggleSpark: (point: HistoryPoint) => void;
+}) {
   const latest = latestCertified(values, metric);
+  // The open sparkline receipt, if it belongs to this tile's trend.
+  const openPoint =
+    openSparkId === null
+      ? null
+      : (spark.find((sp) => sp.point.metric_value_id === openSparkId)?.point ??
+        null);
+  // Sparkline trends appear WHERE HISTORY EXISTS (handoff 0024): every
+  // point is a persisted figure one click from its receipt.
+  const trend =
+    spark.length > 0 ? (
+      <>
+        <Sparkline
+          metricLabel={metricLabel(metric)}
+          unit={unitLabel(spark[0].point.unit)}
+          bucket={bucket}
+          points={spark}
+          openId={openSparkId}
+          onToggle={onToggleSpark}
+        />
+        {openPoint && (
+          <div className="spark-receipt">
+            <Receipt value={openPoint} />
+            <button type="button" onClick={() => onToggleSpark(openPoint)}>
+              {copy.dashboard.sparkline.closeReceipt}
+            </button>
+          </div>
+        )}
+      </>
+    ) : null;
   if (!latest) {
     return (
       <li className="card stat-tile">
@@ -361,6 +420,7 @@ function StatTile({ values, metric }: { values: MetricValue[]; metric: string })
         <p className="stat-period">
           {copy.dashboard.noCertifiedDetail(metricLabel(metric))}
         </p>
+        {trend}
       </li>
     );
   }
@@ -382,7 +442,76 @@ function StatTile({ values, metric }: { values: MetricValue[]; metric: string })
       <p>
         <ExplainLink value={latest} />
       </p>
+      {trend}
     </li>
+  );
+}
+
+/**
+ * The audience-lens bar (handoff 0024, design point 2): three NAMED LENS
+ * CONFIGURATIONS + the calendar-bucket group that drives /metrics/history.
+ * A lens is grouping and framing ONLY — the hint under the bar says so,
+ * and the server's own grouping_note renders verbatim beside it.
+ */
+const LENS_PRESETS: Record<string, HistoryBucketKind> = {
+  board: "quarter",
+  executive: "month",
+  operations: "day",
+};
+
+function LensBar({
+  preset,
+  bucket,
+  groupingNote,
+  onPreset,
+  onBucket,
+}: {
+  preset: string | null;
+  bucket: HistoryBucketKind;
+  /** The server's grouping_note, rendered VERBATIM when history loaded. */
+  groupingNote: string | null;
+  onPreset: (key: string | null) => void;
+  onBucket: (bucket: HistoryBucketKind) => void;
+}) {
+  const t = copy.dashboard.lens;
+  return (
+    <section aria-label={t.rowLabel} className="lens-bar">
+      <p className="chart-desc">{t.intro}</p>
+      <div className="chart-filters">
+        <div className="filter-bar" role="group" aria-label={t.rowLabel}>
+          <span className="filter-bar-label">{t.rowLabel}:</span>
+          {Object.keys(LENS_PRESETS).map((key) => (
+            <button
+              key={key}
+              type="button"
+              aria-pressed={preset === key}
+              onClick={() => onPreset(preset === key ? null : key)}
+            >
+              {t.presets[key]}
+            </button>
+          ))}
+        </div>
+        <div className="filter-bar" role="group" aria-label={t.bucketLabel}>
+          <span className="filter-bar-label">{t.bucketLabel}:</span>
+          {HISTORY_BUCKETS.map((b) => (
+            <button
+              key={b}
+              type="button"
+              aria-pressed={bucket === b}
+              onClick={() => onBucket(b)}
+            >
+              {t.bucketOptions[b]}
+            </button>
+          ))}
+        </div>
+      </div>
+      {preset && <p className="chart-desc">{t.presetHints[preset]}</p>}
+      {groupingNote && (
+        <p className="chart-desc">
+          {t.groupingIntro} {groupingNote}
+        </p>
+      )}
+    </section>
   );
 }
 
@@ -396,6 +525,14 @@ export function DashboardView() {
   const [granularity, setGranularity] = useState<Granularity>("monthly");
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
+  // The audience lens (handoff 0024 #2): a preset is a lens CONFIGURATION —
+  // it picks the history bucket and the section order, nothing else.
+  // "Executive" (month) is the default rhythm.
+  const [preset, setPreset] = useState<string | null>("executive");
+  const [bucket, setBucket] = useState<HistoryBucketKind>("month");
+  const [history, setHistory] = useState<HistoryResponse | null>(null);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [openSparkId, setOpenSparkId] = useState<string | null>(null);
 
   useEffect(() => {
     listMetricValues()
@@ -409,6 +546,64 @@ export function DashboardView() {
         setIssuesError(err instanceof ApiError ? err.message : String(err)),
       );
   }, []);
+
+  // The period series behind the sparklines: persisted figures, grouped by
+  // the selected calendar bucket BY THE SERVER (never summed anywhere).
+  useEffect(() => {
+    let stale = false;
+    setHistory(null);
+    setHistoryError(null);
+    getMetricsHistory({ bucket })
+      .then((data) => {
+        if (!stale) setHistory(data);
+      })
+      .catch((err) => {
+        if (!stale)
+          setHistoryError(err instanceof ApiError ? err.message : String(err));
+      });
+    return () => {
+      stale = true;
+    };
+  }, [bucket]);
+
+  const applyPreset = (key: string | null) => {
+    setPreset(key);
+    if (key !== null) setBucket(LENS_PRESETS[key]);
+  };
+  const applyBucket = (b: HistoryBucketKind) => {
+    setBucket(b);
+    // A hand-picked bucket that disagrees with the pressed preset unpresses
+    // it — a preset never LOOKS active while its configuration is not.
+    if (preset !== null && LENS_PRESETS[preset] !== b) setPreset(null);
+  };
+
+  /**
+   * The tile's trend: this metric's AGENCY-WIDE persisted NTD figures
+   * (fleet/agency scope — a mode slice never silently stands in for the
+   * whole), each tagged with the server's bucket key. Selection only.
+   */
+  const sparkFor = (metric: string): SparklinePoint[] => {
+    if (!history) return [];
+    const out: SparklinePoint[] = [];
+    for (const b of history.buckets) {
+      for (const point of b.points) {
+        if (
+          point.metric === metric &&
+          point.category !== "ops" &&
+          (point.scope === "fleet" || point.scope === "agency")
+        ) {
+          out.push({ point, bucketKey: b.bucket_key });
+        }
+      }
+    }
+    return out;
+  };
+  const toggleSpark = (point: HistoryPoint) =>
+    setOpenSparkId((prev) =>
+      prev === point.metric_value_id ? null : point.metric_value_id,
+    );
+  // "Operations" lens: ops cards forward — an ORDER change only.
+  const opsFirst = preset === "operations";
 
   const all = values ?? [];
   // Date-range SELECTION (string comparison on ISO dates — see
@@ -595,13 +790,35 @@ export function DashboardView() {
 
       {values && (
         <>
+          <LensBar
+            preset={preset}
+            bucket={bucket}
+            groupingNote={history?.grouping_note ?? null}
+            onPreset={applyPreset}
+            onBucket={applyBucket}
+          />
+          {/* A trend that failed to load is stated, never blank — the tiles
+              themselves still render their certified figures. */}
+          {historyError && (
+            <p className="chart-desc">
+              {copy.dashboard.lens.historyUnavailable(historyError)}
+            </p>
+          )}
           <section aria-label={copy.dashboard.tilesHeading}>
             <h2>{copy.dashboard.tilesHeading}</h2>
             <p className="chart-desc">{copy.dashboard.tilesIntro}</p>
             <ul className="stat-grid">
-              <StatTile values={all} metric="vrm" />
-              <StatTile values={all} metric="vrh" />
-              <StatTile values={all} metric="upt" />
+              {["vrm", "vrh", "upt"].map((metric) => (
+                <StatTile
+                  key={metric}
+                  values={all}
+                  metric={metric}
+                  spark={sparkFor(metric)}
+                  bucket={bucket}
+                  openSparkId={openSparkId}
+                  onToggleSpark={toggleSpark}
+                />
+              ))}
             </ul>
           </section>
 
@@ -626,6 +843,8 @@ export function DashboardView() {
               onTo={setToDate}
               onGranularity={setGranularity}
             />
+            {(() => {
+            const chartsGrid = (
             <div className="dashboard-grid">
               {/* (2) daily UPT line */}
               <ChartCard
@@ -822,12 +1041,15 @@ export function DashboardView() {
                 </p>
               </ChartCard>
             </div>
+            );
 
-            {/* ---- Operations metrics (handoff 0014, design point 5):
-                 route-level OTP + headway adherence. Every card carries the
-                 ops badge; refusal accounting is shown, never hidden; and
-                 nothing in this section can be certified — the boundary is
-                 structural (category='ops'). ---- */}
+            // ---- Operations metrics (handoff 0014, design point 5):
+            // route-level OTP + headway adherence. Every card carries the
+            // ops badge; refusal accounting is shown, never hidden; and
+            // nothing in this section can be certified — the boundary is
+            // structural (category='ops'). Under the OPERATIONS lens
+            // (handoff 0024) this section leads — an order change only.
+            const opsSection = (
             <section aria-label={copy.ops.dashboard.heading}>
               <h2>{copy.ops.dashboard.heading}</h2>
               <p className="chart-desc">{copy.ops.dashboard.intro}</p>
@@ -902,6 +1124,20 @@ export function DashboardView() {
                 </div>
               )}
             </section>
+            );
+
+            return opsFirst ? (
+              <>
+                {opsSection}
+                {chartsGrid}
+              </>
+            ) : (
+              <>
+                {chartsGrid}
+                {opsSection}
+              </>
+            );
+            })()}
             </>
           )}
         </>

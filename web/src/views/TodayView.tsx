@@ -256,13 +256,13 @@ function CertificationCard({
 function DqCard({
   open,
   owned,
-  attested,
-  resolved,
+  statuses,
 }: {
   open: Load<DqIssueCounts>;
   owned: Load<DqIssueCounts>;
-  attested: Load<DqIssueCounts>;
-  resolved: Load<DqIssueCounts>;
+  /** The ONE unfiltered counts call (handoff 0024 #3): whole-queue
+   *  by_status totals — resolved and attested come from here. */
+  statuses: Load<DqIssueCounts>;
 }) {
   const t = copy.today.dq;
   if (open.state === "loading" || owned.state === "loading") {
@@ -278,8 +278,10 @@ function DqCard({
   }
   const openCount = open.data.total;
   const ownedCount = owned.state === "ready" ? owned.data.total : 0;
-  const resolvedCount = resolved.state === "ready" ? resolved.data.total : 0;
-  const attestedCount = attested.state === "ready" ? attested.data.total : 0;
+  const resolvedCount =
+    statuses.state === "ready" ? (statuses.data.by_status.resolved ?? 0) : 0;
+  const attestedCount =
+    statuses.state === "ready" ? (statuses.data.by_status.attested ?? 0) : 0;
   const blocking =
     (open.data.by_severity.blocking ?? 0) +
     (owned.state === "ready" ? (owned.data.by_severity.blocking ?? 0) : 0);
@@ -610,8 +612,7 @@ export function TodayView() {
   const [certs, setCerts] = useState<Load<CertificationRecord[]>>(LOADING);
   const [dqOpen, setDqOpen] = useState<Load<DqIssueCounts>>(LOADING);
   const [dqOwned, setDqOwned] = useState<Load<DqIssueCounts>>(LOADING);
-  const [dqAttested, setDqAttested] = useState<Load<DqIssueCounts>>(LOADING);
-  const [dqResolved, setDqResolved] = useState<Load<DqIssueCounts>>(LOADING);
+  const [dqStatuses, setDqStatuses] = useState<Load<DqIssueCounts>>(LOADING);
   const [safetyCounts, setSafetyCounts] =
     useState<Load<SafetyEventCounts>>(LOADING);
   const [deadlines, setDeadlines] = useState<Load<SafetyDeadlines>>(LOADING);
@@ -641,10 +642,12 @@ export function TodayView() {
         .catch((err) => setCerts(toError(err)));
     }
     if (needsDq) {
-      // Per-status counts ONLY — never the unfiltered count and never the
-      // list: each server-side count scales with its own rows (live
-      // finding, 2026-07-20: an unfiltered count over a 41k-issue queue
-      // costs ~5s; the owned/resolved/attested slices are milliseconds).
+      // Server-side counts, consumed properly (handoff 0024, design point
+      // 3): handoff 0023 rewrote GET /dq/issues/counts as a SQL GROUP BY —
+      // 4.8–5.9 s → 33–49 ms over the live 41k-issue queue — so the 0021
+      // per-status-only workaround is gone. The open/owned calls carry the
+      // unresolved severity split the blocker lines need; the steward's
+      // whole-queue status totals come from ONE unfiltered call below.
       getDqIssueCounts("open")
         .then((data) => setDqOpen({ state: "ready", data }))
         .catch((err) => setDqOpen(toError(err)));
@@ -653,12 +656,9 @@ export function TodayView() {
         .catch((err) => setDqOwned(toError(err)));
     }
     if (role === "data_steward") {
-      getDqIssueCounts("attested")
-        .then((data) => setDqAttested({ state: "ready", data }))
-        .catch((err) => setDqAttested(toError(err)));
-      getDqIssueCounts("resolved")
-        .then((data) => setDqResolved({ state: "ready", data }))
-        .catch((err) => setDqResolved(toError(err)));
+      getDqIssueCounts()
+        .then((data) => setDqStatuses({ state: "ready", data }))
+        .catch((err) => setDqStatuses(toError(err)));
     }
     if (needsSafety) {
       getSafetyEventCounts({ month })
@@ -795,12 +795,7 @@ export function TodayView() {
             />
           )}
           {role === "data_steward" && (
-            <DqCard
-              open={dqOpen}
-              owned={dqOwned}
-              attested={dqAttested}
-              resolved={dqResolved}
-            />
+            <DqCard open={dqOpen} owned={dqOwned} statuses={dqStatuses} />
           )}
           {needsSafety && (
             <SafetyCard

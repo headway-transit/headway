@@ -4,11 +4,12 @@ import { Link } from "react-router-dom";
 import {
   ApiError,
   attestDqIssue,
+  getDqIssueCounts,
   listAttestations,
   listDqIssues,
   resolveDqIssue,
 } from "../api/client";
-import type { AttestationRecord, DqIssue } from "../api/types";
+import type { AttestationRecord, DqIssue, DqIssueCounts } from "../api/types";
 import { canResolveDqIssues, useSession } from "../auth/session";
 import { Modal } from "../components/Modal";
 import { QuoteFigure } from "../components/QuoteFigure";
@@ -29,21 +30,43 @@ import { pushToast } from "../toasts";
  * The queue-at-a-glance header (2026-07-11 click-through, finding 2): stat
  * chips (text + count + severity color, never color alone) plus severity and
  * status filter toggles (aria-pressed) so a steward can see blocking-only in
- * one click. Counts are workflow tallies of ISSUES — not regulatory figures —
- * computed client-side from the list GET /dq/issues serves. That endpoint
- * returns the ENTIRE queue today (no pagination), so the counts cover
- * everything; if the API ever paginates, these counts must move server-side.
- * Filtering hides nothing from the counts, and the showing-line states how
- * many issues the filters are holding back — an issue is never made to look
- * resolved (or gone) by a filter.
+ * one click. Counts are workflow tallies of ISSUES — not regulatory figures.
+ *
+ * Since handoff 0024 (consuming 0023's rewritten counts endpoint) the
+ * header counts are SERVER-side: GET /dq/issues/counts counts over exactly
+ * the rows GET /dq/issues serves under the same status filter (the 0017
+ * cards-match-table guarantee), and after 0023's fix it answers in
+ * milliseconds over the live 41k-issue queue — so the cards paint at once
+ * while the full list (still a multi-second download at 41k rows) loads
+ * beside them. Filtering hides nothing from the counts, and the
+ * showing-line states how many issues the filters are holding back — an
+ * issue is never made to look resolved (or gone) by a filter.
  */
 export function DqView() {
   const session = useSession();
   const [issues, setIssues] = useState<DqIssue[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Whole-queue tallies from the server: unresolved severity split needs
+  // open + owned (their by_severity covers exactly the unresolved rows);
+  // the unfiltered call carries the by_status totals (resolved etc.).
+  const [countsOpen, setCountsOpen] = useState<DqIssueCounts | null>(null);
+  const [countsOwned, setCountsOwned] = useState<DqIssueCounts | null>(null);
+  const [countsAll, setCountsAll] = useState<DqIssueCounts | null>(null);
+  const [countsError, setCountsError] = useState<string | null>(null);
   /** null = no filter (all). */
   const [severityFilter, setSeverityFilter] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
+
+  // The three server counts: cheap since 0023 (SQL GROUP BY), refetched
+  // after every workflow action so the cards stay the SERVER's tallies —
+  // never a client-side adjustment.
+  const refreshCounts = () => {
+    const onCountsError = (err: unknown) =>
+      setCountsError(err instanceof ApiError ? err.message : String(err));
+    getDqIssueCounts("open").then(setCountsOpen).catch(onCountsError);
+    getDqIssueCounts("owned").then(setCountsOwned).catch(onCountsError);
+    getDqIssueCounts().then(setCountsAll).catch(onCountsError);
+  };
 
   useEffect(() => {
     listDqIssues()
@@ -51,6 +74,8 @@ export function DqView() {
       .catch((err) =>
         setError(err instanceof ApiError ? err.message : String(err)),
       );
+    refreshCounts();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Documented-effort total: UI ARITHMETIC ON EFFORT METADATA (the minutes
@@ -73,6 +98,8 @@ export function DqView() {
     );
     // The shell-wide confirmation pattern (handoff 0017 #4).
     pushToast(copy.dq.resolveSuccess(updated.title));
+    // The header cards are SERVER counts — recount, never adjust locally.
+    refreshCounts();
   };
 
   const handleAttested = (updated: DqIssue) => {
@@ -82,22 +109,29 @@ export function DqView() {
         null,
     );
     pushToast(copy.dq.attest.success(updated.title));
+    refreshCounts();
   };
 
   const mayResolve = canResolveDqIssues(session);
 
-  // Queue tallies (issue counts, not regulatory figures; full list — see
-  // the component comment). "Open" means status open or owned: 'resolved'
-  // and 'attested' (migration 0029 — the p. 146 statistician closure) are
-  // both CLOSED states, exactly as the certification gate counts them.
+  // SERVER-side queue tallies (workflow counts, never regulatory figures).
+  // "Open" means status open or owned: 'resolved' and 'attested'
+  // (migration 0029 — the p. 146 statistician closure) are both CLOSED
+  // states, exactly as the certification gate counts them. Adding the
+  // open and owned per-severity counts is a tally of two disjoint
+  // server-counted sets — the same composition /today's blocker line uses.
   const all = issues ?? [];
+  const countsReady = countsOpen !== null && countsOwned !== null;
   const countBy = (severity: string) =>
-    all.filter(
-      (i) =>
-        i.severity === severity &&
-        (i.status === "open" || i.status === "owned"),
-    ).length;
-  const resolvedCount = all.filter((i) => i.status === "resolved").length;
+    (countsOpen?.by_severity[severity] ?? 0) +
+    (countsOwned?.by_severity[severity] ?? 0);
+  const resolvedCount = countsAll?.by_status.resolved ?? 0;
+  // Empty queue: the server's whole-queue total when we have it; the
+  // loaded list as the fallback when the counts call failed.
+  const queueEmpty =
+    countsAll !== null
+      ? countsAll.total === 0
+      : issues !== null && issues.length === 0;
 
   const filtered = all.filter(
     (i) =>
@@ -119,18 +153,31 @@ export function DqView() {
           {error}
         </div>
       )}
-      {/* Skeleton (handoff 0021 #2): the queue's shape while it loads. */}
-      {!issues && !error && <Skeleton variant="table" count={5} />}
-      {issues && issues.length === 0 && <p>{copy.dq.empty}</p>}
-      {issues && issues.length > 0 && (
+      {/* A counts failure is stated verbatim — the cards never silently
+          vanish into a clean-looking header. */}
+      {countsError && (
+        <div role="alert" className="alert">
+          {countsError}
+        </div>
+      )}
+      {queueEmpty && <p>{copy.dq.empty}</p>}
+      {/* The queue-at-a-glance header paints from the SERVER counts the
+          moment they land (milliseconds since handoff 0023) — the 41k-row
+          list download no longer holds the whole page hostage. */}
+      {!countsReady && !countsError && !queueEmpty && (
+        <Skeleton variant="cards" count={4} />
+      )}
+      {!queueEmpty && (countsReady || (issues !== null && issues.length > 0)) && (
         <>
           <section aria-label={copy.dq.summaryHeading} className="dq-summary">
             <h2>{copy.dq.summaryHeading}</h2>
             {/* Summary cards ARE the filter toggles (handoff 0017 #2):
                 count + colored top border + label, aria-pressed. The three
                 severity cards toggle the severity filter; the Resolved card
-                toggles the status filter to resolved. Counts always cover
-                the whole queue — filtering hides nothing from them. */}
+                toggles the status filter to resolved. Counts cover the
+                WHOLE queue (server-counted over exactly the rows the list
+                endpoint serves) — filtering hides nothing from them. */}
+            {countsReady && (
             <SummaryCards
               label={copy.dq.severityFilterLabel}
               cards={[
@@ -174,6 +221,7 @@ export function DqView() {
                 }
               }}
             />
+            )}
             {totalEffortMinutes > 0 && (
               <ul className="dq-chips">
                 <li className="chip effort">
@@ -188,7 +236,7 @@ export function DqView() {
               value={statusFilter}
               onChange={setStatusFilter}
             />
-            {filtersActive && (
+            {filtersActive && issues !== null && (
               <p className="dq-showing">
                 {copy.dq.showingCount(
                   formatCount(filtered.length),
@@ -197,7 +245,11 @@ export function DqView() {
               </p>
             )}
           </section>
-          {filtered.length === 0 ? (
+          {/* Skeleton (handoff 0021 #2): the LIST's shape while the full
+              queue download (still multi-second at 41k rows — recorded
+              backend follow-up) is in flight. The header above is live. */}
+          {issues === null && !error && <Skeleton variant="table" count={5} />}
+          {issues !== null && issues.length > 0 && (filtered.length === 0 ? (
             <div className="banner">
               <p>{copy.dq.noMatch(formatCount(all.length))}</p>
               <button
@@ -232,7 +284,7 @@ export function DqView() {
                 ))}
               </ul>
             </>
-          )}
+          ))}
         </>
       )}
     </>
@@ -240,9 +292,10 @@ export function DqView() {
 }
 
 /**
- * Queue tallies for display: thousands-separated ("8,824"). These are counts
- * of workflow issues this component made itself — never a regulatory figure,
- * which would be displayed verbatim from the API instead.
+ * Queue tallies for display: thousands-separated ("8,824"). Since handoff
+ * 0024 the header tallies are the SERVER's own counts (GET
+ * /dq/issues/counts) — this helper only formats them; it never originates
+ * a regulatory figure, which would be displayed verbatim from the API.
  */
 function formatCount(count: number): string {
   return count.toLocaleString("en-US");

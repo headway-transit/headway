@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { Suspense, lazy, useEffect } from "react";
 import {
   Navigate,
   Outlet,
@@ -27,6 +27,17 @@ import { SafetyView } from "./views/SafetyView";
 import { SamplingView } from "./views/SamplingView";
 import { SandboxView } from "./views/SandboxView";
 import { TodayView } from "./views/TodayView";
+import { Skeleton } from "./components/Skeleton";
+import { copy } from "./copy";
+
+/**
+ * The living map (handoff 0024) is code-split: MapLibre GL JS (~800 kB
+ * minified) loads only when /map is visited, so the /today first-paint
+ * budget is untouched by the map's arrival.
+ */
+const MapView = lazy(() =>
+  import("./views/MapView").then((m) => ({ default: m.MapView })),
+);
 
 function RequireAuth() {
   const session = useSession();
@@ -69,6 +80,18 @@ export function AppRoutes() {
               1); the dashboard keeps its place in the nav. */}
           <Route path="/" element={<Navigate to="/today" replace />} />
           <Route path="/today" element={<TodayView />} />
+          {/* The living map (handoff 0024, design point 1): any signed-in
+              role, exactly like GET /ops/vehicles/latest + /geometry/*. */}
+          <Route
+            path="/map"
+            element={
+              <Suspense
+                fallback={<Skeleton variant="lines" count={3} label={copy.map.loading} />}
+              >
+                <MapView />
+              </Suspense>
+            }
+          />
           {/* Any authenticated role (handoff 0008, pillar B). */}
           <Route path="/dashboard" element={<DashboardView />} />
           <Route path="/metrics" element={<MetricsView />} />

@@ -1,0 +1,40 @@
+login dsteward: OK (tour auto-offered; skipped for screenshots)
+A. /map default (300 s) window chip: "No vehicle positions in the last 157 h 31 min"
+A. /map server staleness note, VERBATIM: "No vehicle has reported a position in the last 300 seconds. The newest position on record is 567118 seconds old — the feed is stale or service is not running, not an empty fleet."
+A. /map legend schematic line: "About the route lines, in the server's own words: Schematic geometry: each route line connects the stops of the route's most common trip pattern with straight segments. It shows structure, not streets…"
+screenshot dsteward-map-quiet-live.png (geometry drawn from live /geometry/*; feed honestly quiet)
+A. /map 24 h window (the API's cap): "0 vehicles with a position in the selected window." | chip: "No vehicle positions in the last 157 h 32 min" — the feed is older than every allowed window; the page states it, never fakes it
+screenshot dsteward-map-24h-live.png
+A. /map NETWORK PROOF: 16 requests during the whole /map session; EXTERNAL (tiles/fonts/sprites/anything): 0 (ZERO)
+A. /map API endpoints touched: /geometry/routes, /geometry/stops, /ops/vehicles/latest
+A. /dq queue-at-a-glance cards (SERVER counts) visible 347 ms after nav click; screenshot dsteward-dq-counts-first.png
+A. /dq full 41k-row issue list rendered at 10199 ms (unpaginated list download — recorded backend follow-up)
+A. /today FIRST PAINT (SPA nav /metrics -> /today): 31.9 ms to the first painted frame (28 skeleton blocks visible)
+A. /today FULL SETTLE (every skeleton replaced): 5.46 s wall
+screenshot dsteward-today-settled.png
+B. RENDERER PROOF setup: /ops/vehicles/latest intercepted with 2057 REAL canonical.vehicle_positions rows (read-only DB replay; TRUE ages 566594–1647025 s; newest 2026-07-22T02:58:36Z). Geometry, auth, app code, MapLibre renderer: fully live.
+login dsteward: OK (tour auto-offered; skipped for screenshots)
+B. chip (ages are true, so it stays QUIET even with dots drawn): "No vehicle positions in the last 157 h 23 min" | "2,057 vehicles with a position in the selected window."
+screenshot dsteward-map-dots-replay.png (REPLAYED real rows — labeled)
+B. list cap line: "Showing the first 100 of 2,057 vehicles in the window. Nothing is dropped from the map or the counts — narrow the window to shorten the list."
+B. vehicle panel from list (vehicle 1033): Vehicle 1033 | Route CapeFlyer · Trip SouthBase-817310-9940 | Position as of 746844 seconds ago (at the last refresh). | Reported at 2026-07-20T00:54:26Z. | Position: 42.346309661865234, -71.05767822265625 | Source feed: gtfs_rt | Close vehicle details
+screenshot dsteward-map-vehicle-panel-replay.png (dot centered, selection ring, panel)
+B. CANVAS CLICK on the dot reopens the popover panel: true
+screenshot dsteward-map-canvas-click-replay.png
+B. camera calls with motion ALLOWED: ["easeTo"] (easeTo = glide)
+B. REDUCED MOTION (CDP-emulated; matchMedia=true): camera calls ["jumpTo"] (jumpTo = instant, the 0021 rule) 
+screenshot dsteward-map-reduced-motion-replay.png
+login certifier: OK (tour auto-offered; skipped for screenshots)
+C. /dashboard Executive lens (default, month) loaded — sparklines on the hero tiles
+screenshot certifier-dashboard-executive.png
+C. Board pressed -> /metrics/history requests so far: ?bucket=month | ?bucket=month | ?bucket=quarter
+screenshot certifier-dashboard-board.png
+C. Operations lens: section order ["Operations metrics","Unlinked passenger trips over time"] (ops cards FORWARD)
+screenshot certifier-dashboard-operations.png
+C. hand-picked Week -> Operations preset aria-pressed=false; history requests: ?bucket=month | ?bucket=month | ?bucket=quarter | ?bucket=day | ?bucket=week
+C. sparkline point -> RECEIPT (one click), leading lines: ["160835.49 miles — Vehicle Revenue Miles (VRM), 2026-07-01 to 2026-08-01.","How complete is the data","90.61%","Covers 90.61% of vehicle-trips; 2768 excluded and documented."]
+screenshot certifier-dashboard-spark-receipt.png
+C. /map chip (live): "No vehicle positions in the last 157 h 33 min"
+screenshot certifier-map-live.png
+screenshot certifier-map-dark.png (theme toggle repaints the canvas from the dark tokens, live)
+C. /map EXTERNAL requests: 0 (ZERO)

@@ -73,20 +73,19 @@ const dqCountsOwned = {
   by_severity: { blocking: 2, warning: 100, info: 98 },
   by_status: { owned: 200 },
 };
-const dqCountsAttested = {
-  total: 10,
-  by_severity: { warning: 10 },
-  by_status: { attested: 10 },
-};
-const dqCountsResolved = {
-  total: 30,
-  by_severity: { blocking: 5, warning: 25 },
-  by_status: { resolved: 30 },
+/** The whole-queue (unfiltered) counts: one call carries every status
+ *  total. Cheap since handoff 0023 rewrote the endpoint as a SQL GROUP BY
+ *  (4.8–5.9 s → 33–49 ms live), which retired the 0021 per-status-only
+ *  workaround (handoff 0024, design point 3). */
+const dqCountsAll = {
+  total: 1240,
+  by_severity: { blocking: 11, warning: 435, info: 794 },
+  by_status: { open: 1000, owned: 200, attested: 10, resolved: 30 },
 };
 
-/** Counts endpoint handler: the status filter picks the body. An
- *  UNFILTERED call fails the test loudly — the live 41k-issue queue made
- *  the unfiltered count a ~5s query, so /today must never issue one. */
+/** Counts endpoint handler: the optional status filter picks the body —
+ *  open/owned carry the unresolved severity split for the blocker lines;
+ *  the unfiltered call carries the whole-queue by_status totals. */
 const dqCountsRoute: RouteHandler = (call) => {
   const status = new URL(call.url, "http://x").searchParams.get("status");
   const body =
@@ -94,15 +93,11 @@ const dqCountsRoute: RouteHandler = (call) => {
       ? dqCountsOpen
       : status === "owned"
         ? dqCountsOwned
-        : status === "attested"
-          ? dqCountsAttested
-          : status === "resolved"
-            ? dqCountsResolved
-            : null;
+        : status === null
+          ? dqCountsAll
+          : null;
   if (body === null) {
-    throw new Error(
-      "Unfiltered GET /dq/issues/counts from /today (must be per-status)",
-    );
+    throw new Error(`Unexpected GET /dq/issues/counts?status=${status}`);
   }
   return { status: 200, body };
 };
@@ -276,12 +271,21 @@ describe("/today (the briefing home)", () => {
       screen.getByText("10 issues closed under a recorded statistician attestation."),
     ).toBeInTheDocument();
     expect(
+      screen.getByText("30 resolved issues on record."),
+    ).toBeInTheDocument();
+    expect(
       screen.getByRole("link", { name: "Go to the data-quality queue" }),
     ).toHaveAttribute("href", "/dq");
 
     // BINDING: the briefing consumed /dq/issues/counts and NEVER fetched
-    // the issue list itself.
-    expect(calls.some((c) => c.path === "/dq/issues/counts")).toBe(true);
+    // the issue list itself. Three counts calls exactly: open + owned
+    // (the unresolved severity split) + ONE unfiltered whole-queue call —
+    // the 0021 per-status-only workaround is deleted (handoff 0024 #3).
+    const countCalls = calls
+      .filter((c) => c.path === "/dq/issues/counts")
+      .map((c) => new URL(c.url, "http://x").searchParams.get("status"))
+      .sort();
+    expect(countCalls).toEqual([null, "open", "owned"].sort());
     expect(calls.some((c) => c.path === "/dq/issues")).toBe(false);
     // And no certifications fetch — that slice is the official's.
     expect(calls.some((c) => c.path === "/certifications")).toBe(false);

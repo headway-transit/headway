@@ -1199,6 +1199,178 @@ export interface SandboxPreviewResponse {
   ops?: PreviewSection | null;
 }
 
+// ---- the living map + audience lenses (handoffs 0023/0024) ----
+//
+// Typed against the regenerated services/api/openapi.json (54 paths,
+// 2026-07-22): GET /ops/vehicles/latest, GET /geometry/stops,
+// GET /geometry/routes, GET /metrics/history.
+
+/**
+ * One vehicle's latest position, verbatim from canonical.vehicle_positions.
+ * Nullable fields stay null — an unassigned position is served unassigned,
+ * never guessed. latitude/longitude/bearing/speed are POSITIONS (geometry
+ * for the map), never reported regulatory figures.
+ */
+export interface OpsVehicle {
+  vehicle_id: string;
+  latitude: number;
+  longitude: number;
+  /** ISO date-time */
+  recorded_at: string;
+  /** Seconds since this position was recorded, by the DATABASE clock. */
+  age_seconds: number;
+  bearing?: number | null;
+  speed_mps?: number | null;
+  trip_id?: string | null;
+  route_id?: string | null;
+  source_record_id: string;
+  source: string;
+  /** The per-vehicle SIMULATED flag — rendered as the badge wherever set. */
+  simulated: boolean;
+}
+
+/**
+ * GET /ops/vehicles/latest — the live-map feed. OPS category: the envelope
+ * restates the migration-0024 boundary (ops_note) and the UI badges the
+ * surface. `note` carries the server's plain-language staleness/emptiness
+ * statement, rendered verbatim when present.
+ */
+export interface OpsVehiclesLatest {
+  /** ISO date-time (server clock at response time). */
+  as_of: string;
+  max_age_seconds: number;
+  category: string;
+  ops_note: string;
+  vehicles: OpsVehicle[];
+  vehicle_count: number;
+  total_in_window: number;
+  cap: number;
+  truncated: boolean;
+  /** Newest position on record REGARDLESS of window — the honesty anchor. */
+  newest_position_at?: string | null;
+  note?: string | null;
+}
+
+export interface PointGeometry {
+  type: string;
+  /** [longitude, latitude] */
+  coordinates: number[];
+}
+
+export interface LineStringGeometry {
+  type: string;
+  /** [[longitude, latitude], ...] */
+  coordinates: number[][];
+}
+
+export interface StopFeature {
+  type: string;
+  geometry: PointGeometry;
+  /** stop_id, name. */
+  properties: Record<string, unknown>;
+}
+
+/** GET /geometry/stops — GeoJSON FeatureCollection of canonical.stops. */
+export interface StopsCollection {
+  type: string;
+  features: StopFeature[];
+  category: string;
+  ops_note: string;
+  stop_count: number;
+  /** Stops served WITHOUT coordinates — counted, never invented. */
+  stops_without_coordinates: number;
+  cap: number;
+  truncated: boolean;
+  total_stops: number;
+  note?: string | null;
+}
+
+export interface RouteFeature {
+  type: string;
+  geometry: LineStringGeometry;
+  /** route_id, short_name, long_name, mode, geometry_kind,
+   *  pattern_trip_count, stop_count, stops_missing_coordinates. */
+  properties: Record<string, unknown>;
+}
+
+/**
+ * GET /geometry/routes — the HONEST SCHEMATIC: straight lines through the
+ * ordered stops of each route's most common trip pattern. geometry_kind +
+ * geometry_note say so and the map legend renders them verbatim — the line
+ * must never be presented as the path vehicles drive.
+ */
+export interface RoutesCollection {
+  type: string;
+  features: RouteFeature[];
+  category: string;
+  ops_note: string;
+  geometry_kind: string;
+  geometry_note: string;
+  route_count: number;
+  routes_without_geometry: number;
+  cap: number;
+  truncated: boolean;
+  total_routes_with_trips: number;
+  /** ISO date-time + TTL: the per-process cache's stated staleness bound. */
+  computed_at: string;
+  cache_ttl_seconds: number;
+  cache_note: string;
+  note?: string | null;
+}
+
+/**
+ * One persisted figure in the period series — a full metric-value row,
+ * verbatim and receipt-linkable, plus the simulated label. `value` is the
+ * API's exact decimal STRING, never parsed into a number for display.
+ */
+export interface HistoryPoint {
+  metric_value_id: string;
+  metric: string;
+  unit: string;
+  /** ISO date */
+  period_start: string;
+  /** ISO date */
+  period_end: string;
+  scope: string;
+  value: string;
+  calc_name: string;
+  calc_version: string;
+  /** ISO date-time */
+  computed_at: string;
+  certification_status: string;
+  detail?: Record<string, unknown>;
+  /** "ntd" | "ops" — the honesty boundary. */
+  category: string;
+  simulated: boolean;
+}
+
+/** One calendar bucket: a key and the figures whose period starts in it.
+ *  ONLY these two fields exist — the server computes no aggregate. */
+export interface HistoryBucket {
+  bucket_key: string;
+  points: HistoryPoint[];
+}
+
+/**
+ * GET /metrics/history — persisted figures GROUPED by calendar bucket,
+ * never summed or averaged (grouping_note states it; rendered verbatim).
+ */
+export interface HistoryResponse {
+  bucket: string;
+  metric?: string | null;
+  scope?: string | null;
+  calc_version?: string | null;
+  period_from?: string | null;
+  period_to?: string | null;
+  buckets: HistoryBucket[];
+  point_count: number;
+  total_matching: number;
+  cap: number;
+  truncated: boolean;
+  grouping_note: string;
+  note?: string | null;
+}
+
 // ---- error envelopes (FastAPI) ----
 
 export interface ValidationErrorItem {

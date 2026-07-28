@@ -7,7 +7,8 @@ import {
   renderApp,
   signInAs,
 } from "./helpers";
-import type { DqIssue } from "../api/types";
+import type { DqIssue, DqIssueCounts } from "../api/types";
+import type { RouteHandler } from "./helpers";
 import {
   attestationRecord,
   attestedBlockingIssue,
@@ -17,13 +18,41 @@ import {
   warningIssue,
 } from "./fixtures";
 
-function mockIssues() {
-  return mockApi({
-    "GET /dq/issues": {
-      status: 200,
-      body: [blockingIssue, warningIssue, resolvedIssue],
+/**
+ * Server-side counts over EXACTLY the mocked issue rows — the mock mirrors
+ * the 0017/0023 cards-match-table guarantee (same rows, same optional
+ * status filter), so the header cards the view now builds from GET
+ * /dq/issues/counts (handoff 0024 #3) always agree with the mocked list.
+ */
+function countsFor(issues: DqIssue[], status: string | null): DqIssueCounts {
+  const rows = status ? issues.filter((i) => i.status === status) : issues;
+  const tally = (pick: (i: DqIssue) => string) => {
+    const out: Record<string, number> = {};
+    for (const i of rows) out[pick(i)] = (out[pick(i)] ?? 0) + 1;
+    return out;
+  };
+  return {
+    total: rows.length,
+    by_severity: tally((i) => i.severity),
+    by_status: tally((i) => i.status),
+  };
+}
+
+/** The list route + the counts route (query-aware), for one fixture set. */
+function dqRoutes(issues: DqIssue[]): Record<string, RouteHandler> {
+  return {
+    "GET /dq/issues": { status: 200, body: issues },
+    "GET /dq/issues/counts": (call) => {
+      const status = new URL(call.url, "http://test").searchParams.get(
+        "status",
+      );
+      return { status: 200, body: countsFor(issues, status) };
     },
-  });
+  };
+}
+
+function mockIssues() {
+  return mockApi(dqRoutes([blockingIssue, warningIssue, resolvedIssue]));
 }
 
 /**
@@ -41,12 +70,7 @@ const openRefusalIssue: DqIssue = {
 describe("/dq", () => {
   it("treats an ATTESTED blocking issue as closed (migration 0029): visible with its resolution story, not counted open, no resolve form, no blocking note", async () => {
     signInAs("data_steward");
-    mockApi({
-      "GET /dq/issues": {
-        status: 200,
-        body: [attestedBlockingIssue, blockingIssue],
-      },
-    });
+    mockApi(dqRoutes([attestedBlockingIssue, blockingIssue]));
     renderApp("/dq");
 
     // The open count matches the API's certification rule: the attested
@@ -216,7 +240,7 @@ describe("/dq", () => {
   it("lets a data steward resolve an issue by keyboard with a required note", async () => {
     signInAs("data_steward");
     const calls = mockApi({
-      "GET /dq/issues": { status: 200, body: [blockingIssue] },
+      ...dqRoutes([blockingIssue]),
       "POST /dq/issues/dq-1/resolve": {
         status: 200,
         body: {
@@ -278,7 +302,7 @@ describe("/dq", () => {
   it("records optional time spent (whole minutes), shows it on the resolved card, and totals documented effort in the header", async () => {
     signInAs("data_steward");
     const calls = mockApi({
-      "GET /dq/issues": { status: 200, body: [blockingIssue, resolvedIssue] },
+      ...dqRoutes([blockingIssue, resolvedIssue]),
       "POST /dq/issues/dq-1/resolve": {
         status: 200,
         body: {
@@ -358,7 +382,7 @@ describe("/dq", () => {
   it("keeps the effort field optional: a blank field sends no resolution_minutes and shows no total when none are recorded", async () => {
     signInAs("data_steward");
     const calls = mockApi({
-      "GET /dq/issues": { status: 200, body: [blockingIssue] },
+      ...dqRoutes([blockingIssue]),
       "POST /dq/issues/dq-1/resolve": {
         status: 200,
         body: {
@@ -407,7 +431,7 @@ describe("/dq", () => {
       "again — reopening and re-resolving would need a new issue so the " +
       "history stays honest.";
     mockApi({
-      "GET /dq/issues": { status: 200, body: [blockingIssue] },
+      ...dqRoutes([blockingIssue]),
       "POST /dq/issues/dq-1/resolve": {
         status: 409,
         body: { detail: refusal },
@@ -433,26 +457,40 @@ describe("/dq", () => {
 
   it("closes a p. 146 refusal issue under a recorded attestation: dialog with the verbatim rule, standing attestations only, POST, toast, the attested chip", async () => {
     signInAs("data_steward");
+    // STATEFUL mock: the POST closes the issue in the mocked queue, so the
+    // counts the view refetches afterwards recount the changed rows — the
+    // same server-recount contract the live API provides.
+    let queue: DqIssue[] = [openRefusalIssue, blockingIssue];
     const calls = mockApi({
-      "GET /dq/issues": {
-        status: 200,
-        body: [openRefusalIssue, blockingIssue],
+      "GET /dq/issues": { status: 200, body: queue },
+      "GET /dq/issues/counts": (call) => {
+        const status = new URL(call.url, "http://test").searchParams.get(
+          "status",
+        );
+        return { status: 200, body: countsFor(queue, status) };
       },
       "GET /attestations": {
         status: 200,
         body: [attestationRecord, revokedAttestationRecord],
       },
-      [`POST /dq/issues/${openRefusalIssue.issue_id}/attest`]: {
-        status: 200,
-        body: {
-          issue_id: openRefusalIssue.issue_id,
-          status: "attested",
-          resolved_at: "2026-07-15T18:00:00Z",
-          resolution:
-            "Closed under statistician attestation #att-3 (p. 146): the factoring method was approved.",
-          attestation_id: "att-3",
-          audit_event_id: 901,
-        },
+      [`POST /dq/issues/${openRefusalIssue.issue_id}/attest`]: () => {
+        queue = queue.map((i) =>
+          i.issue_id === openRefusalIssue.issue_id
+            ? { ...i, status: "attested" }
+            : i,
+        );
+        return {
+          status: 200,
+          body: {
+            issue_id: openRefusalIssue.issue_id,
+            status: "attested",
+            resolved_at: "2026-07-15T18:00:00Z",
+            resolution:
+              "Closed under statistician attestation #att-3 (p. 146): the factoring method was approved.",
+            attestation_id: "att-3",
+            audit_event_id: 901,
+          },
+        };
       },
     });
     const user = userEvent.setup();
@@ -548,7 +586,7 @@ describe("/dq", () => {
 
   it("offers no attest action to a viewer (UX mirror of the API's data_steward+ rule)", async () => {
     signInAs("viewer");
-    mockApi({ "GET /dq/issues": { status: 200, body: [openRefusalIssue] } });
+    mockApi(dqRoutes([openRefusalIssue]));
     renderApp("/dq");
 
     await screen.findByRole("heading", { name: openRefusalIssue.title });
@@ -560,7 +598,7 @@ describe("/dq", () => {
   it("states plainly when no standing attestation exists — the dialog references approvals, it never creates one", async () => {
     signInAs("data_steward");
     mockApi({
-      "GET /dq/issues": { status: 200, body: [openRefusalIssue] },
+      ...dqRoutes([openRefusalIssue]),
       // Only a REVOKED attestation on record: nothing standing to offer.
       "GET /attestations": { status: 200, body: [revokedAttestationRecord] },
     });
@@ -594,7 +632,7 @@ describe("/dq", () => {
       "close issues. Record a new attestation if a statistician has " +
       "approved a method.";
     mockApi({
-      "GET /dq/issues": { status: 200, body: [openRefusalIssue] },
+      ...dqRoutes([openRefusalIssue]),
       "GET /attestations": { status: 200, body: [attestationRecord] },
       [`POST /dq/issues/${openRefusalIssue.issue_id}/attest`]: {
         status: 409,
@@ -642,7 +680,7 @@ describe("/dq", () => {
       status: "open",
       title: `Bulk issue ${i}`,
     }));
-    mockApi({ "GET /dq/issues": { status: 200, body: many } });
+    mockApi(dqRoutes(many));
     renderApp("/dq");
 
     await screen.findByRole("heading", { name: "Data-quality issues" });
@@ -652,10 +690,11 @@ describe("/dq", () => {
     ).toBeInTheDocument();
     // Exactly the cap's worth of cards is drawn…
     expect(screen.getAllByRole("article")).toHaveLength(200);
-    // …and the summary counts still cover the WHOLE queue.
+    // …and the summary counts still cover the WHOLE queue (findBy: the
+    // server-counted cards settle on their own request, not the list's).
     const summary = screen.getByRole("region", { name: "Queue at a glance" });
     expect(
-      within(summary).getByRole("button", { name: /Info open/ }),
+      await within(summary).findByRole("button", { name: /Info open/ }),
     ).toHaveTextContent("250");
   });
 });

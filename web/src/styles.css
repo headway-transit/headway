@@ -68,6 +68,15 @@
   --chart-status-warning: #946300; /* 5.19:1 on the chart surface */
   --chart-status-info: #1d4e89; /* 8.39:1 on the chart surface */
 
+  /* The living map (handoff 0024): a self-hosted water-tone canvas — no
+     tiles, so the background IS a token. Marks are meaningful non-text
+     (SC 1.4.11, >= 3:1 vs --map-bg; scripts/check-contrast.mjs): route
+     4.09:1, stop 5.13:1, vehicle 5.73:1. */
+  --map-bg: #dce8f0;
+  --map-route: #5c7086;
+  --map-stop: #57606a;
+  --map-vehicle: #1a56a8;
+
   --focus-ring: 3px solid var(--color-accent);
 
   /* Spacing rhythm */
@@ -128,6 +137,13 @@
   --chart-status-blocking: #f2827f; /* 6.82:1 on the dark chart surface */
   --chart-status-warning: #d4a72c; /* 7.71:1 on the dark chart surface */
   --chart-status-info: #6cb6ff; /* 8.05:1 on the dark chart surface */
+
+  /* Map tokens, dark set (route 3.19:1, stop 7.33:1, vehicle 8.30:1 on
+     the dark water tone — scripts/check-contrast.mjs). */
+  --map-bg: #101823;
+  --map-route: #526a85;
+  --map-stop: #9ea7b3;
+  --map-vehicle: #6cb6ff;
 
   --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.55), 0 1px 1px rgba(0, 0, 0, 0.4);
   --shadow-2: 0 4px 12px rgba(0, 0, 0, 0.6);
@@ -2492,4 +2508,157 @@ button.figure-button {
     box-shadow: none;
     border: none;
   }
+}
+
+/* ---- The living map (/map — handoff 0024, design point 1) ---- */
+
+.map-canvas {
+  width: 100%;
+  height: min(62vh, 560px);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-2);
+  overflow: hidden;
+  margin: var(--space-3) 0;
+  background: var(--map-bg);
+}
+/* MapLibre's own focus outline is subtle; use the house ring. */
+.map-canvas canvas:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: -3px;
+}
+
+.map-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin: var(--space-2) 0;
+}
+/* The staleness chip: honest states, text-first (color is an echo). The
+   pairs are the AA-verified success/warning sets. A state change swaps
+   text instantly — bad news never animates in. */
+.chip.map-chip.live {
+  background: var(--color-success-bg);
+  color: var(--color-success-text);
+}
+.chip.map-chip.quiet {
+  background: var(--color-warning-bg);
+  color: var(--color-warning-text);
+}
+.map-count {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Legend: swatches echo the map tokens; the text carries the meaning. */
+.map-legend ul {
+  list-style: none;
+  padding: 0;
+  margin: var(--space-2) 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+.map-legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.map-key {
+  display: inline-block;
+  flex: none;
+}
+.map-key-stop {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--map-stop);
+}
+.map-key-route {
+  width: 22px;
+  height: 3px;
+  background: var(--map-route);
+}
+.map-key-vehicle {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--map-vehicle);
+  border: 2px solid var(--color-bg);
+  box-shadow: 0 0 0 1px var(--map-vehicle);
+}
+
+.map-vehicle-panel {
+  padding: var(--space-3);
+  margin: var(--space-3) 0;
+}
+.map-list table {
+  border-collapse: collapse;
+  margin: var(--space-2) 0;
+}
+.map-list th,
+.map-list td {
+  text-align: left;
+  padding: var(--space-1) var(--space-3) var(--space-1) 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+/* ---- KPI sparklines (handoff 0024, design point 2) ---- */
+
+.sparkline-block {
+  margin-top: var(--space-2);
+}
+.sparkline {
+  position: relative;
+  height: 48px;
+}
+.sparkline-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.sparkline-line {
+  fill: none;
+  stroke: var(--series-1);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+/* Each point is a REAL button over the line: an uncertified figure is a
+   ring, a certified one is filled (shape + the accessible name carry the
+   status — never color alone). */
+.spark-point {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  margin: -7px 0 0 -7px;
+  padding: 0;
+  border-radius: 50%;
+  border: 2px solid var(--series-1);
+  background: var(--color-bg);
+  cursor: pointer;
+}
+.spark-point.certified {
+  background: var(--series-1);
+}
+.spark-point:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: 1px;
+}
+.spark-point[aria-expanded="true"] {
+  box-shadow: 0 0 0 3px var(--color-accent);
+}
+.sparkline-note {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  margin: var(--space-1) 0 0;
+}
+.spark-receipt {
+  margin-top: var(--space-2);
+}
+
+/* ---- Audience lens bar (handoff 0024, design point 2) ---- */
+.lens-bar {
+  margin: var(--space-3) 0;
 }
