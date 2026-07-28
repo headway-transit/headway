@@ -8,9 +8,18 @@ item is one line plus the source that demands it. The roadmap is governed in the
 
 ## Now (next ~3 waves)
 
-- **Fresh-box installer test** — run `./install/install.sh` end to end on a clean
-  machine and capture evidence; every logged attempt so far stopped at the pre-checks.
-  *(install/install.log; HANDOFF.md state table)*
+- ~~**Fresh-box installer test**~~ **DONE 2026-07-22**: first complete guided install,
+  by a partner agency ITS manager on a fresh Ubuntu 26.04 VM. *(HANDOFF.md state table)*
+- **In-app connection experience** — from the first agency UAT (2026-07-28, first
+  requester recorded). Three honest rungs: (1) **visibility** — shipped (the
+  `/admin/sources` status board); (2) **connection wizard** — the UI collects and
+  validates feed URLs / vendor format and emits the exact server-side configuration,
+  while apply stays a printed command (no pretending a browser changed the server);
+  (3) **apply-from-UI** — gated on settings-driven ingestion, a Platform Architect
+  trust-boundary decision, not a page. *(handoff 0025 Open Questions)*
+- **In-UI update visibility** — same UAT: a "Check for updates" affordance is
+  legitimate (a click is consent; no phoning home) and version display in the Updates
+  card; a browser-side "update now" button stays deliberately refused. *(handoff 0025)*
 - **Close the standing live-verification pendings**: API suite against the live stack
   with migrations 0014–0016 applied; web click-through with captured evidence; AI
   `anomaly_runner` against the live DB; calc `--per-mode` + voms + MR-20 package run on
