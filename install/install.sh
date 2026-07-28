@@ -72,6 +72,7 @@ ASSUME_YES=0
 RECONFIGURE=0
 CHECK_UPDATES=0
 UPGRADE=0
+RESET_PASSWORD=0
 UPGRADE_TARGET=""
 FAILURES=0
 WARNINGS=0
@@ -165,6 +166,15 @@ Usage:
                                   changes; your data is never touched. The
                                   full story, including how to go back, is
                                   in docs/updating.md.
+  ./install/install.sh --reset-admin-password
+                                  Forgot a Headway sign-in password? This
+                                  sets a new one for an existing account,
+                                  right here on the server — nothing is
+                                  reinstalled and no data is touched. It
+                                  asks for the username (and lists the
+                                  existing ones if you cannot remember),
+                                  then for the new password. The reset is
+                                  recorded in Headway's audit trail.
   ./install/install.sh --help     Show this message.
 
 Everything the installer does is recorded in install/install.log.
@@ -180,6 +190,7 @@ for arg in "$@"; do
     --reconfigure-access) RECONFIGURE=1 ;;
     --check-updates) CHECK_UPDATES=1 ;;
     --upgrade) UPGRADE=1 ;;
+    --reset-admin-password) RESET_PASSWORD=1 ;;
     v[0-9]*)
       # A release version like v0.2.0-alpha — only meaningful with --upgrade.
       if ! printf '%s' "$arg" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.-]+)?$'; then
@@ -1182,6 +1193,139 @@ PYEOF
   fi
 }
 
+# --- Password reset (--reset-admin-password) -------------------------------------
+# The same one-off-container machinery as create_admin_user: the new password
+# is bcrypt-hashed INSIDE the helper container and only the hash reaches the
+# database. Being able to run this is what having admin access to the server
+# means — the same trust level as reading deploy/compose/.env. Every reset is
+# recorded in Headway's append-only audit trail.
+
+reset_admin_password() {
+  blank
+  say "--- Resetting a Headway sign-in password ---"
+  say "This sets a new password for an existing Headway account on this"
+  say "server. Nothing is reinstalled and no data is touched."
+  blank
+
+  local pg_pass
+  pg_pass="$(read_env_value POSTGRES_PASSWORD)"
+  if [ -z "$pg_pass" ]; then
+    fail "No Headway installation was found on this computer (there is no"
+    fixln "database password in deploy/compose/.env). If Headway was never"
+    fixln "installed here, run ./install/install.sh first."
+    exit 1
+  fi
+  if ! docker ps --format '{{.Names}}' 2>/dev/null | grep -q 'timescaledb'; then
+    fail "Headway's database container is not running, so the password"
+    fixln "cannot be changed right now. Start Headway first:"
+    fixln "    docker compose --project-directory deploy/compose --profile app up -d"
+    fixln "then run this command again."
+    exit 1
+  fi
+
+  local reset_username
+  while true; do
+    printf '   Which username needs a new password? '
+    read -r reset_username
+    if printf '%s' "$reset_username" | grep -Eq '^[A-Za-z0-9._-]+$'; then
+      break
+    fi
+    say "   Please use only letters, numbers, dots, hyphens or underscores."
+  done
+
+  local new_password
+  while true; do
+    printf '   Choose the new password (at least 8 characters; it will not be shown as you type): '
+    read -rs new_password; printf '\n'
+    if [ "${#new_password}" -lt 8 ]; then
+      say "   That password is too short. Please use at least 8 characters."
+      continue
+    fi
+    if [ "$(printf '%s' "$new_password" | wc -c)" -gt 72 ]; then
+      say "   That password is too long (the sign-in system supports up to"
+      say "   72 characters). Please choose a shorter one."
+      continue
+    fi
+    printf '   Type the same password again to confirm: '
+    local confirm; read -rs confirm; printf '\n'
+    if [ "$new_password" = "$confirm" ]; then break; fi
+    say "   The two passwords did not match. Let's try again."
+  done
+  log "password reset requested for username '$reset_username' (password not logged)"
+
+  local pg_user pg_db
+  pg_user="$(read_env_value POSTGRES_USER)"; pg_user="${pg_user:-headway}"
+  pg_db="$(read_env_value POSTGRES_DB)";     pg_db="${pg_db:-headway}"
+
+  if ! PGPASSWORD="$pg_pass" \
+       HEADWAY_RESET_USERNAME="$reset_username" \
+       HEADWAY_RESET_PASSWORD="$new_password" \
+       docker run --rm -i \
+      --network "$(compose_network)" \
+      -e PGHOST=timescaledb \
+      -e PGPORT=5432 \
+      -e PGUSER="$pg_user" \
+      -e PGPASSWORD \
+      -e PGDATABASE="$pg_db" \
+      -e HEADWAY_RESET_USERNAME \
+      -e HEADWAY_RESET_PASSWORD \
+      python:3.12-slim \
+      bash -c "pip install -q bcrypt 'psycopg[binary]' && python -" \
+      <<'PYEOF' 2>&1 | tee -a "$LOG_FILE"; then
+import json, os, sys
+import bcrypt
+import psycopg
+
+username = os.environ["HEADWAY_RESET_USERNAME"]
+password = os.environ["HEADWAY_RESET_PASSWORD"].encode("utf-8")
+
+# bcrypt reads only the first 72 bytes; reject loudly rather than truncate
+# (same rule as services/api/headway_api/auth.py).
+if len(password) > 72:
+    print("PROBLEM  The password is longer than 72 bytes, which the sign-in")
+    print("         system does not support. Please choose a shorter one.")
+    sys.exit(1)
+
+password_hash = bcrypt.hashpw(password, bcrypt.gensalt()).decode("ascii")
+
+with psycopg.connect() as conn:  # connection settings come from PG* variables
+    cur = conn.execute(
+        "UPDATE auth.users SET password_hash = %s WHERE username = %s",
+        (password_hash, username),
+    )
+    if cur.rowcount == 0:
+        rows = conn.execute(
+            "SELECT username, role FROM auth.users ORDER BY username"
+        ).fetchall()
+        print(f"PROBLEM  No account named '{username}' exists in this Headway")
+        print("         database, so nothing was changed. The accounts that")
+        print("         DO exist here are:")
+        for name, role in rows:
+            print(f"             {name}  ({role.replace('_', ' ')})")
+        print("         Run this command again with one of those usernames.")
+        sys.exit(1)
+    conn.execute(
+        "INSERT INTO audit.events (actor, action, subject_kind, subject_id, detail) "
+        "VALUES (%s, 'password_reset', 'auth.users', %s, %s)",
+        (
+            username,
+            username,
+            json.dumps({"method": "install.sh --reset-admin-password"}),
+        ),
+    )
+    conn.commit()
+    print(f"OK       The password for '{username}' has been changed. Sign in")
+    print("         with the new password from now on. This reset was")
+    print("         recorded in Headway's audit trail.")
+PYEOF
+    blank
+    fail "The password reset did not complete. The details are just above"
+    fixln "and in $LOG_FILE. Nothing was changed unless the OK message"
+    fixln "printed."
+    exit 1
+  fi
+}
+
 # --- Step 7: summary -------------------------------------------------------------
 
 print_summary() {
@@ -1763,15 +1907,21 @@ fi
 # Modes are one at a time; each promises something different (--check and
 # --check-updates promise to change nothing; --upgrade and
 # --reconfigure-access exist to change things).
-MODES=$((CHECK_ONLY + RECONFIGURE + CHECK_UPDATES + UPGRADE))
+MODES=$((CHECK_ONLY + RECONFIGURE + CHECK_UPDATES + UPGRADE + RESET_PASSWORD))
 if [ "$MODES" -gt 1 ]; then
   fail "Those options cannot be combined. Please run one at a time:"
-  fixln "--check, --check-updates, --upgrade, or --reconfigure-access."
+  fixln "--check, --check-updates, --upgrade, --reconfigure-access, or"
+  fixln "--reset-admin-password."
   exit 1
 fi
 
 if [ "$CHECK_UPDATES" -eq 1 ]; then
   check_updates
+  exit 0
+fi
+
+if [ "$RESET_PASSWORD" -eq 1 ]; then
+  reset_admin_password
   exit 0
 fi
 

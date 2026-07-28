@@ -226,6 +226,11 @@ asking for help.
   update: every downloaded image's signature is verified before anything
   switches, your data is never touched, and the way back is printed at the
   end. The full story: [`docs/updating.md`](../docs/updating.md).
+- **Forgot a sign-in password?** No reinstall needed. On the server, run
+  `./install/install.sh --reset-admin-password` — it asks which account
+  (and lists the existing usernames if you cannot remember those either),
+  takes a new password, and records the reset in Headway's audit trail.
+  Nothing else about the installation is touched.
 - Keep `deploy/compose/.env` safe. It holds this installation's
   passwords. Do not email it or commit it anywhere.
 
