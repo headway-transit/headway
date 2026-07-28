@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { screen, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
   expectNoAxeViolations,
@@ -168,7 +168,12 @@ describe("/dq", () => {
     // loaded list (the endpoint returns the whole queue): 1 blocking open,
     // 1 warning open ("owned" still counts as open — it is not resolved),
     // 0 info open, 1 resolved. Each card IS a filter toggle.
-    const summary = screen.getByRole("region", { name: "Queue at a glance" });
+    // findBy (async): the summary renders from the COUNTS request, which can
+    // resolve after the list under parallel-suite load — the CI-observed
+    // flake (2026-07-28) was exactly this query racing that fetch.
+    const summary = await screen.findByRole("region", {
+      name: "Queue at a glance",
+    });
     const cardRow = within(summary).getByRole("list", {
       name: "Show issues by severity",
     });
@@ -505,10 +510,17 @@ describe("/dq", () => {
     expect(
       screen.queryByRole("button", { name: /^Attest:.*Bus 1207/ }),
     ).not.toBeInTheDocument();
-    // Both blocking issues are open before the closure.
+    // Both blocking issues are open before the closure. findBy + waitFor:
+    // the summary paints from the separate counts request (see the flake
+    // note above) — never assume it beat the list.
     expect(
-      screen.getByRole("button", { name: /Blocking open/ }),
-    ).toHaveTextContent("2");
+      await screen.findByRole("button", { name: /Blocking open/ }),
+    ).toBeInTheDocument();
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: /Blocking open/ }),
+      ).toHaveTextContent("2"),
+    );
 
     await user.click(attestButton);
     const dialog = await screen.findByRole("dialog", {
@@ -576,10 +588,13 @@ describe("/dq", () => {
       within(card).queryByRole("button", { name: /^Attest:/ }),
     ).not.toBeInTheDocument();
     // The attested issue no longer counts open — screen and server tell
-    // the same story as the certification gate.
-    expect(
-      screen.getByRole("button", { name: /Blocking open/ }),
-    ).toHaveTextContent("1");
+    // the same story as the certification gate. waitFor: the count comes
+    // from the post-attest counts REFETCH, which is its own request.
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: /Blocking open/ }),
+      ).toHaveTextContent("1"),
+    );
 
     await expectNoAxeViolations();
   }, 15000);
