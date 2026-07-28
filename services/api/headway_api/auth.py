@@ -152,7 +152,7 @@ class LoginResponse(BaseModel):
 
 
 _SELECT_USER = (
-    "SELECT user_id, username, password_hash, role, disabled "
+    "SELECT user_id, username, password_hash, role, is_active "
     "FROM auth.users WHERE username = %s"
 )
 
@@ -169,7 +169,7 @@ def login(body: LoginRequest, request: Request, db=Depends(get_db)) -> LoginResp
     if row is None:
         # Same message as a wrong password: do not reveal which usernames exist.
         raise _BAD_CREDENTIALS
-    user_id, username, password_hash, role, disabled = row
+    user_id, username, password_hash, role, is_active = row
     if not verify_password(body.password, password_hash):
         with db.transaction():
             write_event(
@@ -181,7 +181,11 @@ def login(body: LoginRequest, request: Request, db=Depends(get_db)) -> LoginResp
                 detail={"reason": "wrong password"},
             )
         raise _BAD_CREDENTIALS
-    if disabled:
+    if not is_active:
+        # Deactivated accounts get the SAME generic 401 as a wrong password
+        # (handoff 0025, design point 1): whether an account exists, and in
+        # what state, is never revealed by the login surface. The audit
+        # trail keeps the real reason.
         with db.transaction():
             write_event(
                 db,
@@ -189,13 +193,9 @@ def login(body: LoginRequest, request: Request, db=Depends(get_db)) -> LoginResp
                 action="login_denied",
                 subject_kind="auth.users",
                 subject_id=str(user_id),
-                detail={"reason": "account disabled"},
+                detail={"reason": "account deactivated"},
             )
-        raise HTTPException(
-            status_code=403,
-            detail="This account has been disabled. Please contact your "
-            "Headway administrator.",
-        )
+        raise _BAD_CREDENTIALS
     token = issue_token(
         secret=settings.session_secret,
         sub=str(user_id),

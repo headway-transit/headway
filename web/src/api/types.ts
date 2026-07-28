@@ -517,6 +517,12 @@ export interface Branding {
   accent: string;
   has_logo: boolean;
   /**
+   * Cache-busting logo version (handoff 0025, design point 3): appended to
+   * the logo URL as ?v= so a replaced logo appears immediately. Null when
+   * no logo exists; optional so the UI tolerates an API that predates it.
+   */
+  logo_version?: string | null;
+  /**
    * Branding v2 (handoff 0017): the themed chrome, or null/absent for the
    * neutral Headway default. Optional so the UI tolerates an API that
    * predates branding v2.
@@ -547,7 +553,101 @@ export interface UpdateSettingResponse extends Setting {
 export interface LogoUploadResponse {
   content_type: string;
   bytes: number;
+  /** The new cache-busting version — this upload is visible immediately. */
+  logo_version: string;
   audit_event_id: number;
+}
+
+/** DELETE /branding/logo response (LogoDeleteResponse). */
+export interface LogoDeleteResponse {
+  removed: boolean;
+  audit_event_id: number;
+}
+
+// ---- /users (handoff 0025 — the admin area's user management v0) ----
+//
+// Typed against services/api routers/users.py EXACTLY (openapi.json
+// regenerated this wave). NO password material appears in any response.
+
+/** One account as GET /users serves it (UserRecord). */
+export interface UserRecord {
+  username: string;
+  role: string;
+  is_active: boolean;
+  /** ISO date-time */
+  created_at: string;
+}
+
+export interface CreateUserRequest {
+  username: string;
+  role: string;
+  password: string;
+}
+
+export interface CreateUserResponse extends UserRecord {
+  audit_event_id: number;
+}
+
+export interface ResetPasswordResponse {
+  username: string;
+  audit_event_id: number;
+}
+
+/** Deactivate/reactivate response (ActiveChangeResponse). */
+export interface ActiveChangeResponse {
+  username: string;
+  is_active: boolean;
+  /** Plain-language session-lifetime honesty on deactivation; shown verbatim. */
+  note?: string | null;
+  audit_event_id: number;
+}
+
+export interface ChangeRoleResponse {
+  username: string;
+  role: string;
+  /** Plain-language note: an existing session keeps its old role until expiry. */
+  note?: string | null;
+  audit_event_id: number;
+}
+
+// ---- /sources/status (handoff 0025 — read-only data-source status v0) ----
+
+/** One (source, connector) pair as raw.records has actually seen it. */
+export interface SourceStatus {
+  source: string;
+  connector: string;
+  latest_connector_version: string;
+  records_total: number;
+  /** Rows refused at parse and quarantined — never silently dropped. */
+  malformed_total: number;
+  /** ISO date-times */
+  first_seen_at: string;
+  latest_landed_at: string;
+  latest_fetched_at: string;
+  /** Seconds between the database clock and the newest record. */
+  latest_age_seconds: number;
+  records_in_window: number;
+  malformed_in_window: number;
+  /** True when the source label names a simulated source — badge it. */
+  simulated: boolean;
+}
+
+export interface CanonicalLiveness {
+  newest_vehicle_position_at: string | null;
+  age_seconds: number | null;
+  /** Plain-language freshness statement, verbatim. */
+  note: string;
+}
+
+export interface SourcesStatusResponse {
+  as_of: string;
+  window_hours: number;
+  sources: SourceStatus[];
+  canonical: CanonicalLiveness;
+  /** How connecting REALLY works today — rendered verbatim, no fake form. */
+  connecting_note: string;
+  /** Plain language when the list itself would mislead; verbatim. */
+  note?: string | null;
 }
 
 // ---- /safety (handoff 0010 — Safety & Security module v0) ----

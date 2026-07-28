@@ -2157,6 +2157,26 @@
             }
           }
         }
+      },
+      "delete": {
+        "tags": [
+          "branding"
+        ],
+        "summary": "Delete Logo",
+        "description": "Remove the agency logo entirely (certifying official only \u2014\nhandoff 0025, design point 3). The header returns to showing the\ndisplay name alone. The object is deleted from the store BEFORE the\nsettings row and audit event commit together \u2014 deletion is idempotent,\nso a mid-flight failure retries safely, and a meta row pointing at\nmissing bytes already serves the plain-language 404.",
+        "operationId": "delete_logo_branding_logo_delete",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LogoDeleteResponse"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/branding": {
@@ -3167,10 +3187,350 @@
           }
         }
       }
+    },
+    "/users": {
+      "get": {
+        "tags": [
+          "users"
+        ],
+        "summary": "List Users",
+        "description": "Every account on this instance \u2014 username, role, active state,\ncreated date. Certifying official only. Password hashes are never\nserved, by any endpoint, ever.",
+        "operationId": "list_users_users_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/UserRecord"
+                  },
+                  "type": "array",
+                  "title": "Response List Users Users Get"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "users"
+        ],
+        "summary": "Create User",
+        "description": "Create a local account (certifying official only; audited). The\npassword is bcrypt-hashed by the same helper the login path verifies\nagainst; the plaintext exists only inside this request.",
+        "operationId": "create_user_users_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateUserRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateUserResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/users/{username}/reset-password": {
+      "post": {
+        "tags": [
+          "users"
+        ],
+        "summary": "Reset Password",
+        "description": "Set a new password for an account (certifying official only;\naudited \u2014 the audit record never carries the password, only who reset\nwhose). Admin-performed by design: self-service reset needs email\ninfrastructure Headway does not have yet (recorded follow-up).",
+        "operationId": "reset_password_users__username__reset_password_post",
+        "parameters": [
+          {
+            "name": "username",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Username"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResetPasswordRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResetPasswordResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/users/{username}/deactivate": {
+      "post": {
+        "tags": [
+          "users"
+        ],
+        "summary": "Deactivate User",
+        "description": "Deactivate an account (certifying official only; audited). New\nsign-ins are refused immediately \u2014 with the same generic message as a\nwrong password, so account state never leaks. LOCKOUT FAIL-SAFE: the\nlast active certifying official cannot be deactivated (409).",
+        "operationId": "deactivate_user_users__username__deactivate_post",
+        "parameters": [
+          {
+            "name": "username",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Username"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActiveChangeResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/users/{username}/reactivate": {
+      "post": {
+        "tags": [
+          "users"
+        ],
+        "summary": "Reactivate User",
+        "description": "Reactivate a deactivated account (certifying official only;\naudited). The account signs in with the password it already had.",
+        "operationId": "reactivate_user_users__username__reactivate_post",
+        "parameters": [
+          {
+            "name": "username",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Username"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActiveChangeResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/users/{username}/role": {
+      "post": {
+        "tags": [
+          "users"
+        ],
+        "summary": "Change Role",
+        "description": "Change an account's role (certifying official only; audited with\nthe old AND new role). LOCKOUT FAIL-SAFE: the last active certifying\nofficial cannot be demoted (409) \u2014 same guard as deactivation.",
+        "operationId": "change_role_users__username__role_post",
+        "parameters": [
+          {
+            "name": "username",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Username"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChangeRoleRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChangeRoleResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sources/status": {
+      "get": {
+        "tags": [
+          "sources"
+        ],
+        "summary": "Sources Status",
+        "description": "What every data source has actually delivered \u2014 per (source,\nconnector): latest record times, all-time and windowed record counts,\nand malformed (quarantined) counts \u2014 plus the canonical vehicle-position\nliveness the ops endpoint computes. Read-only: connecting sources\nhappens outside the app today (see connecting_note).",
+        "operationId": "sources_status_sources_status_get",
+        "parameters": [
+          {
+            "name": "window_hours",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 720,
+              "minimum": 1,
+              "description": "Bounded window (hours) for the recent-activity counts. Totals are always all-time.",
+              "default": 24,
+              "title": "Window Hours"
+            },
+            "description": "Bounded window (hours) for the recent-activity counts. Totals are always all-time."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourcesStatusResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
     "schemas": {
+      "ActiveChangeResponse": {
+        "properties": {
+          "username": {
+            "type": "string",
+            "title": "Username"
+          },
+          "is_active": {
+            "type": "boolean",
+            "title": "Is Active"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "audit_event_id": {
+            "type": "integer",
+            "title": "Audit Event Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "username",
+          "is_active",
+          "audit_event_id"
+        ],
+        "title": "ActiveChangeResponse"
+      },
       "AttestRequest": {
         "properties": {
           "attestation_id": {
@@ -3635,6 +3995,17 @@
             "type": "boolean",
             "title": "Has Logo"
           },
+          "logo_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Logo Version"
+          },
           "chrome": {
             "anyOf": [
               {
@@ -3660,6 +4031,43 @@
         ],
         "title": "BrandingResponse",
         "description": "What the app shell needs to brand itself. Colors here have already\npassed the WCAG AA contrast guardrail at write time."
+      },
+      "CanonicalLiveness": {
+        "properties": {
+          "newest_vehicle_position_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Newest Vehicle Position At"
+          },
+          "age_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Age Seconds"
+          },
+          "note": {
+            "type": "string",
+            "title": "Note"
+          }
+        },
+        "type": "object",
+        "required": [
+          "note"
+        ],
+        "title": "CanonicalLiveness",
+        "description": "The same feed-freshness honesty GET /ops/vehicles/latest serves:\nthe newest normalized vehicle position vs the database clock."
       },
       "CertificationCertificate": {
         "properties": {
@@ -3966,6 +4374,53 @@
           "audit_event_id"
         ],
         "title": "CertificationResponse"
+      },
+      "ChangeRoleRequest": {
+        "properties": {
+          "role": {
+            "type": "string",
+            "title": "Role"
+          }
+        },
+        "type": "object",
+        "required": [
+          "role"
+        ],
+        "title": "ChangeRoleRequest"
+      },
+      "ChangeRoleResponse": {
+        "properties": {
+          "username": {
+            "type": "string",
+            "title": "Username"
+          },
+          "role": {
+            "type": "string",
+            "title": "Role"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "audit_event_id": {
+            "type": "integer",
+            "title": "Audit Event Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "username",
+          "role",
+          "audit_event_id"
+        ],
+        "title": "ChangeRoleResponse"
       },
       "ChromeTheme": {
         "properties": {
@@ -4394,6 +4849,63 @@
           "secret"
         ],
         "title": "CreateSubscriptionRequest"
+      },
+      "CreateUserRequest": {
+        "properties": {
+          "username": {
+            "type": "string",
+            "title": "Username"
+          },
+          "role": {
+            "type": "string",
+            "title": "Role"
+          },
+          "password": {
+            "type": "string",
+            "title": "Password"
+          }
+        },
+        "type": "object",
+        "required": [
+          "username",
+          "role",
+          "password"
+        ],
+        "title": "CreateUserRequest"
+      },
+      "CreateUserResponse": {
+        "properties": {
+          "username": {
+            "type": "string",
+            "title": "Username"
+          },
+          "role": {
+            "type": "string",
+            "title": "Role"
+          },
+          "is_active": {
+            "type": "boolean",
+            "title": "Is Active"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "audit_event_id": {
+            "type": "integer",
+            "title": "Audit Event Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "username",
+          "role",
+          "is_active",
+          "created_at",
+          "audit_event_id"
+        ],
+        "title": "CreateUserResponse"
       },
       "DeadlinesResponse": {
         "properties": {
@@ -5421,6 +5933,24 @@
         ],
         "title": "LoginResponse"
       },
+      "LogoDeleteResponse": {
+        "properties": {
+          "removed": {
+            "type": "boolean",
+            "title": "Removed"
+          },
+          "audit_event_id": {
+            "type": "integer",
+            "title": "Audit Event Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "removed",
+          "audit_event_id"
+        ],
+        "title": "LogoDeleteResponse"
+      },
       "LogoUploadResponse": {
         "properties": {
           "content_type": {
@@ -5431,6 +5961,10 @@
             "type": "integer",
             "title": "Bytes"
           },
+          "logo_version": {
+            "type": "string",
+            "title": "Logo Version"
+          },
           "audit_event_id": {
             "type": "integer",
             "title": "Audit Event Id"
@@ -5440,6 +5974,7 @@
         "required": [
           "content_type",
           "bytes",
+          "logo_version",
           "audit_event_id"
         ],
         "title": "LogoUploadResponse"
@@ -6743,6 +7278,37 @@
         ],
         "title": "RequirementResponse"
       },
+      "ResetPasswordRequest": {
+        "properties": {
+          "password": {
+            "type": "string",
+            "title": "Password"
+          }
+        },
+        "type": "object",
+        "required": [
+          "password"
+        ],
+        "title": "ResetPasswordRequest"
+      },
+      "ResetPasswordResponse": {
+        "properties": {
+          "username": {
+            "type": "string",
+            "title": "Username"
+          },
+          "audit_event_id": {
+            "type": "integer",
+            "title": "Audit Event Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "username",
+          "audit_event_id"
+        ],
+        "title": "ResetPasswordResponse"
+      },
       "ResolveRequest": {
         "properties": {
           "resolution": {
@@ -7623,6 +8189,125 @@
         ],
         "title": "Setting"
       },
+      "SourceStatus": {
+        "properties": {
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "connector": {
+            "type": "string",
+            "title": "Connector"
+          },
+          "latest_connector_version": {
+            "type": "string",
+            "title": "Latest Connector Version"
+          },
+          "records_total": {
+            "type": "integer",
+            "title": "Records Total"
+          },
+          "malformed_total": {
+            "type": "integer",
+            "title": "Malformed Total"
+          },
+          "first_seen_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "First Seen At"
+          },
+          "latest_landed_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Latest Landed At"
+          },
+          "latest_fetched_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Latest Fetched At"
+          },
+          "latest_age_seconds": {
+            "type": "integer",
+            "title": "Latest Age Seconds"
+          },
+          "records_in_window": {
+            "type": "integer",
+            "title": "Records In Window"
+          },
+          "malformed_in_window": {
+            "type": "integer",
+            "title": "Malformed In Window"
+          },
+          "simulated": {
+            "type": "boolean",
+            "title": "Simulated"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source",
+          "connector",
+          "latest_connector_version",
+          "records_total",
+          "malformed_total",
+          "first_seen_at",
+          "latest_landed_at",
+          "latest_fetched_at",
+          "latest_age_seconds",
+          "records_in_window",
+          "malformed_in_window",
+          "simulated"
+        ],
+        "title": "SourceStatus",
+        "description": "One (source, connector) pair as raw.records has actually seen it."
+      },
+      "SourcesStatusResponse": {
+        "properties": {
+          "as_of": {
+            "type": "string",
+            "format": "date-time",
+            "title": "As Of"
+          },
+          "window_hours": {
+            "type": "integer",
+            "title": "Window Hours"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/SourceStatus"
+            },
+            "type": "array",
+            "title": "Sources"
+          },
+          "canonical": {
+            "$ref": "#/components/schemas/CanonicalLiveness"
+          },
+          "connecting_note": {
+            "type": "string",
+            "title": "Connecting Note",
+            "default": "Connecting a new data source is not an in-app action yet. Feeds are configured in the deployment's .env file (GTFS and GTFS-Realtime URLs), APC/TIDES files land in the watched drop folder or arrive over the machine-key ingest API, and vendor exports go through the vendor adapters \u2014 the step-by-step guide is docs/connecting-your-data.md in your Headway installation. In-app source configuration is a recorded roadmap item."
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "type": "object",
+        "required": [
+          "as_of",
+          "window_hours",
+          "sources",
+          "canonical"
+        ],
+        "title": "SourcesStatusResponse"
+      },
       "Ss40Deadline": {
         "properties": {
           "event_id": {
@@ -8064,6 +8749,36 @@
           "audit_event_id"
         ],
         "title": "UpdateSettingResponse"
+      },
+      "UserRecord": {
+        "properties": {
+          "username": {
+            "type": "string",
+            "title": "Username"
+          },
+          "role": {
+            "type": "string",
+            "title": "Role"
+          },
+          "is_active": {
+            "type": "boolean",
+            "title": "Is Active"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "username",
+          "role",
+          "is_active",
+          "created_at"
+        ],
+        "title": "UserRecord",
+        "description": "One account as the admin surface sees it. NO password material \u2014\nnot hashed, not masked; the field does not exist here."
       },
       "ValidationError": {
         "properties": {

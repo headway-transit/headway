@@ -91,6 +91,8 @@ class FakeConn:
         # geometry (canonical.stops / canonical.trips / canonical.stop_times
         # / canonical.routes).
         self.vehicle_positions: list[dict] = []
+        # Sources status (handoff 0025): the raw.records ingest registry.
+        self.raw_records: list[dict] = []
         self.stops: dict[str, dict] = {}
         self.canonical_routes: dict[str, dict] = {}
         self.canonical_trips: dict[str, dict] = {}
@@ -156,14 +158,104 @@ class FakeConn:
         params = params or ()
         self.executed.append((q, params))
 
-        if "FROM auth.users WHERE username" in q:
+        if q.startswith(
+            "SELECT user_id, username, password_hash, role, is_active "
+            "FROM auth.users WHERE username"
+        ):
+            # auth.login — the ONLY query that ever reads a password hash.
             u = self.users.get(params[0])
             rows = (
-                [(u["user_id"], u["username"], u["password_hash"], u["role"], u["disabled"])]
+                [(u["user_id"], u["username"], u["password_hash"], u["role"], u["is_active"])]
                 if u
                 else []
             )
             return FakeCursor(rows)
+
+        # -- users admin (handoff 0025 / migration 0032) ---------------------
+        if q.startswith(
+            "SELECT user_id, role, is_active, created_at FROM auth.users "
+            "WHERE username"
+        ):
+            u = self.users.get(params[0])
+            rows = (
+                [(u["user_id"], u["role"], u["is_active"], u["created_at"])]
+                if u
+                else []
+            )
+            return FakeCursor(rows)
+
+        if q.startswith(
+            "SELECT username, role, is_active, created_at FROM auth.users"
+        ):
+            rows = sorted(
+                self.users.values(),
+                key=lambda u: (u["created_at"], u["username"]),
+            )
+            return FakeCursor(
+                [
+                    (u["username"], u["role"], u["is_active"], u["created_at"])
+                    for u in rows
+                ]
+            )
+
+        if q.startswith("INSERT INTO auth.users"):
+            username, password_hash, role = params
+            # Honest model of the ON CONFLICT (username) DO NOTHING clause:
+            # an existing username returns NO row.
+            if username in self.users:
+                return FakeCursor([])
+            # The migration-0009/0032 CHECK + defaults, modeled honestly.
+            assert role in (
+                "viewer", "data_steward", "report_preparer",
+                "certifying_official",
+            )
+            u = {
+                "user_id": str(uuid.uuid4()),
+                "username": username,
+                "password_hash": password_hash,
+                "role": role,
+                "is_active": True,
+                "created_at": dt.datetime.now(UTC),
+            }
+            self.users[username] = u
+            return FakeCursor([(u["user_id"], u["created_at"])])
+
+        if q.startswith("UPDATE auth.users SET password_hash"):
+            password_hash, username = params
+            u = self.users.get(username)
+            if u is None:
+                return FakeCursor([])
+            u["password_hash"] = password_hash
+            return FakeCursor([(u["user_id"],)])
+
+        if q.startswith("UPDATE auth.users SET is_active"):
+            is_active, username = params
+            u = self.users.get(username)
+            if u is None:
+                return FakeCursor([])
+            u["is_active"] = bool(is_active)
+            return FakeCursor([(u["user_id"],)])
+
+        if q.startswith("UPDATE auth.users SET role"):
+            role, username = params
+            u = self.users.get(username)
+            if u is None:
+                return FakeCursor([])
+            u["role"] = role
+            return FakeCursor([(u["user_id"],)])
+
+        if q.startswith(
+            "SELECT count(*) FROM auth.users "
+            "WHERE role = 'certifying_official' AND is_active"
+        ):
+            n = sum(
+                1
+                for u in self.users.values()
+                if u["role"] == "certifying_official"
+                and u["is_active"]
+                and u["username"] != params[0]
+            )
+            return FakeCursor([(n,)])
 
         if (
             q.startswith("SELECT metric_value_id, metric, unit")
@@ -1125,6 +1217,41 @@ class FakeConn:
                 [(len({t["route_id"] for t in self.canonical_trips.values()}),)]
             )
 
+        # -- sources status (handoff 0025, design point 2) --------------------
+        if q.startswith("SELECT source, connector, (array_agg"):
+            window_hours = params[0]
+            assert params[1] == window_hours
+            now = dt.datetime.now(UTC)
+            cutoff = now - dt.timedelta(hours=window_hours)
+            groups: dict[tuple, list[dict]] = {}
+            for r in self.raw_records:
+                groups.setdefault((r["source"], r["connector"]), []).append(r)
+            rows = []
+            for (source, connector), records in sorted(groups.items()):
+                newest = max(records, key=lambda r: r["landed_at"])
+                rows.append(
+                    (
+                        source,
+                        connector,
+                        newest["connector_version"],
+                        len(records),
+                        sum(
+                            1 for r in records
+                            if r["parse_status"] == "malformed"
+                        ),
+                        min(r["landed_at"] for r in records),
+                        newest["landed_at"],
+                        max(r["fetched_at"] for r in records),
+                        sum(1 for r in records if r["landed_at"] >= cutoff),
+                        sum(
+                            1 for r in records
+                            if r["parse_status"] == "malformed"
+                            and r["landed_at"] >= cutoff
+                        ),
+                    )
+                )
+            return FakeCursor(rows)
+
         if q.startswith("SELECT count(*) FROM computed.metric_values"):
             # /metrics/history cap honesty — same filters as the row query.
             rows = list(self.metric_values.values())
@@ -1208,13 +1335,15 @@ class FakeConn:
         return rows
 
     # -- seeding helpers ----------------------------------------------------
-    def add_user(self, username, role, *, disabled=False, password_hash=None):
+    def add_user(self, username, role, *, is_active=True, password_hash=None):
         self.users[username] = {
             "user_id": str(uuid.uuid4()),
             "username": username,
             "password_hash": password_hash or _HASHES[username],
             "role": role,
-            "disabled": disabled,
+            "is_active": is_active,
+            "created_at": dt.datetime(2026, 7, 1, 8, 0, tzinfo=UTC)
+            + dt.timedelta(minutes=len(self.users)),
         }
 
     def add_metric_value(self, **overrides):
@@ -1291,6 +1420,22 @@ class FakeConn:
         p.update(overrides)
         self.vehicle_positions.append(p)
         return p
+
+    def add_raw_record(self, **overrides):
+        """Seed one raw.records registry row (handoff 0025 sources status)."""
+        now = dt.datetime.now(UTC)
+        r = {
+            "record_id": uuid.uuid4().hex * 2,  # 64 hex chars, like sha256
+            "source": "gtfs_rt",
+            "connector": "headway-gtfs-rt",
+            "connector_version": "0.1.0",
+            "parse_status": "ok",
+            "fetched_at": now,
+            "landed_at": now,
+        }
+        r.update(overrides)
+        self.raw_records.append(r)
+        return r
 
     def add_stop(self, stop_id, name="Test Stop", latitude=42.36,
                  longitude=-71.06):
@@ -1619,6 +1764,11 @@ class FakeObjectStore:
         self.call_log.append(("store.get", key))
         return self.objects.get(key)
 
+    def delete(self, key):
+        """Idempotent, like S3 remove_object (routers/branding.py DELETE)."""
+        self.call_log.append(("store.delete", key))
+        self.objects.pop(key, None)
+
 
 class FakeProducer:
     def __init__(self, call_log=None):
@@ -1655,7 +1805,7 @@ def fake_db():
     db.add_user("stella", "data_steward")
     db.add_user("petra", "report_preparer")
     db.add_user("cora", "certifying_official")
-    db.add_user("dora", "viewer", disabled=True)
+    db.add_user("dora", "viewer", is_active=False)
     db.seed_default_settings()
     return db
 

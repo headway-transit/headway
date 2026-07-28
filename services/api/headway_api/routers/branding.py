@@ -12,9 +12,25 @@ Three endpoints:
   need it before sign-in), per-IP rate limited with the same token bucket as
   the public open-data endpoint, served with the recorded content type and
   cache headers. Plain-language 404 while no logo has been uploaded.
+- ``DELETE /branding/logo`` — certifying official only, audited: "remove it
+  entirely" exists (handoff 0025, design point 3 — the first agency UAT).
 - ``GET /branding`` — UNAUTHENTICATED JSON {display_name, primary, accent,
-  has_logo} for the app shell. Colors served here have already passed the
-  contrast guardrail at write time (routers/settings.py + branding.py).
+  has_logo, logo_version} for the app shell. Colors served here have already
+  passed the contrast guardrail at write time (routers/settings.py +
+  branding.py).
+
+LOGO CACHE-BUSTING (handoff 0025, design point 3 — the wave-15 standing
+queue item, root cause of the UAT "can't replace the logo" report). The
+logo URL is fixed and served with ``Cache-Control: public, max-age=300``,
+so after a replacement every browser — including the admin's own — kept
+showing the OLD logo for up to five minutes, and inside the SPA the
+unchanged ``<img src>`` never even re-fetched. RECORDED CHOICE: a version
+query parameter + ETag semantics. ``GET /branding`` serves
+``logo_version`` (derived from the audited ``brand_logo_meta`` row's
+``updated_at``, which every upload advances); the shell renders
+``/branding/logo?v=<logo_version>``, so a replacement changes the URL and
+the new image appears immediately. The logo response also carries an
+``ETag`` (the same version) and honors ``If-None-Match`` with 304.
 
 SVG NOTE: SVG can carry script, and this logo is served unauthenticated from
 our origin. Only a certifying official can upload one, and the response adds
@@ -96,7 +112,7 @@ _UPDATE_SETTING = (
 
 
 class LogoStore(Protocol):
-    """The two object-store operations branding needs. Satisfied by the same
+    """The object-store operations branding needs. Satisfied by the same
     app.state.object_store the ingest router uses (ingest.MinioObjectStore in
     production, the fake in tests)."""
 
@@ -104,10 +120,21 @@ class LogoStore(Protocol):
 
     def get(self, key: str) -> Optional[bytes]: ...
 
+    def delete(self, key: str) -> None: ...
+
 
 class LogoUploadResponse(BaseModel):
     content_type: str
     bytes: int
+    #: The new cache-busting version (see the module docstring): the shell
+    #: renders /branding/logo?v=<logo_version>, so this upload is visible
+    #: immediately.
+    logo_version: str
+    audit_event_id: int
+
+
+class LogoDeleteResponse(BaseModel):
+    removed: bool
     audit_event_id: int
 
 
@@ -129,6 +156,11 @@ class BrandingResponse(BaseModel):
     primary: str
     accent: str
     has_logo: bool
+    #: Cache-busting version for the logo URL (null when no logo): derived
+    #: from the audited brand_logo_meta row's updated_at, which every upload
+    #: advances. The shell appends it as ?v=<logo_version> so a replaced
+    #: logo appears immediately (handoff 0025, design point 3).
+    logo_version: Optional[str] = None
     #: Non-null ONLY when the agency set all three chrome keys (each pair
     #: contrast-guaranteed at write time). Null = neutral Headway chrome —
     #: the out-of-the-box state.
@@ -139,6 +171,22 @@ class BrandingResponse(BaseModel):
 def _setting_value(db, key: str) -> str:
     row = db.execute(_SELECT_SETTING_VALUE, (key,)).fetchone()
     return row[1] if row is not None else BRANDING_DEFAULTS[key]
+
+
+def _logo_version(updated_at) -> str:
+    """The cache-busting logo version: the brand_logo_meta row's updated_at
+    as epoch microseconds. Every upload advances updated_at (the audited
+    settings write), so every replacement mints a new URL."""
+    return str(int(updated_at.timestamp() * 1_000_000))
+
+
+def _logo_meta(db) -> tuple[str, Optional[str]]:
+    """(content_type, logo_version) from the brand_logo_meta row;
+    (unset, None) when no logo exists or the row predates migration 0015."""
+    row = db.execute(_SELECT_SETTING_VALUE, (LOGO_META_KEY,)).fetchone()
+    if row is None or row[1] == LOGO_META_UNSET:
+        return LOGO_META_UNSET, None
+    return row[1], _logo_version(row[5])
 
 
 def _no_logo_404() -> HTTPException:
@@ -237,8 +285,72 @@ async def upload_logo(
             },
         )
     return LogoUploadResponse(
-        content_type=content_type, bytes=len(data), audit_event_id=audit_event_id
+        content_type=content_type,
+        bytes=len(data),
+        logo_version=_logo_version(updated[0]),
+        audit_event_id=audit_event_id,
     )
+
+
+@router.delete("/branding/logo", response_model=LogoDeleteResponse)
+def delete_logo(
+    request: Request,
+    identity: Identity = Depends(require_certifying_official),
+    db=Depends(get_db),
+) -> LogoDeleteResponse:
+    """Remove the agency logo entirely (certifying official only —
+    handoff 0025, design point 3). The header returns to showing the
+    display name alone. The object is deleted from the store BEFORE the
+    settings row and audit event commit together — deletion is idempotent,
+    so a mid-flight failure retries safely, and a meta row pointing at
+    missing bytes already serves the plain-language 404."""
+    content_type, _version = _logo_meta(db)
+    if content_type == LOGO_META_UNSET:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "No agency logo is uploaded on this Headway instance, so "
+                "there is nothing to remove."
+            ),
+        )
+    store: LogoStore | None = getattr(request.app.state, "object_store", None)
+    if store is None:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Logo storage is not configured on this Headway instance: "
+                "the object store connection is missing. Nothing was "
+                "removed. Please contact your Headway administrator."
+            ),
+        )
+
+    store.delete(LOGO_OBJECT_KEY)
+    with db.transaction():
+        updated = db.execute(
+            _UPDATE_SETTING, (LOGO_META_UNSET, identity.username, LOGO_META_KEY)
+        ).fetchone()
+        if updated is None:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "This Headway instance is missing its branding settings "
+                    "(database migration 0015 has not been applied), so the "
+                    "logo removal was not recorded. Please contact your "
+                    "Headway administrator."
+                ),
+            )
+        audit_event_id = write_event(
+            db,
+            actor=identity.username,
+            action="branding_logo_removed",
+            subject_kind="app.settings",
+            subject_id=LOGO_META_KEY,
+            detail={
+                "old_content_type": content_type,
+                "object_key": LOGO_OBJECT_KEY,
+            },
+        )
+    return LogoDeleteResponse(removed=True, audit_event_id=audit_event_id)
 
 
 @router.get(
@@ -261,9 +373,19 @@ def get_logo(request: Request, db=Depends(get_db)) -> Response:
     client_ip = request.client.host if request.client else "unknown"
     enforce_rate_limit(request.app.state.public_rate_limiter, client_ip)
 
-    content_type = _setting_value(db, LOGO_META_KEY)
+    content_type, logo_version = _logo_meta(db)
     if content_type == LOGO_META_UNSET:
         raise _no_logo_404()
+
+    # ETag semantics (handoff 0025, design point 3): the version IS the
+    # validator, so a revalidating client gets a cheap 304 while a replaced
+    # logo (new version) always re-downloads.
+    etag = f'"{logo_version}"'
+    if request.headers.get("If-None-Match") == etag:
+        return Response(
+            status_code=304,
+            headers={"ETag": etag, "Cache-Control": LOGO_CACHE_CONTROL},
+        )
 
     store: LogoStore | None = getattr(request.app.state, "object_store", None)
     if store is None:
@@ -283,6 +405,7 @@ def get_logo(request: Request, db=Depends(get_db)) -> Response:
 
     headers = {
         "Cache-Control": LOGO_CACHE_CONTROL,
+        "ETag": etag,
         # Never let a browser second-guess the stored type.
         "X-Content-Type-Options": "nosniff",
     }
@@ -313,10 +436,12 @@ def get_branding(request: Request, db=Depends(get_db)) -> BrandingResponse:
         if all(v != CHROME_UNSET for v in chrome_values.values())
         else None
     )
+    logo_content_type, logo_version = _logo_meta(db)
     return BrandingResponse(
         display_name=_setting_value(db, "agency_display_name"),
         primary=_setting_value(db, "brand_color_primary"),
         accent=_setting_value(db, "brand_color_accent"),
-        has_logo=_setting_value(db, LOGO_META_KEY) != LOGO_META_UNSET,
+        has_logo=logo_content_type != LOGO_META_UNSET,
+        logo_version=logo_version,
         chrome=chrome,
     )

@@ -306,6 +306,8 @@ def test_get_branding_shape_and_defaults(client):
         "primary": "#1a5fb4",
         "accent": "#0b57d0",
         "has_logo": False,
+        # No logo, no version — the shell renders no logo URL at all.
+        "logo_version": None,
         # Branding v2 (handoff 0017): chrome is null until the agency sets
         # ALL THREE brand_chrome_* keys — neutral Headway out of the box.
         "chrome": None,
@@ -323,6 +325,101 @@ def test_get_branding_reflects_changes_and_logo(client, fake_db):
     body = r.json()
     assert body["display_name"] == "Springfield Transit"
     assert body["has_logo"] is True
+    assert body["logo_version"] is not None
+
+
+# ---------------------------------------------------------------------------
+# Logo replacement is VISIBLE (handoff 0025, design point 3 — the UAT
+# "can't replace the logo" report): the version advances on every upload,
+# so the shell's ?v= URL changes; ETag revalidation gets 304 until then.
+# ---------------------------------------------------------------------------
+
+
+def test_replacing_the_logo_advances_the_version(client, fake_db):
+    first = _upload(client, fake_db).json()
+    assert first["logo_version"]
+    assert client.get("/branding").json()["logo_version"] == (
+        first["logo_version"]
+    )
+    # Replace: the fake settings row's updated_at advances like the real
+    # audited UPDATE ... updated_at = now() does.
+    second = _upload(client, fake_db, data=SVG_BYTES,
+                     content_type="image/svg+xml", filename="logo.svg")
+    assert second.status_code == 200
+    new_version = second.json()["logo_version"]
+    assert new_version != first["logo_version"]
+    # The bundle serves the NEW version — the shell's <img src> changes and
+    # the replacement is visible immediately.
+    assert client.get("/branding").json()["logo_version"] == new_version
+    # And the replaced bytes are what the logo endpoint now serves.
+    r = client.get("/branding/logo")
+    assert r.content == SVG_BYTES
+
+
+def test_get_logo_serves_etag_and_honors_if_none_match(client, fake_db):
+    version = _upload(client, fake_db).json()["logo_version"]
+    r = client.get("/branding/logo")
+    assert r.headers["etag"] == f'"{version}"'
+    revalidated = client.get(
+        "/branding/logo", headers={"If-None-Match": f'"{version}"'}
+    )
+    assert revalidated.status_code == 304
+    assert revalidated.content == b""
+    # A stale validator (pre-replacement) re-downloads in full.
+    stale = client.get(
+        "/branding/logo", headers={"If-None-Match": '"older-version"'}
+    )
+    assert stale.status_code == 200
+    assert stale.content == PNG_BYTES
+
+
+# ---------------------------------------------------------------------------
+# DELETE /branding/logo — "remove it entirely" exists (handoff 0025)
+# ---------------------------------------------------------------------------
+
+
+def test_delete_logo_removes_records_and_audits(client, fake_db, fake_store):
+    _upload(client, fake_db)
+    r = client.delete("/branding/logo", headers=auth_header(fake_db, "cora"))
+    assert r.status_code == 200
+    assert r.json()["removed"] is True
+    # Object gone, meta unset, bundle honest, logo 404s again.
+    assert "branding/logo" not in fake_store.objects
+    assert fake_db.settings["brand_logo_meta"]["setting_value"] == "unset"
+    body = client.get("/branding").json()
+    assert body["has_logo"] is False and body["logo_version"] is None
+    assert client.get("/branding/logo").status_code == 404
+
+    events = [
+        e for e in fake_db.audit_events
+        if e["action"] == "branding_logo_removed"
+    ]
+    assert len(events) == 1
+    assert events[0]["actor"] == "cora"
+    assert json.loads(events[0]["detail"]) == {
+        "old_content_type": "image/png",
+        "object_key": "branding/logo",
+    }
+    assert r.json()["audit_event_id"] == events[0]["event_id"]
+
+
+def test_delete_logo_when_none_is_404(client, fake_db):
+    r = client.delete("/branding/logo", headers=auth_header(fake_db, "cora"))
+    assert r.status_code == 404
+    assert "nothing to remove" in r.json()["detail"]
+
+
+def test_delete_logo_requires_certifying_official(client, fake_db, fake_store):
+    _upload(client, fake_db)
+    for username in ("vera", "stella", "petra"):
+        r = client.delete(
+            "/branding/logo", headers=auth_header(fake_db, username)
+        )
+        assert r.status_code == 403, username
+    assert client.delete("/branding/logo").status_code == 401
+    # Nothing was removed by the denied attempts.
+    assert fake_store.objects["branding/logo"] == PNG_BYTES
+    assert fake_db.settings["brand_logo_meta"]["setting_value"] == "image/png"
 
 
 # ---------------------------------------------------------------------------

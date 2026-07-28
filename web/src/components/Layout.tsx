@@ -116,8 +116,15 @@ export function Layout() {
       <header className="app-header">
         <span className="brand">
           {/* Decorative: the display name beside it carries the meaning. */}
+          {/* logo_version busts the browser cache on replacement (handoff
+              0025 #3): a new upload mints a new URL, so the new logo shows
+              immediately. */}
           {branding?.has_logo && (
-            <img className="brand-logo" src={brandingLogoUrl()} alt="" />
+            <img
+              className="brand-logo"
+              src={brandingLogoUrl(branding.logo_version)}
+              alt=""
+            />
           )}
           {displayName}
         </span>
@@ -176,16 +183,16 @@ export function Layout() {
                 </li>
                 {/* Shown only to the certifying official — UX, not security:
                     the API enforces the role on POST /certifications and on
-                    every branding write. */}
+                    every admin/branding write. The admin hub (handoff 0025)
+                    absorbs the old Branding nav entry; /settings/branding
+                    keeps working and is linked from the hub. */}
                 {canCertify(session) && (
                   <>
                     <li>
                       <NavLink to="/certify">{copy.nav.certify}</NavLink>
                     </li>
                     <li>
-                      <NavLink to="/settings/branding">
-                        {copy.nav.branding}
-                      </NavLink>
+                      <NavLink to="/admin">{copy.nav.admin}</NavLink>
                     </li>
                   </>
                 )}

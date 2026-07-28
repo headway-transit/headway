@@ -34,6 +34,8 @@ from .routers import (
     sampling,
     sandbox,
     settings as settings_router,
+    sources,
+    users,
 )
 
 
@@ -151,4 +153,6 @@ def create_app(
     app.include_router(safety.router)
     app.include_router(sampling.router)
     app.include_router(sandbox.router)
+    app.include_router(users.router)
+    app.include_router(sources.router)
     return app

@@ -20,6 +20,7 @@ import type { FormEvent } from "react";
 import {
   ApiError,
   brandingLogoUrl,
+  deleteLogo,
   getBranding,
   updateSetting,
   uploadLogo,
@@ -90,7 +91,10 @@ export function BrandingView() {
   const [primary, setPrimary] = useState("#1a5fb4");
   const [accent, setAccent] = useState("#0b57d0");
   const [hasLogo, setHasLogo] = useState(false);
+  const [logoVersion, setLogoVersion] = useState<string | null>(null);
   const [logoFile, setLogoFile] = useState<File | null>(null);
+  // Remount the file input after a successful upload so the chooser clears.
+  const [logoInputKey, setLogoInputKey] = useState(0);
 
   const [error, setError] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
@@ -108,11 +112,25 @@ export function BrandingView() {
         setPrimary(branding.primary);
         setAccent(branding.accent);
         setHasLogo(branding.has_logo);
+        setLogoVersion(branding.logo_version ?? null);
         setBranding(branding); // keep the shell in sync
       },
       () => setLoadError(copy.branding.loadError),
     );
   }, []);
+
+  /**
+   * After a logo change, re-read GET /branding: the server's logo_version
+   * is what makes the replacement VISIBLE (the header and preview <img>
+   * URLs change — the cache-busting fix for the first-UAT "uploaded a new
+   * logo, still saw the old one" report, handoff 0025 #3).
+   */
+  const refreshLogoState = async () => {
+    const branding = await getBranding();
+    setHasLogo(branding.has_logo);
+    setLogoVersion(branding.logo_version ?? null);
+    setBranding(branding); // the shell header updates immediately too
+  };
 
   /** Push a saved change into the app-shell branding store immediately. */
   const publish = (patch: Partial<Branding>) => {
@@ -173,13 +191,28 @@ export function BrandingView() {
       setStatusMessage(null);
       return;
     }
+    const replacing = hasLogo;
     void run(async () => {
       const uploaded = await uploadLogo(logoFile);
-      setHasLogo(true);
-      publish({ has_logo: true });
+      setLogoFile(null);
+      setLogoInputKey((k) => k + 1);
+      await refreshLogoState();
+      const bytes = uploaded.bytes.toLocaleString("en-US");
       setStatusMessage(
-        copy.branding.logoUploaded(uploaded.bytes.toLocaleString("en-US")),
+        replacing
+          ? copy.branding.logoReplaced(bytes)
+          : copy.branding.logoUploaded(bytes),
       );
+    });
+  };
+
+  const removeLogo = () => {
+    void run(async () => {
+      await deleteLogo();
+      setLogoFile(null);
+      setLogoInputKey((k) => k + 1);
+      await refreshLogoState();
+      setStatusMessage(copy.branding.logoRemoved);
     });
   };
 
@@ -263,7 +296,7 @@ export function BrandingView() {
               {hasLogo && (
                 <img
                   className="preview-logo"
-                  src={brandingLogoUrl()}
+                  src={brandingLogoUrl(logoVersion)}
                   alt={copy.branding.logoAlt(displayName || copy.appName)}
                 />
               )}
@@ -304,20 +337,63 @@ export function BrandingView() {
           <p className="branding-hint" id={logoHintId}>
             {copy.branding.logoHint}
           </p>
-          <p>{hasLogo ? copy.branding.logoPresent : copy.branding.logoNone}</p>
-          <form onSubmit={submitLogo}>
-            <label htmlFor={logoId}>{copy.branding.logoLabel}</label>
-            <input
-              id={logoId}
-              type="file"
-              accept="image/svg+xml,image/png"
-              aria-describedby={logoHintId}
-              onChange={(e) => setLogoFile(e.target.files?.[0] ?? null)}
-            />
-            <button type="submit" disabled={saving}>
-              {copy.branding.uploadLogo}
-            </button>
-          </form>
+          {/* First-UAT fix (handoff 0025 #3): with a logo present, the
+              REPLACE affordance is explicit — its own labeled file field
+              and its own save button, like the color fields above — and
+              REMOVE exists. The <img> URLs carry logo_version, so a
+              replacement is visible immediately (no stale cached logo). */}
+          {hasLogo ? (
+            <>
+              <p>{copy.branding.logoPresent}</p>
+              <img
+                className="current-logo"
+                src={brandingLogoUrl(logoVersion)}
+                alt={copy.branding.currentLogoAlt}
+              />
+              <form onSubmit={submitLogo}>
+                <label htmlFor={logoId}>
+                  {copy.branding.replaceLogoLabel}
+                </label>
+                <input
+                  key={logoInputKey}
+                  id={logoId}
+                  type="file"
+                  accept="image/svg+xml,image/png"
+                  aria-describedby={logoHintId}
+                  onChange={(e) => setLogoFile(e.target.files?.[0] ?? null)}
+                />
+                <button type="submit" disabled={saving}>
+                  {copy.branding.replaceLogo}
+                </button>
+              </form>
+              <button
+                type="button"
+                className="remove-logo"
+                onClick={removeLogo}
+                disabled={saving}
+              >
+                {copy.branding.removeLogo}
+              </button>
+            </>
+          ) : (
+            <>
+              <p>{copy.branding.logoNone}</p>
+              <form onSubmit={submitLogo}>
+                <label htmlFor={logoId}>{copy.branding.logoLabel}</label>
+                <input
+                  key={logoInputKey}
+                  id={logoId}
+                  type="file"
+                  accept="image/svg+xml,image/png"
+                  aria-describedby={logoHintId}
+                  onChange={(e) => setLogoFile(e.target.files?.[0] ?? null)}
+                />
+                <button type="submit" disabled={saving}>
+                  {copy.branding.uploadLogo}
+                </button>
+              </form>
+            </>
+          )}
         </section>
       </div>
     </>

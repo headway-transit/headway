@@ -65,7 +65,9 @@ export const copy = {
     attestations: "Attestations",
     certifications: "Certifications",
     certify: "Certify",
-    branding: "Branding",
+    /** The admin hub (handoff 0025): certifying official only (UX; the API
+     *  enforces the role on every admin call). */
+    admin: "Admin",
     /** Visible signed-in AND signed-out: the public page needs no account. */
     publicData: "Public data",
     signIn: "Sign in",
@@ -1176,6 +1178,9 @@ export const copy = {
       "Try a settings change before anyone makes it: propose new values for the calculation knobs below, pick a period, and Headway's deterministic calculation runner recomputes that period's figures under the proposed settings as a preview. The arithmetic is the calculation library's — never this page's.",
     applyNote:
       "Nothing here applies a change. Actually changing a setting happens only in Headway's separate, audited settings flow: a certifying official updates the setting, the change is audit-logged with who changed it and when, and the calculation runner reads the new value on its next real run. This page has no apply button on purpose.",
+    /** The audited flow's real room (handoff 0025): Admin → Settings.
+     *  Rendered only for the certifying official, beside applyNote. */
+    settingsDoor: "Open Settings (Admin) to make an audited change.",
     settingsHeading: "Settings to model",
     settingsIntro:
       "Today's values come from the agency's recorded settings, shown exactly as stored. Propose a new value for at least one; leave the others blank to keep them as they are.",
@@ -1763,11 +1768,210 @@ export const copy = {
     logoLabel: "Logo file",
     uploadLogo: "Upload logo",
     logoNone: "No logo has been uploaded yet.",
-    logoPresent: "A logo is uploaded and shown in the header.",
+    logoPresent: "This logo is shown in the header right now:",
+    /* Replace/remove (handoff 0025 #3 — the first-UAT report: with a logo
+       uploaded, there was no clear way to replace it, and a replacement
+       stayed invisible behind the cached URL). The replace flow has its own
+       labeled file field and save button; remove exists; and after either,
+       the page re-reads GET /branding so the change is visible at once. */
+    replaceLogoLabel: "New logo file (SVG or PNG)",
+    replaceLogo: "Replace logo",
+    logoReplaced: (bytes: string) =>
+      `Logo replaced (${bytes} bytes). The header and the preview above now show the new logo.`,
+    removeLogo: "Remove logo",
+    logoRemoved:
+      "The logo has been removed. The header shows the agency name alone.",
     logoUploaded: (bytes: string) =>
       `Logo uploaded (${bytes} bytes). It now appears in the header.`,
     logoAlt: (displayName: string) => `${displayName} logo`,
+    currentLogoAlt: "The current agency logo",
     chooseFileFirst: "Choose an SVG or PNG file first, then upload it.",
+  },
+
+  /**
+   * The admin area (handoff 0025 — built from the first real agency UAT:
+   * "Why isn't there an admin page where you can add and connect your data
+   * sources, manage users, connect to SSO?"). Honesty rules are binding:
+   * the SSO and Updates cards state what exists and what does not — no
+   * toggles, no buttons that pretend; the data-sources room has NO
+   * add-source form because no add-source API exists.
+   */
+  admin: {
+    heading: "Admin",
+    intro:
+      "Manage this Headway installation: user accounts, the data sources feeding it, its branding, and its policy settings. Server rules decide what is allowed — this page shows refusals word for word.",
+    notAllowed:
+      "Only a certifying official can use the admin area. If you need an account changed or a data source connected, ask the person who administers Headway at your agency.",
+    backToHub: "Back to Admin",
+    cards: {
+      users: {
+        title: "Users",
+        description:
+          "Create accounts, reset passwords, change roles, and deactivate or reactivate people. Every change is recorded in the audit trail.",
+        link: "Manage users",
+      },
+      sources: {
+        title: "Data sources",
+        description:
+          "What each connected source has delivered — latest data, recent volume, and anything refused at ingest. Read-only: connecting a source happens on the server today.",
+        link: "View data sources",
+      },
+      branding: {
+        title: "Branding",
+        description:
+          "The agency name, brand colors, and logo shown across the app. Colors that would be unreadable are refused.",
+        link: "Edit branding",
+      },
+      settings: {
+        title: "Settings",
+        description:
+          "The calculation policy knobs — thresholds and windows the calculation runs read. Every change is audited with the old and new value.",
+        link: "Edit settings",
+      },
+      sso: {
+        title: "Single sign-on",
+        /* HONEST CARD (binding): SSO is designed (ADR-0011), not built.
+           No toggle, no setup button — nothing pretends. */
+        body: [
+          "Single sign-on with Entra ID, Google, or Okta is designed for Headway but not available yet. The design is recorded as ADR-0011: Headway will sign users in directly against your identity provider (native OIDC), alongside the local accounts that exist today.",
+          "Until then, every account is a local Headway account, managed under Users on this page. When SSO ships, it will be set up here.",
+        ],
+        status: "Designed, not yet available (ADR-0011)",
+      },
+      updates: {
+        title: "Updates",
+        /* HONEST CARD: updating happens on the server, by an administrator.
+           No update button in a browser — a web session must never be able
+           to replace the software it runs in (same reasoning family as the
+           SSO card: nothing pretends, nothing acts from here). */
+        body: [
+          "Updating Headway happens on the server, by an administrator — not from this page. Depending on how this installation was set up, it follows either the source code or signed releases.",
+          "On the server, an administrator runs one of these in the Headway folder:",
+        ],
+        commandSourceLabel: "Installations that follow the source code:",
+        commandSource: "./install/install.sh --update-from-source",
+        commandReleaseLabel: "Installations that follow signed releases:",
+        commandRelease:
+          "./install/install.sh --check-updates   (then --upgrade to apply)",
+        whyNoButton:
+          "There is deliberately no update button here: a web session must never be able to replace the software it runs in.",
+        status: "Updated on the server by an administrator",
+      },
+    },
+
+    users: {
+      heading: "Users",
+      intro:
+        "Everyone who can sign in to this Headway installation. Passwords are stored only as one-way hashes; nobody — including administrators — can read one back.",
+      loadError: "Headway could not load the user list.",
+      table: {
+        caption: "User accounts on this Headway installation",
+        username: "Username",
+        role: "Role",
+        status: "Status",
+        created: "Created",
+        actions: "Actions",
+      },
+      statusActive: "Active",
+      statusDeactivated: "Deactivated",
+      youMarker: (username: string) => `${username} (you)`,
+      create: {
+        heading: "Add a user",
+        usernameLabel: "Username",
+        usernameHint:
+          "Letters, numbers, dots, hyphens or underscores — no spaces.",
+        roleLabel: "Role",
+        passwordLabel: "Temporary password",
+        passwordHint:
+          "At least 8 characters. Share it with the person privately; they cannot change it themselves yet, but you can reset it here any time.",
+        submit: "Create user",
+        created: (username: string, roleLabel: string) =>
+          `Account '${username}' created as ${roleLabel}.`,
+      },
+      resetPassword: {
+        button: (username: string) => `Reset password for ${username}`,
+        buttonShort: "Reset password",
+        passwordLabel: (username: string) =>
+          `New password for ${username}`,
+        submit: "Save new password",
+        cancel: "Cancel",
+        done: (username: string) =>
+          `Password for '${username}' has been reset. Share the new password privately.`,
+      },
+      role: {
+        label: (username: string) => `Role for ${username}`,
+        submit: "Change role",
+        /** The server's note (session keeps its old role briefly) renders
+         *  verbatim beside this confirmation. */
+        changed: (username: string, roleLabel: string) =>
+          `'${username}' is now a ${roleLabel}.`,
+      },
+      deactivate: {
+        button: (username: string) => `Deactivate ${username}`,
+        buttonShort: "Deactivate",
+        /** Client-side statement of the SERVER's lockout fail-safe, shown
+         *  at the aria-disabled control. Clicking still asks the server,
+         *  whose refusal renders verbatim — the server is the rule. */
+        lastAdminReason:
+          "This is the last active certifying official. Headway refuses to deactivate or demote the last one, so the agency can never lock itself out. Make another account a certifying official first.",
+        done: (username: string) => `'${username}' has been deactivated.`,
+      },
+      reactivate: {
+        button: (username: string) => `Reactivate ${username}`,
+        buttonShort: "Reactivate",
+        done: (username: string) =>
+          `'${username}' has been reactivated. They sign in with the password they already had.`,
+      },
+    },
+
+    sources: {
+      heading: "Data sources",
+      intro:
+        "What this Headway installation has actually received, per source and connector — straight from the ingest record. Read-only by design.",
+      loadError: "Headway could not load the data-source status.",
+      asOf: (timestamp: string) => `As of ${timestamp} (server clock).`,
+      table: {
+        caption: "Data delivered per source and connector",
+        source: "Source",
+        connector: "Connector",
+        latest: "Latest data",
+        inWindow: (hours: number) => `Received (last ${hours} h)`,
+        refused: (hours: number) => `Refused (last ${hours} h)`,
+        total: "Received (all time)",
+        refusedTotal: "Refused (all time)",
+      },
+      refusedHint:
+        "“Refused” rows failed parsing and were quarantined loudly — Headway never drops data silently.",
+      canonicalHeading: "Live feed freshness",
+      teaching: {
+        heading: "How connecting works today",
+        /* The honest teaching panel (binding: no fake add-source form).
+           The API's connecting_note renders verbatim above these. */
+        items: [
+          "Real-time and schedule feeds (GTFS, GTFS-Realtime): set the feed URLs in the deployment's .env file on the server.",
+          "Passenger counts (APC / TIDES): drop export files into the watched folder on the server, or push them over the machine-key API.",
+          "Vendor exports (SQL Server, data lakes, vendor files): the vendor adapters convert them; machine keys authenticate pushes.",
+          "The step-by-step guide, including machine keys, is docs/connecting-your-data.md in your Headway installation.",
+        ],
+      },
+    },
+
+    settings: {
+      heading: "Settings",
+      intro:
+        "The policy knobs this installation's calculations read, each with its basis. Changing one is an audited act — the old and new values are recorded, and the next calculation run uses the new value. Values are shown exactly as stored.",
+      brandingNote:
+        "Branding (agency name, colors, logo) has its own room — see Branding in Admin.",
+      loadError: "Headway could not load the settings.",
+      valueLabel: (key: string) => `Value for ${key}`,
+      save: (key: string) => `Save ${key}`,
+      saved: (key: string, value: string) =>
+        `'${key}' is now ${value}. The change is recorded in the audit trail; the next calculation run reads it.`,
+      updatedBy: (by: string, at: string) => `Last changed by ${by} on ${at}.`,
+      sandboxHint:
+        "Want to see what a change would do before making it? Model it in the Settings sandbox first — it changes nothing.",
+      sandboxLink: "Open the Settings sandbox",
+    },
   },
 
   /**

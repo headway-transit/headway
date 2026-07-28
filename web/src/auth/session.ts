@@ -87,6 +87,15 @@ export function canEnterAttestations(session: Session | null): boolean {
 }
 
 /**
+ * Mirrors the API (handoff 0025): GET /sources/status is data_steward or
+ * above. The admin HUB is presented to the certifying official only, but a
+ * steward may open /admin/sources directly — same rule as the API.
+ */
+export function canViewSourceStatus(session: Session | null): boolean {
+  return session !== null && ROLE_RANK[session.role] >= ROLE_RANK.data_steward;
+}
+
+/**
  * Mirrors the API (handoff 0010): recording or correcting a safety event
  * requires data_steward or above.
  */

@@ -2662,3 +2662,130 @@ button.figure-button {
 .lens-bar {
   margin: var(--space-3) 0;
 }
+
+/* ---- The admin area (handoff 0025) ----
+   Hub cards + the Users / Data sources / Settings rooms. All colors are
+   existing AA-verified token pairs — no new pairs to register with
+   scripts/check-contrast.mjs. */
+.admin-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr));
+  gap: var(--space-3);
+  margin: var(--space-3) 0;
+  align-items: start;
+}
+.admin-card {
+  padding: var(--space-3);
+}
+.admin-card h2 {
+  margin-top: 0;
+}
+/* The honest-card status line (SSO / Updates): text states it — never a
+   toggle, never color alone. */
+.admin-card-status {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--color-text-muted);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-1);
+  padding: var(--space-1) var(--space-2);
+  display: inline-block;
+}
+.admin-command-label {
+  margin-bottom: var(--space-1);
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+.admin-command {
+  margin: 0 0 var(--space-2);
+  padding: var(--space-2);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-1);
+  overflow-x: auto;
+}
+.admin-section {
+  padding: var(--space-3);
+  margin: var(--space-3) 0;
+}
+.admin-section h2 {
+  margin-top: 0;
+}
+/* Shared muted hint for the admin rooms (the export-control precedent). */
+.admin-users-table .field-hint,
+.admin-sources-table .field-hint,
+.admin-setting .field-hint,
+.admin-hint,
+.field-hint {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  max-width: 36rem;
+}
+.admin-users-table td,
+.admin-users-table th,
+.admin-sources-table td,
+.admin-sources-table th {
+  vertical-align: top;
+}
+.admin-role-cell {
+  display: inline-flex;
+  gap: var(--space-1);
+  align-items: center;
+  flex-wrap: wrap;
+}
+.admin-user-actions {
+  display: flex;
+  gap: var(--space-1);
+  flex-wrap: wrap;
+}
+.admin-user-actions button,
+.admin-role-cell button {
+  white-space: nowrap;
+}
+.admin-reset-form {
+  margin-top: var(--space-2);
+  display: flex;
+  gap: var(--space-1);
+  align-items: end;
+  flex-wrap: wrap;
+}
+.admin-reset-form label {
+  flex-basis: 100%;
+}
+.admin-reset-form input {
+  margin-bottom: 0;
+}
+.admin-create-form {
+  display: grid;
+  gap: var(--space-2);
+  max-width: 28rem;
+}
+.admin-create-form .field-hint {
+  margin: var(--space-1) 0;
+}
+.admin-setting-edit {
+  display: flex;
+  gap: var(--space-2);
+  align-items: end;
+  flex-wrap: wrap;
+}
+.admin-setting-edit label {
+  flex-basis: 100%;
+}
+.admin-setting-edit input {
+  max-width: 12rem;
+  margin-bottom: 0;
+  font-family: ui-monospace, monospace;
+}
+
+/* Branding: the current-logo display + remove control (handoff 0025 #3). */
+.branding-section .current-logo {
+  display: block;
+  max-height: 3rem;
+  width: auto;
+  max-width: 16rem;
+  margin: var(--space-2) 0;
+}
+.branding-section .remove-logo {
+  margin-top: var(--space-2);
+}

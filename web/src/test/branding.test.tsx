@@ -144,11 +144,28 @@ describe("/settings/branding", () => {
   it("uploads the logo as multipart form data to POST /branding/logo and the header shows it", async () => {
     const user = userEvent.setup();
     signInAs("certifying_official");
+    // Stateful branding mock: after the upload, GET /branding serves
+    // has_logo + logo_version — the page RE-READS it (handoff 0025 #3)
+    // rather than assuming, and the versioned URL busts the cache.
+    let uploaded = false;
     const calls = mockApi({
-      "GET /branding": { status: 200, body: AGENCY_BRANDING },
-      "POST /branding/logo": {
+      "GET /branding": () => ({
         status: 200,
-        body: { content_type: "image/svg+xml", bytes: 512, audit_event_id: 42 },
+        body: uploaded
+          ? { ...AGENCY_BRANDING, has_logo: true, logo_version: "1753700000000001" }
+          : AGENCY_BRANDING,
+      }),
+      "POST /branding/logo": () => {
+        uploaded = true;
+        return {
+          status: 200,
+          body: {
+            content_type: "image/svg+xml",
+            bytes: 512,
+            logo_version: "1753700000000001",
+            audit_event_id: 42,
+          },
+        };
       },
     });
     renderApp("/settings/branding");
@@ -173,9 +190,121 @@ describe("/settings/branding", () => {
     expect((post!.body as FormData).get("file")).toBeInstanceOf(File);
     expect(post!.headers["Content-Type"]).toBeUndefined();
 
-    // The shell consumed has_logo: the header now renders the logo image.
+    // The shell consumed the re-read branding: the header renders the logo
+    // from the VERSIONED URL (the cache-busting fix).
     const header = screen.getByRole("banner");
-    expect(header.querySelector("img.brand-logo")).not.toBeNull();
+    const headerLogo = header.querySelector("img.brand-logo");
+    expect(headerLogo).not.toBeNull();
+    expect(headerLogo!.getAttribute("src")).toBe(
+      "/branding/logo?v=1753700000000001",
+    );
+  });
+
+  /**
+   * THE FIRST-UAT REPRODUCTION (handoff 0025, design point 3): the ITS
+   * manager "uploaded a logo, wants to replace it with a better one, and
+   * isn't given an option to do so." With a logo present the section must
+   * offer an explicit REPLACE affordance with its own save, a REMOVE
+   * control, and after replacing, the new image must be visible at once
+   * (new logo_version → new <img> URL — no stale cached logo).
+   */
+  it("with a logo present: explicit replace + remove affordances, and replacing swaps the visible image immediately", async () => {
+    const user = userEvent.setup();
+    signInAs("certifying_official");
+    let version = "1000";
+    const calls = mockApi({
+      "GET /branding": () => ({
+        status: 200,
+        body: { ...AGENCY_BRANDING, has_logo: true, logo_version: version },
+      }),
+      "POST /branding/logo": () => {
+        version = "2000";
+        return {
+          status: 200,
+          body: {
+            content_type: "image/png",
+            bytes: 2048,
+            logo_version: version,
+            audit_event_id: 43,
+          },
+        };
+      },
+    });
+    renderApp("/settings/branding");
+
+    // The current logo is SHOWN, from the versioned URL.
+    const current = await screen.findByAltText("The current agency logo");
+    expect(current.getAttribute("src")).toBe("/branding/logo?v=1000");
+
+    // The replace affordance is explicit: labeled file field + own button.
+    const replaceInput = screen.getByLabelText("New logo file (SVG or PNG)");
+    const replaceButton = screen.getByRole("button", {
+      name: "Replace logo",
+    });
+    // Remove exists too.
+    expect(
+      screen.getByRole("button", { name: "Remove logo" }),
+    ).toBeInTheDocument();
+
+    const file = new File(["png-bytes"], "better-logo.png", {
+      type: "image/png",
+    });
+    await user.upload(replaceInput, file);
+    await user.click(replaceButton);
+
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "Logo replaced (2,048 bytes). The header and the preview above now show the new logo.",
+    );
+    // The visible image URL CHANGED — the replacement is visible now, not
+    // after a five-minute cache expiry.
+    await waitFor(() =>
+      expect(
+        screen
+          .getByAltText("The current agency logo")
+          .getAttribute("src"),
+      ).toBe("/branding/logo?v=2000"),
+    );
+    const header = screen.getByRole("banner");
+    expect(
+      header.querySelector("img.brand-logo")!.getAttribute("src"),
+    ).toBe("/branding/logo?v=2000");
+    expect(calls.some((c) => c.method === "POST")).toBe(true);
+
+    await expectNoAxeViolations();
+  });
+
+  it("remove logo calls DELETE /branding/logo and the header logo disappears", async () => {
+    const user = userEvent.setup();
+    signInAs("certifying_official");
+    let hasLogo = true;
+    const calls = mockApi({
+      "GET /branding": () => ({
+        status: 200,
+        body: hasLogo
+          ? { ...AGENCY_BRANDING, has_logo: true, logo_version: "1000" }
+          : AGENCY_BRANDING,
+      }),
+      "DELETE /branding/logo": () => {
+        hasLogo = false;
+        return { status: 200, body: { removed: true, audit_event_id: 44 } };
+      },
+    });
+    renderApp("/settings/branding");
+
+    await user.click(
+      await screen.findByRole("button", { name: "Remove logo" }),
+    );
+
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "The logo has been removed. The header shows the agency name alone.",
+    );
+    const del = calls.find((c) => c.method === "DELETE");
+    expect(del?.path).toBe("/branding/logo");
+    // Back to the no-logo state: upload affordance, no header logo.
+    expect(screen.getByLabelText("Logo file")).toBeInTheDocument();
+    expect(
+      screen.getByRole("banner").querySelector("img.brand-logo"),
+    ).toBeNull();
   });
 });
 

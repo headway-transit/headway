@@ -25,6 +25,7 @@
  */
 
 import { useEffect, useId, useState } from "react";
+import { Link } from "react-router-dom";
 import { ApiError, listSettings, runSandboxPreview } from "../api/client";
 import type {
   PreviewSection,
@@ -32,6 +33,7 @@ import type {
   SandboxPreviewResponse,
   Setting,
 } from "../api/types";
+import { canCertify, useSession } from "../auth/session";
 import { copy } from "../copy";
 import { isSimulated } from "../detail";
 import { DeltaFigure } from "../components/DeltaFigure";
@@ -278,6 +280,7 @@ function ImpactRail({ result }: { result: SandboxPreviewResponse }) {
 // -------------------------------------------------------------------- view
 
 export function SandboxView() {
+  const session = useSession();
   const ids = {
     from: useId(),
     to: useId(),
@@ -341,8 +344,16 @@ export function SandboxView() {
       {/* The prominent changes-nothing statement — on EVERY visit. */}
       <p className="banner sandbox-banner">{sb.banner}</p>
       <p>{sb.intro}</p>
-      {/* NO apply button anywhere on this surface; the audited flow named. */}
-      <p className="sandbox-apply-note">{sb.applyNote}</p>
+      {/* NO apply button anywhere on this surface; the audited flow named.
+          Since handoff 0025 the flow HAS a room: Admin → Settings (the
+          certifying official's audited edit surface) — linked, not
+          duplicated here. */}
+      <p className="sandbox-apply-note">
+        {sb.applyNote}{" "}
+        {canCertify(session) && (
+          <Link to="/admin/settings">{sb.settingsDoor}</Link>
+        )}
+      </p>
 
       <section className="card sandbox-panel" aria-label={sb.settingsHeading}>
         <h2>{sb.settingsHeading}</h2>

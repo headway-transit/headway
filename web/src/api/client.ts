@@ -11,6 +11,7 @@
 
 import { clearSession, getSession } from "../auth/session";
 import type {
+  ActiveChangeResponse,
   AttestRequest,
   AttestResponse,
   AttestationCreated,
@@ -19,6 +20,9 @@ import type {
   AttestationRevokeRequest,
   AttestationRevoked,
   Branding,
+  ChangeRoleResponse,
+  CreateUserRequest,
+  CreateUserResponse,
   CertificationCertificate,
   CertificationIntent,
   CertificationRecord,
@@ -33,11 +37,13 @@ import type {
   LineageNode,
   LoginRequest,
   LoginResponse,
+  LogoDeleteResponse,
   LogoUploadResponse,
   MetricValue,
   Mr20Package,
   OpsVehiclesLatest,
   PublicMetricValue,
+  ResetPasswordResponse,
   RoutesCollection,
   ResolveRequest,
   ResolveResponse,
@@ -64,8 +70,10 @@ import type {
   SandboxPreviewRequest,
   SandboxPreviewResponse,
   Setting,
+  SourcesStatusResponse,
   StopsCollection,
   UpdateSettingResponse,
+  UserRecord,
 } from "./types";
 
 /** Base URL for the API; empty string = same origin (dev proxy / co-hosting). */
@@ -933,10 +941,23 @@ export function getBranding(): Promise<Branding> {
 /**
  * The URL of GET /branding/logo (unauthenticated, cache-headed) for use as
  * an <img src>. The shell only renders it when GET /branding says a logo
- * exists.
+ * exists. Pass the branding bundle's logo_version so the URL changes when
+ * the logo is replaced — the cache-busting fix for the first-UAT "can't
+ * replace the logo" report (handoff 0025, design point 3): without it the
+ * fixed URL + Cache-Control kept showing the OLD logo after a replacement.
  */
-export function brandingLogoUrl(): string {
-  return `${BASE_URL}/branding/logo`;
+export function brandingLogoUrl(version?: string | null): string {
+  const v = version ? `?v=${encodeURIComponent(version)}` : "";
+  return `${BASE_URL}/branding/logo${v}`;
+}
+
+/**
+ * DELETE /branding/logo (certifying official only — enforced server-side;
+ * audited). "Remove it entirely" exists (handoff 0025): the header returns
+ * to the display name alone. Refusals surface verbatim.
+ */
+export function deleteLogo(): Promise<LogoDeleteResponse> {
+  return request<LogoDeleteResponse>("DELETE", "/branding/logo");
 }
 
 /** GET /settings — any signed-in role may read agency policy settings. */
@@ -970,4 +991,95 @@ export function uploadLogo(file: File): Promise<LogoUploadResponse> {
   const form = new FormData();
   form.append("file", file);
   return request<LogoUploadResponse>("POST", "/branding/logo", form);
+}
+
+// ---- users admin (handoff 0025, design point 1) ----
+//
+// ALL certifying_official-only, enforced server-side; every change is
+// audited by the API. No endpoint ever returns password material.
+
+/** GET /users — every account: username, role, active state, created. */
+export function listUsers(): Promise<UserRecord[]> {
+  return request<UserRecord[]>("GET", "/users");
+}
+
+/**
+ * POST /users — create a local account. Validation is the installer's
+ * (username charset; password >= 8 chars, <= 72 bytes) and the server's
+ * plain-language refusals surface verbatim.
+ */
+export function createUser(
+  body: CreateUserRequest,
+): Promise<CreateUserResponse> {
+  return request<CreateUserResponse>("POST", "/users", body);
+}
+
+/** POST /users/{username}/reset-password — admin sets a new password. */
+export function resetUserPassword(
+  username: string,
+  password: string,
+): Promise<ResetPasswordResponse> {
+  return request<ResetPasswordResponse>(
+    "POST",
+    `/users/${encodeURIComponent(username)}/reset-password`,
+    { password },
+  );
+}
+
+/**
+ * POST /users/{username}/deactivate. THE LOCKOUT FAIL-SAFE lives server-
+ * side: deactivating the last active certifying official is refused (409)
+ * and that refusal renders verbatim at the control.
+ */
+export function deactivateUser(
+  username: string,
+): Promise<ActiveChangeResponse> {
+  return request<ActiveChangeResponse>(
+    "POST",
+    `/users/${encodeURIComponent(username)}/deactivate`,
+  );
+}
+
+/** POST /users/{username}/reactivate. */
+export function reactivateUser(
+  username: string,
+): Promise<ActiveChangeResponse> {
+  return request<ActiveChangeResponse>(
+    "POST",
+    `/users/${encodeURIComponent(username)}/reactivate`,
+  );
+}
+
+/**
+ * POST /users/{username}/role — same last-admin guard as deactivation
+ * (the server refuses demoting the last active certifying official).
+ */
+export function setUserRole(
+  username: string,
+  role: string,
+): Promise<ChangeRoleResponse> {
+  return request<ChangeRoleResponse>(
+    "POST",
+    `/users/${encodeURIComponent(username)}/role`,
+    { role },
+  );
+}
+
+// ---- data sources status (handoff 0025, design point 2) ----
+
+/**
+ * GET /sources/status (data_steward+ — enforced server-side): read-only —
+ * what raw.records has actually seen per (source, connector), plus the
+ * canonical vehicle-position liveness. There is NO add-source call because
+ * no add-source API exists; the served connecting_note states how
+ * connecting really works and the UI renders it verbatim.
+ */
+export function getSourcesStatus(
+  windowHours?: number,
+): Promise<SourcesStatusResponse> {
+  const qs =
+    windowHours !== undefined
+      ? `?${new URLSearchParams({ window_hours: String(windowHours) })}`
+      : "";
+  return request<SourcesStatusResponse>("GET", `/sources/status${qs}`);
 }

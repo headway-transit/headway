@@ -1,0 +1,59 @@
+login certifier: OK (landed on /today)
+A. SSO card status line: Designed, not yet available (ADR-0011)
+A. SSO card buttons/inputs (must be 0): 0
+A. Updates card commands: ["./install/install.sh --update-from-source","./install/install.sh --check-updates   (then --upgrade to apply)"]
+A. Updates card buttons (must be 0): 0
+screenshot certifier-admin-hub.png
+B. create confirmation: Account 'avery.uat' created as data steward.
+screenshot certifier-admin-users-created.png
+C. avery.uat signed in (second session): Signed in as avery.uat (data steward)
+screenshot avery-second-session-today.png
+D. reset confirmation shown
+E. deactivate confirmation (with the server session note): 'avery.uat' has been deactivated. New sign-ins for 'avery.uat' are refused from now on. If this person is signed in right now, that session ends on its own within 30 minutes (when their current session token expires).
+screenshot certifier-admin-users-deactivated.png
+E. deactivated login refusal (generic, verbatim): That username and password combination was not recognized.
+screenshot avery-login-refused-deactivated.png
+E. reactivated
+E. avery.uat signs in again after reactivation with the RESET password: OK
+F. aria-disabled on "Deactivate certifier": true
+F. stated reason at the control: This is the last active certifying official. Headway refuses to deactivate or demote the last one, so the agency can never lock itself out. Make another account a certifying official first.
+CONSOLE ERROR: Failed to load resource: the server responded with a status of 409 (Conflict)
+F. SERVER 409 VERBATIM at the control: 'certifier' is the last active certifying official on this Headway instance. Deactivating this account would leave no one able to certify reports or manage users and branding, so Headway refuses it. Make another account a certifying official first, then try again.
+screenshot certifier-admin-users-lockout.png
+G. /admin/sources rows (live raw.records groups): 10
+G. add-source forms/buttons (MUST be 0 — honest scope): 0
+G. connecting note (server, verbatim) present: 1
+screenshot certifier-admin-sources.png
+H. gap_threshold_seconds current value (verbatim): 240
+H. save confirmation: 'gap_threshold_seconds' is now 240. The change is recorded in the audit trail; the next calculation run reads it.
+screenshot certifier-admin-settings-saved.png
+H. sandbox knob (current audited value shown): Proposed value for gap_threshold_seconds |  | Today's value: 240 |  | What this setting does
+screenshot certifier-sandbox-reflects-240.png
+H. knob restored to 300 (audited)
+I. header logo before any upload: (no header logo)
+I. after upload A — header logo URL: http://localhost:8000/branding/logo?v=1785260144167236
+screenshot certifier-branding-logo-a.png
+I. after REPLACE #1 (B) — header logo URL: http://localhost:8000/branding/logo?v=1785260144399189 | changed from A: true
+screenshot certifier-branding-logo-b-replaced.png
+I. after REPLACE #2 (C) — header logo URL: http://localhost:8000/branding/logo?v=1785260144657697 | changed from B: true
+screenshot certifier-branding-logo-c-replaced.png
+I. after REMOVE — header logo: (no header logo)
+screenshot certifier-branding-logo-removed.png
+FATAL: page.waitForURL: Timeout 30000ms exceeded.
+=========================== logs ===========================
+waiting for navigation to "**/today" until "load"
+  navigated to "http://localhost:5173/settings/branding"
+============================================================
+J. login dsteward: OK
+J. dsteward nav Admin links (must be 0): 0
+J. dsteward /admin direct (in-app): Only a certifying official can use the admin area. If you need an account changed or a data source connected, ask the person who administers Headway at your agency.
+screenshot dsteward-admin-not-allowed.png
+J. dsteward /admin/sources opens (same rule as the API): table rows = 10
+screenshot dsteward-admin-sources.png
+
+NOTE on the FATAL line above: harness-side only. After sign-out the login
+redirect returned to the pre-signout page (/settings/branding, via React
+Router's persisted history state) while the script waited for /today, so
+the driver timed out — no app failure; every step before it completed and
+was screenshotted. Step J (the dsteward gating checks) was completed by a
+follow-up script run, logged directly after the FATAL line.

@@ -213,6 +213,12 @@ class MinioObjectStore:
             response.close()
             response.release_conn()
 
+    def delete(self, key: str) -> None:
+        """Remove one object. Added for DELETE /branding/logo (handoff
+        0025); idempotent — removing a missing key is a no-op in S3
+        semantics. Ingest itself never deletes: raw records are immutable."""
+        self._client.remove_object(self._bucket, key)
+
 
 class KafkaEnvelopeProducer:
     """kafka-python-ng adapter (from the ``ingest`` extra). Flushes per send:

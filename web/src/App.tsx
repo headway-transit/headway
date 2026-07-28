@@ -10,6 +10,10 @@ import {
 import { setUnauthorizedHandler } from "./api/client";
 import { useSession } from "./auth/session";
 import { Layout } from "./components/Layout";
+import { AdminSettingsView } from "./views/AdminSettingsView";
+import { AdminSourcesView } from "./views/AdminSourcesView";
+import { AdminUsersView } from "./views/AdminUsersView";
+import { AdminView } from "./views/AdminView";
 import { AttestationsView } from "./views/AttestationsView";
 import { BrandingView } from "./views/BrandingView";
 import { CertificateView } from "./views/CertificateView";
@@ -130,6 +134,14 @@ export function AppRoutes() {
           {/* Role-gated in the UI; the API enforces certifying_official on
               PUT /settings/* and POST /branding/logo (handoff 0008 C). */}
           <Route path="/settings/branding" element={<BrandingView />} />
+          {/* The admin area (handoff 0025): hub + rooms. Certifying
+              official only in the UI (sources also opens for stewards,
+              matching GET /sources/status); the API enforces the role on
+              every admin call — hiding a page is never security. */}
+          <Route path="/admin" element={<AdminView />} />
+          <Route path="/admin/users" element={<AdminUsersView />} />
+          <Route path="/admin/sources" element={<AdminSourcesView />} />
+          <Route path="/admin/settings" element={<AdminSettingsView />} />
         </Route>
       </Route>
     </Routes>

@@ -55,13 +55,24 @@ def test_login_unknown_user_same_message_as_wrong_password(client):
     assert "not recognized" in r.json()["detail"]
 
 
-def test_login_disabled_account_403(client, fake_db):
-    r = client.post(
+def test_login_deactivated_account_same_generic_401(client, fake_db):
+    """Handoff 0025, design point 1: a deactivated account gets EXACTLY the
+    wrong-password message — account state is never an enumeration oracle.
+    The audit trail still records the real reason."""
+    denied = client.post(
         "/auth/login", json={"username": "dora", "password": "disabled-pass-1"}
     )
-    assert r.status_code == 403
-    assert "disabled" in r.json()["detail"]
-    assert any(e["action"] == "login_denied" for e in fake_db.audit_events)
+    wrong = client.post(
+        "/auth/login", json={"username": "cora", "password": "nope"}
+    )
+    assert denied.status_code == wrong.status_code == 401
+    assert denied.json()["detail"] == wrong.json()["detail"]
+    denials = [e for e in fake_db.audit_events if e["action"] == "login_denied"]
+    assert len(denials) == 1
+    assert denials[0]["actor"] == "dora"
+    import json as _json
+
+    assert _json.loads(denials[0]["detail"]) == {"reason": "account deactivated"}
 
 
 def test_no_token_is_401_with_plain_message(client):
