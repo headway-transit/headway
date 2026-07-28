@@ -27,6 +27,13 @@ item is one line plus the source that demands it. The roadmap is governed in the
 - **In-UI update visibility** — same UAT: a "Check for updates" affordance is
   legitimate (a click is consent; no phoning home) and version display in the Updates
   card; a browser-side "update now" button stays deliberately refused. *(handoff 0025)*
+- **Self-hosted basemap for the live map** (first-agency UAT ask, 2026-07-28): an
+  admin-initiated, one-time download of a regional OpenStreetMap extract (PMTiles —
+  one file, served same-origin, MapLibre-native, OSM attribution displayed per ODbL),
+  so the map gains street context with zero external requests at view time. Never
+  hotlink tile servers — that phones home per view, breaks air-gapped installs, and
+  violates OSM's tile usage policy. Pairs with shapes.txt ingestion (0023 Open
+  Questions) for true street-aligned route geometry. *(handoff 0024 Open Questions)*
 - **Close the standing live-verification pendings**: API suite against the live stack
   with migrations 0014–0016 applied; web click-through with captured evidence; AI
   `anomaly_runner` against the live DB; calc `--per-mode` + voms + MR-20 package run on
