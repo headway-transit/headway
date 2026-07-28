@@ -232,8 +232,16 @@ VENDOR_DROP_DIR=/data/vendor-drop
 VENDOR_SOURCE=tripspark_streets
 ```
 
-Restart the ingestion service once after setting them
-(`docker compose --profile app restart ingestion` from `deploy/compose`).
+Apply the change once after setting them — from `deploy/compose`:
+
+```sh
+docker compose --profile app up -d ingestion
+```
+
+(`up -d`, not `restart`: a plain restart reuses the container's old
+settings and would silently ignore your new `.env` lines. `up -d`
+recreates the container with the new values. This applies to ANY `.env`
+change, including feed URLs.)
 From then on, files copied into `deploy/compose/vendor-drop/` are picked
 up **automatically within about half a minute** — no restart per file.
 Handled files move to `vendor-drop/processed/`; identical bytes are never
