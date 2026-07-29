@@ -49,6 +49,14 @@ item is one line plus the source that demands it. The roadmap is governed in the
   bus-mode VRM (D1 negligible for miles, D2 bus-exempt), pending D3 per-agency
   confirmation and D4 fidelity validation; then work D2–D6 closure in order.
   *(REGULATORY_TRACKER.md "Reportability position" + Divergence analysis)*
+  **PRIORITY RAISED (2026-07-28, first partner agency):** the mode dimension is not a
+  refinement, it is the whole job at a real agency. The first partner runs four modes
+  across four separate vendor systems (fixed route, paratransit, on-demand, vanpool) —
+  no vendor's own reporting can produce that agency's NTD submission, because no vendor
+  sees more than its own mode. Combining them with per-mode figures, each traceable to
+  the system that produced it, is the reason a cross-vendor platform exists. Vanpool in
+  particular arrives as fleet telematics (odometer/GPS distance + duty hours), not as a
+  transit system's export — a distinct connector shape worth designing for.
 
 ## Next
 
