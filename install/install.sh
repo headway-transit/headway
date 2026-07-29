@@ -1445,6 +1445,25 @@ update_from_source() {
 
   wait_for_healthy
 
+  # Every source update rebuilds images, and each rebuild strands the
+  # previous build's layers and build cache on disk — invisible in any
+  # Headway data folder, but real growth (found live 2026-07-29: an agency
+  # VM exhausted its 150 GB virtual-disk provisioning largely through
+  # rebuild churn). Prune ONLY what nothing references: dangling images
+  # (tagged images — including release images a rollback needs — are never
+  # touched) and the builder cache (safe; the only cost is a slower next
+  # rebuild). Cleanup failure never fails an otherwise-good update.
+  blank
+  say "--- Reclaiming disk space left by previous updates ---"
+  say "Old image layers and build cache from earlier rebuilds are removed."
+  say "Running services and your data are never touched by this step."
+  if ! docker image prune -f 2>&1 | tail -1 | tee -a "$LOG_FILE"; then
+    note "Image cleanup could not run; skipped (the update itself is fine)."
+  fi
+  if ! docker builder prune -f 2>&1 | tail -1 | tee -a "$LOG_FILE"; then
+    note "Build-cache cleanup could not run; skipped (the update is fine)."
+  fi
+
   blank
   say "=================================================================="
   say " Update complete — Headway is running version $after"

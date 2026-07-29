@@ -71,3 +71,45 @@ is not a stopgap — it is the least-privilege integration most agency DBAs pref
 ---
 *Numbers in this guide are re-measured when the reference deployment changes materially;
 if your measured reality disagrees, please open an issue — honest numbers are the point.*
+
+## The storage layer your `df` cannot see (virtualized installs)
+
+Learned live from the first partner agency (2026-07-29): their Headway VM crashed
+"out of storage" while the guest's own `df` showed **16% used**. Both statements
+were true, because the exhaustion was one layer down — and most agency installs
+run on that layer (vSphere, Hyper-V, Proxmox).
+
+**Why it happens.** A *thin-provisioned* virtual disk grows every time a new
+block is written and does not shrink when files are deleted. Docker image
+rebuilds are exactly that workload: every `--update-from-source` writes fresh
+image layers and build cache, the old ones are deleted in the guest, and the
+virtual disk keeps the high-water mark. Add a forgotten VM *snapshot* — which
+turns every write into growth in a delta file — and a 150 GB allocation can
+exhaust its datastore while the guest believes it is nearly empty. When the
+datastore fills, the hypervisor pauses or crashes the VM with no warning inside
+the guest; from the console it looks like a mystery hang.
+
+**What to ask your virtualization admin (once, at provisioning):**
+
+- Is the disk thin- or thick-provisioned, and does the **datastore** have
+  headroom beyond the sum of thin disks on it?
+- Are there standing **snapshots** on the VM? Snapshots are for the minutes
+  around a risky change, not for weeks — a snapshot left attached grows without
+  bound and slows the VM.
+- Is space reclamation wired through? Ubuntu runs `fstrim` weekly by default,
+  but the discard only reaches the datastore when the virtual-disk layer
+  passes it on (in vSphere terms: VMFS6 with unmap enabled, or an NFS
+  datastore that honors hole-punching).
+
+**What Headway does about its own share.** `--update-from-source` now cleans up
+after itself: dangling image layers and build cache are pruned after every
+successful update (running services, data volumes, and tagged release images —
+including anything a rollback would need — are never touched). One-off manual
+check, any time: `docker system df` shows what Docker holds; `docker image
+prune -f` and `docker builder prune -f` are safe by the same rule.
+
+**What this section is not.** Application-data growth — how long raw records,
+telemetry and predictions are kept — is a records-retention question with legal
+weight, owned by the agency and expressed per data class with its authority
+cited (ADR-0012). Disk hygiene buys headroom; only a retention policy bounds
+growth.
