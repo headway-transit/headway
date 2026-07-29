@@ -1,0 +1,17 @@
+# Vendor-export drop directory (handoff 0015 adapters, Path C of
+# docs/connecting-your-data.md). Drop your vendor system's own export
+# files here — e.g. a TripSpark Streets APC CSV — and the ingestion
+# service picks them up within about half a minute, moving handled files
+# into processed/.
+#
+# Agency operational data, never source: nothing in here is committed.
+#
+# THIS .gitignore IS TRACKED ON PURPOSE, so the directory exists in every
+# checkout. Without it, Docker creates the bind-mount path itself on first
+# `up` — owned by ROOT — and the person who then tries to copy an export
+# in gets permission denied for reasons that have nothing to do with them.
+# A tracked placeholder means the folder belongs to whoever cloned the
+# repo. (Same lesson as the 2026-07-28 nginx file-mode incident: never let
+# a host permission accident decide whether the product works.)
+*
+!.gitignore

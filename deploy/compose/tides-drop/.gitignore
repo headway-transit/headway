@@ -1,0 +1,12 @@
+# TIDES passenger-events drop directory (handoff 0005, Path A of
+# docs/connecting-your-data.md). Drop passenger_events*.csv here; the
+# folder is scanned when the ingestion service starts, and handled files
+# move into processed/.
+#
+# Agency operational data, never source: nothing in here is committed.
+#
+# THIS .gitignore IS TRACKED ON PURPOSE — see ../vendor-drop/.gitignore
+# for why: an untracked bind-mount path is created by Docker as root, and
+# the agency staffer copying an export in then hits permission denied.
+*
+!.gitignore
