@@ -53,7 +53,15 @@ provenance is your explicit act, never this library's default.
 | `metric_values` / `machine_metrics` | machine API key (`hwk_…`, scope `read:metrics`) or session token |
 | `lineage` / `walk_lineage` | machine API key or session token |
 | `public_certified` | none |
-| `compare`, `dq_issues`, `dq_issue_counts` | session token only (`headway_client.login`) — the API does not yet take machine keys here, and this client relays that 401 rather than papering over it |
+| `compare`, `dq_issues` / `iter_dq_issues` / `dq_issue`, `dq_issue_counts` | session token only (`headway_client.login`) — the API does not yet take machine keys here, and this client relays that 401 rather than papering over it |
+
+**The DQ queue pages** (API handoff 0030): `dq_issues()` returns one bounded
+`DqIssuePage` (server default 50 rows, hard maximum 200 — a larger `limit` is
+refused, not clamped) whose `total` always states the whole queue under the
+same filters; `iter_dq_issues()` walks every page lazily. Queue rows no
+longer carry `source_record_ids` — on a real deployment those arrays were
+716 MB of an 850 MB whole-queue response. The provenance moved, complete and
+untruncated, to `dq_issue(issue_id)`.
 
 How to get a machine key (an administrator issues it) and how the read-only
 SQL role compares: [docs/analyst-access.md](../../docs/analyst-access.md).

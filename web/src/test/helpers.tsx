@@ -85,6 +85,19 @@ const DEFAULT_ROUTES: Record<string, RouteHandler> = {
       has_logo: false,
     },
   },
+  // The dashboard (and /certify's blockers panel) read the DQ tallies from
+  // GET /dq/issues/counts (handoff 0030 — the list endpoint pages, so
+  // nothing downloads the queue to count it). Default: an empty queue, so
+  // tests not about DQ need no route. DQ tests override with real counts.
+  "GET /dq/issues/counts": {
+    status: 200,
+    body: {
+      total: 0,
+      by_severity: { blocking: 0, warning: 0, info: 0 },
+      by_status: { open: 0, owned: 0, resolved: 0, attested: 0 },
+      resolution_minutes_total: 0,
+    },
+  },
   // The dashboard fetches its sparkline history on every mount (handoff
   // 0024 #2); the default is an EMPTY series (no trend rendered), so the
   // many pre-existing dashboard tests keep exercising exactly what they

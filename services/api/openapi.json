@@ -1147,6 +1147,7 @@
           "data-quality"
         ],
         "summary": "List Issues",
+        "description": "One BOUNDED page of the data-quality queue (handoff 0030).\n\nUntil this wave the endpoint returned every row it had. On the live\nqueue that measured **98,497 issues, 850 MB of JSON, 17 seconds**, and\nit froze the browser tab of the screen a data steward lives in. There\nis now no way to ask for that: ``limit`` defaults to 50 and is capped\nat 200, and pages are walked with the opaque ``cursor`` from the\nprevious response.\n\n**Provenance moved, it did not go away.** ``source_record_ids`` is not\nin these rows; ``GET /dq/issues/{id}`` serves it, complete and\nuntruncated, for the issue actually being worked. 716 MB of that 850 MB\nwas this one field.\n\n**Paging is keyset, on (created_at, issue_id) ascending** \u2014 the primary\nkey breaks every tie, so the ordering is total and a row can neither be\nskipped nor served twice while new findings land behind the reader.\n\n``total`` is the count over the whole queue under the same filters, so\na caller can always say what it has NOT loaded.",
         "operationId": "list_issues_dq_issues_get",
         "parameters": [
           {
@@ -1164,6 +1165,50 @@
               ],
               "title": "Status"
             }
+          },
+          {
+            "name": "severity",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Severity"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
           }
         ],
         "responses": {
@@ -1172,11 +1217,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/DqIssue"
-                  },
-                  "title": "Response List Issues Dq Issues Get"
+                  "$ref": "#/components/schemas/DqIssuePage"
                 }
               }
             }
@@ -1250,7 +1291,7 @@
           "data-quality"
         ],
         "summary": "Get Issue",
-        "description": "One issue by id (any signed-in role) \u2014 the deep-link target (handoff\n0026): a calculation refusal links straight to the exact finding that\nblocked it, and the UI must be able to show THAT finding without\ndownloading the whole queue (97k rows / hundreds of MB live). Registered\nafter /dq/issues/counts so the literal path wins.",
+        "description": "One issue by id (any signed-in role) \u2014 the deep-link target (handoff\n0026): a calculation refusal links straight to the exact finding that\nblocked it, and the UI must be able to show THAT finding without\ndownloading the whole queue. Registered after /dq/issues/counts so the\nliteral path wins.\n\nSince handoff 0030 this is ALSO where ``source_record_ids`` lives \u2014\nthe complete, untruncated provenance array for this one issue. The\nqueue listing no longer carries it (716 MB of an 850 MB response for a\nfield a list view only joined into a string); every queue row links\nhere, so the walk from a finding to its raw records is one request, not\na 850 MB download.",
         "operationId": "get_issue_dq_issues__issue_id__get",
         "parameters": [
           {
@@ -5404,6 +5445,57 @@
             "type": "string",
             "title": "Description"
           },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "resolved_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved At"
+          },
+          "resolution": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolution"
+          },
+          "resolution_minutes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolution Minutes"
+          },
+          "subject_context": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subject Context"
+          },
           "source_record_ids": {
             "anyOf": [
               {
@@ -5417,6 +5509,141 @@
               }
             ],
             "title": "Source Record Ids"
+          }
+        },
+        "type": "object",
+        "required": [
+          "issue_id",
+          "issue_type",
+          "severity",
+          "status",
+          "owner",
+          "title",
+          "description",
+          "created_at",
+          "resolved_at",
+          "resolution",
+          "resolution_minutes",
+          "source_record_ids"
+        ],
+        "title": "DqIssue",
+        "description": "One issue WITH its provenance \u2014 served by ``GET /dq/issues/{id}``.\n\n``source_record_ids`` is the content-addressed lineage: the raw feed\nrecords this finding was raised over. It is a first-class provenance\nfield and it has not gone anywhere \u2014 but it is served HERE, per issue,\nnot by the queue listing (handoff 0030).\n\nWhy (measured on the live queue, 98,497 issues): the ids are 716 MB of\nthe 850 MB the whole-queue listing used to return \u2014 11.5 million\nidentifiers, up to 34,835 on a single issue \u2014 for a list view that\nnever displayed more than a joined string of them. Moving them to the\nper-issue endpoint is not a reduction in provenance: every row in the\nqueue links to its own issue, and this endpoint answers with the\ncomplete, untruncated array. Nothing is summarised, sampled, or capped."
+      },
+      "DqIssueCounts": {
+        "properties": {
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "by_severity": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "By Severity"
+          },
+          "by_status": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "By Status"
+          },
+          "resolution_minutes_total": {
+            "type": "integer",
+            "title": "Resolution Minutes Total"
+          }
+        },
+        "type": "object",
+        "required": [
+          "total",
+          "by_severity",
+          "by_status",
+          "resolution_minutes_total"
+        ],
+        "title": "DqIssueCounts",
+        "description": "Counts for the /dq summary cards (handoff 0017, design point 2):\ncounted over EXACTLY the rows GET /dq/issues serves under the same\nfilter, so a card total can never disagree with the table below it.\nMissing severities/statuses appear as explicit zeros.\n\nSince handoff 0030 the list endpoint serves ONE PAGE, so this endpoint\nis the only place a whole-queue tally comes from \u2014 which is what it has\nalways meant. Every screen that shows a queue-wide number reads it\nhere, never by counting rows it happens to have loaded."
+      },
+      "DqIssuePage": {
+        "properties": {
+          "issues": {
+            "items": {
+              "$ref": "#/components/schemas/DqIssueSummary"
+            },
+            "type": "array",
+            "title": "Issues"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          },
+          "has_more": {
+            "type": "boolean",
+            "title": "Has More"
+          }
+        },
+        "type": "object",
+        "required": [
+          "issues",
+          "total",
+          "limit",
+          "next_cursor",
+          "has_more"
+        ],
+        "title": "DqIssuePage",
+        "description": "One page of the queue, plus the truth about the rest of it.\n\n``total`` is counted by the database over EXACTLY the rows this filter\nselects \u2014 the whole queue, not the page \u2014 so nothing that reads this\nresponse has to mistake \"what I loaded\" for \"what exists\"."
+      },
+      "DqIssueSummary": {
+        "properties": {
+          "issue_id": {
+            "type": "string",
+            "title": "Issue Id"
+          },
+          "issue_type": {
+            "type": "string",
+            "title": "Issue Type"
+          },
+          "severity": {
+            "type": "string",
+            "title": "Severity"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "owner": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
           },
           "created_at": {
             "type": "string",
@@ -5479,43 +5706,13 @@
           "owner",
           "title",
           "description",
-          "source_record_ids",
           "created_at",
           "resolved_at",
           "resolution",
           "resolution_minutes"
         ],
-        "title": "DqIssue"
-      },
-      "DqIssueCounts": {
-        "properties": {
-          "total": {
-            "type": "integer",
-            "title": "Total"
-          },
-          "by_severity": {
-            "additionalProperties": {
-              "type": "integer"
-            },
-            "type": "object",
-            "title": "By Severity"
-          },
-          "by_status": {
-            "additionalProperties": {
-              "type": "integer"
-            },
-            "type": "object",
-            "title": "By Status"
-          }
-        },
-        "type": "object",
-        "required": [
-          "total",
-          "by_severity",
-          "by_status"
-        ],
-        "title": "DqIssueCounts",
-        "description": "Counts for the /dq summary cards (handoff 0017, design point 2):\ncounted over EXACTLY the rows GET /dq/issues serves under the same\nfilter, so a card total can never disagree with the table below it.\nMissing severities/statuses appear as explicit zeros."
+        "title": "DqIssueSummary",
+        "description": "One issue as the QUEUE shows it (handoff 0030).\n\nEverything a steward reads in a list is here. What is deliberately NOT\nhere is ``source_record_ids`` \u2014 see :class:`DqIssue`."
       },
       "DrawCreated": {
         "properties": {

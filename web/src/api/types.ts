@@ -407,7 +407,13 @@ export interface DqSubjectContext {
   unmatched?: { trip_count: number; trip_ids: string[] };
 }
 
-export interface DqIssue {
+/**
+ * One issue as the QUEUE serves it (handoff 0030). Everything a steward
+ * reads in a list row is here.
+ *
+ * What is deliberately NOT here is `source_record_ids` — see `DqIssue`.
+ */
+export interface DqIssueSummary {
   issue_id: string;
   issue_type: string;
   severity: string;
@@ -415,7 +421,6 @@ export interface DqIssue {
   owner: string | null;
   title: string;
   description: string;
-  source_record_ids: string[] | null;
   /** ISO date-time */
   created_at: string;
   /** ISO date-time */
@@ -438,16 +443,60 @@ export interface DqIssue {
 }
 
 /**
+ * One issue WITH its provenance — what GET /dq/issues/{id} serves.
+ *
+ * `source_record_ids` is the content-addressed lineage: the raw feed
+ * records the finding was raised over. Since handoff 0030 it is served
+ * per issue rather than by the queue listing — on the live queue those ids
+ * were 716 MB of an 850 MB response, for a field a list row only ever
+ * joined into a string. The array served here is COMPLETE: nothing is
+ * summarised, sampled, or capped, so the walk from a finding back to its
+ * raw records is untouched.
+ */
+export interface DqIssue extends DqIssueSummary {
+  source_record_ids: string[] | null;
+}
+
+/**
+ * GET /dq/issues (handoff 0030): ONE BOUNDED PAGE of the queue, plus the
+ * truth about the rest of it.
+ *
+ * `total` is the server's count over the whole queue under the same
+ * filters — never the page — so a screen can always say what it is not
+ * showing rather than letting a visible row count pass for the queue.
+ */
+export interface DqIssuePage {
+  issues: DqIssueSummary[];
+  /** Issues matching the same filters across the WHOLE queue. */
+  total: number;
+  /** The page size the server applied. */
+  limit: number;
+  /** Pass back as `cursor` for the next page; null on the last page. */
+  next_cursor: string | null;
+  has_more: boolean;
+}
+
+/**
  * GET /dq/issues/counts (handoff 0017, design point 2 — consumed by /today
  * per handoff 0021): counts computed over EXACTLY the rows GET /dq/issues
  * serves under the same filter, so a card total can never disagree with
  * the queue behind its door. Missing severities/statuses are explicit
  * zeros. Workflow tallies, never regulatory figures.
+ *
+ * Since handoff 0030 the list serves one page, so this endpoint is the
+ * ONLY source of a whole-queue number in the app — which is what it has
+ * always meant. No screen counts the rows it happens to have loaded.
  */
 export interface DqIssueCounts {
   total: number;
   by_severity: Record<string, number>;
   by_status: Record<string, number>;
+  /**
+   * Recorded resolution effort over the same rows, in whole minutes
+   * (handoff 0030). Workflow metadata a steward typed, never a regulatory
+   * figure. Optional so the UI tolerates an API that predates the field.
+   */
+  resolution_minutes_total?: number;
 }
 
 export interface ResolveRequest {

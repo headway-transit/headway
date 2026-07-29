@@ -62,11 +62,20 @@ def test_empty_input_still_yields_provenance_columns():
 
 def test_dq_issues_frame_nullable_minutes(transport):
     with HeadwayClient("http://fake", token=SESSION_TOKEN, transport=transport) as hw:
-        issues = hw.dq_issues()
-    df = frames.dq_issues_frame(issues)
+        page = hw.dq_issues()
+    df = frames.dq_issues_frame(page.issues)
     assert str(df["resolution_minutes"].dtype) == "Int64"
     assert pd.isna(df["resolution_minutes"].iloc[0])  # unmeasured stays <NA>
     assert df["resolution_minutes"].iloc[1] == 12  # measured stays integer
+    # No source_record_ids column: the provenance array moved to the
+    # per-issue endpoint (API handoff 0030) — dq_issue(issue_id) has it.
+    assert "source_record_ids" not in df.columns
+
+
+def test_dq_issues_frame_accepts_the_iterator_walk(transport):
+    with HeadwayClient("http://fake", token=SESSION_TOKEN, transport=transport) as hw:
+        df = frames.dq_issues_frame(hw.iter_dq_issues(page_size=1))
+    assert len(df) == 2
 
 
 def test_lineage_frame_one_row_per_node(transport):

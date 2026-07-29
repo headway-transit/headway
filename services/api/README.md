@@ -33,9 +33,9 @@ preserved end to end; floating point never touches a figure).
 | GET | `/attestations` (+ `/{id}`) | any signed-in role | Attestations (filter `metric`, `include_revoked=false`); revoked rows serve by default — revocation is history, not deletion. |
 | POST | `/attestations/{id}/revoke` | `certifying_official` only | Revoke (never delete): sets revoked_at/by/reason once — the migration-0029 trigger enforces exactly that shape. Figures already factored keep their provenance; FUTURE runs stop factoring under it. Audited. |
 | POST | `/dq/issues/{id}/attest` | `data_steward` or above | Close ONE p. 146 refusal issue (`apc_missing_trips_above_fta_threshold`) to the explicit `attested` state, referencing a live attestation; the resolution text is built server-side from the attestation. Refuses any other issue_type — no other gap has a statistician cure ('agencies must not collect a smaller sample than the chosen sampling plan prescribes', p. 149). Audited. |
-| GET | `/dq/issues` | any signed-in role | Data-quality issues; filter by `status`. Rows include `resolution_minutes` (migration 0016) — null when the effort was not recorded. |
-| GET | `/dq/issues/{id}` | any signed-in role | One finding by id (handoff 0026) — the deep-link target a calculation refusal points at (`/dq?issue=<id>` in the UI): served directly so the linked finding never waits on the whole-queue download (97k rows / ~877 MB JSON live). 404 in plain words for unknown or malformed ids. |
-| GET | `/dq/issues/counts` | any signed-in role | Severity/status counts for the /dq summary cards (handoff 0017): counted by the database in ONE `GROUP BY` over EXACTLY the rows `/dq/issues` serves under the same `status` filter (handoff 0023 — the previous fetch-all-rows-and-count-in-Python implementation measured 4.8–5.9 s on a 41,646-issue live queue; this measures 33–49 ms, no pre-aggregation, no staleness), missing buckets explicit zeros. |
+| GET | `/dq/issues` | any signed-in role | ONE BOUNDED PAGE of the data-quality queue (handoff 0030); filter by `status` and `severity` (both server-side). `limit` defaults to 50, hard maximum 200 — anything outside 1..200 is a 422, so an unbounded request is impossible, not discouraged. Pages walk by opaque keyset `cursor` over the total ordering `(created_at, issue_id)`; the response states the WHOLE-queue `total` under the same filters plus `has_more`/`next_cursor`. Rows include `resolution_minutes` (migration 0016) — null when the effort was not recorded — and NOT `source_record_ids`: the provenance array moved to `GET /dq/issues/{id}` (it measured 716 MB of the 850 MB whole-queue response; the ids are not gone, they are served where they are used). |
+| GET | `/dq/issues/{id}` | any signed-in role | One finding by id (handoff 0026) — the deep-link target a calculation refusal points at (`/dq?issue=<id>` in the UI), and since handoff 0030 the home of `source_record_ids`: the complete, never-truncated provenance array for this one finding. 404 in plain words for unknown or malformed ids. |
+| GET | `/dq/issues/counts` | any signed-in role | Severity/status counts for the /dq summary cards (handoff 0017): counted by the database in ONE `GROUP BY` over EXACTLY the rows `/dq/issues` serves under the same `status` filter (handoff 0023 — the previous fetch-all-rows-and-count-in-Python implementation measured 4.8–5.9 s on a 41,646-issue live queue; this measures 33–49 ms, no pre-aggregation, no staleness), missing buckets explicit zeros. Since handoff 0030 this is the ONLY whole-queue tally (the list pages), and it also carries `resolution_minutes_total` — the recorded effort summed over the same rows, so no client sums a loaded page and calls it the queue. |
 | POST | `/dq/issues/{id}/resolve` | `data_steward` or above | Resolves an issue with a resolution note + audit event, in one transaction. Optional `resolution_minutes` (int ≥ 0; plain-language 422 otherwise) records the effort, audited old→new. Post-commit, dispatches the `dq.issue.resolved` webhook (best-effort — a delivery problem never fails the resolve). |
 | GET | `/reports/mr20?month=YYYY-MM` | any signed-in role | The `headway_calc.mr20` MR-20 preview package for the month, served **VERBATIM** (NOT-REPORTABLE banner + caveats included; this API never edits a figure). Plain-language 422 on a bad month. |
 | GET | `/reports/mr20/export` | any signed-in role | The MR-20 package as CSV/XLSX (`month`, `format`): one row per (scope, metric) cell, values verbatim, missing cells with their explicit reasons; the NOT-REPORTABLE banner + every enumerated caveat lead the CSV / form the XLSX first sheet (handoff 0017 export discipline — see `/metrics/values/export`). |
@@ -641,3 +641,50 @@ recognise the version falls back to the same null path.
   the WHOLE queue — 97,782 rows, ~900 MB, 18 s, which freezes a browser tab.
   86% of that payload is `source_record_ids`; `subject_context` is 0.2 MB
   (0.0%). Pagination/projection on this endpoint is the follow-up.
+  *(Done — see the next section, handoff 0030.)*
+
+---
+
+## The DQ queue is bounded (handoff 0030)
+
+`GET /dq/issues` serves ONE PAGE, always. Measured on the live queue before
+the change: **98,497 rows, 850 MB of JSON, ~17.5 s server time, frozen tab**.
+After: **58 KB and ~0.1 s** for the default 50-row page; every page of a
+40,000-row walk answered in 82–115 ms with zero rows repeated or skipped.
+
+Decisions worth naming:
+
+- **Keyset, not offset.** Pages follow an opaque `cursor` encoding the last
+  row's `(created_at, issue_id)` — the primary key breaks every tie (the
+  live queue holds 98k rows across only 31 distinct `created_at` values), so
+  the ordering is deterministic and TOTAL, and a finding landing mid-walk
+  can neither push an unread row past the reader nor serve one twice.
+  Oldest-first: new findings append past the end, so page positions hold
+  steady while a calc run writes. An unreadable cursor is a 422 in plain
+  words, never a silent reset to page one.
+- **The cap is enforced, not advertised.** `limit` outside 1..200 is a 422 —
+  refused, not clamped, because a clamped `limit=100000` would look like it
+  had returned everything.
+- **Provenance moved to where it is used.** `source_record_ids` — 716 MB of
+  the 850 MB, 11.5 million identifiers, up to 34,835 on one issue — left the
+  list rows and is served complete and untruncated by `GET /dq/issues/{id}`.
+  Every consumer of the list field was checked and fixed: web (`/dq` now
+  fetches it on demand per finding; `/dashboard` and `/certify` read the
+  counts endpoint instead of downloading the queue), `clients/python`
+  (`dq_issues()` returns a `DqIssuePage`, `iter_dq_issues()` walks pages,
+  `dq_issue(id)` serves the array; frames drop the column and say where it
+  went), notebook `03-dq-triage`, and the integration suite. The exports
+  paths never consumed this endpoint.
+- **`/dq/issues/counts` stays the one whole-queue tally** and gains
+  `resolution_minutes_total`, because the /dq header used to sum effort
+  minutes from the fully downloaded queue — a page-sum would have quietly
+  become "effort on the 50 issues you can see".
+
+Verification: `pytest tests/ -q` **418 passed** (+14 pagination/edge tests in
+`tests/test_dq.py`: default bound, cap refusal in every direction, full-walk
+exactly-once coverage, last-page edge at an exact multiple, beyond-the-end
+cursor, unreadable cursor 422, insert-behind-the-reader stability,
+provenance relocation, server-side severity filter, counts/page agreement).
+`openapi.json` regenerated: OpenAPI 3.1.0, 63 paths (`DqIssuePage`,
+`DqIssueSummary` added; `DqIssue` keeps `source_record_ids` on the by-id
+response only). Live measurements in handoff 0030's evidence.

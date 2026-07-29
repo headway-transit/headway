@@ -4,6 +4,9 @@ import type {
   CertificationRecord,
   CompareResponse,
   DqIssue,
+  DqIssueCounts,
+  DqIssuePage,
+  DqIssueSummary,
   LineageNode,
   MetricValue,
   Mr20Package,
@@ -721,6 +724,53 @@ export const dashboardValues: MetricValue[] = [
   ...dashboardVrmHistory,
   ...dashboardVrhHistory,
 ];
+
+/**
+ * One page of the queue as GET /dq/issues serves it since handoff 0030 —
+ * the rows PLUS the whole-queue truth (total / has_more / next_cursor).
+ * Defaults describe a queue that fits on one page; override for paging
+ * tests.
+ */
+export function dqPage(
+  issues: DqIssueSummary[],
+  overrides: Partial<DqIssuePage> = {},
+): DqIssuePage {
+  return {
+    issues,
+    total: issues.length,
+    limit: 50,
+    next_cursor: null,
+    has_more: false,
+    ...overrides,
+  };
+}
+
+/**
+ * Server-side counts over EXACTLY the given rows, honouring the same
+ * optional status filter — the 0017/0023 cards-match-table guarantee that
+ * the mocked counts route must keep, now with the whole-queue effort sum
+ * (handoff 0030).
+ */
+export function dqCountsFor(
+  issues: DqIssueSummary[],
+  status: string | null,
+): DqIssueCounts {
+  const rows = status ? issues.filter((i) => i.status === status) : issues;
+  const tally = (pick: (i: DqIssueSummary) => string) => {
+    const out: Record<string, number> = {};
+    for (const i of rows) out[pick(i)] = (out[pick(i)] ?? 0) + 1;
+    return out;
+  };
+  return {
+    total: rows.length,
+    by_severity: tally((i) => i.severity),
+    by_status: tally((i) => i.status),
+    resolution_minutes_total: rows.reduce(
+      (sum, i) => sum + (i.resolution_minutes ?? 0),
+      0,
+    ),
+  };
+}
 
 export const blockingIssue: DqIssue = {
   issue_id: "dq-1",

@@ -29,12 +29,12 @@ import { useEffect, useId, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   ApiError,
+  getDqIssueCounts,
   getMetricsHistory,
-  listDqIssues,
   listMetricValues,
 } from "../api/client";
 import type {
-  DqIssue,
+  DqIssueCounts,
   HistoryPoint,
   HistoryResponse,
   MetricValue,
@@ -519,7 +519,14 @@ function LensBar({
 export function DashboardView() {
   const session = useSession();
   const [values, setValues] = useState<MetricValue[] | null>(null);
-  const [issues, setIssues] = useState<DqIssue[] | null>(null);
+  // The DQ card's tallies come from the SERVER's counts endpoint (handoff
+  // 0030): the issue list now serves one page at a time, so tallying
+  // downloaded rows would have tallied a page and called it the queue.
+  // One DqIssueCounts per unresolved status — by_severity within each.
+  const [dqCounts, setDqCounts] = useState<{
+    open: DqIssueCounts;
+    owned: DqIssueCounts;
+  } | null>(null);
   const [valuesError, setValuesError] = useState<string | null>(null);
   const [issuesError, setIssuesError] = useState<string | null>(null);
   // The chart filters (docket #1). Monthly is the app's reporting rhythm.
@@ -542,8 +549,8 @@ export function DashboardView() {
       .catch((err) =>
         setValuesError(err instanceof ApiError ? err.message : String(err)),
       );
-    listDqIssues()
-      .then(setIssues)
+    Promise.all([getDqIssueCounts("open"), getDqIssueCounts("owned")])
+      .then(([open, owned]) => setDqCounts({ open, owned }))
       .catch((err) =>
         setIssuesError(err instanceof ApiError ? err.message : String(err)),
       );
@@ -732,37 +739,32 @@ export function DashboardView() {
       : undefined;
 
   // ---- DQ: unresolved issues by workflow status × severity (tallies) ----
-  // The card obeys the same date slice as everything below the filter row
-  // (an issue's date is its created_at day), but nothing is hidden silently:
-  // the held-back count is always stated, and no issue ever looks resolved
-  // because a filter excluded it. Granularity does not apply — these are
+  // Server-counted over the WHOLE queue (handoff 0030): one counts call
+  // per unresolved status, by_severity within each — the same tallies /dq
+  // and /today read. The date filter below does NOT slice this card any
+  // more: the list endpoint pages and the counts endpoint carries no date
+  // filter, so a sliced tally could only have come from counting loaded
+  // rows — a page passing for the queue. The card says in words that it
+  // always covers the whole queue. Granularity does not apply — these are
   // queue tallies, not a time series.
-  const allUnresolved = (issues ?? []).filter((i) => i.status !== "resolved");
-  const unresolved = allUnresolved.filter((i) =>
-    overlapsRange(
-      i.created_at.slice(0, 10),
-      i.created_at.slice(0, 10),
-      fromDate,
-      toDate,
-    ),
-  );
-  const dqHeldBack = allUnresolved.length - unresolved.length;
-  const dqBars: StackedBar[] = ["open", "owned"]
+  const dqBars: StackedBar[] = (["open", "owned"] as const)
     .map((status) => {
-      const ofStatus = unresolved.filter((i) => i.status === status);
+      const bySeverity = dqCounts?.[status].by_severity ?? {};
+      const statusTotal = SEVERITY_ORDER.reduce(
+        (sum, severity) => sum + (bySeverity[severity] ?? 0),
+        0,
+      );
       return {
         key: status,
         label: copy.dashboard.dq.statusLabels[status] ?? status,
         segments: SEVERITY_ORDER.map((severity) => ({
           severity,
           label: copy.dq.severityLabels[severity] ?? severity,
-          count: ofStatus.filter((i) => i.severity === severity).length,
-          displayCount: formatCount(
-            ofStatus.filter((i) => i.severity === severity).length,
-          ),
+          count: bySeverity[severity] ?? 0,
+          displayCount: formatCount(bySeverity[severity] ?? 0),
           color: SEVERITY_COLOR[severity],
         })),
-        displayTotal: formatCount(ofStatus.length),
+        displayTotal: formatCount(statusTotal),
       };
     })
     .filter((bar) => bar.segments.some((s) => s.count > 0));
@@ -1013,18 +1015,10 @@ export function DashboardView() {
                   // The load failure is already announced in the page-level
                   // alert; restate it here so the card never looks "clear".
                   <p>{issuesError}</p>
-                ) : !issues ? (
+                ) : dqCounts === null ? (
                   <p>{copy.loading}</p>
                 ) : dqBars.length === 0 ? (
-                  // The date slice may hold back issues — say so; the plain
-                  // "queue is clear" line only appears when it is true.
-                  <p>
-                    {dqHeldBack > 0
-                      ? copy.dashboard.filters.dqOutsideRange(
-                          formatCount(dqHeldBack),
-                        )
-                      : copy.dashboard.dq.empty}
-                  </p>
+                  <p>{copy.dashboard.dq.empty}</p>
                 ) : (
                   <>
                     <SeverityStackedBar
@@ -1035,11 +1029,13 @@ export function DashboardView() {
                         color: SEVERITY_COLOR[severity],
                       }))}
                     />
-                    {dqHeldBack > 0 && (
+                    {/* Stated, not implied (handoff 0030): the date filter
+                        above slices the charts, but these are whole-queue
+                        tallies from the server's counts — a date-sliced
+                        tally could only come from counting loaded rows. */}
+                    {(fromDate !== "" || toDate !== "") && (
                       <p className="chart-desc">
-                        {copy.dashboard.filters.dqOutsideRange(
-                          formatCount(dqHeldBack),
-                        )}
+                        {copy.dashboard.dq.wholeQueueNote}
                       </p>
                     )}
                   </>

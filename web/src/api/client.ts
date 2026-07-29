@@ -35,6 +35,7 @@ import type {
   CompareResponse,
   DqIssue,
   DqIssueCounts,
+  DqIssuePage,
   ErrorEnvelope,
   HistoryResponse,
   LineageNode,
@@ -368,16 +369,46 @@ export function publicVerifyCertification(
   );
 }
 
-export function listDqIssues(status?: string): Promise<DqIssue[]> {
-  const qs = status ? `?${new URLSearchParams({ status })}` : "";
-  return request<DqIssue[]>("GET", `/dq/issues${qs}`);
+/**
+ * GET /dq/issues (handoff 0030): ONE BOUNDED PAGE of the data-quality
+ * queue.
+ *
+ * Until this wave this call downloaded the whole queue — measured live at
+ * 98,497 issues, 850 MB, 17 s, and a frozen browser tab. The server now
+ * caps a page at 200 rows (50 by default) and hands back a cursor for the
+ * next one; the response also carries the whole-queue `total` under the
+ * same filters, so nothing on screen has to mistake the loaded rows for
+ * the queue.
+ *
+ * `status` and `severity` filter on the SERVER. That matters: with one
+ * page loaded, filtering in the browser would filter the page, and a card
+ * reading "8,824 blocking" above two visible rows is exactly the quiet
+ * lie this project refuses.
+ */
+export function listDqIssues(params?: {
+  status?: string;
+  severity?: string;
+  limit?: number;
+  cursor?: string;
+}): Promise<DqIssuePage> {
+  const query = new URLSearchParams();
+  if (params?.status) query.set("status", params.status);
+  if (params?.severity) query.set("severity", params.severity);
+  if (params?.limit !== undefined) query.set("limit", String(params.limit));
+  if (params?.cursor) query.set("cursor", params.cursor);
+  const qs = query.toString();
+  return request<DqIssuePage>("GET", `/dq/issues${qs ? `?${qs}` : ""}`);
 }
 
 /**
  * GET /dq/issues/{id} (handoff 0026): one finding directly — the deep-link
  * target a calculation refusal points at (/dq?issue=<id>). Fetched on its
- * own so the linked finding renders immediately, independent of the
- * whole-queue download (97k issues / hundreds of MB on the live box).
+ * own so the linked finding renders immediately, independent of the queue.
+ *
+ * Since handoff 0030 this is also the ONLY place `source_record_ids` is
+ * served: the complete, untruncated provenance array for the one finding
+ * being worked. The queue rows link here, so the path from a finding back
+ * to its raw records is one request rather than an 850 MB download.
  */
 export function getDqIssue(issueId: string): Promise<DqIssue> {
   return request<DqIssue>(

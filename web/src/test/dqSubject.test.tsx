@@ -9,7 +9,7 @@ import {
 } from "./helpers";
 import type { DqIssue, DqIssueCounts } from "../api/types";
 import type { RouteHandler } from "./helpers";
-import { blockingIssue, subjectContextIssue } from "./fixtures";
+import { blockingIssue, dqPage, subjectContextIssue } from "./fixtures";
 
 /**
  * "Which trips this affects" — the finding's subject rendered in the
@@ -39,7 +39,8 @@ function countsFor(issues: DqIssue[], status: string | null): DqIssueCounts {
 
 function dqRoutes(issues: DqIssue[]): Record<string, RouteHandler> {
   return {
-    "GET /dq/issues": { status: 200, body: issues },
+    // One PAGE, the post-0030 shape (these fixture sets fit on one).
+    "GET /dq/issues": { status: 200, body: dqPage(issues) },
     "GET /dq/issues/counts": (call) => {
       const status = new URL(call.url, "http://test").searchParams.get(
         "status",
@@ -228,7 +229,11 @@ describe("/dq — the finding's subject in the agency's vocabulary", () => {
       "Headway received no position reports from Bus 1207",
     );
     expect(card).toHaveTextContent("Not yet assigned");
-    expect(card).toHaveTextContent("sha256:aaaa1111");
+    // Provenance is one click away, not in the queue row (handoff 0030):
+    // the disclosure is offered, and the raw-record id arrives on demand.
+    expect(card).toHaveTextContent(
+      "Source records: the raw data behind this finding",
+    );
     expect(
       within(card).getByRole("button", { name: /^Resolve:/ }),
     ).toBeInTheDocument();

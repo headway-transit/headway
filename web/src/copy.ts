@@ -701,12 +701,19 @@ export const copy = {
       attested: "Attested",
     } as Record<string, string>,
     /**
-     * The queue-at-a-glance chips (2026-07-11 click-through, finding 2).
+     * The queue-at-a-glance cards (2026-07-11 click-through, finding 2).
      * Counts are of ISSUES IN THE QUEUE — workflow tallies, not regulatory
-     * figures — counted client-side from the full list GET /dq/issues
-     * serves (the endpoint returns every issue; no pagination today).
+     * figures. Since handoff 0024 they come from GET /dq/issues/counts,
+     * which counts in the database over the WHOLE queue; since handoff
+     * 0030 the list beneath them serves one page at a time, so the copy
+     * has to keep that distinction visible in words. A card that silently
+     * meant "of the 50 issues loaded" would be exactly the kind of quiet
+     * lie this project refuses.
      */
     summaryHeading: "Queue at a glance",
+    /** Said once, under the cards, so the distinction is never implied. */
+    summaryScope: (total: string) =>
+      `These counts cover all ${total} issues in the queue, not just the page shown below.`,
     /** Summary-card labels (handoff 0017 #2): the count is the card's big
      *  figure; severity counts cover OPEN (unresolved) issues. */
     cardLabels: {
@@ -719,16 +726,22 @@ export const copy = {
     statusFilterLabel: "Show issues by status",
     filterAllSeverities: "All severities",
     filterAllStatuses: "All statuses",
-    showingCount: (shown: string, total: string) =>
-      `Showing ${shown} of ${total} issues. The counts above always cover the whole queue.`,
     /**
-     * The render cap (2026-07-14 live click-through finding: the live queue
-     * held 35,456 issues and rendering every card hung the browser). The
-     * cap is STATED, never silent — no issue leaves the queue or the
-     * counts; the filters narrow to what matters.
+     * The page line (handoff 0030). The queue is read one page at a time —
+     * before this, /dq downloaded all 98,497 issues (850 MB, 17 seconds,
+     * and a frozen tab). Three facts, always together: which issues are on
+     * screen, how many match in total, and that the counts above are the
+     * whole queue rather than this page.
      */
-    renderCap: (cap: string, matching: string) =>
-      `Only the first ${cap} of ${matching} matching issues are drawn on this page — drawing them all would freeze the browser. Nothing is dropped: the counts above cover the whole queue, and the filter cards narrow the list to what you need.`,
+    showingRange: (from: string, to: string, matching: string) =>
+      `Showing issues ${from}–${to} of ${matching} that match. The rest are still in the queue — use Next to read on, or the cards above to narrow it.`,
+    showingRangeUnfiltered: (from: string, to: string, total: string) =>
+      `Showing issues ${from}–${to} of ${total} in the queue. The rest are still there — use Next to read on, or the cards above to narrow it.`,
+    /** Plain page controls: no infinite scroll, no hidden loading. */
+    pageNext: "Next page",
+    pagePrevious: "Previous page",
+    pageNavLabel: "Data-quality queue pages",
+    pageLoading: "Loading the next page…",
     noMatch: (total: string) =>
       `No issues match these filters. The queue still holds ${total} issue(s) — filtering hides nothing from the counts above, and no issue is resolved by being filtered out.`,
     clearFilters: "Show all issues",
@@ -740,6 +753,28 @@ export const copy = {
     resolvedLabel: "Resolved",
     resolutionLabel: "Resolution",
     sourceRecordsLabel: "Source records",
+
+    /**
+     * The provenance disclosure (handoff 0030). The raw-record ids are the
+     * lineage chain from a finding back to the feed messages it was raised
+     * over — they did not go anywhere, they moved off the queue listing
+     * (716 MB of an 850 MB response) onto the finding itself, fetched when
+     * someone actually asks for them. Every row keeps the path.
+     */
+    sourceRecords: {
+      toggle: "Source records: the raw data behind this finding",
+      intro:
+        "The exact raw records Headway raised this finding over. Fetched for this finding only — copy them when you are working a ticket or querying the data directly.",
+      loading: "Loading the source records for this finding…",
+      count: (count: string) =>
+        `${count} raw ${count === "1" ? "record" : "records"}`,
+      /** A finding about a run as a whole cites no individual record. */
+      none:
+        "This finding is about the calculation run as a whole, so it cites no individual raw records.",
+      failed:
+        "The source records for this finding could not be loaded. The finding itself is unchanged.",
+      retry: "Try loading the source records again",
+    },
 
     /**
      * What the finding is ABOUT, said the way the agency says it (handoff
@@ -1498,6 +1533,14 @@ export const copy = {
         open: "Open",
         owned: "Owned",
       } as Record<string, string>,
+      /**
+       * Handoff 0030: the tallies are the server's whole-queue counts (the
+       * same ones /dq and /today read). The date filter slices the charts,
+       * not this card — said in words whenever a date filter is active, so
+       * the card is never read as "issues in the selected dates".
+       */
+      wholeQueueNote:
+        "These tallies always cover the whole data-quality queue. The date filter above narrows the charts, not this card — go to the data-quality queue to work the list.",
       segmentLabel: (severity: string, count: string, status: string) =>
         `${severity}: ${count} ${status} issue${count === "1" ? "" : "s"}`,
       totalColumn: "Total",

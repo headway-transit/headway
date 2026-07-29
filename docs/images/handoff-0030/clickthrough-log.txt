@@ -1,0 +1,46 @@
+2026-07-29T23:39:40.169Z logged in as dsteward
+2026-07-29T23:39:41.316Z TTI /dq (SPA nav): cards 274 ms, first page of issues 772 ms
+2026-07-29T23:39:41.351Z page/scope lines: ["These counts cover all 98,497 issues in the queue, not just the page shown below.","Showing issues 1–50 of 98,497 in the queue. The rest are still there — use Next to read on, or the cards above to narrow it."]
+2026-07-29T23:39:41.354Z issue cards drawn: 50
+2026-07-29T23:39:42.413Z TTI /dq (revisit, SPA nav): 857 ms
+2026-07-29T23:39:42.860Z Next page painted in 438 ms
+2026-07-29T23:39:42.860Z wire: page1 rows 00e98eae-9862-419e-89cd-8e3d650de8ea..3ad9acca-4af2-4393-8ad8-b2f1054727bf; page2 rows 3ca583b5-37ce-4679-90fc-1f96e2e8dce0..6c53057d-a382-4fa6-894e-f7530b6fc55e
+2026-07-29T23:39:43.375Z Previous returned to page 1
+2026-07-29T23:39:43.513Z per-issue provenance fetches: before open=0, after open=1
+2026-07-29T23:39:44.009Z keyboard: Enter on focused "Next page" advanced to page 2
+2026-07-29T23:39:45.733Z axe [light]: violations=[] incomplete=[]
+2026-07-29T23:39:47.990Z axe [dark]: violations=[] incomplete=[]
+2026-07-29T23:39:48.128Z === /dq/issues* network log (browser-side) ===
+2026-07-29T23:39:48.129Z   200 165B /dq/issues/counts?status=open
+2026-07-29T23:39:48.129Z   200 149B /dq/issues/counts?status=owned
+2026-07-29T23:39:48.129Z   200 168B /dq/issues/counts
+2026-07-29T23:39:48.129Z   200 165B /dq/issues/counts?status=open
+2026-07-29T23:39:48.129Z   200 149B /dq/issues/counts?status=owned
+2026-07-29T23:39:48.129Z   200 168B /dq/issues/counts
+2026-07-29T23:39:48.129Z   200 149B /dq/issues/counts?status=owned
+2026-07-29T23:39:48.129Z   200 168B /dq/issues/counts
+2026-07-29T23:39:48.129Z   200 165B /dq/issues/counts?status=open
+2026-07-29T23:39:48.129Z   200 149B /dq/issues/counts?status=owned
+2026-07-29T23:39:48.129Z   200 168B /dq/issues/counts
+2026-07-29T23:39:48.129Z   200 165B /dq/issues/counts?status=open
+2026-07-29T23:39:48.129Z   200 58296B /dq/issues?limit=50
+2026-07-29T23:39:48.129Z   200 58296B /dq/issues?limit=50
+2026-07-29T23:39:48.129Z   200 165B /dq/issues/counts?status=open
+2026-07-29T23:39:48.129Z   200 149B /dq/issues/counts?status=owned
+2026-07-29T23:39:48.129Z   200 168B /dq/issues/counts
+2026-07-29T23:39:48.129Z   200 149B /dq/issues/counts?status=owned
+2026-07-29T23:39:48.129Z   200 165B /dq/issues/counts?status=open
+2026-07-29T23:39:48.129Z   200 168B /dq/issues/counts
+2026-07-29T23:39:48.129Z   200 149B /dq/issues/counts?status=owned
+2026-07-29T23:39:48.129Z   200 165B /dq/issues/counts?status=open
+2026-07-29T23:39:48.129Z   200 168B /dq/issues/counts
+2026-07-29T23:39:48.130Z   200 149B /dq/issues/counts?status=owned
+2026-07-29T23:39:48.130Z   200 165B /dq/issues/counts?status=open
+2026-07-29T23:39:48.130Z   200 58296B /dq/issues?limit=50
+2026-07-29T23:39:48.130Z   200 168B /dq/issues/counts
+2026-07-29T23:39:48.130Z   200 58296B /dq/issues?limit=50
+2026-07-29T23:39:48.130Z   200 58260B /dq/issues?limit=50&cursor=MjAyNi0wNy0wOVQxNToyOTo1Mi4zODY1NzIrMDA6MDB8M2FkOWFjY2EtNGFmMi00MzkzLThhZDgtYjJmMTA1NDcyN2Jm
+2026-07-29T23:39:48.130Z   200 58296B /dq/issues?limit=50
+2026-07-29T23:39:48.130Z   200 1314B /dq/issues/00e98eae-9862-419e-89cd-8e3d650de8ea
+2026-07-29T23:39:48.130Z   200 58260B /dq/issues?limit=50&cursor=MjAyNi0wNy0wOVQxNToyOTo1Mi4zODY1NzIrMDA6MDB8M2FkOWFjY2EtNGFmMi00MzkzLThhZDgtYjJmMTA1NDcyN2Jm
+2026-07-29T23:39:48.318Z CLICK-THROUGH COMPLETE

@@ -35,7 +35,7 @@ Failures fail loudly: every non-2xx response raises
 from __future__ import annotations
 
 import datetime as _dt
-from typing import Any, Optional, Sequence
+from typing import Any, Iterator, Optional, Sequence
 
 import httpx
 
@@ -43,6 +43,8 @@ from .models import (
     CompareResponse,
     DqIssue,
     DqIssueCounts,
+    DqIssuePage,
+    DqIssueSummary,
     LineageNode,
     LineageTrail,
     MetricValue,
@@ -314,19 +316,80 @@ class HeadwayClient:
 
     # -- data quality --------------------------------------------------------
 
-    def dq_issues(self, status: Optional[str] = None) -> list[DqIssue]:
-        """Data-quality issues (``GET /dq/issues``), optionally filtered by
-        status ('open', 'owned', 'resolved'). Gaps, conflicts, and
-        validation failures live here with an owner and a resolution trail
-        — an unexplained gap becomes a finding in an FTA triennial review.
+    def dq_issues(
+        self,
+        status: Optional[str] = None,
+        severity: Optional[str] = None,
+        *,
+        limit: Optional[int] = None,
+        cursor: Optional[str] = None,
+    ) -> DqIssuePage:
+        """One BOUNDED page of the data-quality queue (``GET /dq/issues``),
+        optionally filtered by status ('open', 'owned', 'resolved',
+        'attested') and severity ('blocking', 'warning', 'info'). Gaps,
+        conflicts, and validation failures live here with an owner and a
+        resolution trail — an unexplained gap becomes a finding in an FTA
+        triennial review.
+
+        Since API handoff 0030 the endpoint pages (server default 50 rows,
+        hard maximum 200 — a larger ``limit`` is refused, not clamped) and
+        the response carries the WHOLE-queue ``total`` under the same
+        filters, so you always know what you have not loaded. Walk pages
+        by passing ``page.next_cursor`` back as ``cursor``, or use
+        :meth:`iter_dq_issues`. ``source_record_ids`` is not in queue rows
+        any more — fetch :meth:`dq_issue` for one issue's complete
+        provenance array.
 
         HONEST LIMIT: currently a signed-in human session token only
         (``headway_client.login``); a machine key gets the server's 401.
         """
         if not self._token:
             raise HeadwayApiError(401, _NO_CREDENTIAL_HELP)
-        raw = self._get("/dq/issues", {"status": status})
-        return [DqIssue.from_json(r) for r in raw]
+        raw = self._get(
+            "/dq/issues",
+            {
+                "status": status,
+                "severity": severity,
+                "limit": limit,
+                "cursor": cursor,
+            },
+        )
+        return DqIssuePage.from_json(raw)
+
+    def iter_dq_issues(
+        self,
+        status: Optional[str] = None,
+        severity: Optional[str] = None,
+        *,
+        page_size: int = 200,
+    ) -> Iterator[DqIssueSummary]:
+        """Every issue matching the filters, walked page by page — the
+        convenience for notebooks that used to get the whole queue in one
+        (850 MB, on a real deployment) response. Yields
+        :class:`~headway_client.models.DqIssueSummary` rows lazily; the
+        server's keyset ordering guarantees no row is skipped or repeated
+        while new findings land behind the walk. Session token only, like
+        :meth:`dq_issues`."""
+        cursor: Optional[str] = None
+        while True:
+            page = self.dq_issues(
+                status, severity, limit=page_size, cursor=cursor
+            )
+            yield from page.issues
+            if not page.has_more or page.next_cursor is None:
+                return
+            cursor = page.next_cursor
+
+    def dq_issue(self, issue_id: str) -> DqIssue:
+        """One issue by id (``GET /dq/issues/{id}``) WITH its provenance:
+        ``source_record_ids`` is the complete, never-truncated list of
+        content-addressed raw records the finding was raised over — served
+        here, per issue, since the queue listing stopped carrying it (API
+        handoff 0030). Session token only, like :meth:`dq_issues`."""
+        if not self._token:
+            raise HeadwayApiError(401, _NO_CREDENTIAL_HELP)
+        raw = self._get(f"/dq/issues/{issue_id}")
+        return DqIssue.from_json(raw)
 
     def dq_issue_counts(self, status: Optional[str] = None) -> DqIssueCounts:
         """Severity/status counts over exactly the rows :meth:`dq_issues`

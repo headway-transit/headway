@@ -84,7 +84,11 @@ def test_baseline_login_reads_empty_and_audit_is_visible_outside(
 
     resp = api_client.get("/dq/issues", params={"status": "open"}, headers=headers)
     assert resp.status_code == 200
-    assert all(i["owner"] != "vera.it" for i in resp.json())  # resolved nothing
+    # One bounded page (handoff 0030): rows under "issues", whole-queue
+    # total beside them.
+    assert all(
+        i["owner"] != "vera.it" for i in resp.json()["issues"]
+    )  # resolved nothing
 
     # The login audit event must be visible from OUTSIDE the app's
     # connection: first teeth of the autocommit regression.

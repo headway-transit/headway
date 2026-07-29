@@ -275,6 +275,9 @@ DQ_COUNTS = {
     "total": 2,
     "by_severity": {"blocking": 1, "warning": 1, "info": 0},
     "by_status": {"open": 1, "owned": 0, "resolved": 1},
+    # The whole-queue effort sum (API handoff 0030) — the 12 recorded
+    # minutes on the resolved fixture row.
+    "resolution_minutes_total": 12,
 }
 
 
@@ -383,7 +386,24 @@ def fake_api_handler(request: httpx.Request) -> httpx.Response:
             return _error(404, "No reported figure with that id exists.")
         return _json_response(200, LINEAGE_TREE)
 
+    if path.startswith("/dq/issues/") and path not in (
+        "/dq/issues/counts",
+    ):
+        # GET /dq/issues/{id}: the queue row PLUS source_record_ids — the
+        # per-issue home of the provenance array (API handoff 0030).
+        if kind != "session":
+            return _error(
+                401, "You are not signed in. Please sign in to use Headway."
+            )
+        issue_id = path.rsplit("/", 1)[1]
+        for row in DQ_ISSUES:
+            if row["issue_id"] == issue_id:
+                return _json_response(200, row)
+        return _error(404, "No data-quality issue with that id exists.")
+
     if path == "/dq/issues":
+        # One bounded PAGE (API handoff 0030): queue rows carry NO
+        # source_record_ids; the response states the whole-queue total.
         if kind != "session":
             return _error(
                 401, "You are not signed in. Please sign in to use Headway."
@@ -395,10 +415,38 @@ def fake_api_handler(request: httpx.Request) -> httpx.Response:
                 f"'{status}' is not a data-quality status Headway knows. "
                 "Valid statuses are: open, owned, resolved.",
             )
+        severity = request.url.params.get("severity")
+        limit = int(request.url.params.get("limit") or 50)
+        if not 1 <= limit <= 200:
+            return _error(
+                422, "limit must be between 1 and 200 — the page is bounded."
+            )
         rows = DQ_ISSUES
         if status is not None:
             rows = [r for r in rows if r["status"] == status]
-        return _json_response(200, rows)
+        if severity is not None:
+            rows = [r for r in rows if r["severity"] == severity]
+        total = len(rows)
+        # Cursor: this fake uses the issue_id of the last-served row.
+        cursor = request.url.params.get("cursor")
+        if cursor is not None:
+            ids = [r["issue_id"] for r in rows]
+            if cursor not in ids:
+                return _error(422, "That page marker is not one Headway issued.")
+            rows = rows[ids.index(cursor) + 1:]
+        page = rows[:limit]
+        has_more = len(rows) > limit
+        body = {
+            "issues": [
+                {k: v for k, v in r.items() if k != "source_record_ids"}
+                for r in page
+            ],
+            "total": total,
+            "limit": limit,
+            "next_cursor": page[-1]["issue_id"] if has_more and page else None,
+            "has_more": has_more,
+        }
+        return _json_response(200, body)
 
     if path == "/dq/issues/counts":
         if kind != "session":

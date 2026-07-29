@@ -14,6 +14,8 @@ import type {
   AttestationRecord,
   DqIssue,
   DqIssueCounts,
+  DqIssuePage,
+  DqIssueSummary,
   DqSubjectContext,
   DqSubjectGroup,
 } from "../api/types";
@@ -41,13 +43,25 @@ import { pushToast } from "../toasts";
  *
  * Since handoff 0024 (consuming 0023's rewritten counts endpoint) the
  * header counts are SERVER-side: GET /dq/issues/counts counts over exactly
- * the rows GET /dq/issues serves under the same status filter (the 0017
- * cards-match-table guarantee), and after 0023's fix it answers in
- * milliseconds over the live 41k-issue queue — so the cards paint at once
- * while the full list (still a multi-second download at 41k rows) loads
- * beside them. Filtering hides nothing from the counts, and the
- * showing-line states how many issues the filters are holding back — an
- * issue is never made to look resolved (or gone) by a filter.
+ * the rows GET /dq/issues serves under the same filters (the 0017
+ * cards-match-table guarantee), and it answers in milliseconds over the
+ * live queue.
+ *
+ * Handoff 0030 — THE QUEUE IS READ ONE PAGE AT A TIME. Until this wave the
+ * screen downloaded every issue: measured live at 98,497 issues, 850 MB,
+ * 17 seconds, and a frozen tab. Three rules hold it honest:
+ *
+ *  1. The summary cards are always the SERVER's whole-queue counts, never a
+ *     tally of the loaded page, and the copy says so in words under them.
+ *  2. The filters run on the SERVER. Filtering the loaded page would put a
+ *     card reading "8,824 blocking" above two visible rows.
+ *  3. The page line states which issues are on screen and how many match in
+ *     total, so the visible rows are never mistaken for the queue.
+ *
+ * Provenance moved with the same discipline: `source_record_ids` is no
+ * longer in the queue rows (716 MB of that 850 MB), so each card fetches
+ * it from GET /dq/issues/{id} when a reader opens the disclosure. Every
+ * row still has the path from a finding back to its raw records.
  */
 export function DqView() {
   const session = useSession();
@@ -62,8 +76,27 @@ export function DqView() {
   // must never gate the link a refusal handed the user.
   const [linkedIssue, setLinkedIssue] = useState<DqIssue | null>(null);
   const [linkedError, setLinkedError] = useState<string | null>(null);
-  const [issues, setIssues] = useState<DqIssue[] | null>(null);
+  /**
+   * The page on screen: its rows, what it is not showing, AND which page
+   * number it actually is. The index rides WITH the rows (set in the same
+   * state update) so the "Showing issues N–M" line can never get ahead of
+   * the list — during a fetch the old page keeps its own true range
+   * instead of the next page's range appearing over the old rows.
+   */
+  const [view, setView] = useState<{
+    page: DqIssuePage;
+    index: number;
+  } | null>(null);
+  const [pageLoading, setPageLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /**
+   * Where we are in the keyset walk. `cursors[n]` is the cursor that
+   * fetches page n (page 0 needs none), so "Previous" is a step back
+   * through markers this client already holds — no server round trip is
+   * needed to know where it has been, and no page can be skipped.
+   */
+  const [cursors, setCursors] = useState<(string | null)[]>([null]);
+  const [pageIndex, setPageIndex] = useState(0);
   // Whole-queue tallies from the server: unresolved severity split needs
   // open + owned (their by_severity covers exactly the unresolved rows);
   // the unfiltered call carries the by_status totals (resolved etc.).
@@ -86,12 +119,47 @@ export function DqView() {
     getDqIssueCounts().then(setCountsAll).catch(onCountsError);
   };
 
+  // One page, from the server, under the CURRENT filters. Refetched when a
+  // filter changes or the reader moves a page — the filters and the paging
+  // both live where the rows are.
   useEffect(() => {
-    listDqIssues()
-      .then(setIssues)
-      .catch((err) =>
-        setError(err instanceof ApiError ? err.message : String(err)),
-      );
+    let stale = false;
+    setPageLoading(true);
+    listDqIssues({
+      ...(statusFilter !== null && { status: statusFilter }),
+      ...(severityFilter !== null && { severity: severityFilter }),
+      limit: DQ_PAGE_SIZE,
+      ...(cursors[pageIndex] !== null && { cursor: cursors[pageIndex]! }),
+    })
+      .then((next) => {
+        if (stale) return;
+        setView({ page: next, index: pageIndex });
+        setError(null);
+        // Remember the marker for the page after this one, so Next is a
+        // step forward and Previous a step back through markers already
+        // held. A page can be neither skipped nor served twice.
+        if (next.next_cursor !== null) {
+          setCursors((prev) => {
+            const grown = prev.slice(0, pageIndex + 1);
+            grown.push(next.next_cursor);
+            return grown;
+          });
+        }
+      })
+      .catch((err) => {
+        if (stale) return;
+        setError(err instanceof ApiError ? err.message : String(err));
+      })
+      .finally(() => {
+        if (!stale) setPageLoading(false);
+      });
+    return () => {
+      stale = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [statusFilter, severityFilter, pageIndex]);
+
+  useEffect(() => {
     refreshCounts();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -114,38 +182,56 @@ export function DqView() {
       );
   }, [linkedIssueId]);
 
-  // Documented-effort total: UI ARITHMETIC ON EFFORT METADATA (the minutes
-  // stewards typed into the resolve form) — a workflow tally like the issue
-  // counts, NEVER a reported regulatory figure (those are displayed verbatim
-  // from the API and never computed client-side). Sum of minutes / 60, one
-  // decimal.
-  const totalEffortMinutes = (issues ?? []).reduce(
-    (sum, i) =>
-      sum + (typeof i.resolution_minutes === "number" ? i.resolution_minutes : 0),
-    0,
-  );
+  // Documented-effort total: EFFORT METADATA (the minutes stewards typed
+  // into the resolve form) — a workflow tally like the issue counts, NEVER
+  // a reported regulatory figure. Summed BY THE SERVER over the whole
+  // queue since handoff 0030: with one page loaded, summing the rows on
+  // screen would have quietly turned "hours of documented work" into
+  // "hours on the 50 issues you can see".
+  const totalEffortMinutes = countsAll?.resolution_minutes_total ?? 0;
   const effortHours = (totalEffortMinutes / 60).toFixed(1);
 
-  const handleResolved = (updated: DqIssue) => {
-    setIssues(
-      (prev) =>
-        prev?.map((i) => (i.issue_id === updated.issue_id ? updated : i)) ??
-        null,
+  const replaceOnPage = (updated: DqIssueSummary) =>
+    setView((prev) =>
+      prev === null
+        ? null
+        : {
+            ...prev,
+            page: {
+              ...prev.page,
+              issues: prev.page.issues.map((i) =>
+                i.issue_id === updated.issue_id ? updated : i,
+              ),
+            },
+          },
     );
+
+  const handleResolved = (updated: DqIssueSummary) => {
+    replaceOnPage(updated);
     // The shell-wide confirmation pattern (handoff 0017 #4).
     pushToast(copy.dq.resolveSuccess(updated.title));
     // The header cards are SERVER counts — recount, never adjust locally.
     refreshCounts();
   };
 
-  const handleAttested = (updated: DqIssue) => {
-    setIssues(
-      (prev) =>
-        prev?.map((i) => (i.issue_id === updated.issue_id ? updated : i)) ??
-        null,
-    );
+  const handleAttested = (updated: DqIssueSummary) => {
+    replaceOnPage(updated);
     pushToast(copy.dq.attest.success(updated.title));
     refreshCounts();
+  };
+
+  /** Any filter change restarts the walk — a cursor is a position in one
+   *  ordering, and carrying it across a different filter would land the
+   *  reader in the middle of a queue they have not seen the start of. */
+  const changeSeverityFilter = (next: string | null) => {
+    setSeverityFilter(next);
+    setCursors([null]);
+    setPageIndex(0);
+  };
+  const changeStatusFilter = (next: string | null) => {
+    setStatusFilter(next);
+    setCursors([null]);
+    setPageIndex(0);
   };
 
   const mayResolve = canResolveDqIssues(session);
@@ -156,29 +242,31 @@ export function DqView() {
   // states, exactly as the certification gate counts them. Adding the
   // open and owned per-severity counts is a tally of two disjoint
   // server-counted sets — the same composition /today's blocker line uses.
-  const all = issues ?? [];
   const countsReady = countsOpen !== null && countsOwned !== null;
   const countBy = (severity: string) =>
     (countsOpen?.by_severity[severity] ?? 0) +
     (countsOwned?.by_severity[severity] ?? 0);
   const resolvedCount = countsAll?.by_status.resolved ?? 0;
   // Empty queue: the server's whole-queue total when we have it; the
-  // loaded list as the fallback when the counts call failed.
+  // page's own whole-queue total as the fallback when the counts call
+  // failed. Neither is a count of the rows on screen.
+  const anyFilter = severityFilter !== null || statusFilter !== null;
+  const page = view?.page ?? null;
   const queueEmpty =
     countsAll !== null
       ? countsAll.total === 0
-      : issues !== null && issues.length === 0;
+      : page !== null && page.total === 0 && !anyFilter;
 
-  const filtered = all.filter(
-    (i) =>
-      (severityFilter === null || i.severity === severityFilter) &&
-      (statusFilter === null || i.status === statusFilter),
-  );
-  const filtersActive = severityFilter !== null || statusFilter !== null;
-  // Render cap (2026-07-14 live finding: 35,456 live issues hung the tab).
-  // STATED, never silent: the counts cover the whole queue, the cap line
-  // says exactly how many cards are drawn, and filtering narrows the list.
-  const shown = filtered.slice(0, DQ_RENDER_CAP);
+  // What this page holds, said in the queue's own numbering — numbered by
+  // the index the DISPLAYED rows belong to (view.index), never by where
+  // the reader has clicked to (pageIndex): while the next page is in
+  // flight the old rows keep their own true range. The ordering is
+  // oldest-first and new findings land at the END, so a row's position
+  // does not shift under a reader while a calc run is writing.
+  const shown = page?.issues ?? [];
+  const matching = page?.total ?? 0;
+  const rangeFrom = (view?.index ?? 0) * DQ_PAGE_SIZE + 1;
+  const rangeTo = (view?.index ?? 0) * DQ_PAGE_SIZE + shown.length;
 
   return (
     <>
@@ -213,11 +301,17 @@ export function DqView() {
               issue={linkedIssue}
               mayResolve={mayResolve}
               onResolved={(updated) => {
-                setLinkedIssue(updated);
+                // Keep the linked card's provenance array: the update is a
+                // queue-shaped row, the linked finding a full detail row.
+                setLinkedIssue((prev) =>
+                  prev === null ? prev : { ...prev, ...updated },
+                );
                 handleResolved(updated);
               }}
               onAttested={(updated) => {
-                setLinkedIssue(updated);
+                setLinkedIssue((prev) =>
+                  prev === null ? prev : { ...prev, ...updated },
+                );
                 handleAttested(updated);
               }}
             />
@@ -231,7 +325,7 @@ export function DqView() {
       {!countsReady && !countsError && !queueEmpty && (
         <Skeleton variant="cards" count={4} />
       )}
-      {!queueEmpty && (countsReady || (issues !== null && issues.length > 0)) && (
+      {!queueEmpty && (countsReady || (page !== null && page.total > 0)) && (
         <>
           <section aria-label={copy.dq.summaryHeading} className="dq-summary">
             <h2>{copy.dq.summaryHeading}</h2>
@@ -279,12 +373,20 @@ export function DqView() {
               ]}
               onToggle={(key, pressed) => {
                 if (key === "resolved") {
-                  setStatusFilter(pressed ? "resolved" : null);
+                  changeStatusFilter(pressed ? "resolved" : null);
                 } else {
-                  setSeverityFilter(pressed ? key : null);
+                  changeSeverityFilter(pressed ? key : null);
                 }
               }}
             />
+            )}
+            {/* The distinction the whole screen turns on, said in words
+                rather than left to be inferred (handoff 0030): the cards
+                are the WHOLE queue; the list below is one page of it. */}
+            {countsAll !== null && (
+              <p className="dq-showing">
+                {copy.dq.summaryScope(formatCount(countsAll.total))}
+              </p>
             )}
             {totalEffortMinutes > 0 && (
               <ul className="dq-chips">
@@ -298,29 +400,23 @@ export function DqView() {
               allLabel={copy.dq.filterAllStatuses}
               options={copy.dq.statusLabels}
               value={statusFilter}
-              onChange={setStatusFilter}
+              onChange={changeStatusFilter}
             />
-            {filtersActive && issues !== null && (
-              <p className="dq-showing">
-                {copy.dq.showingCount(
-                  formatCount(filtered.length),
-                  formatCount(all.length),
-                )}
-              </p>
-            )}
           </section>
-          {/* Skeleton (handoff 0021 #2): the LIST's shape while the full
-              queue download (still multi-second at 41k rows — recorded
-              backend follow-up) is in flight. The header above is live. */}
-          {issues === null && !error && <Skeleton variant="table" count={5} />}
-          {issues !== null && issues.length > 0 && (filtered.length === 0 ? (
+          {/* Skeleton (handoff 0021 #2): the LIST's shape while its page
+              is in flight — now milliseconds, not the multi-second
+              whole-queue download this screen used to start with. */}
+          {page === null && !error && <Skeleton variant="table" count={5} />}
+          {page !== null && (page.total === 0 ? (
             <div className="banner">
-              <p>{copy.dq.noMatch(formatCount(all.length))}</p>
+              <p>
+                {copy.dq.noMatch(formatCount(countsAll?.total ?? 0))}
+              </p>
               <button
                 type="button"
                 onClick={() => {
-                  setSeverityFilter(null);
-                  setStatusFilter(null);
+                  changeSeverityFilter(null);
+                  changeStatusFilter(null);
                 }}
               >
                 {copy.dq.clearFilters}
@@ -328,14 +424,22 @@ export function DqView() {
             </div>
           ) : (
             <>
-              {filtered.length > DQ_RENDER_CAP && (
-                <p className="banner">
-                  {copy.dq.renderCap(
-                    formatCount(DQ_RENDER_CAP),
-                    formatCount(filtered.length),
-                  )}
-                </p>
-              )}
+              {/* Which issues are on screen, and how many match in total.
+                  Never "showing 50 issues" full stop — that sentence would
+                  let the page pass for the queue. */}
+              <p className="dq-showing">
+                {anyFilter
+                  ? copy.dq.showingRange(
+                      formatCount(rangeFrom),
+                      formatCount(rangeTo),
+                      formatCount(matching),
+                    )
+                  : copy.dq.showingRangeUnfiltered(
+                      formatCount(rangeFrom),
+                      formatCount(rangeTo),
+                      formatCount(matching),
+                    )}
+              </p>
               <ul className="issue-list">
                 {shown.map((issue) => (
                   <IssueCard
@@ -347,6 +451,26 @@ export function DqView() {
                   />
                 ))}
               </ul>
+              <nav className="dq-pager" aria-label={copy.dq.pageNavLabel}>
+                <button
+                  type="button"
+                  onClick={() => setPageIndex((n) => Math.max(0, n - 1))}
+                  disabled={pageIndex === 0 || pageLoading}
+                >
+                  {copy.dq.pagePrevious}
+                </button>{" "}
+                <button
+                  type="button"
+                  onClick={() => setPageIndex((n) => n + 1)}
+                  disabled={!page.has_more || pageLoading}
+                >
+                  {copy.dq.pageNext}
+                </button>
+                {/* Politely announced, never a silent swap of content. */}
+                <span role="status">
+                  {pageLoading ? copy.dq.pageLoading : ""}
+                </span>
+              </nav>
             </>
           ))}
         </>
@@ -365,8 +489,12 @@ function formatCount(count: number): string {
   return count.toLocaleString("en-US");
 }
 
-/** How many issue CARDS are drawn at once (the counts cover everything). */
-const DQ_RENDER_CAP = 200;
+/**
+ * One page of the queue (handoff 0030). Matches the server's default; the
+ * server enforces its own hard maximum of 200 regardless of what any
+ * client asks for — an unbounded request is impossible, not discouraged.
+ */
+const DQ_PAGE_SIZE = 50;
 
 interface FilterBarProps {
   label: string;
@@ -436,10 +564,13 @@ const STATISTICIAN_QUOTE = quoteContaining(
 );
 
 interface IssueCardProps {
-  issue: DqIssue;
+  /** A queue row (no provenance array — handoff 0030); the linked finding
+   *  arrives as a full DqIssue, which is assignable. Provenance renders
+   *  via the on-demand disclosure below either way. */
+  issue: DqIssueSummary;
   mayResolve: boolean;
-  onResolved: (updated: DqIssue) => void;
-  onAttested: (updated: DqIssue) => void;
+  onResolved: (updated: DqIssueSummary) => void;
+  onAttested: (updated: DqIssueSummary) => void;
 }
 
 function IssueCard({ issue, mayResolve, onResolved, onAttested }: IssueCardProps) {
@@ -474,12 +605,6 @@ function IssueCard({ issue, mayResolve, onResolved, onAttested }: IssueCardProps
           <dd>{issue.owner ?? copy.dq.ownerUnassigned}</dd>
           <dt>{copy.dq.createdLabel}</dt>
           <dd>{issue.created_at}</dd>
-          {issue.source_record_ids && issue.source_record_ids.length > 0 && (
-            <>
-              <dt>{copy.dq.sourceRecordsLabel}</dt>
-              <dd>{issue.source_record_ids.join(", ")}</dd>
-            </>
-          )}
           {isClosed && issue.resolved_at !== null && (
             <>
               <dt>{copy.dq.resolvedLabel}</dt>
@@ -500,6 +625,11 @@ function IssueCard({ issue, mayResolve, onResolved, onAttested }: IssueCardProps
             </>
           )}
         </dl>
+        {/* Provenance on demand (handoff 0030): the raw-record ids left the
+            queue payload (716 MB of the 850 MB whole-queue response) and
+            are fetched from GET /dq/issues/{id} when a reader opens this.
+            Every finding keeps its path back to the raw records. */}
+        <SourceRecords issue={issue} />
         {mayResolve && !isClosed && (
           <>
             <ResolveForm issue={issue} onResolved={onResolved} />
@@ -514,6 +644,76 @@ function IssueCard({ issue, mayResolve, onResolved, onAttested }: IssueCardProps
         )}
       </article>
     </li>
+  );
+}
+
+/**
+ * The provenance disclosure (handoff 0030): "Source records" for one
+ * finding, fetched from GET /dq/issues/{id} the first time a reader opens
+ * it and never truncated once fetched.
+ *
+ * Why a fetch and not a field: the queue listing used to carry every
+ * finding's raw-record ids — 716 MB of an 850 MB response, 11.5 million
+ * identifiers, for a screen that renders 50 rows. The ids are lineage, not
+ * list furniture; they now load for the one finding actually being worked.
+ * A load failure is stated in the reader's face and can be retried — the
+ * disclosure never quietly renders "no records" over an error.
+ */
+function SourceRecords({ issue }: { issue: DqIssueSummary }) {
+  // undefined = not asked yet; null = asked, the finding cites no records.
+  const [records, setRecords] = useState<string[] | null | undefined>(
+    undefined,
+  );
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = () => {
+    setLoading(true);
+    setError(null);
+    getDqIssue(issue.issue_id)
+      .then((detail) => setRecords(detail.source_record_ids))
+      .catch((err) =>
+        setError(err instanceof ApiError ? err.message : String(err)),
+      )
+      .finally(() => setLoading(false));
+  };
+
+  return (
+    <details
+      className="dq-source-records"
+      onToggle={(event) => {
+        if (
+          (event.currentTarget as HTMLDetailsElement).open &&
+          records === undefined &&
+          !loading &&
+          error === null
+        ) {
+          load();
+        }
+      }}
+    >
+      <summary>{copy.dq.sourceRecords.toggle}</summary>
+      {loading && <p role="status">{copy.dq.sourceRecords.loading}</p>}
+      {error !== null && (
+        <div role="alert" className="alert">
+          <p>{copy.dq.sourceRecords.failed}</p>
+          <p>{error}</p>
+          <button type="button" onClick={load}>
+            {copy.dq.sourceRecords.retry}
+          </button>
+        </div>
+      )}
+      {records === null && <p>{copy.dq.sourceRecords.none}</p>}
+      {records != null && (
+        <>
+          <p>
+            {copy.dq.sourceRecords.count(formatCount(records.length))}{" "}
+            {copy.dq.sourceRecords.intro}
+          </p>
+          <code>{records.join(", ")}</code>
+        </>
+      )}
+    </details>
   );
 }
 
@@ -697,8 +897,8 @@ function RouteNames({ group }: { group: DqSubjectGroup }) {
 }
 
 interface AttestControlProps {
-  issue: DqIssue;
-  onAttested: (updated: DqIssue) => void;
+  issue: DqIssueSummary;
+  onAttested: (updated: DqIssueSummary) => void;
 }
 
 /**
@@ -853,8 +1053,8 @@ function AttestControl({ issue, onAttested }: AttestControlProps) {
 }
 
 interface ResolveFormProps {
-  issue: DqIssue;
-  onResolved: (updated: DqIssue) => void;
+  issue: DqIssueSummary;
+  onResolved: (updated: DqIssueSummary) => void;
 }
 
 function ResolveForm({ issue, onResolved }: ResolveFormProps) {

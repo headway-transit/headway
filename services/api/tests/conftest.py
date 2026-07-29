@@ -50,6 +50,25 @@ _HASHES = {u: auth.hash_password(p) for u, p in _PASSWORDS.items()}
 UTC = dt.timezone.utc
 
 
+def _dq_filters(q: str, params) -> list[tuple[str, object]]:
+    """Read back the queue filters ``dq.list_issues`` built, in its order.
+
+    The router appends ``status`` then ``severity`` (handoff 0030), each
+    with one positional parameter, before any cursor/limit parameters — so
+    walking the query text and the parameters together in that order
+    reconstructs the filter exactly, without this fake having to parse SQL.
+    """
+    out: list[tuple[str, object]] = []
+    i = 0
+    if "status = %s" in q:
+        out.append(("status", params[i]))
+        i += 1
+    if "severity = %s" in q:
+        out.append(("severity", params[i]))
+        i += 1
+    return out
+
+
 class FakeCursor:
     def __init__(self, rows, rowcount=None):
         self._rows = list(rows)
@@ -351,19 +370,38 @@ class FakeConn:
             ]
             return FakeCursor(rows)
 
-        if q.startswith("SELECT severity, status, count(*) FROM dq.issues"):
+        if q.startswith("SELECT severity, status, count(*), "):
             # /dq/issues/counts (handoff 0023): the SQL-side GROUP BY over
-            # exactly the rows /dq/issues serves under the same filter.
+            # exactly the rows /dq/issues serves under the same filter,
+            # carrying the effort sum since handoff 0030.
             rows = list(self.dq_issues.values())
             if "WHERE status = %s" in q:
                 rows = [r for r in rows if r["status"] == params[0]]
-            grouped: dict[tuple, int] = {}
+            grouped: dict[tuple, list[int]] = {}
             for r in rows:
                 key = (r["severity"], r["status"])
-                grouped[key] = grouped.get(key, 0) + 1
+                cell = grouped.setdefault(key, [0, 0])
+                cell[0] += 1
+                cell[1] += r["resolution_minutes"] or 0
             return FakeCursor(
-                [(sev, st, n) for (sev, st), n in sorted(grouped.items())]
+                [
+                    (sev, st, n, minutes)
+                    for (sev, st), (n, minutes) in sorted(grouped.items())
+                ]
             )
+
+        if (
+            q.startswith("SELECT count(*) FROM dq.issues")
+            # ...but NOT the certification gate below, which pins its
+            # severity and status as SQL literals.
+            and "'blocking'" not in q
+        ):
+            # The page total (handoff 0030): counted over EXACTLY the rows
+            # the page's own filters select — never derived from the page.
+            rows = list(self.dq_issues.values())
+            for cond, value in _dq_filters(q, params):
+                rows = [r for r in rows if r[cond] == value]
+            return FakeCursor([(len(rows),)])
 
         if "count(*) FROM dq.issues" in q:
             n = sum(
@@ -498,30 +536,48 @@ class FakeConn:
             return FakeCursor([(event["event_id"],)])
 
         if q.startswith("SELECT issue_id, issue_type"):
+            # Handoff 0030: the queue columns are a strict PREFIX of the
+            # per-issue columns — source_record_ids rides last and only on
+            # the detail query, which is the whole point of the change.
+            detail = "source_record_ids" in q
             rows = list(self.dq_issues.values())
             if "WHERE issue_id = %s" in q:
                 # GET /dq/issues/{id} (handoff 0026 deep link).
                 rows = [r for r in rows if r["issue_id"] == str(params[0])]
-            elif "WHERE status = %s" in q:
-                rows = [r for r in rows if r["status"] == params[0]]
-            rows.sort(key=lambda r: r["created_at"])
-            return FakeCursor(
-                [
-                    (
-                        r["issue_id"], r["issue_type"], r["severity"], r["status"],
-                        r["owner"], r["title"], r["description"],
-                        r["source_record_ids"], r["created_at"],
-                        r["resolved_at"], r["resolution"],
-                        r["resolution_minutes"],
-                        # Migration 0035 (handoff 0029): the frozen,
-                        # agency-vocabulary context. None for every pre-0035
-                        # row — the default here, because that is the shape
-                        # 97,067 live rows have.
-                        r["subject_context"],
-                    )
+            else:
+                for cond, value in _dq_filters(q, params):
+                    rows = [r for r in rows if r[cond] == value]
+            # Deterministic AND total: the primary key breaks every tie, so
+            # paging can neither skip nor repeat a row (handoff 0030).
+            rows.sort(key=lambda r: (r["created_at"], str(r["issue_id"])))
+            if "(created_at, issue_id) > (%s, %s)" in q:
+                after = tuple(params[-3:-1])
+                rows = [
+                    r
                     for r in rows
+                    if (r["created_at"], str(r["issue_id"]))
+                    > (after[0], str(after[1]))
                 ]
-            )
+            if " LIMIT %s" in q:
+                rows = rows[: params[-1]]
+
+            def _row(r):
+                queue_columns = (
+                    r["issue_id"], r["issue_type"], r["severity"], r["status"],
+                    r["owner"], r["title"], r["description"],
+                    r["created_at"], r["resolved_at"], r["resolution"],
+                    r["resolution_minutes"],
+                    # Migration 0035 (handoff 0029): the frozen,
+                    # agency-vocabulary context. None for every pre-0035
+                    # row — the default here, because that is the shape
+                    # 97,067 live rows have.
+                    r["subject_context"],
+                )
+                if detail:
+                    return queue_columns + (r["source_record_ids"],)
+                return queue_columns
+
+            return FakeCursor([_row(r) for r in rows])
 
         if q.startswith("UPDATE dq.issues SET status = 'resolved'"):
             resolution, resolution_minutes, issue_id = params
