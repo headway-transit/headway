@@ -58,6 +58,16 @@ item is one line plus the source that demands it. The roadmap is governed in the
   particular arrives as fleet telematics (odometer/GPS distance + duty hours), not as a
   transit system's export — a distinct connector shape worth designing for.
 
+- **Deadhead + total-vehicle figures** (first-agency ask, 2026-07-29): today's VRM/VRH
+  exclude deadhead **by construction** (only trip-assigned positions count; the p. 129
+  exclusion and deadhead definitions are already quoted in the tracker) — but deadhead is
+  never *measured*, and NTD's forms also want total actual vehicle miles/hours, not only
+  revenue. The increment: quote the total-vs-revenue form lines verbatim first (NTD
+  Compliance), then compute total vehicle movement (positions outside trip assignment for
+  fixed route; the fleet-telematics contract for vanpool — its distance-vs-revenue wall
+  was built for exactly this) and report deadhead as the audited difference, never a
+  plug. *(REGULATORY_TRACKER.md pp. 128–136 quotes; contracts/fleet-telematics.v0)*
+
 ## Next
 
 - **APC certification workflow support** — the pp. 147–148 FTA approval/benchmarking
