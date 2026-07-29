@@ -26,6 +26,34 @@
 //	                               transform runtime refuses unregistered labels
 //	DROP_MAX_FILE_BYTES            cap on a dropped file's size in bytes (optional, default 256 MiB);
 //	                               oversize files are moved to <drop dir>/rejected/ and logged
+//	SAMSARA_ENABLED                "true" turns on the Samsara fleet-telematics poller (handoff 0028).
+//	                               The TOKEN deliberately does NOT act as the on-switch: a missing
+//	                               token must be a loud refusal, not a silently skipped connector
+//	SAMSARA_API_TOKEN              bearer API token — REQUIRED with SAMSARA_ENABLED, from the secret
+//	                               store, NEVER logged and never written into a record. Needs only the
+//	                               read-only "Read Vehicle Statistics" scope (Vehicles category)
+//	SAMSARA_SOURCE                 envelope source for telematics records — REQUIRED with
+//	                               SAMSARA_ENABLED, no default (fail closed). Must be a REGISTERED
+//	                               label from contracts/fleet-telematics.v0.schema.json: "samsara"
+//	                               for a real account, "samsara_simulated" for anything synthetic
+//	SAMSARA_SERVICE_DAY_TZ         the agency's IANA service-day timezone (e.g. America/New_York) —
+//	                               REQUIRED with SAMSARA_ENABLED, never guessed. The transform must
+//	                               be given the SAME zone (HEADWAY_TELEMATICS_SERVICE_DAY_TZ)
+//	SAMSARA_BASE_URL               API root (optional, default https://api.samsara.com; the vendor
+//	                               spec also lists https://api.eu.samsara.com and https://api.ca.samsara.com)
+//	SAMSARA_VEHICLE_IDS            comma-separated vendor vehicle ids to restrict the poll to (optional)
+//	SAMSARA_TAG_IDS                comma-separated vendor tag ids (optional; a tag-scoped token plus
+//	                               a tag filter is the least-privilege way to poll only the vanpool)
+//	SAMSARA_PARENT_TAG_IDS         comma-separated vendor parent tag ids (optional)
+//	SAMSARA_ENGINE_TIME            "false" to skip the engine-runtime request (optional, default true).
+//	                               Engine RUNTIME is not duty hours and not revenue hours
+//	SAMSARA_LAG_DAYS               how many days back the newest polled service day sits (optional,
+//	                               default 1 — a service day is not complete until it ends)
+//	SAMSARA_BACKFILL_DAYS          how many consecutive service days each cycle re-polls to catch
+//	                               late-arriving samples (optional, default 3; re-polls are idempotent)
+//	SAMSARA_POLL_INTERVAL          Go duration between poll cycles (optional, default 6h). Deliberately
+//	                               separate from POLL_INTERVAL: a daily-window API is not a 30s feed
+//	SAMSARA_MAX_PAGE_BYTES         cap on one API response page in bytes (optional, default 64 MiB)
 //	POLL_INTERVAL                  Go duration, default 30s (GTFS-RT polls AND drop-dir rescans;
 //	                               also the file-drop partial-copy settle time)
 //	AGENCY_ID                      optional envelope agency_id
@@ -54,6 +82,7 @@ import (
 	"github.com/headway-transit/headway/services/ingestion/connectors/dr"
 	"github.com/headway-transit/headway/services/ingestion/connectors/gtfsrt"
 	"github.com/headway-transit/headway/services/ingestion/connectors/gtfsstatic"
+	"github.com/headway-transit/headway/services/ingestion/connectors/samsara"
 	"github.com/headway-transit/headway/services/ingestion/connectors/tides"
 	"github.com/headway-transit/headway/services/ingestion/connectors/vendorfile"
 	"github.com/headway-transit/headway/services/ingestion/internal/producer"
@@ -283,8 +312,31 @@ func run(log *slog.Logger) error {
 		}()
 	}
 
+	// Samsara fleet telematics (handoff 0028). SAMSARA_ENABLED is the
+	// on-switch rather than the token, precisely so that a missing token is a
+	// loud refusal instead of a connector that quietly never runs.
+	if strings.EqualFold(os.Getenv("SAMSARA_ENABLED"), "true") {
+		poller, err := samsaraFromEnv(agencyID, kafka, log)
+		if err != nil {
+			return err
+		}
+		started++
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			log.Info("samsara telematics poller started",
+				"source", poller.Source, "timezone", poller.ServiceDay.String(),
+				"interval", poller.Interval.String(),
+				"lag_days", poller.LagDays, "backfill_days", poller.BackfillDays,
+				"engine_time", poller.IncludeEngineTime)
+			if err := poller.Run(ctx); err != nil && ctx.Err() == nil {
+				log.Error("samsara telematics poller stopped", "error", err)
+			}
+		}()
+	}
+
 	if started == 0 {
-		return fmt.Errorf("no connectors configured: set GTFS_RT_*_URL, GTFS_STATIC_URL, TIDES_DROP_DIR, DR_DROP_DIR, and/or VENDOR_DROP_DIR")
+		return fmt.Errorf("no connectors configured: set GTFS_RT_*_URL, GTFS_STATIC_URL, TIDES_DROP_DIR, DR_DROP_DIR, VENDOR_DROP_DIR, and/or SAMSARA_ENABLED=true")
 	}
 
 	log.Info("headway-ingest running", "connectors", started)
@@ -293,6 +345,110 @@ func run(log *slog.Logger) error {
 	wg.Wait()
 	log.Info("headway-ingest stopped cleanly")
 	return nil
+}
+
+// samsaraFromEnv builds the Samsara telematics poller. Every value Headway
+// must never guess (token, source label, service-day timezone) is REQUIRED;
+// the poller's own Check() produces the plain-language refusal so the
+// wording lives next to the rules it enforces.
+func samsaraFromEnv(agencyID string, kafka producer.Producer, log *slog.Logger) (*samsara.Poller, error) {
+	client, bucket, err := minioFromEnv("SAMSARA_ENABLED")
+	if err != nil {
+		return nil, err
+	}
+
+	poller := &samsara.Poller{
+		BaseURL:      strings.TrimSpace(os.Getenv("SAMSARA_BASE_URL")),
+		Token:        os.Getenv("SAMSARA_API_TOKEN"),
+		Source:       strings.TrimSpace(os.Getenv("SAMSARA_SOURCE")),
+		VehicleIDs:   csvFromEnv("SAMSARA_VEHICLE_IDS"),
+		TagIDs:       csvFromEnv("SAMSARA_TAG_IDS"),
+		ParentTagIDs: csvFromEnv("SAMSARA_PARENT_TAG_IDS"),
+		AgencyID:     agencyID,
+		Store:        samsara.NewMinioStore(client, bucket),
+		Producer:     kafka,
+		Log:          log,
+	}
+
+	// The service-day timezone is loaded here (not in Check) so an
+	// unresolvable zone name is distinguishable from an absent one.
+	if tz := strings.TrimSpace(os.Getenv("SAMSARA_SERVICE_DAY_TZ")); tz != "" {
+		loc, err := time.LoadLocation(tz)
+		if err != nil {
+			return nil, fmt.Errorf(
+				"SAMSARA_SERVICE_DAY_TZ=%q is not a resolvable IANA timezone "+
+					"(%w). Use a zone name like America/New_York; a service "+
+					"date is a local wall date and is never guessed", tz, err)
+		}
+		poller.ServiceDay = loc
+	}
+
+	poller.IncludeEngineTime = true
+	if v := strings.TrimSpace(os.Getenv("SAMSARA_ENGINE_TIME")); v != "" {
+		if strings.EqualFold(v, "false") {
+			poller.IncludeEngineTime = false
+		} else if !strings.EqualFold(v, "true") {
+			return nil, fmt.Errorf("SAMSARA_ENGINE_TIME must be true or false, got %q", v)
+		}
+	}
+
+	if poller.LagDays, err = intFromEnv("SAMSARA_LAG_DAYS"); err != nil {
+		return nil, err
+	}
+	if poller.BackfillDays, err = intFromEnv("SAMSARA_BACKFILL_DAYS"); err != nil {
+		return nil, err
+	}
+	if poller.MaxPageBytes, err = bytesFromEnv("SAMSARA_MAX_PAGE_BYTES"); err != nil {
+		return nil, err
+	}
+	poller.Interval = samsara.DefaultInterval
+	if v := os.Getenv("SAMSARA_POLL_INTERVAL"); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil {
+			return nil, fmt.Errorf("SAMSARA_POLL_INTERVAL: %w", err)
+		}
+		poller.Interval = d
+	}
+	if poller.LagDays == 0 {
+		poller.LagDays = samsara.DefaultLagDays
+	}
+	if poller.BackfillDays == 0 {
+		poller.BackfillDays = samsara.DefaultBackfillDays
+	}
+
+	// Refuse now, at startup, rather than on the first poll.
+	if err := poller.Check(); err != nil {
+		return nil, err
+	}
+	return poller, nil
+}
+
+// csvFromEnv splits an optional comma-separated env var, trimming blanks.
+func csvFromEnv(name string) []string {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return nil
+	}
+	var out []string
+	for _, part := range strings.Split(raw, ",") {
+		if trimmed := strings.TrimSpace(part); trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
+}
+
+// intFromEnv parses an optional positive-integer env var; 0 means unset.
+func intFromEnv(name string) (int, error) {
+	v := strings.TrimSpace(os.Getenv(name))
+	if v == "" {
+		return 0, nil
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n <= 0 {
+		return 0, fmt.Errorf("%s must be a positive integer, got %q", name, v)
+	}
+	return n, nil
 }
 
 // bytesFromEnv parses an optional byte-count env var (plain integer bytes).

@@ -12,6 +12,8 @@ This directory is the **single connector boundary** (ADR-0006): every connector 
 | `demand-response-trip.v0.md` | Field semantics, regulatory pointers, and the worked Via-style CSV export mapping example for `demand_response_trip` v0. |
 | `adapter-mapping.v0.schema.json` | The machine-validated format of vendor adapter mapping specs (`adapters/<vendor>/<product>/mapping.v0.yaml`, handoff 0015) — declarative vendor-export → open-contract mappings. |
 | `adapter-mapping.v0.md` | Field semantics of the mapping-spec format, the declared-timezone and provenance rules (agency-sample-only, never vendor documentation), and the runtime guarantees. |
+| `fleet-telematics.v0.schema.json` | One vehicle-day measurement series (distance or engine time, on one explicit measurement basis) from a fleet-telematics system — the canonical record derived from `raw.telematics.vehicle_stats` (handoff 0028). |
+| `fleet-telematics.v0.md` | Field semantics, the honesty wall (telematics distance is NOT revenue miles, engine/duty time is NOT revenue hours), the Samsara adapter derived from the vendor's published OpenAPI spec, and the vendor-neutrality argument. |
 
 ## Invariants (binding on every connector)
 

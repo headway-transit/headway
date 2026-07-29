@@ -1,0 +1,171 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://headway.dev/contracts/fleet-telematics.v0.schema.json",
+  "title": "Headway Fleet Telematics Vehicle-Day v0",
+  "description": "One MEASUREMENT SERIES for one vehicle on one service date, as reported by a fleet-telematics system (handoff 0028, ADR-0006). Vendor-neutral: Samsara is the first adapter onto this contract, not its definition; Geotab / Verizon Connect / any other telematics API must fit these fields without a rewrite. THIS RECORD IS MEASURED VEHICLE MOVEMENT, NOT A REPORTABLE FIGURE. Telematics distance is NOT revenue miles (an odometer delta includes deadhead, personal use, maintenance travel and everything else the vehicle did) and engine/duty time is NOT revenue hours. Nothing in Headway computes VRM, VRH or VP-mode figures from these records; the path from here to a reportable vanpool figure requires the FTA vanpool rules quoted verbatim into services/calc/REGULATORY_TRACKER.md by the NTD Compliance role — a separate, compliance-gated wave. Each record carries exactly ONE measure on exactly ONE measurement basis: bases are kept DISTINCT and are NEVER silently substituted for one another. A record with no measurable value (one sample, or a counter that went backwards) omits `value` and keeps its sample endpoints — absent means UNMEASURED, never zero, and gaps are never interpolated across. Field semantics are defined here; transport is the raw-record envelope (raw-record-envelope.v0.schema.json). Long-form semantics, the vendor-neutrality argument and the honesty wall: fleet-telematics.v0.md.",
+  "type": "object",
+  "required": [
+    "vehicle_id",
+    "service_date",
+    "window_start",
+    "window_end",
+    "measure",
+    "basis",
+    "unit",
+    "reading_kind",
+    "sample_count",
+    "source_system"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "vehicle_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The source system's stable identifier for the vehicle, verbatim. Headway never re-keys a vendor identifier; matching a telematics vehicle to an agency fleet roster is a separate, human-confirmed step."
+    },
+    "vehicle_label": {
+      "type": "string",
+      "description": "Optional human-readable vehicle name as the source system presents it (fleet number, unit name). Display only — never an identity."
+    },
+    "service_date": {
+      "type": "string",
+      "format": "date",
+      "description": "The service day this measurement series belongs to (ISO 8601 date), as the LOCAL wall date in the agency's DECLARED service-day timezone. The timezone is declared by the operator and never guessed; a deployment with no declared zone produces no telematics rows at all (fail closed). window_start/window_end make the declared day boundaries explicit and auditable."
+    },
+    "window_start": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Inclusive start of the service day, ISO 8601 WITH a UTC offset. The offset is what makes service_date checkable after the fact — a naive timestamp is never accepted."
+    },
+    "window_end": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Exclusive end of the service day, ISO 8601 WITH a UTC offset. window_end > window_start. Day length is whatever the declared zone says it is (23 or 25 hours across a DST transition) — never assumed to be 24 hours."
+    },
+    "measure": {
+      "type": "string",
+      "enum": ["distance", "engine_time"],
+      "description": "What was measured. `distance`: how far the vehicle moved (ALL movement — revenue, deadhead, personal, maintenance; NOT revenue miles). `engine_time`: how long the engine ran (NOT duty hours, NOT revenue hours, NOT driver hours-of-service)."
+    },
+    "basis": {
+      "type": "string",
+      "enum": [
+        "ecu_odometer",
+        "gps_odometer",
+        "gps_distance",
+        "ecu_engine_time",
+        "estimated_engine_time",
+        "duty_status_time"
+      ],
+      "description": "HOW it was measured — the measurement basis, kept DISTINCT and never silently substituted. distance bases: `ecu_odometer` (cumulative odometer read from the vehicle's own diagnostic bus — the vehicle's own number); `gps_odometer` (an odometer maintained from GPS travel, seeded by a human-entered reading — only as good as its seed); `gps_distance` (cumulative distance accumulated by the telematics gateway from GPS since the gateway was installed — resets when the gateway is replaced or reconfigured, and belongs to the GATEWAY, not the vehicle). engine_time bases: `ecu_engine_time` (engine runtime read from the diagnostic bus); `estimated_engine_time` (runtime ESTIMATED by the gateway, e.g. from when it draws power — an estimate, labelled as one, never promoted to ecu_engine_time); `duty_status_time` (driver duty time from an hours-of-service / ELD record — a DRIVER's regulated status, not the vehicle's, and not revenue time)."
+    },
+    "unit": {
+      "type": "string",
+      "enum": ["meters", "seconds"],
+      "description": "Unit of `value`, `first_reading_value` and `last_reading_value`. SI on the wire, always: meters for distance, seconds for engine_time. Conversion to statute miles or hours happens downstream in exact decimal arithmetic, never here and never in binary floating point."
+    },
+    "reading_kind": {
+      "type": "string",
+      "enum": ["cumulative_counter", "period_total"],
+      "description": "How the source expresses the quantity. `cumulative_counter`: the source reports a running total (odometer, engine-hour meter, since-install distance) and `value` is the difference between the LAST and FIRST readings inside the window — both endpoints are carried so the subtraction is auditable and reversible. `period_total`: the source reports an amount already attributed to a period, and `value` is that amount as given (no endpoints exist). Both shapes exist across vendors; neither is converted into the other."
+    },
+    "value": {
+      "type": "string",
+      "pattern": "^\\d+(\\.\\d+)?$",
+      "description": "The measured amount over the window, in `unit`, as a plain decimal string (exact NUMERIC end to end, never binary float). ABSENT means UNMEASURED — never 0, never interpolated, never extrapolated to the window boundaries. Absent legitimately occurs when the window holds fewer than two readings of a cumulative counter, or when the counter went BACKWARDS (a reset or replaced gateway): the endpoints are still carried and a data-quality issue is raised, but no number is invented. For `cumulative_counter` this value covers only the span between the first and last reading actually received — movement before the first reading or after the last is NOT included and is NOT estimated."
+    },
+    "first_reading_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Timestamp of the first reading of this basis inside the window (ISO 8601 with UTC offset). REQUIRED when reading_kind is cumulative_counter and sample_count > 0. It is not the start of the day: the vehicle may have moved before it."
+    },
+    "first_reading_value": {
+      "type": "string",
+      "pattern": "^\\d+(\\.\\d+)?$",
+      "description": "The counter value at first_reading_at, in `unit`. REQUIRED when first_reading_at is present."
+    },
+    "last_reading_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Timestamp of the last reading of this basis inside the window (ISO 8601 with UTC offset). REQUIRED when reading_kind is cumulative_counter and sample_count > 0. It is not the end of the day."
+    },
+    "last_reading_value": {
+      "type": "string",
+      "pattern": "^\\d+(\\.\\d+)?$",
+      "description": "The counter value at last_reading_at, in `unit`. REQUIRED when last_reading_at is present."
+    },
+    "sample_count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "How many readings of this basis fell inside the window. 0 or 1 means no movement/runtime is measurable from this day's samples — the record still exists so the absence is visible rather than inferred from a missing row."
+    },
+    "max_sample_gap_seconds": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "The largest interval between two consecutive readings inside the window, in whole seconds. This is the record's honesty field: it states how blind the measurement is between its endpoints. ABSENT when sample_count < 2. Headway never interpolates across a gap; downstream consumers must decide what a gap means and say so."
+    },
+    "source_system": {
+      "type": "string",
+      "enum": ["samsara", "samsara_simulated"],
+      "description": "REGISTERED source label of the telematics system that produced the readings (handoff 0015 fail-closed rule, handoff 0005 simulation rule). A real agency account uses the plain vendor label (`samsara`); anything synthetic MUST use the `_simulated` suffix so simulated data stays permanently distinguishable in provenance. An UNREGISTERED label is refused fail-closed by the transform runtime — the raw record is retained, a blocking data-quality issue is raised, and zero canonical rows are written. Adding a vendor means adding its labels to this enum: a contracts change under Platform Architect governance, never a connector's private decision."
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "measure": { "const": "distance" } },
+        "required": ["measure"]
+      },
+      "then": {
+        "properties": {
+          "unit": { "const": "meters" },
+          "basis": {
+            "enum": ["ecu_odometer", "gps_odometer", "gps_distance"]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "measure": { "const": "engine_time" } },
+        "required": ["measure"]
+      },
+      "then": {
+        "properties": {
+          "unit": { "const": "seconds" },
+          "basis": {
+            "enum": [
+              "ecu_engine_time",
+              "estimated_engine_time",
+              "duty_status_time"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": { "required": ["first_reading_at"] },
+      "then": { "required": ["first_reading_value"] }
+    },
+    {
+      "if": { "required": ["last_reading_at"] },
+      "then": { "required": ["last_reading_value"] }
+    },
+    {
+      "if": {
+        "properties": { "reading_kind": { "const": "period_total" } },
+        "required": ["reading_kind"]
+      },
+      "then": {
+        "not": {
+          "anyOf": [
+            { "required": ["first_reading_at"] },
+            { "required": ["last_reading_at"] },
+            { "required": ["first_reading_value"] },
+            { "required": ["last_reading_value"] }
+          ]
+        }
+      }
+    }
+  ]
+}

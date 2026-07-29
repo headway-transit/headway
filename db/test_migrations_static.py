@@ -805,3 +805,74 @@ def test_service_day_overrides_validated_and_meaningful():
     assert "MUTABLE-WITH-AUDIT" in sql
     # Regulatory basis is cited, never asserted from memory.
     assert "p. 156" in sql and "REGULATORY_TRACKER.md" in sql
+
+
+def test_vehicle_telematics_days_bases_distinct_and_value_not_fabricated():
+    # Handoff 0028 / migration 0034: fleet-telematics vehicle-day
+    # measurement series. The honesty wall must be structural, not advisory.
+    sql = all_sql()
+    sql_0034 = (MIGRATIONS_DIR / "0034_vehicle_telematics_days.sql").read_text(
+        encoding="utf-8"
+    )
+    assert "CREATE TABLE canonical.vehicle_telematics_days" in sql
+    assert (
+        "create_hypertable('canonical.vehicle_telematics_days', 'window_start')"
+        in sql
+    )
+    # Replay-idempotent unique key including the partition column.
+    assert re.search(
+        r"CREATE UNIQUE INDEX\s+\w+\s+ON canonical\.vehicle_telematics_days\s*"
+        r"\(vehicle_id, window_start, measure, basis, source_record_id\)",
+        sql,
+    ), "unique key (vehicle_id, window_start, measure, basis, source_record_id) missing"
+
+    # THE HONESTY WALL is stated in the migration itself.
+    assert "TELEMATICS DISTANCE IS NOT REVENUE MILES" in sql_0034
+    assert "REGULATORY_TRACKER.md" in sql_0034
+
+    # Bases are kept DISTINCT: a distance basis can never appear on an
+    # engine-time row, so silent substitution is unrepresentable.
+    assert "vtd_basis_matches_measure" in sql_0034
+    assert "vtd_unit_matches_measure" in sql_0034
+    for basis in (
+        "ecu_odometer",
+        "gps_odometer",
+        "gps_distance",
+        "ecu_engine_time",
+        "estimated_engine_time",
+        "duty_status_time",
+    ):
+        assert f"'{basis}'" in sql_0034, f"basis {basis} missing from the CHECK enum"
+
+    # The anti-fabrication constraint: a cumulative-counter value must be
+    # exactly the difference of the two recorded readings.
+    assert "vtd_value_is_the_recorded_difference" in sql_0034
+    assert "value = last_reading_value - first_reading_value" in sql_0034
+
+    # Measurements are NUMERIC, never float; NULL means UNMEASURED and is
+    # never coalesced or defaulted.
+    assert re.search(r"value\s+NUMERIC CHECK \(value >= 0\)", sql_0034)
+    assert not re.search(
+        r"(value|reading_value)\s+(REAL|FLOAT|DOUBLE)", sql_0034
+    ), "telematics measurements must be NUMERIC, never float"
+    assert not re.search(
+        r"^\s+value\s+NUMERIC[^,]*(NOT NULL|DEFAULT)", sql_0034, re.MULTILINE
+    ), "value must stay nullable with no default (unmeasured is never 0)"
+
+    # Gaps are carried, never interpolated, and require two samples.
+    assert re.search(r"max_sample_gap_seconds\s+INTEGER CHECK", sql_0034)
+    assert "vtd_gap_needs_two_samples" in sql_0034
+    assert re.search(r"sample_count\s+INTEGER NOT NULL", sql_0034)
+
+    # Readings belong to the window they are filed under, and a period_total
+    # carries no endpoints (no implied subtraction).
+    assert "vtd_first_reading_inside_window" in sql_0034
+    assert "vtd_last_reading_inside_window" in sql_0034
+    assert "vtd_period_total_has_no_endpoints" in sql_0034
+
+    # Provenance: registered source label + FK to the raw record.
+    assert re.search(r"source\s+TEXT NOT NULL", sql_0034)
+    assert re.search(
+        r"source_record_id\s+TEXT NOT NULL REFERENCES raw\.records", sql_0034
+    )
+    assert re.search(r"polled_at\s+TIMESTAMPTZ NOT NULL", sql_0034)

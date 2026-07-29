@@ -233,7 +233,8 @@ services:
           raw.gtfs_rt.alerts \
           raw.tides.passenger_events \
           raw.dr.trips \
-          raw.vendor.files
+          raw.vendor.files \
+          raw.telematics.vehicle_stats
         do
           /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 \
             --create --if-not-exists --topic "$$topic" \

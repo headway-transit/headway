@@ -23,9 +23,10 @@ Honest list — this is what is wired up right now, nothing more:
 | **GTFS-Realtime trip updates** | A URL, polled | **Captured and stored raw only today.** No metric reads it yet — the normalization step currently processes vehicle positions, the static feed, and passenger events. Worth connecting anyway: everything captured now is replayable later. |
 | **GTFS-Realtime service alerts** | A URL, polled | Same as trip updates: captured and stored raw, not yet used by any metric. |
 | **TIDES passenger events (APC counts)** | A CSV file dropped into a folder, **or** pushed over the network with an API key | Boarding/alighting events. This is what lights up **Unlinked Passenger Trips (UPT)**. |
+| **Fleet telematics (Samsara)** | A read-only API token, polled once a day | Measured vehicle movement: how far each vehicle went and how long its engine ran, per day, with the measurement method recorded. **This is NOT revenue miles or revenue hours** and no figure is computed from it. Vehicle-level only — no driver data of any kind. See section 4. |
 
 That is the complete list. There is no direct connection to SQL Server,
-Oracle, a data lake, or a vendor database today — see section 4 for the
+Oracle, a data lake, or a vendor database today — see section 5 for the
 supported path if that is where your data lives.
 
 A note on the numbers themselves: the figures Headway computes from this
@@ -100,7 +101,7 @@ header):
 - `passenger_event_id` — a unique id for each event row
 - `service_date` — the service day, e.g. `2026-06-01`
 - `event_timestamp` — when it happened, **with the UTC offset** (see the
-  timezone warning in section 4)
+  timezone warning in section 5)
 - `trip_stop_sequence` — the stop's position within the trip
 - `event_type` — for counts, use exactly `Passenger boarded` or
   `Passenger alighted` (these are two of the sixteen values the TIDES
@@ -259,7 +260,160 @@ the `tides_simulated` label, where every figure it touches is flagged.
 > — five questions for every bidder and the contract clauses worth having,
 > vendor-neutral.
 
-## 4. "My data lives in SQL Server / a data lake"
+## 4. Vanpool and fleet telematics (Samsara)
+
+If your vanpool (or any part of your fleet) runs on Samsara, Headway can
+pull each vehicle's daily movement straight from it — no more collecting
+odometer sheets by hand.
+
+### What this actually gives you — and what it does not
+
+**Read this before you connect anything.** What Headway collects here is
+**how far each vehicle moved and how long its engine ran**, day by day.
+
+That is **not** revenue miles and **not** revenue hours. An odometer reading
+goes up for everything the van did: carrying passengers, driving to and from
+the garage, the trip to the tyre shop, the driver's lunch run — and on a
+vanpool van kept at a participant's home, personal use too. An engine-hour
+meter counts the engine running, including sitting idling in a car park.
+
+So Headway **does not compute anything from this data**. Not a mile, not an
+hour, not an NTD figure. It records what the vehicles measured, records
+*how* each measurement was taken, records where the measurement is blind,
+and stops there. Turning measured movement into reportable vanpool figures
+needs the FTA's own vanpool rules written into Headway's regulatory tracker
+first, plus a way for you to declare which vehicle-days were actually
+revenue service. That is deliberate future work, not something quietly
+happening in the background.
+
+What you get today is the **audited history**: every day's measurement, kept
+byte-for-byte from the source, ready for the day the reportable figures are
+built on top of it.
+
+### What Headway collects — and what it deliberately does not
+
+**Telematics is employee-monitoring data.** A van's movement history is, in
+practice, a record of what a person did with their day. Headway therefore
+collects the least it can and still do the job, and this table is the whole
+answer — one page your HR lead or your attorney can read.
+
+| | |
+| --- | --- |
+| **What Headway asks Samsara for** | Five vehicle measurements only: three ways of measuring **distance** and two ways of measuring **engine running time**. Each is a number and a timestamp, per vehicle. |
+| **What it keeps** | The vehicle's id and name, and for each reading its time and its value. That is the complete list. |
+| **What it never asks for** | Vehicle GPS locations, ID-card scans, fault codes, fuel, speed, engine on/off events — or any other Samsara data series. |
+| **Driver data — never collected** | No driver names or ids, **no hours-of-service or ELD duty logs**, no driver safety scores, no harsh-braking or harsh-acceleration events, no dashcam or video references. None of it is ingested, and **there is no setting that turns any of it on.** |
+| **Removed before anything is saved** | If Samsara sends anything else in the same response — including its `externalIds` field, which Samsara's own documentation shows holding a **payroll id** — Headway strips it out **before writing anything to disk**. It is never stored "just in case". Headway records *which* fields it removed, never their contents. |
+| **Permission you grant** | **Read Vehicle Statistics**, and nothing else. No permission to change anything in Samsara, and no permission that would give Headway driver-behaviour or compliance data. |
+
+If a future version of Headway ever needs driver-level data, it will have to
+be switched on deliberately, with a warning attached, because collecting it
+may involve your collective-bargaining agreements, state employee-privacy
+law, and your own data-classification rules. Today there is nothing to
+switch on.
+
+**Being straight with you about one thing:** even with no driver name
+anywhere in it, this data is **not anonymous**. Daily distance and engine
+hours per vehicle, put next to vehicle assignments or run sheets you already
+keep, can show who was driving and roughly what they did. That is true of
+telematics data generally, not a quirk of Headway. Treat these records as
+employee records.
+
+### The three ways a distance can be measured — kept separate on purpose
+
+Samsara can report a vehicle's distance three different ways, and they are
+**not** interchangeable:
+
+| How it was measured | What it really is |
+| --- | --- |
+| **Engine-computer odometer** | The van's own odometer, read off its diagnostic port. The number on the dashboard. Not every vehicle supports it. |
+| **GPS odometer** | An odometer Samsara maintains from GPS travel — but it only works once **somebody types in a starting odometer reading**. Without that, it does not update. |
+| **GPS distance** | Distance the *tracking device* has accumulated since it was installed. It belongs to the device, not the van: swap the device and the count starts over. |
+
+Headway stores each of these as its own separate record, labelled with how
+it was measured. If a van has no engine-computer odometer, Headway says so
+in the data-quality queue — it **never** quietly puts the GPS number in that
+column instead. If two methods disagree, you see both figures, not an
+average.
+
+Two more things Headway records rather than smooths over:
+
+- **Gaps.** Each record says the longest stretch between two readings that
+  day. If a van moved 40 miles and there is a six-hour hole in the middle,
+  you are told; Headway never spreads the miles across the gap.
+- **Counters going backwards.** A running total cannot decrease, so if it
+  does (usually a replaced tracking device), Headway keeps both readings,
+  leaves the distance blank, and raises an issue. It never invents a
+  plausible number.
+
+### What to ask your Samsara administrator for
+
+One **read-only API token**, with **one** permission:
+
+> **Read Vehicle Statistics** (under the *Vehicles* category)
+
+That is the whole ask. Headway requests **no permission to change anything**
+in Samsara, and no access to driver hours-of-service or compliance records.
+
+Two things worth doing while you are there:
+
+1. **Tag your vanpool vehicles** and use Samsara's *Tag Access* when
+   creating the token. The token then cannot see any vehicle outside that
+   tag — the safest possible arrangement.
+2. **Name the token for Headway specifically**, so it can be revoked on its
+   own without breaking other integrations.
+
+Copy the token when it is shown — Samsara will not show it again.
+
+### Turning it on
+
+1. Add these to `deploy/compose/.env`:
+
+   ```
+   SAMSARA_ENABLED=true
+   SAMSARA_API_TOKEN=<the read-only token>
+   SAMSARA_SOURCE=samsara
+   SAMSARA_SERVICE_DAY_TZ=America/New_York
+   HEADWAY_TELEMATICS_SERVICE_DAY_TZ=America/New_York
+   ```
+
+   - `SAMSARA_SOURCE` must be `samsara` for a real account. Use
+     `samsara_simulated` **only** for test data — that label follows the
+     records forever, so simulated data can never be mistaken for real.
+   - The two timezone settings must be **identical**. A "service day" is a
+     local calendar day, so Headway needs to be told which timezone yours
+     is; it will never guess one. Optional extras:
+     `SAMSARA_TAG_IDS` / `SAMSARA_VEHICLE_IDS` to poll only part of the
+     fleet, and `SAMSARA_ENGINE_TIME=false` to skip engine hours.
+
+2. Bring the services up so they pick up the change (`.env` changes need
+   `up -d`, not `restart`):
+
+   ```sh
+   cd deploy/compose
+   docker compose up -d ingestion transform
+   ```
+
+3. Watch the first cycle:
+
+   ```sh
+   docker compose logs -f ingestion | grep samsara
+   ```
+
+   You should see `samsara telematics poller started`, then one
+   `telematics page landed and produced` line per page of data.
+
+**If a setting is missing, the connector refuses to start and tells you
+which one** — a missing token, a missing source label or a missing timezone
+is a loud failure, never a connector that silently does nothing. Your token
+never appears in a log line.
+
+By default Headway polls yesterday and the two days before it, once every
+six hours. Yesterday rather than today because a day is not finished until
+it ends, and vehicles upload their data late; re-reading the same days costs
+nothing because identical data is recognised and never counted twice.
+
+## 5. "My data lives in SQL Server / a data lake"
 
 The honest answer: **today Headway has no direct database or data-lake
 connector.** It cannot log into SQL Server, Oracle, Snowflake, or a data
@@ -334,7 +488,7 @@ versioned wire contract in `contracts/` (the raw-record envelope and
 topic registry). A vendor or an in-house developer can build a connector
 against that contract now, without waiting for Headway to ship one.
 
-## 5. How to know it's working
+## 6. How to know it's working
 
 Three layers, from "bytes arrived" to "this number is traceable":
 
@@ -364,7 +518,7 @@ Three layers, from "bytes arrived" to "this number is traceable":
    (A figure with no lineage is treated as an error by the API itself —
    it will not pretend.)
 
-## 6. Getting help / what to send us
+## 7. Getting help / what to send us
 
 When you open an issue, include identifiers — never the data itself:
 
@@ -383,7 +537,15 @@ system to find the exact record; nobody outside needs the contents.
 ---
 
 *Drafting note: AI-assisted draft, verified against the repository on
-2026-07-11 (sources: `deploy/compose/compose.yaml` and `.env.example`,
+2026-07-11, with the fleet-telematics section (4) added and verified
+2026-07-29 (sources for that section: `services/ingestion/connectors/samsara/`
+and its README, `contracts/fleet-telematics.v0.md`,
+`db/migrations/0034_vehicle_telematics_days.sql`,
+`services/transform/headway_transform/telematics_vehicle_days.py`, and
+Samsara's own published OpenAPI document, `info.version` 2025-10-23,
+retrieved 2026-07-29 — no live Samsara account was contacted; the Samsara
+permission names and behaviours quoted are the vendor's published wording).
+Original sources: `deploy/compose/compose.yaml` and `.env.example`,
 `services/ingestion/README.md` and `connectors/tides/tides.go`,
 `services/transform/README.md`, `services/api/README.md`,
 `contracts/topics.v0.md` and `raw-record-envelope.v0.schema.json`,

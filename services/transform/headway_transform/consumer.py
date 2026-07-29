@@ -27,6 +27,7 @@ from . import (
     dr_trips,
     gtfs_rt_positions,
     gtfs_static,
+    telematics_vehicle_days,
     tides_passenger_events,
     trip_updates,
 )
@@ -43,6 +44,7 @@ TOPIC_GTFS_STATIC_FEED = "raw.gtfs_static.feed"
 TOPIC_TIDES_PASSENGER_EVENTS = "raw.tides.passenger_events"
 TOPIC_DR_TRIPS = "raw.dr.trips"
 TOPIC_VENDOR_FILES = "raw.vendor.files"
+TOPIC_TELEMATICS_VEHICLE_STATS = "raw.telematics.vehicle_stats"
 
 # Fetches object-store bytes for payload_encoding='object_ref' envelopes
 # (GTFS static zips, TIDES passenger_events CSVs). Injected; the consumer
@@ -370,12 +372,45 @@ def _handle_vendor_file(
     writer.insert_dq_issues(result.findings)
 
 
+def _handle_telematics_vehicle_stats(
+    writer: DbWriter,
+    envelope: Envelope,
+    object_fetcher: Optional[ObjectFetcher],
+    service_day_tz: Optional[str],
+) -> None:
+    """Route a raw.telematics.vehicle_stats page through its normalizer.
+
+    Two fail-closed refusals live in the normalizer, not here, so they are
+    recorded as dq.issues rows against the raw record: an UNREGISTERED source
+    label (handoff 0015 rule) and an UNDECLARED service-day timezone (a
+    service date is a local wall date and is never derived from a guessed
+    zone). Both leave the raw record retained and write zero canonical rows.
+    """
+    page_bytes = _fetch_file_payload(
+        writer, envelope, object_fetcher, "Telematics page"
+    )
+    if page_bytes is None:
+        return
+
+    rows, edges, findings = telematics_vehicle_days.normalize(
+        page_bytes,
+        envelope.record_id,
+        envelope.source,
+        envelope.fetched_at,
+        service_day_tz,
+    )
+    writer.insert_telematics_days(rows)
+    writer.insert_lineage_edges(edges)
+    writer.insert_dq_issues(findings)
+
+
 def process_message(
     writer: DbWriter,
     topic: str,
     value: bytes,
     object_fetcher: Optional[ObjectFetcher] = None,
     adapter_registry: Optional[AdapterRegistry] = None,
+    telematics_service_day_tz: Optional[str] = None,
 ) -> None:
     """Process one message: validate, land raw record, route, normalize, write.
 
@@ -405,6 +440,10 @@ def process_message(
         _handle_dr_trips(writer, envelope, object_fetcher)
     elif topic == TOPIC_VENDOR_FILES:
         _handle_vendor_file(writer, envelope, object_fetcher, adapter_registry)
+    elif topic == TOPIC_TELEMATICS_VEHICLE_STATS:
+        _handle_telematics_vehicle_stats(
+            writer, envelope, object_fetcher, telematics_service_day_tz
+        )
     else:
         logger.warning("no normalizer for topic %s", topic)
         writer.insert_dq_issues(
@@ -430,6 +469,7 @@ def run_loop(
     object_fetcher: Optional[ObjectFetcher] = None,
     max_messages: Optional[int] = None,
     adapter_registry: Optional[AdapterRegistry] = None,
+    telematics_service_day_tz: Optional[str] = None,
 ) -> int:
     """Consume messages until the source yields None (or max_messages).
 
@@ -444,7 +484,14 @@ def run_loop(
             break
         topic, _key, value = polled
         try:
-            process_message(writer, topic, value, object_fetcher, adapter_registry)
+            process_message(
+                writer,
+                topic,
+                value,
+                object_fetcher,
+                adapter_registry,
+                telematics_service_day_tz,
+            )
             writer.connection.commit()
         except Exception as exc:  # noqa: BLE001 — quarantine path, never a bare pass
             logger.exception("message on %s failed; quarantining", topic)

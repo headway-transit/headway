@@ -75,6 +75,7 @@ not repeat forever.
 | `connectors/tides/` | TIDES passenger_events file-drop scanner (periodic scan of `TIDES_DROP_DIR` every `POLL_INTERVAL` for `passenger_events*.csv` → `raw.tides.passenger_events`, `object_ref` payload; bytes landed at `raw/tides/<record_id>.csv`; partial-copy stability guard + size cap + simulated-source enforcement per "File-drop robustness" above; processed files moved to `processed/`, refused files to `rejected/`; header sanity check against the required TIDES columns sets `parse_status` only) |
 | `connectors/dr/` | Demand-response trips file-drop scanner (handoff 0013; periodic scan of `DR_DROP_DIR` every `POLL_INTERVAL` for `demand_response_trips*.csv` → `raw.dr.trips`, `object_ref` payload; bytes landed at `raw/dr/<record_id>.csv`; same robustness guards as the TIDES scanner; processed files moved to `processed/`, refused files to `rejected/`; header sanity check against the required `demand_response_trip` v0 columns — `contracts/demand-response-trip.v0.schema.json` — sets `parse_status` only) |
 | `connectors/vendorfile/` | Generic vendor-export file-drop scanner for the adapter framework (handoff 0015; periodic scan of `VENDOR_DROP_DIR` every `POLL_INTERVAL` for `*.csv` → `raw.vendor.files`, `object_ref` payload; ORIGINAL vendor bytes landed content-addressed at `raw/vendor/<record_id>.csv`; same robustness guards as the TIDES/DR scanners; deliberately NO header/content check — `parse_status` is always `ok`, because only the registered mapping spec (`adapters/<vendor>/<product>/mapping.v0.yaml`) knows the vendor format; all interpretation, per-row quarantine and the fail-closed unregistered-label refusal happen in the transform adapter runtime) |
+| `connectors/samsara/` | Samsara fleet-telematics poller (handoff 0028; polls `GET /fleet/vehicles/stats/history` one DECLARED service day per window → `raw.telematics.vehicle_stats`, `object_ref` payload; **data minimization at the connector boundary** — fleet telematics is EMPLOYEE-MONITORING data, so every response is reduced to an allow-list (vehicle `id`/`name`; `time`/`value` per reading) BEFORE anything is hashed, landed or produced, and driver-identified or unrequested fields — `externalIds`/payroll ids, `nfcCardScans`, `decorations`, any driver object — are dropped before the first write, never landed "just in case"; the minimized bytes are landed at `raw/telematics/<record_id>.json`; bearer token from `SAMSARA_API_TOKEN`, never logged; fail-closed on token / source label / service-day timezone; cursor pagination, documented `Retry-After` rate-limit backoff and 5xx exponential backoff; a page that is not the documented response shape is landed with `parse_status: malformed` and pagination stops. **Every API detail derived from the vendor's published OpenAPI document, version 2025-10-23, retrieved 2026-07-29 — and NO live Samsara account has ever been contacted; see `connectors/samsara/README.md`.** Telematics distance is NOT revenue miles and engine time is NOT revenue hours: this connector computes nothing) |
 | `cmd/headway-ingest/` | The service binary: env config, connector startup, SIGINT/SIGTERM clean shutdown, `log/slog` JSON logging |
 
 GTFS / GTFS-Realtime payload *semantics* are defined by the specs at
@@ -87,7 +88,15 @@ connector's header check was verified against commit
 `d887d42ce081f3fb6155664a3c486101d62ec52b` (2026-07-10) — re-verify against
 the current spec before extending. Simulated drops (from
 `tools/tides-simulator`) MUST run with `TIDES_SOURCE=tides_simulated` so
-provenance permanently distinguishes them (handoff 0005 binding rule).
+provenance permanently distinguishes them (handoff 0005 binding rule). Fleet
+telematics payload semantics are the VENDOR's: the raw record is the vendor
+API's own response bytes, and the canonical record derived from them is
+defined by `contracts/fleet-telematics.v0.schema.json` (handoff 0028). Every
+Samsara endpoint path, parameter, field name and limit is derived from the
+vendor's published OpenAPI document with the version and retrieval date
+recorded in `connectors/samsara/README.md` — never from memory. Simulated
+telematics runs MUST use `SAMSARA_SOURCE=samsara_simulated`, never
+`samsara` (the same handoff-0005 binding rule).
 
 ## Configuration (environment)
 
@@ -106,14 +115,33 @@ provenance permanently distinguishes them (handoff 0005 binding rule).
 | `VENDOR_DROP_DIR` | Scan this directory every `POLL_INTERVAL` for vendor-export `*.csv` drops (optional, handoff 0015) |
 | `VENDOR_SOURCE` | Envelope `source` for vendor drops — **REQUIRED with `VENDOR_DROP_DIR`, no default** (fail closed). Must be the REGISTERED adapter mapping-spec label `<vendor>_<product>` (see `adapters/README.md`), or `<vendor>_<product>_simulated` for synthetic data; the transform runtime refuses unregistered labels with a blocking DQ issue |
 | `DROP_MAX_FILE_BYTES` | Cap on a dropped file, plain bytes; default 268435456 (256 MiB). Oversize files are moved to `rejected/` and logged |
+| `SAMSARA_ENABLED` | `true` starts the Samsara telematics poller (handoff 0028). The TOKEN is deliberately NOT the on-switch: a missing token must be a loud refusal, not a silently skipped connector |
+| `SAMSARA_API_TOKEN` | Bearer API token — **REQUIRED with `SAMSARA_ENABLED`**, from the secret store, **never logged** and never written into a record. Needs only the read-only "Read Vehicle Statistics" scope (Vehicles category) |
+| `SAMSARA_SOURCE` | Envelope `source` for telematics records — **REQUIRED with `SAMSARA_ENABLED`, no default** (fail closed). Must be a REGISTERED label from `contracts/fleet-telematics.v0.schema.json`: `samsara` for a real account, `samsara_simulated` for anything synthetic |
+| `SAMSARA_SERVICE_DAY_TZ` | Agency IANA service-day timezone — **REQUIRED with `SAMSARA_ENABLED`**, never guessed. The transform must be given the SAME zone (`HEADWAY_TELEMATICS_SERVICE_DAY_TZ`) |
+| `SAMSARA_BASE_URL` | API root, default `https://api.samsara.com` (the vendor spec also lists `https://api.eu.samsara.com` and `https://api.ca.samsara.com`) |
+| `SAMSARA_VEHICLE_IDS` / `SAMSARA_TAG_IDS` / `SAMSARA_PARENT_TAG_IDS` | Optional comma-separated vendor-side filters. A tag-scoped token plus a tag filter is the least-privilege way to poll only the vanpool |
+| `SAMSARA_ENGINE_TIME` | `false` skips the engine-runtime request (default on). Engine RUNTIME is not duty hours and not revenue hours |
+| `SAMSARA_LAG_DAYS` / `SAMSARA_BACKFILL_DAYS` | Newest polled service day = today − lag (default 1); consecutive days re-polled per cycle (default 3). Headway operational defaults, not vendor limits |
+| `SAMSARA_POLL_INTERVAL` | Go duration between poll cycles, default `6h`. Deliberately separate from `POLL_INTERVAL`: a daily-window API is not a 30-second feed |
+| `SAMSARA_MAX_PAGE_BYTES` | Cap on one API response page, plain bytes; default 67108864 (64 MiB). Oversize pages are refused, never truncated |
 | `POLL_INTERVAL` | Go duration for GTFS-RT polling AND drop-dir rescans, default `30s`; also the file-drop partial-copy settle time |
 | `AGENCY_ID` | Optional envelope `agency_id` (multi-feed disambiguation only) |
-| `S3_ENDPOINT` | MinIO/S3 endpoint `host:port` (required with `GTFS_STATIC_URL`, `TIDES_DROP_DIR`, `DR_DROP_DIR` or `VENDOR_DROP_DIR`) |
+| `S3_ENDPOINT` | MinIO/S3 endpoint `host:port` (required with `GTFS_STATIC_URL`, `TIDES_DROP_DIR`, `DR_DROP_DIR`, `VENDOR_DROP_DIR` or `SAMSARA_ENABLED`) |
 | `S3_ACCESS_KEY` / `S3_SECRET_KEY` | Object-store credentials (inject from the secret store; never logged) |
 | `S3_BUCKET` | Raw bucket, default `headway-raw` |
 | `S3_USE_SSL` | `true` for TLS; default `false` (on-prem MinIO) |
 
-At least one connector URL must be set.
+At least one connector must be configured (a `GTFS_*` URL, a `*_DROP_DIR`,
+or `SAMSARA_ENABLED=true`); otherwise the service refuses to start.
+
+**Topic prerequisite (handoff 0028).** `raw.telematics.vehicle_stats` is
+registered in `contracts/topics.v0.md`, but the Compose stack's
+`bootstrap-kafka` topic list (`deploy/compose/compose.yaml`) still needs it
+added — a one-line DevOps change outside the handoff-0028 scope. Until then
+the Samsara connector fails loudly at produce time with
+`UNKNOWN_TOPIC_OR_PARTITION` (observed 2026-07-29, and correct behaviour:
+nothing is silently dropped, and the page is retried next cycle).
 
 ## Dependency licenses (verified in the module cache at build)
 
@@ -125,6 +153,45 @@ At least one connector URL must be set.
 | `google.golang.org/protobuf` | v1.36.11 | BSD-3-Clause |
 
 ## Verification status
+
+**2026-07-29 (Samsara fleet-telematics connector, handoff 0028).**
+`go build ./... && go vet ./... && go test ./... -count=1` → all packages
+**ok**, **73 tests** (was 47; 26 new in `connectors/samsara/`). Go toolchain
+auto-selected by the go.mod directive from host go1.22.2.
+
+```
+$ go test ./... -count=1
+?   .../cmd/headway-ingest    [no test files]
+ok  .../connectors/dr         0.029s
+ok  .../connectors/gtfsrt     0.007s
+ok  .../connectors/gtfsstatic 0.007s
+ok  .../connectors/samsara    0.016s
+ok  .../connectors/tides      0.019s
+ok  .../connectors/vendorfile 0.023s
+ok  .../internal/envelope     0.002s
+?   .../internal/producer     [no test files]
+```
+
+**NO LIVE SAMSARA ACCOUNT HAS EVER BEEN CONTACTED** — the vendor's API
+surface was derived entirely from its published OpenAPI document
+(`https://developers.samsara.com/openapi/samsara-api.json`, `info.version`
+2025-10-23, retrieved 2026-07-29, sha256
+`2ed9a10c…994730e`), and every fixture is synthetic. The full
+verification statement and the checklist of what must be re-verified when an
+agency token arrives is in
+[`connectors/samsara/README.md`](connectors/samsara/README.md).
+
+**Live-verified 2026-07-29** against the running Compose stack, using a
+local SYNTHETIC vendor-shaped server (source label `samsara_simulated`,
+never `samsara`): startup refused with the plain-language message when the
+token / source label / timezone were absent, and again for an unregistered
+source label; a documented `429` + `Retry-After: 0.40235` was honoured
+(waited 402.35 ms) and the poll then succeeded; cursor pagination followed
+`endCursor` across two distance pages plus a separate engine-time request;
+3 pages landed in MinIO and produced to `raw.telematics.vehicle_stats`; the
+API token appeared **zero** times in the connector's logs. Full evidence,
+including the transform side and the replay-idempotency run, is in handoff
+0028.
 
 Unit tests, build, and vet **pass** (2026-07-13, toolchain auto-selected by
 the go.mod directive; host go1.22+ with `GOTOOLCHAIN=auto`; 37 tests):

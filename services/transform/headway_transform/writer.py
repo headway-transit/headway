@@ -23,6 +23,11 @@ matching the handoff-0001 schema exactly:
 - canonical.dr_trips inserts (handoff 0013 / migration 0021), ON CONFLICT
   DO NOTHING on the unique key (dr_trip_id, pickup_timestamp,
   source_record_id) for the same replay reason;
+- canonical.vehicle_telematics_days inserts (handoff 0028 / migration 0034),
+  ON CONFLICT DO NOTHING on the unique key (vehicle_id, window_start,
+  measure, basis, source_record_id) for the same replay reason. These rows
+  are MEASURED VEHICLE MOVEMENT, not revenue miles/hours — no calculation
+  reads them (see telematics_vehicle_days.py, "the honesty wall");
 - lineage.edges inserts, ON CONFLICT DO NOTHING on the full natural key
   (output_kind, output_id, transform_name, transform_version, input_kind,
   input_id) — unique per migration 0023, so a replay adds zero duplicate
@@ -54,6 +59,7 @@ from .gtfs_static import (
 )
 from .dr_trips import CanonicalDrTrip
 from .model import DQFinding, LineageEdge
+from .telematics_vehicle_days import CanonicalTelematicsDay
 from .tides_passenger_events import CanonicalPassengerEvent
 from .trip_updates import CanonicalTripUpdate
 
@@ -166,6 +172,20 @@ INSERT INTO canonical.dr_trips
 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
         %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
 ON CONFLICT (dr_trip_id, pickup_timestamp, source_record_id) DO NOTHING
+""".strip()
+
+INSERT_TELEMATICS_DAY_SQL = """
+INSERT INTO canonical.vehicle_telematics_days
+    (window_start, window_end, service_date, vehicle_id, vehicle_label,
+     measure, basis, unit, reading_kind, value,
+     first_reading_at, first_reading_value,
+     last_reading_at, last_reading_value,
+     sample_count, max_sample_gap_seconds, polled_at,
+     source, source_record_id)
+VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+        %s, %s)
+ON CONFLICT (vehicle_id, window_start, measure, basis, source_record_id)
+DO NOTHING
 """.strip()
 
 INSERT_LINEAGE_EDGE_SQL = """
@@ -362,6 +382,35 @@ class DbWriter:
                     row.interruption_after,
                     row.driver_shift_id,
                     row.dispatching_point_id,
+                    row.source,
+                    row.source_record_id,
+                ),
+            )
+
+    def insert_telematics_days(
+        self, rows: Iterable[CanonicalTelematicsDay]
+    ) -> None:
+        for row in rows:
+            self._execute(
+                INSERT_TELEMATICS_DAY_SQL,
+                (
+                    row.window_start,
+                    row.window_end,
+                    row.service_date,
+                    row.vehicle_id,
+                    row.vehicle_label,
+                    row.measure,
+                    row.basis,
+                    row.unit,
+                    row.reading_kind,
+                    row.value,
+                    row.first_reading_at,
+                    row.first_reading_value,
+                    row.last_reading_at,
+                    row.last_reading_value,
+                    row.sample_count,
+                    row.max_sample_gap_seconds,
+                    row.polled_at,
                     row.source,
                     row.source_record_id,
                 ),
