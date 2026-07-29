@@ -120,3 +120,10 @@ platform, and every deletion leaves a tombstone.**
   dashboard's prediction features — `docs/design/toc-replay-dashboard.md` §6).
 - Quote the state-schedule research for the first partner agency's jurisdiction into the
   regulatory tracker the same way FTA definitions are quoted — never paraphrased.
+- **Retention policy assumes a classifier.** The first partner agency has no records
+  officer (oversight sits with HR and external counsel) and is only now standing up a
+  data-classification program — which is the NORMAL case at a small agency, not an
+  exception. `docs/data-classification.md` therefore ships the inventory side of this:
+  what the platform holds and how sensitive each class is, so an agency can classify what
+  already exists rather than start from a blank page. Retention policy consumes those
+  classes; neither waits on the other.
