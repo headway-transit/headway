@@ -134,6 +134,35 @@ const BASEMAP_PATH = "/basemap/region.pmtiles";
 const BASEMAP_FONT = "Noto Sans Regular";
 
 /**
+ * The street-style choice is DELIBERATELY INDEPENDENT of the app theme
+ * (first-agency UAT, 2026-07-29: in dark mode the dark streets were hard
+ * to read while the rest of the chrome was right). Map legibility is a
+ * task decision, not a branding one — someone watching vehicle dots wants
+ * the streets that make the dots easiest to find, whatever chrome they
+ * prefer. Light streets are therefore the default in BOTH themes, and the
+ * choice is the user's, persisted per browser.
+ */
+export type BasemapStyle = "light" | "dark";
+const BASEMAP_STYLE_KEY = "headway-basemap-style";
+
+function storedBasemapStyle(): BasemapStyle {
+  try {
+    const value = window.localStorage.getItem(BASEMAP_STYLE_KEY);
+    return value === "dark" ? "dark" : "light";
+  } catch {
+    return "light"; // storage blocked: the legible default still applies
+  }
+}
+
+function persistBasemapStyle(style: BasemapStyle): void {
+  try {
+    window.localStorage.setItem(BASEMAP_STYLE_KEY, style);
+  } catch {
+    // storage blocked: the choice still applies for this visit
+  }
+}
+
+/**
  * Detected at runtime, never assumed:
  *   absent   → today's canvas exactly as-is (plus one quiet teaching line
  *              for certifying officials);
@@ -166,18 +195,19 @@ async function detectBasemap(): Promise<Exclude<BasemapState, "checking">> {
 }
 
 /**
- * The Protomaps street layers for one theme, adapted to this page's rules:
+ * The Protomaps street layers for one STYLE (not the app theme — see
+ * BasemapStyle), adapted to this page's rules:
  *   - ids namespaced "basemap-*" (this style already owns "background");
- *   - the theme's own background dropped (the token water-tone canvas
+ *   - the flavor's own background dropped (the token water-tone canvas
  *     stays, so the area outside the extracted region looks unchanged);
  *   - the POI icon layer dropped and icon references stripped — sprites
  *     are not vendored in v0 (limitation stated in the legend);
  *   - every label layer forced onto the one vendored glyph stack.
  */
-function basemapLayerSpecs(theme: "light" | "dark"): LayerSpecification[] {
+function basemapLayerSpecs(style: BasemapStyle): LayerSpecification[] {
   const specs = [
-    ...noLabels("basemap", theme),
-    ...labels("basemap", theme, "en"),
+    ...noLabels("basemap", style),
+    ...labels("basemap", style, "en"),
   ] as LayerSpecification[];
   const out: LayerSpecification[] = [];
   for (const spec of specs) {
@@ -194,7 +224,12 @@ function basemapLayerSpecs(theme: "light" | "dark"): LayerSpecification[] {
   return out;
 }
 
-/** Map paint tokens, resolved from the stylesheet per theme (the canvas
+/** Map paint tokens for HEADWAY'S OWN MARKS — the canvas, route lines,
+ *  stops and vehicle dots. These DO follow the app theme: they are our
+ *  tokens and every pair is contrast-gated. Only the OpenStreetMap street
+ *  background is decoupled (see BasemapStyle).
+ *
+ *  Resolved from the stylesheet per theme (the canvas
  *  cannot read CSS custom properties itself). */
 function mapColors(): {
   bg: string;
@@ -265,7 +300,11 @@ export function MapView() {
   const mapRef = useRef<MapLibreMap | null>(null);
   const [mapReady, setMapReady] = useState(false);
   const [basemap, setBasemap] = useState<BasemapState>("checking");
-  /** The basemap layer ids currently on the map (theme swaps remove and
+  /** Street style — the user's own choice, NOT the app theme (see
+   *  BasemapStyle). Light by default in both themes. */
+  const [basemapStyle, setBasemapStyle] =
+    useState<BasemapStyle>(storedBasemapStyle);
+  /** The basemap layer ids currently on the map (style swaps remove and
    *  re-add them; the overlay layers are never touched). */
   const basemapLayerIds = useRef<string[]>([]);
 
@@ -429,10 +468,10 @@ export function MapView() {
     };
   }, []);
 
-  // Streets under everything: the archive source plus the theme's street
-  // layers, inserted BEFORE the schematic route lines so stops, routes and
-  // vehicles always draw on top. Theme switches swap the street layers in
-  // place; the overlay layers and their data are never touched.
+  // Streets under everything: the archive source plus the chosen style's
+  // street layers, inserted BEFORE the schematic route lines so stops,
+  // routes and vehicles always draw on top. Style switches swap the street
+  // layers in place; the overlay layers and their data are never touched.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady || basemap !== "present") return;
@@ -448,12 +487,12 @@ export function MapView() {
     for (const id of basemapLayerIds.current) {
       if (map.getLayer(id)) map.removeLayer(id);
     }
-    const specs = basemapLayerSpecs(theme);
+    const specs = basemapLayerSpecs(basemapStyle);
     for (const spec of specs) {
       map.addLayer(spec, "routes-line");
     }
     basemapLayerIds.current = specs.map((s) => s.id);
-  }, [mapReady, basemap, theme]);
+  }, [mapReady, basemap, basemapStyle]);
 
   // ---- geometry: fetched once ----
   useEffect(() => {
@@ -631,6 +670,33 @@ export function MapView() {
         ))}
       </div>
       <p className="chart-desc">{t.window.note}</p>
+
+      {/* ---- street style: the user's own choice, not the app theme ---- */}
+      {basemap === "present" && (
+        <>
+          <div
+            className="filter-bar"
+            role="group"
+            aria-label={t.basemap.style.label}
+          >
+            <span className="filter-bar-label">{t.basemap.style.label}:</span>
+            {(["light", "dark"] as BasemapStyle[]).map((style) => (
+              <button
+                key={style}
+                type="button"
+                aria-pressed={basemapStyle === style}
+                onClick={() => {
+                  setBasemapStyle(style);
+                  persistBasemapStyle(style);
+                }}
+              >
+                {t.basemap.style[style]}
+              </button>
+            ))}
+          </div>
+          <p className="chart-desc">{t.basemap.style.note}</p>
+        </>
+      )}
 
       {/* ---- the honesty chip row ---- */}
       <div className="map-status">

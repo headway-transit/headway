@@ -382,3 +382,26 @@ in `docs/images/handoff-0027/`, logs `clickthrough-log.txt` +
   (.gitignore only), `docs/basemap.md`, `docs/images/handoff-0027/`
   (6 screenshots + 2 logs), `web/public/basemap-fonts/` (258 files).
   No commits, per the wave's rule.
+
+### Field follow-up (orchestrator, 2026-07-29): street style decoupled from the app theme
+
+First agency UAT, the morning after the basemap reached their VM: it works —
+and "in dark mode the map is also darkened, making it more difficult to read.
+Going forward, we may not want to have the map pick up on Headway's theme."
+
+Correct, and the reasoning generalizes: **map legibility is a task decision,
+not a branding one.** Someone watching vehicle dots wants whichever streets
+make the dots easiest to find, independent of the chrome they prefer. The
+theme coupling shipped in this wave was an assumption, not a requirement.
+
+Changed: the street background now has its own user setting (light | dark),
+**light by default in BOTH themes**, persisted per browser
+(`headway-basemap-style`), with the control beside the staleness-window
+selector and a plain-words note that it is deliberately separate from the
+app theme. The split is principled, not blanket: Headway's OWN marks — the
+canvas, route lines, stops, vehicle dots — still follow the theme, because
+those are our contrast-gated tokens; only the OpenStreetMap street layers
+decouple. Pinned by a test that runs the app in dark theme and asserts light
+streets, that a style swap re-adds street layers only (overlay layers
+untouched), and that the choice persists. Web 263 tests, build/lint/types
+clean.

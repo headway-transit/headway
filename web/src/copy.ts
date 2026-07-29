@@ -1833,6 +1833,16 @@ export const copy = {
       /** ON the canvas whenever tiles render (ODbL requires the credit;
        *  Protomaps built the archive format + daily extract source). */
       attribution: "© OpenStreetMap contributors · Protomaps",
+      /** Street style — deliberately INDEPENDENT of the app theme (first
+       *  agency UAT 2026-07-29: dark streets under dark chrome were hard
+       *  to read). Light is the default in both themes; the choice is the
+       *  user's and persists in this browser. */
+      style: {
+        label: "Street style",
+        light: "Light",
+        dark: "Dark",
+        note: "The street background keeps its own setting, separate from the light/dark theme of the rest of Headway — whichever makes vehicles and routes easiest to see for you. Saved in this browser.",
+      },
       /** Legend entries for the basemap-present state. */
       legendLine:
         "Street map background — OpenStreetMap data stored on this computer; no request leaves this installation to draw it.",

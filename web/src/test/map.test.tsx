@@ -600,6 +600,61 @@ describe("/map", () => {
     await expectNoAxeViolations();
   });
 
+  it("street style is the USER's choice, never the app theme: dark chrome still gets light streets by default, switching swaps the street layers only, and the choice persists (UAT 2026-07-29)", async () => {
+    window.localStorage.setItem("headway-theme", "dark");
+    window.localStorage.removeItem("headway-basemap-style");
+    signInAs("viewer");
+    mockApi({
+      ...geometryRoutes(),
+      "GET /ops/vehicles/latest": { status: 200, body: vehiclesLive },
+      ...basemapPresentRoutes,
+    });
+    renderApp("/map");
+    const user = userEvent.setup();
+
+    await screen.findByText("© OpenStreetMap contributors · Protomaps");
+    const map = fakeMaps[fakeMaps.length - 1];
+
+    // The app is in DARK theme, yet the streets came up LIGHT: legibility
+    // is a task decision, not a branding one.
+    const lightControl = screen.getByRole("button", {
+      name: copy.map.basemap.style.light,
+    });
+    expect(lightControl).toHaveAttribute("aria-pressed", "true");
+    expect(
+      screen.getByRole("button", { name: copy.map.basemap.style.dark }),
+    ).toHaveAttribute("aria-pressed", "false");
+
+    const streetAddsBefore = map.layerAdds.filter((l) =>
+      l.id.startsWith("basemap-"),
+    ).length;
+    expect(streetAddsBefore).toBeGreaterThan(0);
+    // Headway's OWN marks were added too and must survive a style swap.
+    const overlayAddsBefore = map.layerAdds.filter(
+      (l) => !l.id.startsWith("basemap-"),
+    ).length;
+
+    await user.click(
+      screen.getByRole("button", { name: copy.map.basemap.style.dark }),
+    );
+
+    // Only street layers were re-added; the overlay layers were never
+    // touched, and the choice is remembered for next time.
+    expect(
+      map.layerAdds.filter((l) => l.id.startsWith("basemap-")).length,
+    ).toBeGreaterThan(streetAddsBefore);
+    expect(
+      map.layerAdds.filter((l) => !l.id.startsWith("basemap-")).length,
+    ).toBe(overlayAddsBefore);
+    expect(window.localStorage.getItem("headway-basemap-style")).toBe("dark");
+    expect(
+      screen.getByRole("button", { name: copy.map.basemap.style.dark }),
+    ).toHaveAttribute("aria-pressed", "true");
+
+    window.localStorage.removeItem("headway-theme");
+    window.localStorage.removeItem("headway-basemap-style");
+  });
+
   it("EXTENDS the zero-external-requests pin to the basemap-present state: every request stays same-origin (detection HEAD + ranged magic GET included)", async () => {
     signInAs("viewer");
     const calls = mockApi({
