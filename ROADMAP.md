@@ -104,8 +104,26 @@ item is one line plus the source that demands it. The roadmap is governed in the
 ## Later
 
 - **Native database / data-lake connectors** — SQL Server, Oracle, Snowflake, etc.;
-  today's supported path is the documented CSV export + drop/push, and no commitment
-  exists yet. *(docs/connecting-your-data.md §4)*
+  today's supported path is the documented CSV export + drop/push, and no dated
+  commitment exists yet. *(docs/connecting-your-data.md §4)*
+  **Framing corrected 2026-07-29 (project lead):** an earlier note argued against this on
+  trust grounds — that Headway would "hold credentials into the agency's warehouse." That
+  reasoning imported a SaaS model that does not apply. Headway runs **on the agency's own
+  premises, operated by the agency**; a service account from one internal system to
+  another is ordinary enterprise integration, and the agency's own analytics team is
+  typically already doing exactly that (e.g. landing vendor data in Snowflake for BI).
+  There is no third party in the loop to be asymmetric with. The design shape that
+  survives the real objections:
+  - **Generic connector, agency-supplied query.** Ship a source connector that reads a
+    **view or query the agency provides in configuration** — never vendor table and column
+    names encoded in this repository. That keeps proprietary schemas out of an
+    open-source artifact, keeps least privilege in the agency's hands, and survives a
+    vendor upgrade changing its internals.
+  - **The warehouse is a first-class source, possibly better than the vendor DW** — already
+    curated, already permissioned, already the analytics team's supported surface, and it
+    adds no load to an operational system.
+  - **Not a substitute for the export path**, which stays supported: it is the only option
+    for agencies with no warehouse and no DBA, which is most of them.
 - **Remaining source fleet** — J1939/telematics (verify every PGN/SPN against the SAE
   Digital Annex), farebox/AFC, EV charging + SoC (OCPP where it applies),
   paratransit/DRT, maintenance management, validated manual entry.
