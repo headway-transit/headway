@@ -3,7 +3,7 @@
 This file is the front door for the next lead contributor — human or AI. It assumes **no
 access to any prior working session**. Everything below is reconstructible from the repo
 itself: the ~20-commit wave arc in `git log --oneline`, the role contracts in
-`.claude/roles/`, the eleven ADRs in `docs/adr/`, the nine handoffs in `docs/handoffs/`
+`.claude/roles/`, the twelve ADRs in `docs/adr/`, the nine handoffs in `docs/handoffs/`
 (each carrying live verification evidence), the per-service `README.md` verification
 sections, and `services/calc/REGULATORY_TRACKER.md`. When this document and those sources
 disagree, **the sources win** — update this file, never the evidence.
@@ -276,9 +276,9 @@ Read, in order: `.claude/roles/_SHARED_CONSTRAINTS.md` (binding on everyone), th
    edit-in-place. Next handoff number: **0010**.
 
 4. **Architecture changes go through ADRs** (`docs/adr/`, MADR format, owned by the
-   Platform Architect; eleven ratified — license, Kafka, TIDES-hybrid model, DB-per-agency,
+   Platform Architect; twelve ratified — license, Kafka, TIDES-hybrid model, DB-per-agency,
    Compose+Helm parity, connector contract, lineage graph, polyglot layers, walking
-   skeleton, monorepo+contracts, native OIDC). Never silently contradict an accepted ADR.
+   skeleton, monorepo+contracts, native OIDC, per-agency retention). Never silently contradict an accepted ADR.
    Per `GOVERNANCE.md`, substantial new directions open as an ADR PR labeled `rfc`, held
    ≥ 14 days. The eight shared constraints are constitutional: changing them takes a
    public ADR with **unanimous** maintainer approval.
