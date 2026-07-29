@@ -253,6 +253,12 @@ The label is fail-closed in both directions: an unregistered
 be dropped under a real vendor label — test data belongs in Path A with
 the `tides_simulated` label, where every figure it touches is flagged.
 
+> **Buying or replacing a system right now?** The cheapest time to
+> guarantee you can get your data out is before you sign. See
+> [`docs/procurement-data-requirements.md`](procurement-data-requirements.md)
+> — five questions for every bidder and the contract clauses worth having,
+> vendor-neutral.
+
 ## 4. "My data lives in SQL Server / a data lake"
 
 The honest answer: **today Headway has no direct database or data-lake
