@@ -740,6 +740,60 @@ export const copy = {
     resolvedLabel: "Resolved",
     resolutionLabel: "Resolution",
     sourceRecordsLabel: "Source records",
+
+    /**
+     * What the finding is ABOUT, said the way the agency says it (handoff
+     * 0029). First-agency UAT, on a real blocking finding: "staff/users
+     * will need an easier way to know what exact block they are looking
+     * for that had the issue." So the headline is blocks, routes and times
+     * of day; the raw identifiers move into a collapsed disclosure where
+     * they stay copyable for anyone working a ticket.
+     *
+     * NOTHING here invents a label. Where the feed carries no block, no
+     * route name, or no scheduled time, the copy SAYS that — it never
+     * substitutes a plausible-looking stand-in.
+     */
+    subject: {
+      heading: "Which trips this affects",
+      intro: (total: string, groups: string) =>
+        `${total} affected ${total === "1" ? "trip" : "trips"}, grouped into ${groups} ${groups === "1" ? "block" : "blocks"}. Blocks are listed in the order their first trip is scheduled to leave.`,
+      /** Stated cap — the count above always covers everything. */
+      groupCap: (shown: string, total: string) =>
+        `Showing the first ${shown} of ${total} blocks. Nothing is dropped: the trip and block counts above cover every affected trip, and the full list of identifiers is in the technical detail below.`,
+      columns: {
+        block: "Block",
+        trips: "Trips",
+        routes: "Route(s)",
+        span: "Scheduled times",
+      },
+      tableCaption: "Affected trips grouped by block",
+      /** The feed carries no block for these trips — a fact, not a gap
+       *  we paper over with a made-up id. */
+      blockAbsent: "No block in the schedule feed",
+      blockAbsentHint:
+        "These trips run without a block identifier in the agency's published schedule. Headway shows no block for them rather than guessing one.",
+      /** A route with no short name: the id is all that exists. */
+      routeIdOnly: (routeId: string) => `${routeId} (route id — the feed carries no route name)`,
+      routesNone: "No route in the schedule feed",
+      routesMore: (shown: string, total: string) =>
+        `${shown} of ${total} routes`,
+      spanAbsent: "No scheduled time in the feed",
+      /** GTFS counts from the start of the service day, so 25:10 means
+       *  1:10 a.m. the next morning — said plainly, not wrapped silently. */
+      spanNote:
+        "Times are from the published schedule, counted within the service day: an hour of 24 or more means after midnight.",
+      tripCount: (count: string) =>
+        `${count} ${count === "1" ? "trip" : "trips"}`,
+      /** Trips Headway saw operating that are not in the schedule feed. */
+      unmatchedHeading: "Trips not in the schedule feed",
+      unmatchedBody: (count: string) =>
+        `${count} affected ${count === "1" ? "trip is" : "trips are"} not in the published schedule, so Headway has no block, route, or time for ${count === "1" ? "it" : "them"}. That usually means the trip was added by dispatch after the schedule was published.`,
+      /** The forensic disclosure: collapsed, never removed. */
+      technicalToggle: "Technical detail: trip identifiers",
+      technicalIntro: (cap: string) =>
+        `The internal trip identifiers behind the blocks above — useful when working a ticket or querying the data directly. Up to ${cap} identifiers are listed per block; each block's trip count above is the real total.`,
+      technicalIdsLabel: (block: string) => `Trip identifiers for ${block}`,
+    },
     resolveButton: (title: string) => `Resolve: ${title}`,
     resolutionInputLabel: "How was this issue resolved?",
     resolutionHint:

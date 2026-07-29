@@ -17,9 +17,11 @@ from typing import Iterable
 from headway_calc.types import (
     SEVERITY_BLOCKING,
     SEVERITY_WARNING,
+    SUBJECT_TRIPS,
     BlockingIssue,
     CoverageDetail,
     Finding,
+    SubjectRef,
     VehiclePosition,
 )
 
@@ -207,6 +209,10 @@ def apply_gap_exclusion_policy(
                     f"exclusion is reported via coverage."
                 ),
                 source_record_ids=tuple(p.source_record_id for p in pts),
+                # The excluded trip, as structured data: /dq can then name
+                # its block, route and time of day (handoff 0029) instead of
+                # showing a bare id.
+                subject=SubjectRef(kind=SUBJECT_TRIPS, ids=(trip_id,)),
             )
         )
 

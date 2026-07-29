@@ -63,9 +63,11 @@ from headway_calc.types import (
     SEVERITY_BLOCKING,
     SEVERITY_INFO,
     SEVERITY_WARNING,
+    SUBJECT_TRIPS,
     CalcResult,
     Finding,
     PassengerEvent,
+    SubjectRef,
     UptDetail,
 )
 
@@ -114,13 +116,26 @@ _FACTOR_QUANTUM = Decimal("0.000001")
 #: itself prescribes no rounding rule).
 _UPT_QUANTUM = Decimal("1")
 
-#: How many missing trip_ids a blocking finding names verbatim before
-#: truncating (the full count is always stated).
-_MISSING_TRIPS_NAMED = 20
-
 #: The envelope source of REAL TIDES feeds; anything else (e.g.
 #: "tides_simulated") triggers the simulated-source info finding.
 _REAL_SOURCE = "tides"
+
+#: Quantum for a share rendered as a percentage in finding prose (handoff
+#: 0029). The percentage is a RESTATEMENT of the already-quantized
+#: missing_share, never a second computation of it: 0.8076 -> "80.76%".
+_PERCENT_QUANTUM = Decimal("0.01")
+
+
+def _as_percent(share: Decimal) -> str:
+    """The reported share, said the way a person reads it.
+
+    'missing share 0.8076' is precise and unreadable; '80.76%' is the same
+    number in the vocabulary of the person who has to act on it. Both appear
+    in the finding — the decimal for provenance, the percentage for the
+    human — and the percentage is derived from the quantized reported share,
+    so the two can never disagree.
+    """
+    return f"{(share * 100).quantize(_PERCENT_QUANTUM, rounding=ROUND_HALF_EVEN)}%"
 
 
 def _sorted_events(events: Iterable[PassengerEvent]) -> list[PassengerEvent]:
@@ -168,6 +183,10 @@ def _null_count_warning(event: PassengerEvent) -> Finding:
             f"and is cited here instead of appearing in lineage."
         ),
         source_record_ids=(event.source_record_id,),
+        # The trip is what an APC technician goes and looks at (handoff
+        # 0029); trip_id is never None here — unassigned events return
+        # before this warning is built.
+        subject=SubjectRef(kind=SUBJECT_TRIPS, ids=(event.trip_id,)),
     )
 
 
@@ -336,6 +355,7 @@ def compute_upt(
                         f"validation workflow."
                     ),
                     source_record_ids=tuple(trip_record_ids),
+                    subject=SubjectRef(kind=SUBJECT_TRIPS, ids=(trip_id,)),
                 )
             )
 
@@ -369,6 +389,7 @@ def compute_upt(
                             f"trip's counts are suspect and should be reviewed."
                         ),
                         source_record_ids=(e.source_record_id,),
+                        subject=SubjectRef(kind=SUBJECT_TRIPS, ids=(trip_id,)),
                     )
                 )
                 break  # one finding per trip: the first drop is the evidence
@@ -482,38 +503,81 @@ def compute_upt(
                 # Missing trips have, by definition, no passenger-event
                 # records to cite; the attestation row is named above.
                 source_record_ids=(),
+                # The factored-over trips travel with the finding (handoff
+                # 0029) — an auditor asking "which trips did this cover?"
+                # gets blocks, routes and times, not a truncated id list.
+                subject=SubjectRef(kind=SUBJECT_TRIPS, ids=tuple(missing)),
             )
         )
     elif above_threshold:
-        named = ", ".join(missing[:_MISSING_TRIPS_NAMED])
-        if missing_count > _MISSING_TRIPS_NAMED:
-            named += f", ... ({missing_count - _MISSING_TRIPS_NAMED} more)"
+        # The finding is addressed to a dispatcher, so it leads with what
+        # happened in their words and hands the affected trips over as
+        # STRUCTURED data (the subject ref) instead of pasting raw ids into
+        # prose — handoff 0029. A 100% finding gets a different opening
+        # sentence from a 3% one, because they have different causes and
+        # different next actions.
+        all_affected = missing_count == operated_count
+        if all_affected:
+            title = (
+                f"No passenger counts arrived for any operated trip: all "
+                f"{operated_count:,} trips in this period"
+            )
+            opening = (
+                f"Every operated trip in this period is affected — all "
+                f"{operated_count:,} of the trips Headway saw running have no "
+                f"passenger counts at all. When the share is 100%, the cause "
+                f"is almost never the individual trips: it usually means no "
+                f"passenger-count data reached Headway for this period, so "
+                f"start with the feed rather than the trips. Check whether "
+                f"the automatic passenger counter feed (or the drop folder "
+                f"the counts arrive in) was delivering on these dates before "
+                f"working any trip individually."
+            )
+        else:
+            title = (
+                f"{missing_count:,} of {operated_count:,} operated trips have "
+                f"no passenger counts ({_as_percent(missing_share)} — above "
+                f"the FTA's 2% limit)"
+            )
+            opening = (
+                f"{missing_count:,} of the {operated_count:,} trips Headway "
+                f"saw running in this period have no passenger counts: "
+                f"{_as_percent(missing_share)} of them "
+                f"(share {missing_share}), which is more than the 2% the FTA "
+                f"lets an agency fill in on its own."
+            )
         blocking_issues = (
             Finding(
                 issue_type="apc_missing_trips_above_fta_threshold",
                 severity=SEVERITY_BLOCKING,
-                title=(
-                    f"Missing-trip share {missing_share} exceeds the FTA 2% "
-                    f"threshold: {missing_count} of {operated_count} operated "
-                    f"trips have no passenger events"
-                ),
+                title=title,
                 description=(
-                    f"{missing_count} of {operated_count} operated trips "
-                    f"(observed in canonical.vehicle_positions) have zero "
-                    f"passenger events: missing share {missing_share} exceeds "
-                    f"the threshold of {missing_trip_threshold}. Per the 2026 "
-                    f"NTD Policy Manual p. 146, 'if the vehicle trips with "
-                    f"missing data exceed 2 percent of total trips, agencies "
-                    f"must have a qualified statistician approve the factoring "
-                    f"method used to account for the missing percentage' — a "
-                    f"human workflow, so the calculation refuses to emit a "
-                    f"value ({missing_trip_threshold} is the FTA threshold, "
-                    f"not an engineering placeholder). Missing trip_ids: "
-                    f"{named}."
+                    f"{opening}\n\n"
+                    f"Headway cannot report Unlinked Passenger Trips for this "
+                    f"period until that is settled. Per the 2026 NTD Policy "
+                    f"Manual p. 146, 'if the vehicle trips with missing data "
+                    f"exceed 2 percent of total trips, agencies must have a "
+                    f"qualified statistician approve the factoring method "
+                    f"used to account for the missing percentage' — a human "
+                    f"decision, so the calculation refuses to emit a value "
+                    f"rather than estimate one ({missing_trip_threshold} is "
+                    f"the FTA threshold, not an engineering placeholder). "
+                    f"Either recover the missing counts, or record the "
+                    f"statistician's approval as an attestation — the next "
+                    f"run then factors up under it and the figure carries "
+                    f"that approval permanently.\n\n"
+                    f"All {missing_count:,} affected trips travel with this "
+                    f"finding as structured data, so they can be shown "
+                    f"grouped by block with each block's route and time of "
+                    f"day instead of as a wall of identifiers."
                 ),
                 # Missing trips have, by definition, no passenger-event
-                # records to cite; the trip ids are named in the description.
+                # records to cite — that is exactly why they need a SUBJECT:
+                # source_record_ids is provenance, the subject is the thing a
+                # person has to go find. Every affected trip is carried, not
+                # a truncated sample.
                 source_record_ids=(),
+                subject=SubjectRef(kind=SUBJECT_TRIPS, ids=tuple(missing)),
             ),
         )
     else:

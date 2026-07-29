@@ -112,17 +112,20 @@ from headway_calc.types import (
     SEVERITY_BLOCKING,
     SEVERITY_INFO,
     SEVERITY_WARNING,
+    SUBJECT_TRIPS,
     CalcResult,
     Finding,
     PassengerEvent,
     PmtDetail,
     StopTime,
+    SubjectRef,
 )
 from headway_calc.upt import (
     ALIGHTING_EVENT_TYPE,
     BOARDING_EVENT_TYPE,
     IMBALANCE_THRESHOLD,
     MISSING_TRIP_THRESHOLD,
+    _as_percent,
     _sorted_events,
     _stop_order_key,
 )
@@ -142,9 +145,6 @@ UNIT = "passenger_miles"
 #: (comparison against the threshold is always exact, never quantized).
 _SHARE_QUANTUM = Decimal("0.0001")
 _FACTOR_QUANTUM = Decimal("0.000001")
-
-#: How many trip_ids a finding names verbatim before truncating.
-_TRIPS_NAMED = 20
 
 #: The envelope source of REAL TIDES feeds (handoff 0005 simulated-data rule).
 _REAL_SOURCE = "tides"
@@ -436,6 +436,7 @@ def compute_pmt(
                         f"operated."
                     ),
                     source_record_ids=tuple(trip_record_ids),
+                    subject=SubjectRef(kind=SUBJECT_TRIPS, ids=(trip_id,)),
                 )
             )
         else:
@@ -606,43 +607,81 @@ def compute_pmt(
                 # Missing trips have no passenger-event records to cite;
                 # invalid trips' records are cited by their own warnings.
                 source_record_ids=(),
+                # The factored-over trips travel with the finding (handoff
+                # 0029), grouped and labelled instead of enumerated.
+                subject=SubjectRef(
+                    kind=SUBJECT_TRIPS, ids=tuple(missing + invalid_operated)
+                ),
             )
         )
     elif above_threshold:
-        unusable_named = missing + invalid_operated
-        named = ", ".join(unusable_named[:_TRIPS_NAMED])
-        if unusable_count > _TRIPS_NAMED:
-            named += f", ... ({unusable_count - _TRIPS_NAMED} more)"
+        # Handoff 0029, exactly upt_v0's treatment: plain words for what
+        # happened, the affected trips handed over as structured data, and a
+        # different opening sentence when EVERY operated trip is affected.
+        unusable = missing + invalid_operated
+        all_affected = unusable_count == operated_count
+        if all_affected:
+            title = (
+                f"No usable passenger counts for any operated trip: all "
+                f"{operated_count:,} trips in this period"
+            )
+            opening = (
+                f"Every operated trip in this period is affected — all "
+                f"{operated_count:,} of the trips Headway saw running either "
+                f"have no passenger counts at all ({missing_count:,}) or "
+                f"have counts that failed the manual's own validity checks "
+                f"({len(invalid_operated):,}). A share of 100% points at the "
+                f"feed, not at the trips: check whether passenger-count data "
+                f"reached Headway for these dates at all before working any "
+                f"trip individually."
+            )
+        else:
+            title = (
+                f"{unusable_count:,} of {operated_count:,} operated trips have "
+                f"no usable passenger counts ({_as_percent(share)} — above "
+                f"the FTA's 2% limit)"
+            )
+            opening = (
+                f"{missing_count:,} of the {operated_count:,} trips Headway "
+                f"saw running in this period have no passenger counts, and "
+                f"{len(invalid_operated):,} more carry counts that failed the "
+                f"manual's validity checks (their load profiles were "
+                f"discarded, pp. 151-152). Together that is "
+                f"{_as_percent(share)} of the period's trips "
+                f"(share {share}) — more than the 2% the FTA lets an agency "
+                f"fill in on its own."
+            )
         blocking_issues = (
             Finding(
                 issue_type="apc_missing_trips_above_fta_threshold",
                 severity=SEVERITY_BLOCKING,
-                title=(
-                    f"Missing-or-invalid trip share {share} exceeds the FTA "
-                    f"2% threshold: {missing_count} missing + "
-                    f"{len(invalid_operated)} invalid of {operated_count} "
-                    f"operated trips"
-                ),
+                title=title,
                 description=(
-                    f"{missing_count} of {operated_count} operated trips "
-                    f"(observed in canonical.vehicle_positions) have zero "
-                    f"passenger events and {len(invalid_operated)} more "
-                    f"failed the pp. 151-152 validity checks (their load "
-                    f"profiles were discarded): missing-data share {share} "
-                    f"exceeds the threshold of {missing_trip_threshold}. Per "
-                    f"the 2026 NTD Policy Manual p. 146, 'if the vehicle "
-                    f"trips with missing data exceed 2 percent of total "
-                    f"trips, agencies must have a qualified statistician "
-                    f"approve the factoring method used to account for the "
-                    f"missing percentage' — a human workflow, so the "
-                    f"calculation refuses to emit a value "
-                    f"({missing_trip_threshold} is the FTA threshold, not an "
-                    f"engineering placeholder). Missing/invalid trip_ids: "
-                    f"{named}."
+                    f"{opening}\n\n"
+                    f"Headway cannot report Passenger Miles Traveled for this "
+                    f"period until that is settled. Per the 2026 NTD Policy "
+                    f"Manual p. 146, 'if the vehicle trips with missing data "
+                    f"exceed 2 percent of total trips, agencies must have a "
+                    f"qualified statistician approve the factoring method "
+                    f"used to account for the missing percentage' — a human "
+                    f"decision, so the calculation refuses to emit a value "
+                    f"rather than estimate one ({missing_trip_threshold} is "
+                    f"the FTA threshold, not an engineering placeholder). "
+                    f"Either recover the missing counts, or record the "
+                    f"statistician's approval as an attestation — the next "
+                    f"run then factors up under it and the figure carries "
+                    f"that approval permanently.\n\n"
+                    f"All {unusable_count:,} affected trips travel with this "
+                    f"finding as structured data, so they can be shown "
+                    f"grouped by block with each block's route and time of "
+                    f"day instead of as a wall of identifiers."
                 ),
                 # Missing trips have no passenger-event records to cite;
                 # invalid trips' records are cited by their own warnings.
+                # The SUBJECT is what a dispatcher acts on — every affected
+                # trip, never a truncated sample.
                 source_record_ids=(),
+                subject=SubjectRef(kind=SUBJECT_TRIPS, ids=tuple(unusable)),
             ),
         )
     else:

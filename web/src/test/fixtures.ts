@@ -756,6 +756,79 @@ export const attestedBlockingIssue: DqIssue = {
     "Closed under statistician attestation #att-3 (p. 146): the factoring method was approved.",
 };
 
+/**
+ * A blocking finding carrying its SUBJECT in the agency's vocabulary
+ * (migration 0035, handoff 0029) — shaped exactly like the live MBTA run:
+ * blocks with readable ids, one block running two routes, a route with no
+ * short name, a bucket of trips the feed carries no block for, an
+ * after-midnight scheduled time, a stated group cap, and trips that are not
+ * in the schedule feed at all.
+ */
+export const subjectContextIssue: DqIssue = {
+  issue_id: "dq-subject-1",
+  issue_type: "apc_missing_trips_above_fta_threshold",
+  severity: "blocking",
+  status: "open",
+  owner: null,
+  title:
+    "No passenger counts arrived for any operated trip: all 2,307 trips in this period",
+  description:
+    "Every operated trip in this period is affected — all 2,307 of the trips Headway saw running have no passenger counts at all.",
+  source_record_ids: null,
+  created_at: "2026-07-29T11:00:00Z",
+  resolved_at: null,
+  resolution: null,
+  resolution_minutes: null,
+  subject_context: {
+    version: 1,
+    kind: "canonical.trips",
+    total: 2307,
+    grouped_by: "block",
+    group_count: 660,
+    group_cap: 25,
+    trip_id_cap: 20,
+    groups: [
+      {
+        block_id: null,
+        trip_count: 83,
+        routes: [
+          {
+            route_id: "CR-Fairmount",
+            short_name: null,
+            long_name: "Fairmount Line",
+          },
+        ],
+        route_count: 12,
+        first_departure: "18:10",
+        last_departure: "24:31",
+        trip_ids: ["NorthBase-825706-274", "NorthBase-825707-277"],
+      },
+      {
+        block_id: "L455-173",
+        trip_count: 4,
+        routes: [
+          { route_id: "442", short_name: "442", long_name: "Marblehead" },
+          { route_id: "455", short_name: "455", long_name: "Salem Depot" },
+        ],
+        route_count: 2,
+        first_departure: "19:05",
+        last_departure: "22:59",
+        trip_ids: ["t-442-a", "t-455-b"],
+      },
+      {
+        block_id: "C01-28",
+        trip_count: 2,
+        routes: [{ route_id: "1", short_name: "1", long_name: "Harvard" }],
+        route_count: 1,
+        first_departure: null,
+        last_departure: null,
+        trip_ids: ["t-1-a"],
+      },
+    ],
+    unmatched: { trip_count: 211, trip_ids: ["added-trip-1", "added-trip-2"] },
+  },
+};
+
 export const warningIssue: DqIssue = {
   issue_id: "dq-2",
   issue_type: "source_conflict",

@@ -548,6 +548,19 @@ class RecordingCursor:
             elif "canonical.agencies" in sql:
                 # The ops timezone SELECT (handoff 0014, migration 0026).
                 self._pending_all = list(conn.agency_timezone_rows)
+            elif "information_schema.columns" in sql:
+                # headway_calc.dq's migration-0035 column probe (handoff
+                # 0029). Present by default; the missing flag models a
+                # pre-0035 database, where routing must still land every
+                # finding with its pre-0029 columns.
+                row = None if conn.subject_context_column_missing else (1,)
+                self._pending_one = row
+                self._pending_all = [] if row is None else [row]
+            elif "t.block_id, t.route_id" in sql:
+                # headway_calc.subjects' label SELECT (handoff 0029). Its
+                # bounded aggregate also names canonical.stop_times, so this
+                # branch must come BEFORE the geometry branch.
+                self._pending_all = list(conn.trip_label_rows)
             elif "st.arrival_seconds" in sql:
                 # The ops schedule SELECT (handoff 0014) — names
                 # canonical.stop_times too, so this branch must come FIRST.
@@ -627,6 +640,8 @@ class RecordingConnection:
         attestations_table_missing: bool = False,
         service_day_override_rows: list[tuple] | None = None,
         service_day_overrides_table_missing: bool = False,
+        trip_label_rows: list[tuple] | None = None,
+        subject_context_column_missing: bool = False,
     ):
         self.position_rows = position_rows or []
         # The ops slice (handoff 0014): schedule + agency timezone reads.
@@ -661,6 +676,15 @@ class RecordingConnection:
             SEEDED_SETTINGS_ROWS if settings_rows is None else settings_rows
         )
         self.settings_table_missing = settings_table_missing
+        # Finding-subject label rows (handoff 0029, migration 0035):
+        # (trip_id, block_id, route_id, short_name, long_name,
+        #  first_departure_seconds, last_departure_seconds). Empty by
+        # default — every trip then resolves as UNMATCHED, which is the
+        # honest reading of "this database knows nothing about that trip".
+        self.trip_label_rows = trip_label_rows or []
+        # Models a pre-0035 database (the dq.issues.subject_context column
+        # does not exist yet).
+        self.subject_context_column_missing = subject_context_column_missing
         self.fail_on = fail_on
         self.executed: list[tuple[str, tuple | None]] = []
         # Each commit records how many statements were executed at that point,

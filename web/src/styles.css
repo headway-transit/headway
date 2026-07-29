@@ -994,10 +994,21 @@ ul.detail-panel li {
   background: var(--color-danger-bg);
 }
 .issue.blocking h2,
+.issue.blocking h3,
+.issue.blocking h4,
 .issue.blocking p,
 .issue.blocking dd,
-.issue.blocking dt {
+.issue.blocking dt,
+.issue.blocking summary {
   color: var(--color-danger-text);
+}
+.issue-description {
+  /* Findings are written in paragraphs — the calc separates them with blank
+     lines and headway_calc.dq appends the "raised by / consequence" para the
+     same way. HTML collapses those newlines, which turned a readable finding
+     into one wall of text (2026-07-29 live click-through). Preserving them
+     costs nothing and makes every finding, old and new, readable. */
+  white-space: pre-line;
 }
 .issue dl {
   display: grid;
@@ -1010,6 +1021,56 @@ ul.detail-panel li {
 }
 .issue dd {
   margin: 0;
+}
+
+/* ---- DQ finding subject: which trips this affects (handoff 0029) ----
+   The finding's headline is blocks, routes and times of day; the raw
+   identifiers live in the collapsed disclosure below the table. The table
+   keeps the normal surface background even inside a blocking (danger-tinted)
+   card, so its text contrast is the ordinary body pairing. */
+
+.dq-subject {
+  margin: var(--space-3) 0;
+}
+.dq-subject h3 {
+  margin: 0 0 var(--space-1);
+}
+.dq-subject > p {
+  margin: 0 0 var(--space-2);
+}
+.dq-subject .table-wrap {
+  padding: var(--space-2);
+}
+.dq-subject th[scope="row"] {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+.dq-subject .field-hint {
+  display: block;
+  font-weight: 400;
+}
+.dq-subject-routes {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-2);
+}
+.dq-subject-technical {
+  margin-top: var(--space-2);
+}
+.dq-subject-technical dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: var(--space-1) var(--space-3);
+}
+.dq-subject-technical dl > div {
+  display: contents;
+}
+.dq-subject-technical code {
+  overflow-wrap: anywhere;
+  font-size: 0.9em;
 }
 
 /* ---- lineage tree ---- */

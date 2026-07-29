@@ -513,6 +513,11 @@ class FakeConn:
                         r["source_record_ids"], r["created_at"],
                         r["resolved_at"], r["resolution"],
                         r["resolution_minutes"],
+                        # Migration 0035 (handoff 0029): the frozen,
+                        # agency-vocabulary context. None for every pre-0035
+                        # row — the default here, because that is the shape
+                        # 97,067 live rows have.
+                        r["subject_context"],
                     )
                     for r in rows
                 ]
@@ -1513,6 +1518,10 @@ class FakeConn:
             "resolution": None,
             "resolution_minutes": None,  # migration 0016 — null when unmeasured
             "category": "ntd",  # column default (migration 0024)
+            # Migration 0035 (handoff 0029). NULL by default on purpose:
+            # every issue in the live queue predates the column, so the
+            # default fixture IS the graceful-degradation case.
+            "subject_context": None,
         }
         issue.update(overrides)
         self.dq_issues[issue["issue_id"]] = issue

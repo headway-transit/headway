@@ -293,7 +293,14 @@ def test_gapped_period_below_default_coverage_blocks_and_routes_findings(gapped_
     for (sql, params), calc_name in zip(
         dq_inserts, ("vrm_v0", "vrm_v0", "vrh_v0", "vrh_v0", "vrh_v0", "vrh_v0")
     ):
-        issue_type, severity, status, title, description, record_ids, category = params
+        # Migration 0035 appended subject_context to the INSERT (handoff
+        # 0029): every finding whose subject names canonical rows carries
+        # the resolved, frozen context; a finding about the run as a whole
+        # carries NULL and renders exactly as it always did.
+        (
+            issue_type, severity, status, title, description, record_ids,
+            category, subject_context,
+        ) = params
         assert category == "ntd"
         assert status == "open"
         expected_version = "0.2.0" if calc_name == "vrm_v0" else "0.4.0"
@@ -443,18 +450,31 @@ def test_persist_failure_does_not_roll_back_committed_dq_issues(
     with pytest.raises(RuntimeError, match="simulated metric_values insert failure"):
         run_period(conn, PERIOD_START, PERIOD_END)
 
-    # The dq issues were inserted AND committed before the failing insert:
-    # statements are [7 SELECTs (app.settings, then the 6 reader SELECTs:
-    # positions, passenger events, operated trips, trip geometry, DR trips —
-    # handoff 0013 — and attestations, handoff 0019), vrm blocking dq
-    # insert, vrh's 2 info dq inserts, failing mv insert]; the sole commit
-    # boundary covers exactly the first ten.
-    for sql, _ in conn.executed[0:7]:
+    # The dq issues were inserted AND committed before the failing insert.
+    # Asserted by SHAPE rather than by fixed indices: since handoff 0029 the
+    # routing phase also issues reads (the subject label SELECT and the
+    # migration-0035 column probe), and the invariant under test is the
+    # ORDERING — every finding durable before any value is attempted — not
+    # how many statements it takes.
+    dq_at = [
+        i for i, (sql, _) in enumerate(conn.executed)
+        if "INSERT INTO dq.issues" in sql
+    ]
+    mv_at = [
+        i for i, (sql, _) in enumerate(conn.executed)
+        if "INSERT INTO computed.metric_values" in sql
+    ]
+    # vrm's blocking refusal + vrh's 2 block_unavailable infos; then the one
+    # metric-value insert that fails.
+    assert len(dq_at) == 3 and len(mv_at) == 1
+    assert max(dq_at) < mv_at[0]
+    # Everything before the first finding lands is a READ — no write of any
+    # kind precedes the evidence.
+    for sql, _ in conn.executed[: dq_at[0]]:
         assert sql.lstrip().startswith("SELECT")
-    for sql, _ in conn.executed[7:10]:
-        assert "INSERT INTO dq.issues" in sql
-    assert "INSERT INTO computed.metric_values" in conn.executed[10][0]
-    assert conn.commits == [10]  # committed through the dq inserts, no further
+    # The sole commit boundary sits after every dq insert and before the
+    # metric value: committed through the findings, no further.
+    assert conn.commits == [mv_at[0]]
     # The value phase alone was rolled back; the commit record stands.
     assert conn.rollback_count == 1
 

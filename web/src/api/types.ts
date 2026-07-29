@@ -351,6 +351,62 @@ export interface AttestationRevoked extends AttestationRecord {
 
 // ---- /dq/issues ----
 
+/**
+ * One route a group of affected trips runs. `short_name` is the label an
+ * agency actually says out loud ("42"); it is null when the feed carries
+ * none, and NOTHING is substituted for it — the UI falls back to showing
+ * the route id as an id, because that is the only thing that exists.
+ */
+export interface DqSubjectRoute {
+  route_id: string;
+  short_name: string | null;
+  long_name: string | null;
+}
+
+/**
+ * One block's worth of affected trips. `block_id` is null when the feed
+ * carries no block for them — that is a real, sayable fact ("no block
+ * recorded"), never a placeholder id. Departure times are GTFS service-day
+ * clock times, so an hour of 24 or more means after midnight on the same
+ * service day; both are null when the feed schedules no departure.
+ * `trip_ids` is a capped sample for anyone working a ticket — `trip_count`
+ * is always the truth.
+ */
+export interface DqSubjectGroup {
+  block_id: string | null;
+  trip_count: number;
+  routes: DqSubjectRoute[];
+  route_count: number;
+  first_departure: string | null;
+  last_departure: string | null;
+  trip_ids: string[];
+}
+
+/**
+ * What a finding is ABOUT, in the agency's own vocabulary (migration 0035,
+ * handoff 0029). Resolved once by the calc runner when the finding was
+ * raised and frozen on the row — so it reads the same in an audit years
+ * later — and served verbatim by the API.
+ *
+ * `version` is checked FIRST: an unrecognised version must render exactly
+ * as an absent context does (the finding's prose description, as before),
+ * because a shape this UI does not understand is worse than none.
+ * `group_count` is the true number of groups; `groups` may be shorter,
+ * capped at `group_cap`, and the UI says so. `unmatched` is present only
+ * when some affected trips are not in the schedule feed at all.
+ */
+export interface DqSubjectContext {
+  version: number;
+  kind: string;
+  total: number;
+  grouped_by: string;
+  group_count: number;
+  group_cap: number;
+  trip_id_cap: number;
+  groups: DqSubjectGroup[];
+  unmatched?: { trip_count: number; trip_ids: string[] };
+}
+
 export interface DqIssue {
   issue_id: string;
   issue_type: string;
@@ -371,6 +427,14 @@ export interface DqIssue {
    * UI tolerates an API that predates the field.
    */
   resolution_minutes?: number | null;
+  /**
+   * The finding's subject in the agency's vocabulary (migration 0035).
+   * Optional AND nullable: every finding raised before the migration —
+   * 97,067 of them in the live queue — carries null, and so does every
+   * finding that is about the run as a whole rather than about
+   * identifiable rows. Null is the normal case, not an error.
+   */
+  subject_context?: DqSubjectContext | null;
 }
 
 /**

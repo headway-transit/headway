@@ -98,10 +98,20 @@ def test_golden_blocked_case_refuses_above_fta_threshold(
     assert blocking.issue_type == exp["blocking"][0]["issue_type"]
     assert blocking.severity == exp["blocking"][0]["severity"]
     assert list(blocking.source_record_ids) == exp["blocking"][0]["source_record_ids"]
+    # The p. 146 sentence and its page cite survive VERBATIM (handoff 0029).
     assert "statistician" in blocking.description
-    assert "trip-G" in blocking.description  # the missing trip is named
-    assert "trip-F" in blocking.description  # the invalid operated trips too
-    assert "trip-H" in blocking.description
+    assert "2026 NTD Policy Manual p. 146" in blocking.description
+    assert (
+        "if the vehicle trips with missing data exceed 2 percent of total "
+        "trips, agencies must have a qualified statistician approve the "
+        "factoring method used to account for the missing percentage"
+    ) in blocking.description
+    # The affected trips moved OUT of the prose and into the subject —
+    # missing and invalid-operated alike, complete and untruncated.
+    for trip_id in ("trip-G", "trip-F", "trip-H"):
+        assert trip_id not in blocking.description
+        assert trip_id in blocking.subject.ids
+    assert blocking.subject.kind == "canonical.trips"
 
     assert len(result.warnings) == len(exp["warnings"]) == 4
     for warning, exp_warning in zip(result.warnings, exp["warnings"]):

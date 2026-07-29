@@ -605,3 +605,39 @@ python3 -m pytest tests/ -q
   environment must not touch the live stack; the first environment cleared
   to do so must run the suite against live services before this increment is
   declared Done.
+
+---
+
+## `dq.issues.subject_context` served (handoff 0029, migration 0035)
+
+`GET /dq/issues`, `GET /dq/issues/{id}` now return `subject_context` — what
+the finding is ABOUT, in the agency's own vocabulary: affected trips grouped
+by block, each group carrying its route(s) and the span from first to last
+scheduled departure. The calc runner resolves it ONCE when the finding is
+raised and freezes it on the row; **the API serves it verbatim and never
+re-resolves or fills in a label**, which is what makes it readable the same
+way in an audit years later.
+
+`null` is the normal case, not an error: every finding raised before the
+migration (97,067 rows in the live queue) carries null, and so does every
+finding about the run as a whole rather than about identifiable rows
+(`coverage_below_threshold`). The response model types it as a free-form
+object because the blob versions itself (`version`) — a client that does not
+recognise the version falls back to the same null path.
+
+- `pytest tests/ -q`: **404 passed** (was 400; +4 in `tests/test_dq.py`):
+  the frozen context served verbatim on the list and the by-id deep link,
+  absence preserved as absence inside it (null block, empty routes),
+  pre-migration rows serving `subject_context: null`, and the field behind
+  the same authentication as every other.
+- `openapi.json` regenerated: OpenAPI 3.1.0, **63 paths** (unchanged count —
+  the change is one added property on `DqIssue`).
+- Live (2026-07-29, host uvicorn on 127.0.0.1:8000 against the compose
+  TimescaleDB): `GET /dq/issues/9896da03-…` returns the re-run upt_v0
+  refusal with `version 1, total 2307, group_count 660, groups 25 (capped),
+  unmatched 211`; `GET /dq/issues/c8aa6ac3-…` (a July-16 row) returns
+  `subject_context: null`.
+- **Recorded, NOT this wave's regression:** `GET /dq/issues` still returns
+  the WHOLE queue — 97,782 rows, ~900 MB, 18 s, which freezes a browser tab.
+  86% of that payload is `source_record_ids`; `subject_context` is 0.2 MB
+  (0.0%). Pagination/projection on this endpoint is the follow-up.

@@ -92,6 +92,8 @@ from headway_calc.reader import (
     load_vehicle_positions,
 )
 from headway_calc.types import (
+    SUBJECT_KINDS,
+    SUBJECT_TRIPS,
     BlockingIssue,
     CalcResult,
     CoverageDetail,
@@ -104,6 +106,7 @@ from headway_calc.types import (
     PmtDetail,
     StopPassage,
     StopTime,
+    SubjectRef,
     UptDetail,
     VehiclePosition,
     VomsDetail,
@@ -128,6 +131,8 @@ from headway_calc.vrh import (
 # `from headway_calc.mr20 import build_mr20_package`.
 
 __all__ = [
+    "SUBJECT_KINDS",
+    "SUBJECT_TRIPS",
     "BlockingIssue",
     "CalcResult",
     "CoverageDetail",
@@ -140,6 +145,7 @@ __all__ = [
     "PmtDetail",
     "StopPassage",
     "StopTime",
+    "SubjectRef",
     "UptDetail",
     "VehiclePosition",
     "VomsDetail",

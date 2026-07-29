@@ -1040,3 +1040,89 @@ LEFT JOINs on both queries and NULL-mode passthrough.
   in v0 (mode-awareness limitation, handoff 0005 open question). The live
   run against ingested simulator output is the orchestrator's job once
   migration 0012 + the TIDES connector land (parallel handoff-0005 work).
+
+---
+
+## Findings in the agency's vocabulary (handoff 0029, 2026-07-29)
+
+First-agency UAT on a real blocking finding: *"staff/users will need an
+easier way to know what exact block they are looking for that had the
+issue."* `upt_v0` was formatting the first 20 raw trip ids into its
+description string. **A finding is addressed to a person who has to go fix
+something; it must name the thing in the vocabulary that person uses to find
+it.** Internal ids stay — they are the provenance — but they are the
+footnote, not the headline.
+
+**The split that keeps the calc pure.** `Finding` gained
+`subject: SubjectRef | None` (`headway_calc.types`) — a `kind` (the
+canonical table) plus the COMPLETE, never-truncated list of that table's
+primary keys. The calculation emits ids; it never queries a database, so it
+never sees a route name, a block, or a departure time. `SUBJECT_KINDS` is a
+closed tuple holding exactly the kinds that have a resolver in
+`headway_calc.subjects`; `tests/test_subjects.py` asserts the tuple and the
+resolver registry cannot drift.
+
+`subject` is deliberately NOT `source_record_ids`. Source records are
+provenance (content-addressed raw feed messages, for the lineage graph); a
+subject is the OPERATIONAL thing that needs fixing. They frequently share no
+rows at all — a missing trip has, by definition, no passenger-event record to
+cite, and is exactly the trip a dispatcher must go find.
+
+**Resolution happens once, at persistence, and is frozen.**
+`headway_calc.subjects.resolve_contexts` (impure by design, beside
+`headway_calc.reader`) turns a whole BATCH of findings' subjects into
+agency-facing labels in ONE query — block, route short/long name, and the
+span from first to last scheduled departure — and `headway_calc.dq` writes
+the result to `dq.issues.subject_context` (migration 0035, additive JSONB).
+Frozen so a finding reads the same in an audit years later; ids kept inside
+so any reader can re-derive. One query per batch, never per finding: a
+single live VRH run raised 66,286 findings.
+
+**Three rules the resolver obeys.** (1) Resolved once, frozen forever.
+(2) **No label is ever invented** — a trip with no block shows no block, a
+route with no short name shows no short name, a trip absent from
+`canonical.trips` is reported in its own `unmatched` bucket. (3) Grouping is
+the feature: trips group BY BLOCK with trip count, routes and time span,
+because 1,111 individually listed ids help nobody. Caps (`GROUP_CAP` 25,
+`TRIP_IDS_PER_GROUP_CAP` 20) are STATED alongside the true totals.
+
+**Prose freed of id lists** (`upt_v0`, `pmt_v0`, `_blocks.block_unavailable`,
+`_blocks.telemetry_gap_excluded`). The p. 146 refusal now leads with plain
+words and a DIFFERENT opening sentence when every operated trip is affected
+(a 100% share points at the feed, not at the trips). The verbatim FTA
+sentence and its page cite are unchanged and pinned by test.
+
+**Subjects added** (prose already id-free): `apc_null_count`,
+`apc_count_imbalance`, `apc_negative_load`,
+`apc_missing_trips_attested_factor_up` (upt + pmt),
+`pmt_invalid_trip_excluded`, `layover_exceeds_max` (both versions),
+`telemetry_gap_excluded` (0.2.0 and 0.4.0 paths).
+
+**Reviewed, deliberately unchanged.** `coverage_below_threshold` is about a
+run's coverage RATIO, not identifiable rows — each underlying exclusion
+already carries its own subject. `daytype_average_over_refused_days` names
+DATES, which are already the agency's vocabulary. The DR findings name
+`dr_trip_id`/`vehicle_id` — the agency's OWN dispatch identifiers, not feed
+surrogates; a `canonical.dr_trips` resolver is recorded, not built.
+`sampling`, `ops`, `mode`, `voms` findings carry no row ids at all.
+
+**GTFS service-day clock.** Departures render as `HH:MM` counted from the
+start of the service day, so `25:10` means 1:10 a.m. the next morning.
+Preserved rather than wrapped — wrapping would silently move a trip to the
+wrong day — and the UI says so in words.
+
+**Not available, not faked: trip headsign.** The handoff lists headsign as a
+resolvable label, but `canonical.trips` has no headsign column and the
+transform never maps one — the field does not exist anywhere in Headway
+today. Adding it is a canonical-model change in the transform service (out of
+this wave's scope), so headsign is absent from every context this module
+builds. Recorded, never invented.
+
+**Tests:** `pytest -q` → **591 passed** (was 567; +24 in
+`tests/test_subjects.py`), covering the closed-vocabulary/registry
+agreement, the no-query path for subject-less batches, block grouping with
+route and span, the no-label case, the missing-trip-row (`unmatched`) case,
+both stated caps, clock conversion including the after-midnight convention,
+determinism of the stored JSON, the frozen write, NULL for subject-less
+findings in a mixed batch, the pre-0035 database fallback, and the
+all-affected finding's wording with the verbatim p. 146 quote.

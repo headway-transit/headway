@@ -338,3 +338,43 @@ recompute; VRM refusal-vs-figure rail; nothing persisted) → themed chrome
 applied via the audited settings flow, verified light/dark, and reverted.
 Evidence in handoff 0017's frontend section. The earlier walking-skeleton
 pending (certify a figure live) was closed by the wave-13/15 click-throughs.
+
+---
+
+## "Which trips this affects" — findings in the agency's vocabulary (handoff 0029)
+
+`/dq` renders a finding's `subject_context` as its PRIMARY content: a table
+of blocks with trip count, route(s) and the scheduled time span, in the order
+their first trip is scheduled to leave. Raw trip identifiers moved into a
+collapsed `<details>` disclosure ("Technical detail: trip identifiers") where
+they stay copyable for anyone working a ticket.
+
+Nothing is invented and nothing is computed client-side: every label was
+resolved once by the calc runner and frozen on the row. Where the feed
+carries no block, no route name or no scheduled time, the copy SAYS so
+("No block in the schedule feed … Headway shows no block for them rather than
+guessing one"). Trips absent from the schedule feed get their own bucket.
+Both caps (25 blocks shown, 20 identifiers per block) are stated next to the
+true totals.
+
+Graceful degradation is the load-bearing part: a finding with no context —
+every one of the 97,067 rows raised before migration 0035 — renders exactly
+as it did before, and so does a context whose `version` this UI does not
+recognise. Pinned by test.
+
+Finding descriptions now render with `white-space: pre-line`, so the blank
+lines the calc writes between paragraphs survive (a live click-through
+finding: the paragraphed refusal was rendering as one wall of text). This
+improves every finding, old and new.
+
+- `npx vitest run`: **272 passed / 37 files** (+9 in
+  `src/test/dqSubject.test.tsx`), including jest-axe on the panel and on the
+  opened disclosure.
+- `npm run check:contrast`: all 71 token pairs PASS.
+- Live axe-core 4.x run IN Chrome against the real `/dq` page (live API, live
+  97k queue, the real 2,307-trip finding): **0 violations, 0 incomplete, 223
+  colour-contrast nodes checked** — in light AND dark theme.
+- Keyboard: Tab reaches the disclosure summary (`:focus-visible` → 3 px solid
+  outline, 2 px offset, the house ring), Enter opens it and the identifiers
+  become visible. The table is a real `<table>` with `<caption>`, 4
+  `<th scope="col">` and 25 `<th scope="row">`.

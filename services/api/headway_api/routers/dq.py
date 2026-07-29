@@ -50,6 +50,20 @@ class DqIssue(BaseModel):
     # Migration 0016: minutes of human effort the fix took, recorded at
     # resolve time. Null when not recorded — never coalesced to zero.
     resolution_minutes: Optional[int]
+    # Migration 0035 (handoff 0029): WHAT this finding is about, in the
+    # agency's own vocabulary — affected trips grouped by block, each group
+    # carrying its route(s) and the span from first to last scheduled
+    # departure, resolved once by the calc runner and FROZEN on the row.
+    # Served verbatim: the API neither re-resolves a label nor fills one in.
+    #
+    # Null for every finding raised before the migration, and for findings
+    # about the run as a whole rather than about identifiable rows. Null is
+    # the normal case, not an error — the client renders the prose
+    # description exactly as it always has. Typed as a free-form object
+    # because its schema is versioned INSIDE the blob (``version``): a
+    # client that does not recognise the version must fall back to the same
+    # null path.
+    subject_context: Optional[dict] = None
 
 
 class ResolveRequest(BaseModel):
@@ -97,7 +111,8 @@ class AttestResponse(BaseModel):
 
 _SELECT_ISSUES = (
     "SELECT issue_id, issue_type, severity, status, owner, title, description, "
-    "source_record_ids, created_at, resolved_at, resolution, resolution_minutes "
+    "source_record_ids, created_at, resolved_at, resolution, resolution_minutes, "
+    "subject_context "
     "FROM dq.issues"
 )
 
@@ -149,6 +164,9 @@ def _issue_from_row(r) -> DqIssue:
         resolved_at=r[9],
         resolution=r[10],
         resolution_minutes=r[11],
+        # Served exactly as stored, including NULL. The API never invents a
+        # label the calc runner could not resolve.
+        subject_context=r[12] if len(r) > 12 else None,
     )
 
 

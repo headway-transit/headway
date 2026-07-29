@@ -10,7 +10,13 @@ import {
   listDqIssues,
   resolveDqIssue,
 } from "../api/client";
-import type { AttestationRecord, DqIssue, DqIssueCounts } from "../api/types";
+import type {
+  AttestationRecord,
+  DqIssue,
+  DqIssueCounts,
+  DqSubjectContext,
+  DqSubjectGroup,
+} from "../api/types";
 import { canResolveDqIssues, useSession } from "../auth/session";
 import { Modal } from "../components/Modal";
 import { QuoteFigure } from "../components/QuoteFigure";
@@ -455,7 +461,12 @@ function IssueCard({ issue, mayResolve, onResolved, onAttested }: IssueCardProps
           <SeverityBadge severity={issue.severity} />{" "}
           {isBlocking && !isClosed && <strong>{copy.dq.blockingNote}</strong>}
         </p>
-        <p>{issue.description}</p>
+        <p className="issue-description">{issue.description}</p>
+        {/* What the finding is ABOUT, in the agency's words (handoff 0029).
+            Renders nothing at all when the API served no context — which is
+            every finding raised before migration 0035 — so those issues look
+            exactly as they always have. */}
+        <SubjectContext context={issue.subject_context} />
         <dl>
           <dt>{copy.dq.statusLabel}</dt>
           <dd>{issue.status}</dd>
@@ -503,6 +514,185 @@ function IssueCard({ issue, mayResolve, onResolved, onAttested }: IssueCardProps
         )}
       </article>
     </li>
+  );
+}
+
+/**
+ * The context schema version this UI understands (migration 0035). A blob
+ * carrying anything else is rendered as if it were absent: a shape we do
+ * not understand is worse than none, and the finding's prose description
+ * still says what happened.
+ */
+const SUBJECT_CONTEXT_VERSION = 1;
+
+/**
+ * "Which trips this affects" — the finding's subject in the vocabulary the
+ * agency uses (handoff 0029).
+ *
+ * The UAT sentence this exists to answer: *"staff/users will need an easier
+ * way to know what exact block they are looking for that had the issue."*
+ * So blocks, trip counts, routes and times of day are the PRIMARY content,
+ * and the raw identifiers sit in a collapsed disclosure — still there, still
+ * copyable for anyone working a ticket, just no longer the headline.
+ *
+ * Nothing here is computed: every label was resolved once by the calc runner
+ * and frozen on the row, and this component only formats it. Nothing here is
+ * invented either — where the feed carries no block, no route name or no
+ * scheduled time, the copy says so in words rather than substituting a
+ * plausible-looking stand-in.
+ */
+function SubjectContext({
+  context,
+}: {
+  context?: DqSubjectContext | null;
+}) {
+  const headingId = useId();
+  if (!context || context.version !== SUBJECT_CONTEXT_VERSION) return null;
+  const { groups, group_count: groupCount, unmatched } = context;
+  if (groups.length === 0 && !unmatched) return null;
+  const capped = groupCount > groups.length;
+
+  return (
+    <section className="dq-subject" aria-labelledby={headingId}>
+      <h3 id={headingId}>{copy.dq.subject.heading}</h3>
+      <p>
+        {copy.dq.subject.intro(
+          formatCount(context.total),
+          formatCount(groupCount),
+        )}
+      </p>
+      {capped && <p className="banner">
+        {copy.dq.subject.groupCap(
+          formatCount(groups.length),
+          formatCount(groupCount),
+        )}
+      </p>}
+      {groups.length > 0 && (
+        <div className="table-wrap">
+          <table>
+            <caption>{copy.dq.subject.tableCaption}</caption>
+            <thead>
+              <tr>
+                <th scope="col">{copy.dq.subject.columns.block}</th>
+                <th scope="col">{copy.dq.subject.columns.trips}</th>
+                <th scope="col">{copy.dq.subject.columns.routes}</th>
+                <th scope="col">{copy.dq.subject.columns.span}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {groups.map((group, i) => (
+                <SubjectGroupRow
+                  key={`${group.block_id ?? "no-block"}-${i}`}
+                  group={group}
+                />
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <p className="field-hint">{copy.dq.subject.spanNote}</p>
+      {/* Trips Headway saw operating that the schedule feed does not
+          contain. Their own bucket — never folded into a block they do not
+          belong to, never quietly dropped. */}
+      {unmatched && (
+        <div className="banner">
+          <h4>{copy.dq.subject.unmatchedHeading}</h4>
+          <p>
+            {copy.dq.subject.unmatchedBody(
+              formatCount(unmatched.trip_count),
+            )}
+          </p>
+        </div>
+      )}
+      {/* Forensic on demand: collapsed by default, never removed. */}
+      <details className="dq-subject-technical">
+        <summary>{copy.dq.subject.technicalToggle}</summary>
+        <p>
+          {copy.dq.subject.technicalIntro(formatCount(context.trip_id_cap))}
+        </p>
+        <dl>
+          {groups.map((group, i) => (
+            <div key={`${group.block_id ?? "no-block"}-ids-${i}`}>
+              <dt>{group.block_id ?? copy.dq.subject.blockAbsent}</dt>
+              <dd>
+                <code>{group.trip_ids.join(", ")}</code>
+              </dd>
+            </div>
+          ))}
+          {unmatched && (
+            <div>
+              <dt>{copy.dq.subject.unmatchedHeading}</dt>
+              <dd>
+                <code>{unmatched.trip_ids.join(", ")}</code>
+              </dd>
+            </div>
+          )}
+        </dl>
+      </details>
+    </section>
+  );
+}
+
+/** One block's row: the identity, how many trips, which routes, when. */
+function SubjectGroupRow({ group }: { group: DqSubjectGroup }) {
+  return (
+    <tr>
+      <th scope="row">
+        {group.block_id ?? (
+          <>
+            <em>{copy.dq.subject.blockAbsent}</em>
+            <span className="field-hint">
+              {copy.dq.subject.blockAbsentHint}
+            </span>
+          </>
+        )}
+      </th>
+      <td className="figure">
+        {copy.dq.subject.tripCount(formatCount(group.trip_count))}
+      </td>
+      <td>
+        <RouteNames group={group} />
+      </td>
+      <td>
+        {group.first_departure === null && group.last_departure === null ? (
+          <em>{copy.dq.subject.spanAbsent}</em>
+        ) : (
+          `${group.first_departure ?? "—"}–${group.last_departure ?? "—"}`
+        )}
+      </td>
+    </tr>
+  );
+}
+
+/**
+ * Route names, or the honest absence of them. A route with no short name in
+ * the feed shows its id LABELLED as an id — the id is the only thing that
+ * exists, and calling it what it is beats dressing it up as a name.
+ */
+function RouteNames({ group }: { group: DqSubjectGroup }) {
+  if (group.routes.length === 0) {
+    return <em>{copy.dq.subject.routesNone}</em>;
+  }
+  return (
+    <>
+      <ul className="dq-subject-routes">
+        {group.routes.map((route) => (
+          <li key={route.route_id}>
+            {route.short_name ??
+              route.long_name ??
+              copy.dq.subject.routeIdOnly(route.route_id)}
+          </li>
+        ))}
+      </ul>
+      {group.route_count > group.routes.length && (
+        <span className="field-hint">
+          {copy.dq.subject.routesMore(
+            formatCount(group.routes.length),
+            formatCount(group.route_count),
+          )}
+        </span>
+      )}
+    </>
   );
 }
 

@@ -30,8 +30,10 @@ from headway_calc.types import (
     SEVERITY_BLOCKING,
     SEVERITY_INFO,
     SEVERITY_WARNING,
+    SUBJECT_TRIPS,
     BlockCoverageDetail,
     Finding,
+    SubjectRef,
     TripExcisionCoverageDetail,
     VehiclePosition,
 )
@@ -189,6 +191,12 @@ def block_group_seconds(
                         f"number."
                     ),
                     source_record_ids=(last.source_record_id, first.source_record_id),
+                    # The two trips bounding the interval — what a dispatcher
+                    # looks up to decide whether the vehicle was really out
+                    # of service (handoff 0029).
+                    subject=SubjectRef(
+                        kind=SUBJECT_TRIPS, ids=(trip_n, trip_n1)
+                    ),
                 )
             )
         elif delta_s > 0:
@@ -245,19 +253,22 @@ def _block_unavailable_infos(groups: tuple[BlockGroup, ...]) -> tuple[Finding, .
                     f"({len(day_groups)} trip(s))"
                 ),
                 description=(
-                    f"Trips {', '.join(repr(t) for t in trip_ids)} of vehicle "
-                    f"{vehicle_id} on {day.isoformat()} (UTC) carry no GTFS "
-                    f"block_id in canonical.trips, so VRH grouped them "
-                    f"per-trip (calc 0.2.0 semantics) instead of per-block. "
-                    f"Inter-trip layover time for these trips is therefore "
-                    f"NOT counted — a documented undercount: the FTA includes "
+                    f"{len(trip_ids)} trip(s) run by vehicle {vehicle_id} on "
+                    f"{day.isoformat()} (UTC) carry no GTFS block_id in "
+                    f"canonical.trips, so VRH grouped them per-trip (calc "
+                    f"0.2.0 semantics) instead of per-block. Inter-trip "
+                    f"layover time for these trips is therefore NOT counted "
+                    f"— a documented undercount: the FTA includes "
                     f"layover/recovery time in Vehicle Revenue Hours (2026 "
                     f"NTD Policy Manual, Exhibit 35). block_id is optional "
                     f"per the GTFS spec, so this is valid input, not a data "
                     f"error; the figure stands and includes each trip's "
-                    f"running time."
+                    f"running time. The trips themselves travel with this "
+                    f"finding as structured data — they are not listed here "
+                    f"as raw identifiers."
                 ),
                 source_record_ids=record_ids,
+                subject=SubjectRef(kind=SUBJECT_TRIPS, ids=trip_ids),
             )
         )
     return tuple(infos)
@@ -318,8 +329,8 @@ def apply_block_gap_policy(
                     f"{group.label}"
                 ),
                 description=(
-                    f"VRH group ({group.label}, trips "
-                    f"{', '.join(repr(t) for t in group.trip_ids)}) contains "
+                    f"VRH group ({group.label}, {len(group.trip_ids)} trip(s)) "
+                    f"contains "
                     f"{len(gaps)} within-trip telemetry gap(s) exceeding the "
                     f"gap threshold of {gap_threshold_seconds:.0f}s (largest "
                     f"{largest:.0f}s; first {first_delta:.0f}s in trip "
@@ -329,9 +340,12 @@ def apply_block_gap_policy(
                     f"0.2.0, exclusion unit now the block group) the ENTIRE "
                     f"group ({len(pts_all)} positions) is excluded from the "
                     f"summed figure — no interpolation, no partial sum across "
-                    f"a gap — and the exclusion is reported via coverage."
+                    f"a gap — and the exclusion is reported via coverage. The "
+                    f"excluded trips travel with this finding as structured "
+                    f"data, not as raw identifiers in this sentence."
                 ),
                 source_record_ids=tuple(p.source_record_id for p in pts_all),
+                subject=SubjectRef(kind=SUBJECT_TRIPS, ids=group.trip_ids),
             )
         )
 
@@ -495,6 +509,10 @@ def excised_group_seconds(
                         f"configurable, not an FTA-published number."
                     ),
                     source_record_ids=(last.source_record_id, first.source_record_id),
+                    # The two trips bounding the interval (handoff 0029).
+                    subject=SubjectRef(
+                        kind=SUBJECT_TRIPS, ids=(trip_n, trip_n1)
+                    ),
                 )
             )
         elif delta_s > 0:
@@ -607,6 +625,9 @@ def apply_trip_excision_policy(
                         f"exclusion is reported via trip-denominated coverage."
                     ),
                     source_record_ids=tuple(p.source_record_id for p in pts),
+                    # The excised trip, as structured data: /dq can then name
+                    # its block, route and time of day (handoff 0029).
+                    subject=SubjectRef(kind=SUBJECT_TRIPS, ids=(trip_id,)),
                 )
             )
         clean_flags = tuple(flags)

@@ -257,7 +257,14 @@ def test_share_above_two_percent_blocks_with_value_none():
     blocking = result.blocking_issues[0]
     assert blocking.issue_type == "apc_missing_trips_above_fta_threshold"
     assert blocking.severity == "blocking"
-    assert "trip-49" in blocking.description  # the missing trip is named
+    # Handoff 0029: the missing trip is carried as STRUCTURED data, not
+    # pasted into the prose — a description is for what happened, a subject
+    # is for what to go and look at.
+    assert "trip-49" not in blocking.description
+    assert blocking.subject is not None
+    assert blocking.subject.kind == "canonical.trips"
+    assert blocking.subject.ids == ("trip-49",)
+    assert blocking.subject.total == 1
     assert result.detail.factor_applied is None
     # The counted base still travels in the detail (evidence, not a value).
     assert result.detail.total_boardings_counted == 48

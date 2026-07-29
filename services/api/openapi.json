@@ -5456,6 +5456,18 @@
               }
             ],
             "title": "Resolution Minutes"
+          },
+          "subject_context": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subject Context"
           }
         },
         "type": "object",

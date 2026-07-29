@@ -467,6 +467,63 @@ class HeadwayAdherenceDetail:
         }
 
 
+#: Subject kinds a Finding may point at (handoff 0029). A kind names the
+#: CANONICAL TABLE whose primary key the subject ids are — nothing else, so
+#: the persistence-time resolver always knows exactly what to look the ids
+#: up in.
+#:
+#: The tuple is CLOSED and holds exactly the kinds that have a working
+#: resolver in headway_calc.subjects. That is the point: a kind without a
+#: resolver produces a finding nobody can label, which is the failure this
+#: whole mechanism exists to prevent. Adding a kind means adding its
+#: resolver in the same change — tests/test_subjects.py asserts the tuple
+#: and the resolver registry agree, so the two cannot drift.
+SUBJECT_TRIPS = "canonical.trips"
+SUBJECT_KINDS = (SUBJECT_TRIPS,)
+
+
+@dataclass(frozen=True)
+class SubjectRef:
+    """WHAT a finding is about, as structured data instead of prose (handoff
+    0029).
+
+    A finding is addressed to a person who has to go fix something, so it
+    must name the thing in the vocabulary that person uses to find it. The
+    calculation library cannot do that naming: it is PURE — it never queries
+    a database, so it has no route names, no block names, no departure
+    times. What it *does* know is exactly which canonical rows the finding
+    is about. It emits those as a SubjectRef — ``kind`` (the canonical
+    table) plus ``ids`` (that table's primary keys) — and the persistence
+    layer (headway_calc.subjects, called from headway_calc.dq) resolves them
+    ONCE into agency-facing labels, freezing the result on the dq.issues
+    row.
+
+    Before this existed, ``upt_v0`` formatted the first 20 raw trip ids into
+    its description string. That is data smuggled through prose: it cannot
+    be grouped, cannot be labelled, cannot be linked, and truncates at 20
+    with no way to recover the rest. ``ids`` is COMPLETE — every affected id,
+    never truncated — because truncation is a presentation decision and this
+    is not the presentation layer.
+    """
+
+    kind: str
+    ids: tuple[str, ...] = field(default_factory=tuple)
+
+    def __post_init__(self) -> None:
+        if self.kind not in SUBJECT_KINDS:
+            raise ValueError(
+                f"SubjectRef.kind must be one of {SUBJECT_KINDS}; got "
+                f"{self.kind!r}. A finding's subject names the canonical "
+                f"table its ids belong to — an unknown kind has no resolver "
+                f"and would leave the finding unlabelled."
+            )
+
+    @property
+    def total(self) -> int:
+        """How many rows the finding is about. Never a truncated count."""
+        return len(self.ids)
+
+
 @dataclass(frozen=True)
 class Finding:
     """A data-quality finding raised by a calculation.
@@ -489,6 +546,18 @@ class Finding:
     finding. For an excluded group this is ALL of that group's records —
     excluded groups' records are cited by their finding instead of appearing in
     input_record_ids/lineage (handoff 0002, rule 5).
+
+    ``subject`` (handoff 0029) is the STRUCTURED reference to the canonical
+    rows the finding is about — the trips a dispatcher has to go look at,
+    the events an APC technician has to go chase. It is deliberately
+    separate from ``source_record_ids``: source records are PROVENANCE (the
+    raw feed messages that produced the evidence, content-addressed, for the
+    lineage graph); a subject is the OPERATIONAL thing that needs fixing.
+    They answer different questions and frequently have no rows in common —
+    a missing trip has, by definition, no passenger-event records to cite,
+    yet it is exactly the trip a dispatcher must find. None when the finding
+    is about the run as a whole (a coverage ratio, a timezone declaration)
+    rather than about identifiable rows.
     """
 
     issue_type: str
@@ -496,6 +565,7 @@ class Finding:
     description: str
     source_record_ids: tuple[str, ...] = field(default_factory=tuple)
     severity: str = SEVERITY_BLOCKING
+    subject: SubjectRef | None = None
 
     def __post_init__(self) -> None:
         if self.severity not in _ALLOWED_SEVERITIES:
