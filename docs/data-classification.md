@@ -55,6 +55,51 @@ sensitivity, ADR-0012 is retention.
    the auditor's "what is your retention policy?" question, even if that person is
    borrowed from HR, IT, or counsel.
 
+## When the right people *do* need employee-linked data
+
+Minimization is not prohibition. There are real duties that require knowing which person
+was on which vehicle, and a platform that made them impossible would just push the work
+into spreadsheets nobody audits. The cases, honestly stated:
+
+1. **Operator safety and duty of care.** When a vehicle stops where it should not, or an
+   alarm is raised, dispatch has to know who is on it. This is the strongest case and it
+   is about protecting the employee, not watching them.
+2. **Safety & security reporting.** Federal S&S reporting includes injuries to employees;
+   the platform already holds safety events, and some of them are inherently about
+   identifiable people.
+3. **Explaining service, and defending the operator.** Provenance cuts both ways. An
+   audited record showing a run was late because of a bridge lift — not the person
+   driving — is a defense, and grievance processes turn on exactly that kind of evidence.
+   Systems that only ever accuse are systems employees are right to distrust.
+4. **Distinguishing revenue service from everything else.** Block and run assignment is
+   how deadhead is separated from revenue service. Note that this needs the *assignment*,
+   not usually the *person* — see the pattern below.
+5. **What is deliberately NOT a Headway purpose:** payroll, discipline scoring, and
+   driver-behavior league tables. If an agency wants those, its telematics vendor already
+   sells them; this platform is not the place, and saying so plainly is what makes the
+   other four defensible.
+
+**The pattern that makes later exposure safe** — designed now, built when an agency asks:
+
+- **Aggregate by default, identify on purpose.** Analysis runs on blocks, runs and
+  vehicles. Resolving one of those to a person is a separate, deliberate step — not a
+  column that happens to be joinable by anyone with database access.
+- **Purpose-bound access, not blanket role access.** Viewing operator-identified data
+  means selecting a stated purpose (safety incident, grievance, S&S report) and having
+  that choice recorded. This is ordinary practice in HR and clinical systems and it is
+  the right shape here.
+- **Every look is audited, in an append-only trail.** This is the part that earns union
+  trust rather than asking for it: an agency can demonstrate exactly who accessed
+  operator-identified data, when, and under what stated purpose — and cannot quietly edit
+  that record afterwards.
+- **A distinct role,** separate from data stewards and analysts, granted narrowly.
+- **Shorter retention** for employee-identified data than for the operational data it
+  derives from, per the agency's schedule (ADR-0012).
+- **Bargaining and notice come first.** In a unionized workplace, new employee monitoring
+  is frequently a mandatory subject of bargaining. Nothing here should ever switch itself
+  on, and this page exists partly so an agency can hand the union a straight answer about
+  what is collected and who can see it.
+
 ## What the platform does about it today, without waiting for a program
 
 - **Column-level withholding** of the most sensitive fields from the analyst read path.
