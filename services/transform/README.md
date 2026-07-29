@@ -33,8 +33,15 @@ code cannot drift from the checked-in contract without failing loudly).
   from delay + schedule here), and in-frame duplicate trip/stop keys are
   kept-first + warned (the writer's ON CONFLICT would otherwise absorb
   them silently).
-- `headway_transform/gtfs_static.py` — `normalize_gtfs_static` v0.4.0
-  (0.4.0: parses `agency.txt` → `CanonicalAgency`/`canonical.agencies`,
+- `headway_transform/gtfs_static.py` — `normalize_gtfs_static` v0.5.0
+  (0.5.0, handoff 0031/migration 0036: parses `calendar.txt` +
+  `calendar_dates.txt` → `canonical.service_calendars`/`_calendar_dates`
+  stored as the feed states them — calendar.txt is Conditionally Required
+  per gtfs.org, so only a feed with NEITHER file gets the "defines no
+  service days" warning; unrecognized weekday flags / exception_types
+  quarantine, never read as a guess — and `stops.txt` `stop_code`,
+  preserved NULL when absent, never defaulted to `stop_id`.
+  0.4.0: parses `agency.txt` → `CanonicalAgency`/`canonical.agencies`,
   handoff 0014/migration 0026 — the feed-declared `agency_timezone` that
   anchors otp_v0's schedule comparison; a row without a usable timezone is
   quarantined, never guessed. 0.3.1: decompression budget + per-row parse
@@ -155,11 +162,33 @@ code cannot drift from the checked-in contract without failing loudly).
   and one adapter lineage edge per canonical row carrying
   `adapter:<source_label>` + the spec's content hash), `harness.py` (the
   core of `adapters/validate`: full row accounting, pinned expected counts
-  incl. `emitted` for fan-out specs, deterministic round-trip). The consumer routes `raw.vendor.files` through
-  the registry: an UNREGISTERED envelope source label is refused with a
-  blocking `unregistered_adapter_source` dq.issues row (raw record retained,
-  zero canonical writes — fail closed, never guessed). Reference adapter +
-  contributor docs: `adapters/` at the repo root.
+  incl. `emitted` for fan-out specs, deterministic round-trip; also loads +
+  cross-checks any `resolution.v0.yaml`), and `resolution.py` (handoff
+  0031: per-agency trip resolution — `resolution.v0.yaml` validated against
+  `contracts/adapter-resolution.v0.schema.json` with cross-spec checks
+  against the sibling mapping spec; a `TripResolver` binds one spec to one
+  `ScheduleIndex` and yields the three explicit outcomes resolved /
+  ambiguous / unmatched. Resolved rows get the canonical `trip_id` with the
+  vendor's identifier PRESERVED in `vendor_trip_ref` plus a
+  `resolve_trips:<label>` lineage edge to `canonical.trips`; ambiguous and
+  unmatched rows keep the vendor identifier and become aggregated warning
+  findings that name candidates or the parse — never a pick. An unconfirmed
+  direction convention REFUSES per file with
+  `trip_resolution_not_confirmed`). The consumer routes `raw.vendor.files`
+  through the registry: an UNREGISTERED envelope source label is refused
+  with a blocking `unregistered_adapter_source` dq.issues row (raw record
+  retained, zero canonical writes — fail closed, never guessed); when a
+  resolution spec is registered for the label, the schedule index is read
+  per file from the writer's connection (never cached across files — a
+  fresher static feed must win). Reference adapter + contributor docs:
+  `adapters/` at the repo root.
+- `headway_transform/schedule_index.py` — the agency's schedule flattened
+  for trip resolution (handoff 0031): `canonical.trips` + route short names
+  + each trip's first scheduled departure + the GTFS service calendar
+  (migration 0036 `canonical.service_calendars` / `_calendar_dates`, rules
+  applied at read time: weekday flags in inclusive bounds, exceptions win) +
+  stop identifiers by field. Answers "which scheduled trips have this key?"
+  with ALL matches, sorted — choosing is never its business.
 - `headway_transform/row_guard.py` — per-row CSV parse guards shared by the
   CSV/GTFS normalizers (2026-07-13 hardening pass): mid-iteration
   `csv.Error` capture (oversized field), NUL-byte rejection at field level

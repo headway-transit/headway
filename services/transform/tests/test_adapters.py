@@ -410,8 +410,11 @@ def test_registered_label_flows_to_canonical(fake_connection: FakeConnection) ->
     assert len(events) == 2
     record_id = hashlib.sha256(payload).hexdigest()
     for _sql, params in events:
-        assert params[-2] == "acme_ridelog_simulated"  # source column
-        assert params[-1] == record_id  # source_record_id
+        # 0036 added vendor_trip_ref + trip_resolution after source_record_id;
+        # both are NULL here (no resolution config for this adapter).
+        assert params[8] == "acme_ridelog_simulated"  # source column
+        assert params[9] == record_id  # source_record_id
+        assert params[10] is None and params[11] is None
     edges = fake_connection.sql_for("lineage.edges")
     assert len(edges) == 4  # normalizer + adapter edge per canonical row
     dq = fake_connection.sql_for("dq.issues")
@@ -647,8 +650,11 @@ def test_tripspark_label_now_registered_and_flows(fake_connection: FakeConnectio
     assert len(events) == 4
     record_id = hashlib.sha256(payload).hexdigest()
     for _sql, params in events:
-        assert params[-2] == "tripspark_streets"
-        assert params[-1] == record_id
+        assert params[8] == "tripspark_streets"
+        assert params[9] == record_id
+        # tripspark/streets carries a resolution config whose direction
+        # convention is NOT confirmed: nothing resolves, both columns NULL.
+        assert params[10] is None and params[11] is None
     assert len(fake_connection.sql_for("lineage.edges")) == 8
     dq = fake_connection.sql_for("dq.issues")
     assert sum(1 for _s, p in dq if p[0] == "adapter_row_quarantined") == 5

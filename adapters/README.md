@@ -10,6 +10,9 @@ adapters/
   <vendor>/<product>/
     mapping.v0.yaml        # the declarative mapping spec (the contract is
                            # contracts/adapter-mapping.v0.schema.json)
+    resolution.v0.yaml     # OPTIONAL: per-agency trip resolution against the
+                           # GTFS schedule (handoff 0031; the contract is
+                           # contracts/adapter-resolution.v0.schema.json)
     README.md              # prose: what the export is, how fields map, caveats
     fixtures/
       <name>.csv                  # anonymized sample export rows (agency-provided)
@@ -110,6 +113,15 @@ canonical rows. Redelivery of the same bytes writes zero new rows (idempotent
 by content address + natural keys). Every canonical row carries lineage to the
 raw vendor file and to the exact mapping-spec version (content hash) that
 mapped it.
+
+If the adapter directory also carries a `resolution.v0.yaml` (handoff 0031),
+each mapped row's vendor trip identifier is additionally matched against the
+agency's GTFS schedule at normalization time — three explicit outcomes
+(resolved / ambiguous / unmatched), with ambiguity and misses surfaced as DQ
+findings, the vendor's own identifier always preserved alongside any resolved
+canonical id, and a per-file summary of how much attached. See
+`contracts/adapter-resolution.v0.md`; the first real config is
+`tripspark/streets/resolution.v0.yaml`.
 
 ## The reference adapter (`_reference/`)
 

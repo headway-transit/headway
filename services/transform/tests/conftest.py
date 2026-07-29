@@ -54,8 +54,13 @@ class FakeCursor:
         self._log = log
         self.closed = False
 
-    def execute(self, sql: str, params: tuple) -> None:
+    def execute(self, sql: str, params: tuple = ()) -> None:
         self._log.append((sql, params))
+
+    def fetchall(self) -> list:
+        # Parameterless SELECTs (the schedule-index reads) get an empty
+        # schedule: resolution against a fake connection sees no trips.
+        return []
 
     def close(self) -> None:
         self.closed = True
@@ -76,7 +81,7 @@ class FakeConnection:
         outer = self
 
         class FailingCursor(FakeCursor):
-            def execute(self, sql: str, params: tuple) -> None:
+            def execute(self, sql: str, params: tuple = ()) -> None:
                 if outer.fail_on_sql_containing in sql:
                     raise RuntimeError(
                         f"injected failure on SQL containing "

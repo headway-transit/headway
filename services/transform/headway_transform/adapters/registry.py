@@ -13,6 +13,15 @@ deployments). Registration requirements (handoff 0015, design point 1):
   defect and the whole registry REFUSES to load (fail loudly at startup,
   never a silent shadowing).
 
+An adapter directory MAY also carry a ``resolution.v0.yaml`` — the per-agency
+trip-resolution configuration (handoff 0031). It is optional: an adapter
+without one maps exactly as it always did, carrying the vendor's own trip
+identifier through untouched. When present it is validated at startup with
+the same discipline as the mapping spec, INCLUDING the cross-spec checks
+(same source label, referenced target fields actually mapped, referenced
+source columns actually declared) — a broken resolution config fails the
+registry rather than silently switching resolution off later.
+
 Lookup is FAIL-CLOSED: an envelope source label no registered spec carries
 returns None and the consumer refuses the file (blocking DQ issue, raw record
 retained, zero canonical writes).
@@ -23,9 +32,11 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 
+from .resolution import ResolutionSpec, ResolutionSpecError, load_resolution_spec
 from .spec import MappingSpec, SpecError, load_spec
 
 SPEC_FILENAME = "mapping.v0.yaml"
+RESOLUTION_FILENAME = "resolution.v0.yaml"
 FIXTURES_DIRNAME = "fixtures"
 #: Fixture companions that are not vendor data files.
 _NON_DATA_SUFFIXES = (".expected.json", ".md")
@@ -47,11 +58,22 @@ def fixture_files(spec_path: Path) -> list[Path]:
     )
 
 
-class AdapterRegistry:
-    """source_label -> MappingSpec, built from a scanned adapters directory."""
+def resolution_spec_path(spec_path: Path) -> Optional[Path]:
+    """The resolution config next to a mapping spec, if the adapter has one."""
+    candidate = spec_path.parent / RESOLUTION_FILENAME
+    return candidate if candidate.is_file() else None
 
-    def __init__(self, specs: dict[str, MappingSpec]) -> None:
+
+class AdapterRegistry:
+    """source_label -> MappingSpec (+ optional ResolutionSpec)."""
+
+    def __init__(
+        self,
+        specs: dict[str, MappingSpec],
+        resolutions: Optional[dict[str, ResolutionSpec]] = None,
+    ) -> None:
         self._specs = dict(specs)
+        self._resolutions = dict(resolutions or {})
 
     @classmethod
     def load(cls, adapters_dir: Path | str) -> "AdapterRegistry":
@@ -69,12 +91,21 @@ class AdapterRegistry:
             )
         problems: list[str] = []
         specs: dict[str, MappingSpec] = {}
+        resolutions: dict[str, ResolutionSpec] = {}
         for spec_path in sorted(adapters_dir.rglob(SPEC_FILENAME)):
             try:
                 spec = load_spec(spec_path)
             except SpecError as exc:
                 problems.append(str(exc))
                 continue
+            resolution: Optional[ResolutionSpec] = None
+            resolution_path = resolution_spec_path(spec_path)
+            if resolution_path is not None:
+                try:
+                    resolution = load_resolution_spec(resolution_path, spec)
+                except ResolutionSpecError as exc:
+                    problems.append(str(exc))
+                    continue
             if not fixture_files(spec_path):
                 problems.append(
                     f"{spec_path}: no sample fixtures under "
@@ -91,16 +122,27 @@ class AdapterRegistry:
                 )
                 continue
             specs[spec.source_label] = spec
+            if resolution is not None:
+                resolutions[spec.source_label] = resolution
         if problems:
             raise RegistryError(
                 f"adapter registry at {adapters_dir} failed to load "
                 f"({len(problems)} problem(s)):\n- " + "\n- ".join(problems)
             )
-        return cls(specs)
+        return cls(specs, resolutions)
 
     def lookup(self, source_label: str) -> Optional[MappingSpec]:
         """The spec registered for a source label, or None (fail closed)."""
         return self._specs.get(source_label)
+
+    def lookup_resolution(self, source_label: str) -> Optional[ResolutionSpec]:
+        """The trip-resolution config for a source label, or None.
+
+        None is the ordinary answer: resolution is opt-in per agency, and an
+        adapter without one carries the vendor's trip identifier through
+        exactly as it did before handoff 0031.
+        """
+        return self._resolutions.get(source_label)
 
     def labels(self) -> list[str]:
         return sorted(self._specs)

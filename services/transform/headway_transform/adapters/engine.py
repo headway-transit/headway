@@ -25,7 +25,10 @@ normalizers:
   the raw vendor record PLUS an adapter edge (transform_name
   ``adapter:<source_label>``, transform_version = the mapping spec's content
   hash) — "explain this number" can name the exact spec version that mapped
-  the row;
+  the row; a row whose trip was RESOLVED against the schedule carries a third
+  edge to the canonical trip it resolved to, stamped with the resolution
+  config's content hash, because a resolved trip id is a derived fact and
+  must be traceable to the schedule and the configuration that produced it;
 - **determinism**: same file bytes + same spec bytes => byte-identical
   output, so Kafka redelivery re-derives identical rows/edges/findings and
   the migration-0023 idempotent writes add nothing new.
@@ -38,6 +41,7 @@ nonexistent (DST spring-forward) in that zone quarantines the row.
 from __future__ import annotations
 
 import csv
+import dataclasses
 import io
 from dataclasses import dataclass, field as dc_field
 from datetime import date, datetime, timezone
@@ -53,6 +57,13 @@ from ..model import (
     LineageEdge,
 )
 from ..row_guard import field_problems, iter_rows
+from .resolution import (
+    RESOLVED,
+    StopOutcome,
+    TripOutcome,
+    TripResolver,
+    resolution_findings,
+)
 from .spec import DR_CONTRACT_VALIDATOR, TARGET_DR, TARGET_TIDES, FieldDef, MappingSpec
 
 #: Exact distance conversion factors to statute miles. 1 international mile =
@@ -127,6 +138,10 @@ class AdapterRunResult:
     mapped_count: int = 0
     quarantined_count: int = 0
     filtered_count: int = 0
+    #: Trip-resolution outcome per MAPPED ROW (empty when no resolver ran).
+    #: One entry per row, not per emitted record: a stop visit resolves once.
+    trip_outcomes: list[TripOutcome] = dc_field(default_factory=list)
+    stop_outcomes: list[StopOutcome] = dc_field(default_factory=list)
     #: True when a file-level defect (undecodable bytes, missing source
     #: columns) blocked the whole file before row accounting began.
     file_refused: bool = False
@@ -147,6 +162,13 @@ class AdapterRunResult:
     def emitted_count(self) -> int:
         """Contract records emitted (== mapped rows for specs without emit)."""
         return len(self.records)
+
+    def resolution_counts(self) -> dict[str, int]:
+        """Rows per trip-resolution outcome (empty when none ran)."""
+        counts: dict[str, int] = {}
+        for outcome in self.trip_outcomes:
+            counts[outcome.status] = counts.get(outcome.status, 0) + 1
+        return counts
 
 
 def rfc3339(dt: datetime) -> str:
@@ -378,7 +400,11 @@ def _validate_record(
 
 
 def run_adapter(
-    spec: MappingSpec, file_bytes: bytes, record_id: str, source: str
+    spec: MappingSpec,
+    file_bytes: bytes,
+    record_id: str,
+    source: str,
+    resolver: Optional[TripResolver] = None,
 ) -> AdapterRunResult:
     """Execute one mapping spec over one vendor file's original bytes.
 
@@ -387,12 +413,39 @@ def run_adapter(
     be the label the spec is registered under — the caller (registry lookup)
     guarantees it, and the engine refuses a mismatch rather than mislabel
     provenance.
+
+    ``resolver`` is the optional per-agency trip resolver (handoff 0031),
+    bound to a schedule index by the caller. Without one — the default, and
+    the state of every adapter before an agency configures resolution — the
+    vendor's trip identifier is carried through exactly as before. With one
+    that is not yet confirmed by the agency, nothing resolves and the refusal
+    is recorded once for the file.
     """
     if source != spec.source_label:
         raise ValueError(
             f"envelope source {source!r} does not match the spec's registered "
             f"source_label {spec.source_label!r} — refusing to mislabel provenance"
         )
+    if resolver is not None and resolver.spec.source_label != source:
+        raise ValueError(
+            f"resolution config for {resolver.spec.source_label!r} was handed "
+            f"a {source!r} file — refusing to resolve one vendor's rows with "
+            "another's key"
+        )
+    if resolver is not None and spec.target_contract != TARGET_TIDES:
+        raise ValueError(
+            f"trip resolution is configured for {source!r} but its mapping "
+            f"spec targets {spec.target_contract!r}; only "
+            f"{TARGET_TIDES!r} carries a performed-trip identifier"
+        )
+    if resolver is not None and not resolver.active:
+        # The agency has not confirmed the direction convention. Refusing is
+        # the specified behaviour (handoff 0031, design point 5): map the
+        # file exactly as before and say once, in plain words, what is
+        # missing. Never a half-configured resolution.
+        result = run_adapter(spec, file_bytes, record_id, source, None)
+        result.findings.append(resolver.refusal_finding(record_id, source))
+        return result
 
     result = AdapterRunResult(
         source_label=source,
@@ -450,9 +503,14 @@ def run_adapter(
             stream, delimiter=spec.delimiter, quotechar=spec.quotechar
         )
         header = reader.fieldnames or []
-        missing = sorted(
-            spec.source_columns() - {(h or "").strip() for h in header}
-        )
+        # The resolution config reads raw source columns too (the direction
+        # key, the stop code). They are part of "does this file match the
+        # registered export format?" — a file missing them would resolve
+        # nothing for a reason no one could see.
+        needed = spec.source_columns()
+        if resolver is not None:
+            needed = needed | resolver.spec.required_source_columns()
+        missing = sorted(needed - {(h or "").strip() for h in header})
         if missing:
             return _refuse_file(
                 "adapter_source_mismatch",
@@ -480,7 +538,42 @@ def run_adapter(
     # (emission index, predicate index) -> suppressed-emission count.
     suppressed_by: dict[tuple[int, int], int] = {}
 
-    def _accept(record: dict, rows: list, edges: list[LineageEdge]) -> None:
+    def _resolve(row: dict, record: dict) -> Optional[TripOutcome]:
+        """Resolve ONE mapped vendor row's trip and stop, once."""
+        if resolver is None:
+            return None
+        outcome = resolver.resolve_trip(row, record)
+        result.trip_outcomes.append(outcome)
+        stop_outcome = resolver.resolve_stop(row)
+        if stop_outcome is not None:
+            result.stop_outcomes.append(stop_outcome)
+        return outcome
+
+    def _accept(
+        record: dict,
+        rows: list,
+        edges: list[LineageEdge],
+        outcome: Optional[TripOutcome] = None,
+    ) -> None:
+        if outcome is not None:
+            # Resolution is a NORMALIZATION step, applied to the canonical
+            # row after the target contract validated the record the vendor
+            # actually gave us. The contract record keeps the vendor's
+            # trip_id_performed — that IS what the operator performed — and
+            # the canonical row records what Headway made of it.
+            rows = [
+                dataclasses.replace(
+                    row_obj,
+                    trip_id=(
+                        outcome.trip_id
+                        if outcome.status == RESOLVED
+                        else row_obj.trip_id
+                    ),
+                    vendor_trip_ref=outcome.vendor_ref or row_obj.trip_id,
+                    trip_resolution=outcome.status,
+                )
+                for row_obj in rows
+            ]
         result.records.append(record)
         if spec.target_contract == TARGET_DR:
             result.dr_trips.extend(rows)
@@ -498,6 +591,18 @@ def run_adapter(
                     input_id=record_id,
                 )
             )
+            if outcome is not None and outcome.status == RESOLVED:
+                assert resolver is not None and outcome.trip_id is not None
+                result.edges.append(
+                    LineageEdge(
+                        output_kind=edges[0].output_kind,
+                        output_id=row_obj.output_id,
+                        transform_name=resolver.spec.transform_name,
+                        transform_version=resolver.spec.spec_sha12,
+                        input_kind="canonical.trips",
+                        input_id=outcome.trip_id,
+                    )
+                )
 
     for index, row, parse_error in iter_rows(reader):
         result.total_rows += 1
@@ -554,7 +659,7 @@ def run_adapter(
                 _quarantine(index, [reject])
                 continue
             result.mapped_count += 1
-            _accept(record, rows, edges)
+            _accept(record, rows, edges, _resolve(row, record))
             continue
 
         # Fan-out (`emit`): zero or more records per kept row, one per
@@ -603,8 +708,12 @@ def run_adapter(
             _quarantine(index, problems)
             continue
         result.mapped_count += 1
+        # Resolution is per ROW, not per emission: a boarding and an
+        # alighting recorded at the same stop visit are the same trip, and
+        # resolving twice could not disagree without being a bug.
+        outcome = _resolve(row, pending[0][0])
         for record, rows, edges in pending:
-            _accept(record, rows, edges)
+            _accept(record, rows, edges, outcome)
 
     for (e_idx, p_idx), count in sorted(suppressed_by.items()):
         emission = spec.emissions[e_idx]
@@ -652,6 +761,17 @@ def run_adapter(
                     "recorded — never a silent drop."
                 ),
                 source_record_ids=[record_id],
+            )
+        )
+
+    if resolver is not None:
+        result.findings.extend(
+            resolution_findings(
+                resolver.spec,
+                source,
+                record_id,
+                result.trip_outcomes,
+                result.stop_outcomes,
             )
         )
 

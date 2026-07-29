@@ -28,7 +28,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .engine import AdapterRunResult, run_adapter
-from .registry import FIXTURES_DIRNAME, AdapterRegistry, RegistryError, fixture_files
+from .registry import (
+    FIXTURES_DIRNAME,
+    AdapterRegistry,
+    RegistryError,
+    fixture_files,
+    resolution_spec_path,
+)
+from .resolution import ResolutionSpecError, load_resolution_spec
 from .spec import SpecError, load_spec
 
 EXPECTED_SUFFIX = ".expected.json"
@@ -87,6 +94,28 @@ def validate_adapter(spec_path: Path, report: HarnessReport) -> None:
         f"(source_label {spec.source_label}, spec {spec.spec_sha12}): "
         "schema + semantic checks OK"
     )
+
+    # Optional per-agency trip-resolution config (handoff 0031): validated
+    # with the same discipline, INCLUDING the cross-spec checks against the
+    # mapping spec it sits next to. The harness does not RUN resolution —
+    # that needs the agency's schedule in canonical, which fixtures do not
+    # carry — but a config that cannot load must be a red build here, not a
+    # refused registry at consumer startup days later.
+    res_path = resolution_spec_path(spec_path)
+    if res_path is not None:
+        try:
+            resolution = load_resolution_spec(res_path, spec)
+        except ResolutionSpecError as exc:
+            report.fail(f"{res_path}: {exc}")
+            return
+        confirmed = resolution.direction.confirmed
+        report.note(
+            f"  resolution config {resolution.spec_sha12}: schema + "
+            "cross-spec checks OK (direction convention "
+            + ("CONFIRMED" if confirmed else "NOT CONFIRMED — the resolver "
+               "refuses and records a finding until the agency confirms it")
+            + ")"
+        )
 
     fixtures = fixture_files(spec_path)
     if not fixtures:

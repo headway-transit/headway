@@ -91,7 +91,7 @@ def test_upsert_stops_and_stop_times_sql(fake_connection) -> None:
 
     stop_sql, stop_params = fake_connection.sql_for("canonical.stops")[0]
     assert "ON CONFLICT (stop_id) DO UPDATE" in stop_sql
-    assert stop_params == ("S1", "First St", 42.35, -71.06)
+    assert stop_params == ("S1", "First St", 42.35, -71.06, None)
 
     st_sql, st_params = fake_connection.sql_for("canonical.stop_times")[0]
     assert "ON CONFLICT (trip_id, stop_sequence) DO UPDATE" in st_sql
@@ -108,7 +108,7 @@ def test_upsert_stop_and_stop_time_nulls_bind_null(fake_connection) -> None:
         [CanonicalStopTime("T1", "S2", 2, None, None, None)]
     )
     _sql, stop_params = fake_connection.sql_for("canonical.stops")[0]
-    assert stop_params == ("node-1", None, None, None)
+    assert stop_params == ("node-1", None, None, None, None)
     _sql, st_params = fake_connection.sql_for("canonical.stop_times")[0]
     assert st_params == ("T1", "S2", 2, None, None, None)
 
@@ -172,6 +172,8 @@ def test_insert_passenger_events_conflict_do_nothing_on_unique_key(
         2,
         "tides_simulated",
         "cd" * 32,
+        None,  # vendor_trip_ref — NULL when no resolution ran (0036)
+        None,  # trip_resolution — NULL when no resolution ran (0036)
     )
     # No tenant_id column anywhere (ADR-0004).
     assert "tenant" not in sql.lower()

@@ -32,8 +32,10 @@ from . import (
     trip_updates,
 )
 from .adapters import AdapterRegistry, run_adapter
+from .adapters.resolution import TripResolver
 from .envelope import Envelope, EnvelopeValidationError, parse_envelope
 from .model import SEVERITY_BLOCKING, SEVERITY_WARNING, DQFinding
+from .schedule_index import load_schedule_index
 from .writer import DbWriter
 
 logger = logging.getLogger(__name__)
@@ -175,14 +177,24 @@ def _handle_gtfs_static(
     else:
         zip_bytes = envelope.decode_payload()
 
-    routes, trips, stops, stop_times, agencies, edges, findings = (
-        gtfs_static.normalize(zip_bytes, envelope.record_id)
-    )
+    (
+        routes,
+        trips,
+        stops,
+        stop_times,
+        agencies,
+        service_calendars,
+        service_calendar_dates,
+        edges,
+        findings,
+    ) = gtfs_static.normalize(zip_bytes, envelope.record_id)
     writer.upsert_routes(routes)
     writer.upsert_trips(trips)
     writer.upsert_stops(stops)
     writer.upsert_stop_times(stop_times)
     writer.upsert_agencies(agencies)
+    writer.upsert_service_calendars(service_calendars)
+    writer.upsert_service_calendar_dates(service_calendar_dates)
     writer.insert_lineage_edges(edges)
     writer.insert_dq_issues(findings)
 
@@ -365,7 +377,24 @@ def _handle_vendor_file(
     if file_bytes is None:
         return
 
-    result = run_adapter(spec, file_bytes, envelope.record_id, envelope.source)
+    # Trip resolution (handoff 0031): opt-in per agency via a
+    # resolution.v0.yaml next to the mapping spec. The schedule index is
+    # read PER FILE from the same connection the writer holds — a static
+    # feed upserted five minutes ago must be what this file resolves
+    # against, never a stale process-lifetime cache. An adapter without a
+    # resolution config maps exactly as before (resolver None); one whose
+    # direction convention the agency has not confirmed refuses inside
+    # run_adapter with a finding, never a guess.
+    resolver = None
+    resolution_spec = adapter_registry.lookup_resolution(envelope.source)
+    if resolution_spec is not None:
+        resolver = TripResolver(
+            resolution_spec, load_schedule_index(writer.connection)
+        )
+
+    result = run_adapter(
+        spec, file_bytes, envelope.record_id, envelope.source, resolver
+    )
     writer.insert_passenger_events(result.passenger_events)
     writer.insert_dr_trips(result.dr_trips)
     writer.insert_lineage_edges(result.edges)

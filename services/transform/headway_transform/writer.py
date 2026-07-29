@@ -7,8 +7,9 @@ matching the handoff-0001 schema exactly:
 - raw.records registry row per envelope (immutable; redelivery of the same
   content-addressed record_id is a no-op via ON CONFLICT DO NOTHING — the
   record already landed, nothing is lost);
-- canonical.routes / canonical.trips / canonical.agencies upserts (static
-  feeds supersede);
+- canonical.routes / canonical.trips / canonical.agencies /
+  canonical.service_calendars / canonical.service_calendar_dates upserts
+  (static feeds supersede);
 - canonical.trip_updates inserts (handoff 0014 / migration 0025), ON
   CONFLICT DO NOTHING on the natural key (trip_id, feed_timestamp,
   source_record_id, COALESCE(stop_sequence, -1), COALESCE(stop_id, ''))
@@ -53,6 +54,8 @@ from .gtfs_rt_positions import CanonicalVehiclePosition
 from .gtfs_static import (
     CanonicalAgency,
     CanonicalRoute,
+    CanonicalServiceCalendar,
+    CanonicalServiceCalendarDate,
     CanonicalStop,
     CanonicalStopTime,
     CanonicalTrip,
@@ -101,12 +104,38 @@ SET route_id     = EXCLUDED.route_id,
 """.strip()
 
 UPSERT_STOP_SQL = """
-INSERT INTO canonical.stops (stop_id, name, latitude, longitude)
-VALUES (%s, %s, %s, %s)
+INSERT INTO canonical.stops (stop_id, name, latitude, longitude, stop_code)
+VALUES (%s, %s, %s, %s, %s)
 ON CONFLICT (stop_id) DO UPDATE
 SET name      = EXCLUDED.name,
     latitude  = EXCLUDED.latitude,
-    longitude = EXCLUDED.longitude
+    longitude = EXCLUDED.longitude,
+    stop_code = EXCLUDED.stop_code
+""".strip()
+
+UPSERT_SERVICE_CALENDAR_SQL = """
+INSERT INTO canonical.service_calendars
+    (service_id, monday, tuesday, wednesday, thursday, friday, saturday,
+     sunday, start_date, end_date)
+VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+ON CONFLICT (service_id) DO UPDATE
+SET monday     = EXCLUDED.monday,
+    tuesday    = EXCLUDED.tuesday,
+    wednesday  = EXCLUDED.wednesday,
+    thursday   = EXCLUDED.thursday,
+    friday     = EXCLUDED.friday,
+    saturday   = EXCLUDED.saturday,
+    sunday     = EXCLUDED.sunday,
+    start_date = EXCLUDED.start_date,
+    end_date   = EXCLUDED.end_date
+""".strip()
+
+UPSERT_SERVICE_CALENDAR_DATE_SQL = """
+INSERT INTO canonical.service_calendar_dates
+    (service_id, service_date, exception_type)
+VALUES (%s, %s, %s)
+ON CONFLICT (service_id, service_date) DO UPDATE
+SET exception_type = EXCLUDED.exception_type
 """.strip()
 
 UPSERT_STOP_TIME_SQL = """
@@ -154,8 +183,8 @@ INSERT_PASSENGER_EVENT_SQL = """
 INSERT INTO canonical.passenger_events
     (event_timestamp, service_date, passenger_event_id, vehicle_id,
      trip_id, trip_stop_sequence, event_type, event_count,
-     source, source_record_id)
-VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+     source, source_record_id, vendor_trip_ref, trip_resolution)
+VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
 ON CONFLICT (passenger_event_id, event_timestamp, source_record_id) DO NOTHING
 """.strip()
 
@@ -265,7 +294,42 @@ class DbWriter:
         for stop in stops:
             self._execute(
                 UPSERT_STOP_SQL,
-                (stop.stop_id, stop.name, stop.latitude, stop.longitude),
+                (
+                    stop.stop_id,
+                    stop.name,
+                    stop.latitude,
+                    stop.longitude,
+                    stop.stop_code,
+                ),
+            )
+
+    def upsert_service_calendars(
+        self, calendars: Iterable[CanonicalServiceCalendar]
+    ) -> None:
+        for calendar in calendars:
+            self._execute(
+                UPSERT_SERVICE_CALENDAR_SQL,
+                (
+                    calendar.service_id,
+                    calendar.monday,
+                    calendar.tuesday,
+                    calendar.wednesday,
+                    calendar.thursday,
+                    calendar.friday,
+                    calendar.saturday,
+                    calendar.sunday,
+                    calendar.start_date,
+                    calendar.end_date,
+                ),
+            )
+
+    def upsert_service_calendar_dates(
+        self, rows: Iterable[CanonicalServiceCalendarDate]
+    ) -> None:
+        for row in rows:
+            self._execute(
+                UPSERT_SERVICE_CALENDAR_DATE_SQL,
+                (row.service_id, row.service_date, row.exception_type),
             )
 
     def upsert_stop_times(self, rows: Iterable[CanonicalStopTime]) -> None:
@@ -349,6 +413,8 @@ class DbWriter:
                     row.event_count,
                     row.source,
                     row.source_record_id,
+                    row.vendor_trip_ref,
+                    row.trip_resolution,
                 ),
             )
 

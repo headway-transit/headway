@@ -1,12 +1,29 @@
 """Minimal GTFS static loader: agency.txt + routes.txt + trips.txt +
-stops.txt + stop_times.txt -> canonical.agencies/routes/trips/stops/
-stop_times.
+stops.txt + stop_times.txt + calendar.txt + calendar_dates.txt ->
+canonical.agencies/routes/trips/stops/stop_times/service_calendars/
+service_calendar_dates.
 
 Parses a GTFS static zip (stdlib zipfile + csv) into CanonicalAgency,
-CanonicalRoute, CanonicalTrip, CanonicalStop and CanonicalStopTime
-dataclasses per handoffs 0001, 0011 and 0014, with one LineageEdge per row
-back to the static feed's content-addressed record_id, and a DQFinding for
-every row or file that could not be normalized — never a silent skip.
+CanonicalRoute, CanonicalTrip, CanonicalStop, CanonicalStopTime,
+CanonicalServiceCalendar and CanonicalServiceCalendarDate dataclasses per
+handoffs 0001, 0011, 0014 and 0031, with one LineageEdge per row back to the
+static feed's content-addressed record_id, and a DQFinding for every row or
+file that could not be normalized — never a silent skip.
+
+Service-calendar rules (handoff 0031 — what a vendor trip resolves against):
+
+- ``calendar.txt`` is **Conditionally Required** by the GTFS Schedule
+  Reference ("Required unless all dates of service are defined in
+  calendar_dates.txt. Optional otherwise." — gtfs.org, verified 2026-07-29),
+  so its absence is NOT a defect on its own. A feed carrying NEITHER file
+  defines no service days at all, and that IS a finding: nothing downstream
+  can say which trips run on a given date.
+- ``exception_type`` is stored as the feed's own integer (1 = service added
+  for the date, 2 = service removed — same reference). An unrecognised value
+  is quarantined with the value named, never folded into either meaning.
+- ``stop_code`` (stops.txt) is optional and preserved as NULL when absent —
+  a missing code never falls back to the stop_id (that two feeds happen to
+  make them equal is a coincidence, not a rule).
 
 Agency rules (handoff 0014 — otp_v0's schedule anchor):
 
@@ -40,6 +57,7 @@ import csv
 import io
 import zipfile
 from dataclasses import dataclass
+from datetime import date, datetime
 
 from .model import (
     SEVERITY_BLOCKING,
@@ -59,7 +77,12 @@ TRANSFORM_NAME = "normalize_gtfs_static"
 # 0026 — the feed-declared timezone otp_v0 anchors schedule times with).
 # New version so lineage edges distinguish rows normalized with agency
 # support.
-TRANSFORM_VERSION = "0.4.0"
+# 0.5.0: parses calendar.txt + calendar_dates.txt -> canonical.
+# service_calendars / service_calendar_dates, and stops.txt stop_code
+# (handoff 0031, migration 0036 — what a vendor APC trip resolves against).
+# New version so lineage edges distinguish rows normalized with service-
+# calendar support.
+TRANSFORM_VERSION = "0.5.0"
 
 # Decompressed-size budget (2026-07-13 hardening pass): a zip member's
 # compressed size says nothing about its decompressed size — a crafted
@@ -100,6 +123,8 @@ ROUTES_OUTPUT_KIND = "canonical.routes"
 TRIPS_OUTPUT_KIND = "canonical.trips"
 STOPS_OUTPUT_KIND = "canonical.stops"
 STOP_TIMES_OUTPUT_KIND = "canonical.stop_times"
+SERVICE_CALENDARS_OUTPUT_KIND = "canonical.service_calendars"
+SERVICE_CALENDAR_DATES_OUTPUT_KIND = "canonical.service_calendar_dates"
 
 # GTFS route_type -> canonical text mode.
 # Source: GTFS Schedule Reference, routes.txt route_type enum, gtfs.org
@@ -160,12 +185,19 @@ class CanonicalTrip:
 
 @dataclass(frozen=True)
 class CanonicalStop:
-    """One canonical.stops row (handoff 0011 / migration 0019)."""
+    """One canonical.stops row (handoff 0011 / migration 0019).
+
+    ``stop_code`` (migration 0036) is the rider-facing code printed on the
+    sign — optional in GTFS, so NULL when the feed omits it. It is never
+    defaulted to the stop_id: vendor exports that identify stops by code
+    must fail loudly against a feed that carries none.
+    """
 
     stop_id: str  # TEXT PRIMARY KEY
     name: str | None  # TEXT
     latitude: float | None  # DOUBLE PRECISION (nullable — see module doc)
     longitude: float | None  # DOUBLE PRECISION (nullable)
+    stop_code: str | None = None  # TEXT (migration 0036; optional per GTFS)
 
 
 @dataclass(frozen=True)
@@ -178,6 +210,67 @@ class CanonicalStopTime:
     arrival_seconds: int | None  # INTEGER (GTFS HH:MM:SS, may exceed 24 h)
     departure_seconds: int | None  # INTEGER
     shape_dist_traveled: float | None  # DOUBLE PRECISION — NULL preserved
+
+
+@dataclass(frozen=True)
+class CanonicalServiceCalendar:
+    """One canonical.service_calendars row (handoff 0031 / migration 0036).
+
+    GTFS calendar.txt as the feed states it: weekday availability inside an
+    INCLUSIVE start/end interval. Expansion to individual service days is
+    derivable and happens at read time; the source rows are not derivable
+    and are what gets stored.
+    """
+
+    service_id: str  # TEXT PRIMARY KEY
+    monday: bool
+    tuesday: bool
+    wednesday: bool
+    thursday: bool
+    friday: bool
+    saturday: bool
+    sunday: bool
+    start_date: date  # DATE NOT NULL (inclusive)
+    end_date: date  # DATE NOT NULL (inclusive)
+
+    def weekday_flags(self) -> tuple[bool, ...]:
+        """Availability by ``date.weekday()`` index (0 = Monday)."""
+        return (
+            self.monday,
+            self.tuesday,
+            self.wednesday,
+            self.thursday,
+            self.friday,
+            self.saturday,
+            self.sunday,
+        )
+
+
+@dataclass(frozen=True)
+class CanonicalServiceCalendarDate:
+    """One canonical.service_calendar_dates row (migration 0036).
+
+    ``exception_type`` is the feed's own integer (1 = added, 2 = removed per
+    the GTFS Schedule Reference) — stored undecoded so an unexpected value is
+    visible as itself.
+    """
+
+    service_id: str  # TEXT NOT NULL, PK part
+    service_date: date  # DATE NOT NULL, PK part
+    exception_type: int  # SMALLINT NOT NULL
+
+
+#: GTFS calendar_dates.txt exception_type values (gtfs.org Schedule
+#: Reference, verified 2026-07-29). 1 = "Service has been added for the
+#: specified date"; 2 = "Service has been removed for the specified date".
+SERVICE_ADDED = 1
+SERVICE_REMOVED = 2
+_EXCEPTION_TYPES = (SERVICE_ADDED, SERVICE_REMOVED)
+
+
+def _parse_gtfs_date(raw: str) -> date:
+    """GTFS YYYYMMDD -> date. Raises ValueError on anything else."""
+    return datetime.strptime(raw, "%Y%m%d").date()
 
 
 def _read_member(zf: zipfile.ZipFile, name: str, budget: _Budget) -> bytes:
@@ -244,24 +337,28 @@ def normalize(
     list[CanonicalStop],
     list[CanonicalStopTime],
     list[CanonicalAgency],
+    list[CanonicalServiceCalendar],
+    list[CanonicalServiceCalendarDate],
     list[LineageEdge],
     list[DQFinding],
 ]:
     """Normalize a GTFS static zip's agency.txt, routes.txt, trips.txt,
-    stops.txt and stop_times.txt.
+    stops.txt, stop_times.txt, calendar.txt and calendar_dates.txt.
 
-    Returns (routes, trips, stops, stop_times, agencies, lineage_edges,
-    dq_findings). Every emitted row has exactly one lineage edge (input =
-    the feed's record_id); every file or row that cannot be normalized is a
-    DQFinding. A feed whose members exceed the decompression budget
-    (zip-bomb guard) is ABORTED: zero rows, one blocking transform_failure
-    finding naming the limit.
+    Returns (routes, trips, stops, stop_times, agencies, service_calendars,
+    service_calendar_dates, lineage_edges, dq_findings). Every emitted row
+    has exactly one lineage edge (input = the feed's record_id); every file
+    or row that cannot be normalized is a DQFinding. A feed whose members
+    exceed the decompression budget (zip-bomb guard) is ABORTED: zero rows,
+    one blocking transform_failure finding naming the limit.
     """
     routes: list[CanonicalRoute] = []
     trips: list[CanonicalTrip] = []
     stops: list[CanonicalStop] = []
     stop_times: list[CanonicalStopTime] = []
     agencies: list[CanonicalAgency] = []
+    calendars: list[CanonicalServiceCalendar] = []
+    calendar_dates: list[CanonicalServiceCalendarDate] = []
     edges: list[LineageEdge] = []
     findings: list[DQFinding] = []
 
@@ -280,13 +377,17 @@ def normalize(
                 source_record_ids=[record_id],
             )
         )
-        return routes, trips, stops, stop_times, agencies, edges, findings
+        return (
+            routes, trips, stops, stop_times, agencies,
+            calendars, calendar_dates, edges, findings,
+        )
 
     budget = _Budget(max_member_bytes, max_total_bytes)
     try:
         _normalize_members(
             zf, record_id, budget,
-            routes, trips, stops, stop_times, agencies, edges, findings,
+            routes, trips, stops, stop_times, agencies,
+            calendars, calendar_dates, edges, findings,
         )
     except DecompressionBudgetExceeded as exc:
         findings.append(
@@ -304,8 +405,11 @@ def normalize(
                 source_record_ids=[record_id],
             )
         )
-        return [], [], [], [], [], [], findings
-    return routes, trips, stops, stop_times, agencies, edges, findings
+        return [], [], [], [], [], [], [], [], findings
+    return (
+        routes, trips, stops, stop_times, agencies,
+        calendars, calendar_dates, edges, findings,
+    )
 
 
 def _normalize_members(
@@ -317,6 +421,8 @@ def _normalize_members(
     stops: list[CanonicalStop],
     stop_times: list[CanonicalStopTime],
     agencies: list[CanonicalAgency],
+    calendars: list[CanonicalServiceCalendar],
+    calendar_dates: list[CanonicalServiceCalendarDate],
     edges: list[LineageEdge],
     findings: list[DQFinding],
 ) -> None:
@@ -699,11 +805,18 @@ def _normalize_members(
                             )
                     coords[field] = value
 
+                # stop_code is OPTIONAL per the GTFS Schedule Reference
+                # (stops.txt, gtfs.org, verified 2026-07-29): an absent
+                # column or empty value is valid GTFS → NULL, NO finding.
+                # It is NEVER defaulted to the stop_id — vendor exports that
+                # identify stops by the printed code must fail loudly
+                # against a feed that carries none (migration 0036).
                 stop = CanonicalStop(
                     stop_id=stop_id,
                     name=(row.get("stop_name") or "").strip() or None,
                     latitude=coords["stop_lat"],
                     longitude=coords["stop_lon"],
+                    stop_code=(row.get("stop_code") or "").strip() or None,
                 )
                 stops.append(stop)
                 edges.append(_edge(STOPS_OUTPUT_KIND, stop.stop_id))
@@ -848,3 +961,199 @@ def _normalize_members(
                         f"{trip_id}:{sequence}",
                     )
                 )
+
+        # --- calendar.txt (handoff 0031 — which services run when) --------
+        # CONDITIONALLY REQUIRED: "Required unless all dates of service are
+        # defined in calendar_dates.txt" (GTFS Schedule Reference, gtfs.org,
+        # verified 2026-07-29). Absent on its own is therefore NOT a defect;
+        # absent TOGETHER WITH calendar_dates.txt is (checked below).
+        if "calendar.txt" in names:
+            for index, row, parse_error in iter_rows(
+                _read_csv(zf, "calendar.txt", budget)
+            ):
+                defects = (
+                    [f"CSV parse error: {parse_error}"]
+                    if parse_error is not None
+                    else field_problems(row)
+                )
+                if defects:
+                    findings.append(_row_defect("calendar.txt", index, defects))
+                    continue
+                service_id = (row.get("service_id") or "").strip()
+                problems: list[str] = []
+                if not service_id:
+                    problems.append("service_id is missing/empty")
+
+                days: dict[str, bool] = {}
+                for day in (
+                    "monday", "tuesday", "wednesday",
+                    "thursday", "friday", "saturday", "sunday",
+                ):
+                    raw = (row.get(day) or "").strip()
+                    # 1 = available, 0 = not available (GTFS Schedule
+                    # Reference). Anything else is quarantined, never read
+                    # as "probably not running".
+                    if raw == "1":
+                        days[day] = True
+                    elif raw == "0":
+                        days[day] = False
+                    else:
+                        problems.append(
+                            f"{day} is {raw!r}, not the GTFS 1 (available) "
+                            "or 0 (not available)"
+                        )
+
+                bounds: dict[str, date | None] = {}
+                for bound in ("start_date", "end_date"):
+                    raw = (row.get(bound) or "").strip()
+                    try:
+                        bounds[bound] = _parse_gtfs_date(raw)
+                    except ValueError:
+                        bounds[bound] = None
+                        problems.append(
+                            f"{bound} {raw!r} is not a GTFS YYYYMMDD date"
+                        )
+                start = bounds["start_date"]
+                end = bounds["end_date"]
+                if start is not None and end is not None and end < start:
+                    problems.append(
+                        f"end_date {end.isoformat()} precedes start_date "
+                        f"{start.isoformat()} — the interval is empty as "
+                        "stated; the bounds are never swapped to make it "
+                        "non-empty"
+                    )
+
+                if problems:
+                    findings.append(
+                        DQFinding(
+                            issue_type="malformed_entity",
+                            severity=SEVERITY_WARNING,
+                            title="calendar.txt row could not be normalized",
+                            description=(
+                                f"Record {record_id}, calendar.txt row "
+                                f"{index} (service "
+                                f"{service_id or '<missing>'!r}): "
+                                + "; ".join(problems)
+                                + ". Row quarantined, not dropped silently — "
+                                "a service day is never inferred, and trips "
+                                "on this service cannot be resolved to a "
+                                "date until it is fixed."
+                            ),
+                            source_record_ids=[record_id],
+                        )
+                    )
+                    continue
+
+                assert start is not None and end is not None
+                calendar = CanonicalServiceCalendar(
+                    service_id=service_id,
+                    start_date=start,
+                    end_date=end,
+                    **days,
+                )
+                calendars.append(calendar)
+                edges.append(
+                    _edge(SERVICE_CALENDARS_OUTPUT_KIND, calendar.service_id)
+                )
+
+        # --- calendar_dates.txt -------------------------------------------
+        if "calendar_dates.txt" in names:
+            for index, row, parse_error in iter_rows(
+                _read_csv(zf, "calendar_dates.txt", budget)
+            ):
+                defects = (
+                    [f"CSV parse error: {parse_error}"]
+                    if parse_error is not None
+                    else field_problems(row)
+                )
+                if defects:
+                    findings.append(
+                        _row_defect("calendar_dates.txt", index, defects)
+                    )
+                    continue
+                service_id = (row.get("service_id") or "").strip()
+                raw_date = (row.get("date") or "").strip()
+                raw_exception = (row.get("exception_type") or "").strip()
+                problems = []
+                if not service_id:
+                    problems.append("service_id is missing/empty")
+                exception_date: date | None = None
+                try:
+                    exception_date = _parse_gtfs_date(raw_date)
+                except ValueError:
+                    problems.append(
+                        f"date {raw_date!r} is not a GTFS YYYYMMDD date"
+                    )
+                exception_type: int | None = None
+                try:
+                    exception_type = int(raw_exception)
+                except ValueError:
+                    exception_type = None
+                if exception_type not in _EXCEPTION_TYPES:
+                    problems.append(
+                        f"exception_type {raw_exception!r} is not 1 (service "
+                        "added) or 2 (service removed) per the GTFS Schedule "
+                        "Reference — an unknown exception is never read as "
+                        "either"
+                    )
+
+                if problems:
+                    findings.append(
+                        DQFinding(
+                            issue_type="malformed_entity",
+                            severity=SEVERITY_WARNING,
+                            title=(
+                                "calendar_dates.txt row could not be "
+                                "normalized"
+                            ),
+                            description=(
+                                f"Record {record_id}, calendar_dates.txt row "
+                                f"{index} (service "
+                                f"{service_id or '<missing>'!r}): "
+                                + "; ".join(problems)
+                                + ". Row quarantined, not dropped silently — "
+                                "the exception is neither applied nor "
+                                "ignored quietly."
+                            ),
+                            source_record_ids=[record_id],
+                        )
+                    )
+                    continue
+
+                assert exception_date is not None and exception_type is not None
+                exception = CanonicalServiceCalendarDate(
+                    service_id=service_id,
+                    service_date=exception_date,
+                    exception_type=exception_type,
+                )
+                calendar_dates.append(exception)
+                edges.append(
+                    _edge(
+                        SERVICE_CALENDAR_DATES_OUTPUT_KIND,
+                        f"{exception.service_id}:"
+                        f"{exception.service_date.isoformat()}",
+                    )
+                )
+
+        if "calendar.txt" not in names and "calendar_dates.txt" not in names:
+            findings.append(
+                DQFinding(
+                    issue_type="malformed_entity",
+                    severity=SEVERITY_WARNING,
+                    title=(
+                        "GTFS static feed defines no service days at all"
+                    ),
+                    description=(
+                        f"Record {record_id}: the feed carries neither "
+                        "calendar.txt nor calendar_dates.txt. The GTFS "
+                        "Schedule Reference requires calendar.txt unless "
+                        "every date of service is defined in "
+                        "calendar_dates.txt (gtfs.org) — with neither, "
+                        "nothing can say which trips run on a given date. "
+                        "Trips are still normalized, but any vendor export "
+                        "whose trips resolve by service day will report them "
+                        "as unmatched rather than guess a calendar."
+                    ),
+                    source_record_ids=[record_id],
+                )
+            )

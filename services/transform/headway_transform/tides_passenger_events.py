@@ -101,6 +101,15 @@ class CanonicalPassengerEvent:
     event_count: int | None  # INTEGER — NULL preserved as NULL, never coalesced
     source: str  # TEXT NOT NULL — envelope source ('tides' | 'tides_simulated')
     source_record_id: str  # TEXT NOT NULL REFERENCES raw.records
+    # --- trip resolution (handoff 0031 / migration 0036) -----------------
+    # Both NULL here and for every first-party TIDES file: a TIDES feed
+    # states trip_id_performed itself and nothing resolves it. They are
+    # filled by the vendor-adapter engine when an agency has configured
+    # trip resolution, and the vendor's own identifier is PRESERVED in
+    # vendor_trip_ref even when trip_id becomes the canonical trip — it is
+    # the agency's vocabulary and the audit path back into their system.
+    vendor_trip_ref: str | None = None  # TEXT
+    trip_resolution: str | None = None  # TEXT: resolved|ambiguous|unmatched
 
     @property
     def output_id(self) -> str:

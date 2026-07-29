@@ -254,6 +254,44 @@ The label is fail-closed in both directions: an unregistered
 be dropped under a real vendor label — test data belongs in Path A with
 the `tides_simulated` label, where every figure it touches is flagged.
 
+#### Matching your counts to your schedule ("trip resolution")
+
+Your APC system and your schedule usually name the same trip differently:
+the export might say `12 - 12WD - 21:30` (the way your schedulers talk)
+while your GTFS feed's trip id is a long random-looking string. Until the
+two are matched, passenger counts cannot be attributed to scheduled trips
+— and ridership numbers that depend on that attribution stay blocked.
+
+Headway matches them using a small per-agency configuration file next to
+the adapter (`resolution.v0.yaml`): how your trip names are built, which
+schedule fields each part corresponds to, what your direction codes mean,
+and how trips after midnight are dated. Nothing is guessed — one setting
+in that file (which of your direction values is which GTFS direction)
+**needs your confirmation before matching starts**, and until you confirm
+it Headway says so plainly in the data-quality queue instead of flipping
+a coin. A wrong direction guess would put counts on the wrong trips with
+nothing visibly broken, which is worse than waiting.
+
+Once it runs, every row gets exactly one of three outcomes, and you see
+the tallies per file in the data-quality queue:
+
+- **Matched** — exactly one scheduled trip fits. The row is attributed to
+  it, and the trip name your system used is kept alongside forever, so
+  you can always trace a number back to your own records.
+- **More than one fits** — Headway does not pick. The finding names the
+  candidate trips (typically a handful of schedule variants sharing a
+  route, start time and direction) so a human can decide.
+- **No trip fits** — the finding shows how the trip name was read and
+  what was searched: wrong service day, a trip not in the loaded
+  schedule, a retired stop code, an after-midnight trip dated the other
+  way. The counts still land either way — nothing is dropped — they are
+  just not attributed until the cause is fixed.
+
+If a delivery shows "0 of 1,200 matched", the usual causes are: the
+loaded schedule feed is not the one that was in effect for those dates,
+or the direction confirmation is still pending. The finding text says
+which.
+
 > **Buying or replacing a system right now?** The cheapest time to
 > guarantee you can get your data out is before you sign. See
 > [`docs/procurement-data-requirements.md`](procurement-data-requirements.md)

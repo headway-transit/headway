@@ -1,0 +1,350 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://headway.dev/contracts/adapter-resolution.v0.schema.json",
+  "title": "Headway Vendor Adapter Trip-Resolution Spec v0",
+  "description": "The machine-validated format of adapters/<vendor>/<product>/resolution.v0.yaml (handoff 0031): declarative, PER-AGENCY configuration for resolving a vendor export's own trip and stop identifiers against the agency's GTFS schedule already normalized into canonical.trips / canonical.stops. A vendor APC export names a trip in the agency's operational vocabulary ('route - pattern - start time'); the GTFS trip_id is usually an opaque id. Nothing in this format is agency-specific code: how the vendor's trip name is taken apart, which GTFS field each part matches, the direction convention, and the service-day rollover convention are all DECLARED here and confirmed by the agency. The resolver has exactly three outcomes - resolved (exactly one scheduled trip matches), ambiguous (more than one), unmatched (none) - and the last two become data-quality findings that name what was parsed and what was searched. It never picks a candidate. Prose companion: contracts/adapter-resolution.v0.md.",
+  "type": "object",
+  "required": [
+    "resolution_spec_version",
+    "source_label",
+    "target_contract",
+    "trip",
+    "provenance"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "resolution_spec_version": {
+      "const": 0,
+      "description": "Format version. v0 resolves TIDES passenger_events rows produced by a sibling mapping.v0.yaml."
+    },
+    "source_label": {
+      "type": "string",
+      "minLength": 1,
+      "description": "MUST equal the source_label of the mapping.v0.yaml next to this file. The registry pairs the two by label and refuses a mismatch rather than resolve one vendor's rows with another's configuration."
+    },
+    "target_contract": {
+      "type": "string",
+      "enum": ["tides_passenger_events"],
+      "description": "The contract whose records this spec resolves. v0 supports tides_passenger_events only: it is the contract that carries a performed-trip identifier."
+    },
+    "trip": {
+      "type": "object",
+      "required": ["vendor_identifier", "parse", "match"],
+      "additionalProperties": false,
+      "description": "How the vendor's own trip identifier becomes (at most) one canonical trip_id.",
+      "properties": {
+        "vendor_identifier": {
+          "type": "object",
+          "description": "WHERE the vendor's trip identifier is read from. Exactly one of from_field (a target field the sibling mapping spec fills, e.g. trip_id_performed) or from_column (a raw source column of the vendor file).",
+          "oneOf": [
+            {
+              "required": ["from_field"],
+              "additionalProperties": false,
+              "properties": {
+                "from_field": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "A target contract field the sibling mapping spec maps. Spec load fails if the mapping spec does not map it."
+                }
+              }
+            },
+            {
+              "required": ["from_column"],
+              "additionalProperties": false,
+              "properties": {
+                "from_column": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "A raw source column of the vendor file. For headerless formats it must be one of the mapping spec's declared positional columns."
+                }
+              }
+            }
+          ]
+        },
+        "parse": {
+          "type": "object",
+          "required": ["separator", "components"],
+          "additionalProperties": false,
+          "description": "How the vendor identifier is taken apart. v0 splits on a literal separator into a fixed, named component list. A value that does not split into EXACTLY that many parts is UNMATCHED with the reason stated - a partial parse is never guessed at.",
+          "properties": {
+            "separator": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Literal separator, used verbatim (e.g. ' - '). Not a regular expression."
+            },
+            "components": {
+              "type": "array",
+              "minItems": 2,
+              "uniqueItems": true,
+              "items": {"type": "string", "minLength": 1},
+              "description": "Names for the split parts, in order. Every part is named even when the resolver does not match on it (e.g. a pattern name), so an unmatched finding can state the whole parse."
+            },
+            "strip": {
+              "type": "boolean",
+              "default": true,
+              "description": "Strip surrounding whitespace from each component before matching."
+            }
+          }
+        },
+        "match": {
+          "type": "object",
+          "required": ["route", "start_time", "direction", "service"],
+          "additionalProperties": false,
+          "description": "The join key. All four clauses are REQUIRED in v0 and that is a measured decision, not a stylistic one: on the first agency's live feed (2,704 trips) the key (service, route short name, start time) collided on 500 keys covering 1,000 trips - 37% ambiguous - while adding direction left 1 collision covering 2 trips. Dropping service is worse still (823 colliding keys, 1,816 trips). A weaker key does not resolve; it manufactures ambiguity.",
+          "properties": {
+            "route": {
+              "type": "object",
+              "required": ["component"],
+              "additionalProperties": false,
+              "properties": {
+                "component": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Which parsed component carries the route. Must be one of trip.parse.components."
+                },
+                "gtfs_field": {
+                  "type": "string",
+                  "enum": ["route_short_name", "route_id"],
+                  "default": "route_short_name",
+                  "description": "The canonical.routes field the component is compared against, verbatim and case-sensitively. Declared because the two are NOT interchangeable across agencies (they happen to be identical in the first agency's feed; that coincidence is never assumed)."
+                }
+              }
+            },
+            "start_time": {
+              "type": "object",
+              "required": ["component", "format"],
+              "additionalProperties": false,
+              "properties": {
+                "component": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Which parsed component carries the trip's scheduled start time. Must be one of trip.parse.components."
+                },
+                "format": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "strptime format of that component (e.g. '%H:%M'). A component that does not parse makes the row UNMATCHED with the reason stated."
+                }
+              }
+            },
+            "direction": {
+              "type": "object",
+              "required": ["from_column", "confirmed"],
+              "additionalProperties": false,
+              "description": "The vendor's direction vocabulary mapped onto GTFS direction_id. A DIRECTION IS NEVER ASSUMED: GTFS itself assigns no meaning to 0 and 1 (the Schedule Reference calls them e.g. outbound/inbound only as an example), so which vendor value means which is an agency fact, not a convention this software may infer.",
+              "properties": {
+                "from_column": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "The raw source column carrying the vendor's direction key. For headerless formats it must be one of the mapping spec's declared positional columns."
+                },
+                "confirmed": {
+                  "type": "boolean",
+                  "description": "TRUE only when the agency has confirmed which vendor value corresponds to which GTFS direction_id. While FALSE the resolver RESOLVES NOTHING for this source and says so once per file - refusing is the specified behaviour, because a 50/50 guess on direction attaches passenger counts to the wrong trip half the time and nothing downstream would notice."
+                },
+                "values": {
+                  "type": "object",
+                  "minProperties": 1,
+                  "additionalProperties": {"type": "integer", "enum": [0, 1]},
+                  "description": "Vendor direction value (as it appears in the file, whitespace-stripped) -> GTFS direction_id. A value with no entry makes the row UNMATCHED with the reason stated; vendor vocabulary is mapped explicitly, never guessed."
+                },
+                "confirmed_by": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Who at the agency confirmed the mapping, and against what. REQUIRED when confirmed is true."
+                },
+                "confirmed_on": {
+                  "type": "string",
+                  "format": "date",
+                  "description": "When the mapping was confirmed. REQUIRED when confirmed is true."
+                },
+                "unconfirmed_reason": {
+                  "type": "string",
+                  "minLength": 10,
+                  "description": "Why the mapping is not yet confirmed and exactly what the agency must confirm. REQUIRED when confirmed is false; surfaced verbatim in the DQ finding that explains why nothing resolved."
+                }
+              }
+            },
+            "service": {
+              "type": "object",
+              "required": ["from_field", "service_day_rollover"],
+              "additionalProperties": false,
+              "description": "Which service day the export row belongs to. Candidate trips are restricted to the GTFS services active on that day (calendar.txt + calendar_dates.txt, normalized into canonical.service_calendars / canonical.service_calendar_dates).",
+              "properties": {
+                "from_field": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "The target field carrying the row's service date (e.g. service_date). Must be a field the sibling mapping spec maps."
+                },
+                "service_day_rollover": {
+                  "type": "string",
+                  "enum": ["not_confirmed", "calendar_date"],
+                  "description": "How the export dates a trip that runs past midnight. 'calendar_date' declares that the export's date is the CALENDAR date, so a GTFS trip whose scheduled start is at or past 24:00:00 belongs to the PREVIOUS service date and is matched there. 'not_confirmed' means the convention has not been established from a real export spanning midnight: the resolver then matches only within the calendar date and against GTFS start times before 24:00:00, and reports anything that would need the other reading as UNMATCHED with the reason stated."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "stop": {
+      "type": "object",
+      "required": ["from_column", "match_order"],
+      "additionalProperties": false,
+      "description": "Optional. Checks the export's stop identifier against the agency's GTFS stops. v0 RESOLVES NOTHING ONTO THE ROW - the canonical passenger_events subset carries no stop-identity column (handoff 0011's open gap) - it exists so a stop the schedule does not know becomes a finding instead of a silence.",
+      "properties": {
+        "from_column": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The raw source column carrying the vendor's stop identifier."
+        },
+        "match_order": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "enum": ["stop_code", "stop_id"]},
+          "description": "Which canonical.stops fields to check, in order, first hit wins. Declared per agency: an agency whose stop_id happens to equal its stop_code must not turn that coincidence into an assumption."
+        }
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "required": ["verified_against", "verification_date"],
+      "additionalProperties": false,
+      "description": "REQUIRED provenance of the CONFIGURATION - what schedule feed its key was measured against, and whether a real vendor export has ever been run through it. A resolution spec that has never met the vendor's real export is a legitimate artifact; pretending otherwise is not.",
+      "properties": {
+        "verified_against": {
+          "type": "object",
+          "required": ["schedule_feed", "vendor_export"],
+          "additionalProperties": false,
+          "properties": {
+            "schedule_feed": {
+              "type": "object",
+              "required": ["retrieved", "trips", "key_uniqueness"],
+              "additionalProperties": false,
+              "description": "The agency's GTFS feed the join key's uniqueness was MEASURED against - not assumed from the format's shape.",
+              "properties": {
+                "retrieved": {
+                  "type": "string",
+                  "format": "date",
+                  "description": "When the feed was retrieved."
+                },
+                "trips": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "description": "How many trips the measured feed contained."
+                },
+                "key_uniqueness": {
+                  "type": "string",
+                  "minLength": 10,
+                  "description": "The measured result of applying this spec's join key to that feed, in numbers (how many keys collided, how many trips they covered)."
+                }
+              }
+            },
+            "vendor_export": {
+              "type": "object",
+              "required": ["status", "note"],
+              "additionalProperties": false,
+              "description": "Whether this configuration has ever been run against the vendor's REAL export.",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "enum": ["none_available", "sample", "production"],
+                  "description": "none_available: no real export exists yet - the spec was exercised against synthetic rows in the export's proven shape. sample: verified against an agency-provided sample. production: verified against a real production delivery."
+                },
+                "note": {
+                  "type": "string",
+                  "minLength": 10,
+                  "description": "What was actually run through the spec, and what remains unverified because of it."
+                }
+              }
+            }
+          }
+        },
+        "verification_date": {
+          "type": "string",
+          "format": "date",
+          "description": "When this spec was last verified (the run date of the evidence above)."
+        },
+        "notes": {
+          "type": "string",
+          "description": "Free-text provenance notes. Same BINDING rule as the mapping spec: must NOT quote, excerpt, cite, or paraphrase vendor documentation."
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "trip": {
+            "properties": {
+              "match": {
+                "properties": {
+                  "direction": {
+                    "properties": {"confirmed": {"const": true}},
+                    "required": ["confirmed"]
+                  }
+                },
+                "required": ["direction"]
+              }
+            },
+            "required": ["match"]
+          }
+        },
+        "required": ["trip"]
+      },
+      "then": {
+        "properties": {
+          "trip": {
+            "properties": {
+              "match": {
+                "properties": {
+                  "direction": {
+                    "required": ["values", "confirmed_by", "confirmed_on"]
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "trip": {
+            "properties": {
+              "match": {
+                "properties": {
+                  "direction": {
+                    "properties": {"confirmed": {"const": false}},
+                    "required": ["confirmed"]
+                  }
+                },
+                "required": ["direction"]
+              }
+            },
+            "required": ["match"]
+          }
+        },
+        "required": ["trip"]
+      },
+      "then": {
+        "properties": {
+          "trip": {
+            "properties": {
+              "match": {
+                "properties": {
+                  "direction": {
+                    "required": ["unconfirmed_reason"]
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}
