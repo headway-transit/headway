@@ -76,6 +76,7 @@ not repeat forever.
 | `connectors/dr/` | Demand-response trips file-drop scanner (handoff 0013; periodic scan of `DR_DROP_DIR` every `POLL_INTERVAL` for `demand_response_trips*.csv` → `raw.dr.trips`, `object_ref` payload; bytes landed at `raw/dr/<record_id>.csv`; same robustness guards as the TIDES scanner; processed files moved to `processed/`, refused files to `rejected/`; header sanity check against the required `demand_response_trip` v0 columns — `contracts/demand-response-trip.v0.schema.json` — sets `parse_status` only) |
 | `connectors/vendorfile/` | Generic vendor-export file-drop scanner for the adapter framework (handoff 0015; periodic scan of `VENDOR_DROP_DIR` every `POLL_INTERVAL` for `*.csv` → `raw.vendor.files`, `object_ref` payload; ORIGINAL vendor bytes landed content-addressed at `raw/vendor/<record_id>.csv`; same robustness guards as the TIDES/DR scanners; deliberately NO header/content check — `parse_status` is always `ok`, because only the registered mapping spec (`adapters/<vendor>/<product>/mapping.v0.yaml`) knows the vendor format; all interpretation, per-row quarantine and the fail-closed unregistered-label refusal happen in the transform adapter runtime) |
 | `connectors/samsara/` | Samsara fleet-telematics poller (handoff 0028; polls `GET /fleet/vehicles/stats/history` one DECLARED service day per window → `raw.telematics.vehicle_stats`, `object_ref` payload; **data minimization at the connector boundary** — fleet telematics is EMPLOYEE-MONITORING data, so every response is reduced to an allow-list (vehicle `id`/`name`; `time`/`value` per reading) BEFORE anything is hashed, landed or produced, and driver-identified or unrequested fields — `externalIds`/payroll ids, `nfcCardScans`, `decorations`, any driver object — are dropped before the first write, never landed "just in case"; the minimized bytes are landed at `raw/telematics/<record_id>.json`; bearer token from `SAMSARA_API_TOKEN`, never logged; fail-closed on token / source label / service-day timezone; cursor pagination, documented `Retry-After` rate-limit backoff and 5xx exponential backoff; a page that is not the documented response shape is landed with `parse_status: malformed` and pagination stops. **Every API detail derived from the vendor's published OpenAPI document, version 2025-10-23, retrieved 2026-07-29 — and NO live Samsara account has ever been contacted; see `connectors/samsara/README.md`.** Telematics distance is NOT revenue miles and engine time is NOT revenue hours: this connector computes nothing) |
+| `connectors/sqlsource/` | Generic SQL-source poller (handoff 0033; SQL Server first via `github.com/microsoft/go-mssqldb`, BSD-3-Clause). Keyset-polls a **view or query the agency supplies in configuration** — vendor table/column names never enter this repository; the agency's DBA creates the view (e.g. `dbo.vw_headway_apc`) and a read-only login, and **the view is the contract**. Each poll reads `WHERE cursor > high-water ORDER BY cursor` up to `SQLSOURCE_BATCH_MAX_ROWS`, renders the batch to the registered adapter's declared **positional-CSV shape** (`SQLSOURCE_COLUMNS` must be exactly the adapter's `source_format.csv.columns`, in order), and lands it EXACTLY like a dropped vendor file: content-addressed at `raw/vendor/<record_id>.csv`, `object_ref` envelope to `raw.vendor.files` — the transform adapter runtime and (0031) trip resolution take over untouched. **One pipeline, two intakes.** The result set's columns must match the configured list exactly or the batch is refused whole (the wrong_width precedent, enforced at both ends); `SELECT *` is refused in config validation (ADR-0013 minimization — only the columns the adapter declares are ever read); datetime/float/binary columns are refused with instructions to CAST to varchar **inside the view** (Headway renders bytes, it never invents a format); NULL or non-integer cursors and cursor ties at a full-batch boundary are loud refusals, never silent skips. The high-water mark persists as an atomic JSON file under `SQLSOURCE_STATE_DIR`; it advances only after land + produce (at-least-once), and deleting it deliberately just re-reads history idempotently (content-addressed batches + the adapter engine's deterministic natural keys). Read-only by construction: the connector can only emit one generated `SELECT` over validated bracket-quoted identifiers, under a client-side statement timeout; the agency-side enforcement is the read-only login. The DSN is never held by the poller, never logged, and withheld from parse errors. Same fail-closed label rule as the file intake, including the structural `sim:`-marker refusal |
 | `cmd/headway-ingest/` | The service binary: env config, connector startup, SIGINT/SIGTERM clean shutdown, `log/slog` JSON logging |
 
 GTFS / GTFS-Realtime payload *semantics* are defined by the specs at
@@ -125,6 +126,17 @@ telematics runs MUST use `SAMSARA_SOURCE=samsara_simulated`, never
 | `SAMSARA_LAG_DAYS` / `SAMSARA_BACKFILL_DAYS` | Newest polled service day = today − lag (default 1); consecutive days re-polled per cycle (default 3). Headway operational defaults, not vendor limits |
 | `SAMSARA_POLL_INTERVAL` | Go duration between poll cycles, default `6h`. Deliberately separate from `POLL_INTERVAL`: a daily-window API is not a 30-second feed |
 | `SAMSARA_MAX_PAGE_BYTES` | Cap on one API response page, plain bytes; default 67108864 (64 MiB). Oversize pages are refused, never truncated |
+| `SQLSOURCE_ENABLED` | `true` starts the generic SQL-source connector (handoff 0033). The DSN is deliberately NOT the on-switch: a missing DSN must be a loud refusal, not a silently skipped connector |
+| `SQLSOURCE_DSN` | Read-only connection string — **REQUIRED with `SQLSOURCE_ENABLED`**, from the secret store, **never logged** (withheld even from its own parse error). Shape: `sqlserver://headway_ro:pass@host:1433?database=WAREHOUSE&encrypt=true` |
+| `SQLSOURCE_DRIVER` | Optional, default `sqlserver` — the only driver v0 supports; anything else is refused (Postgres/Oracle are future increments on the same config shape) |
+| `SQLSOURCE_VIEW` | The view the agency's DBA created for Headway (e.g. `dbo.vw_headway_apc`) — **REQUIRED**. One to three dot-separated plain identifiers; free-form SQL is refused (query logic belongs INSIDE the view) |
+| `SQLSOURCE_COLUMNS` | Comma-separated ordered column list — **REQUIRED**. Must be EXACTLY the registered adapter's declared positional columns in the adapter's order (`source_format.csv.columns` in `adapters/<vendor>/<product>/mapping.v0.yaml`); `*` is refused (ADR-0013) |
+| `SQLSOURCE_CURSOR_COLUMN` | The monotonic INTEGER keyset column (a unique warehouse key, e.g. `VehicleLocationAPCKey`) — **REQUIRED**, must be one of `SQLSOURCE_COLUMNS` so every landed batch carries its own cursor evidence |
+| `SQLSOURCE_ADAPTER_LABEL` | Envelope `source` — **REQUIRED, no default** (fail closed). Must be the REGISTERED adapter mapping-spec label `<vendor>_<product>` (or `..._simulated` for synthetic data); the transform runtime refuses unregistered labels with a blocking DQ issue |
+| `SQLSOURCE_STATE_DIR` | Writable directory persisting the high-water mark — **REQUIRED** (the Compose file mounts `deploy/compose/sqlsource-state`) |
+| `SQLSOURCE_POLL_INTERVAL` | Go duration between poll cycles, default `5m` — "more frequent than nightly" is the point; a keyset SELECT on an indexed key is trivial warehouse load |
+| `SQLSOURCE_BATCH_MAX_ROWS` | Cap on one rendered batch (one raw record), default 5000 |
+| `SQLSOURCE_QUERY_TIMEOUT` | Client-side statement timeout per query, default `60s` |
 | `POLL_INTERVAL` | Go duration for GTFS-RT polling AND drop-dir rescans, default `30s`; also the file-drop partial-copy settle time |
 | `AGENCY_ID` | Optional envelope `agency_id` (multi-feed disambiguation only) |
 | `S3_ENDPOINT` | MinIO/S3 endpoint `host:port` (required with `GTFS_STATIC_URL`, `TIDES_DROP_DIR`, `DR_DROP_DIR`, `VENDOR_DROP_DIR` or `SAMSARA_ENABLED`) |
@@ -151,8 +163,42 @@ nothing is silently dropped, and the page is retried next cycle).
 | `github.com/minio/minio-go/v7` | v7.2.1 | Apache-2.0 |
 | `github.com/MobilityData/gtfs-realtime-bindings/golang/gtfs` | v1.0.0 | Apache-2.0 |
 | `google.golang.org/protobuf` | v1.36.11 | BSD-3-Clause |
+| `github.com/microsoft/go-mssqldb` | v1.10.0 | **BSD-3-Clause** (verified against the LICENSE file in the module cache AND by `scripts/license_gate.py --ecosystem go`, 2026-07-30: 32/32 deps PASS; the handoff-0033 assumption held. Its Azure-AD auth subpackages are NOT imported, so no Azure SDK code links into the build) |
+| `github.com/golang-sql/civil` | v0.0.0-20220223132316 | Apache-2.0 (transitive of go-mssqldb) |
+| `github.com/golang-sql/sqlexp` | v0.1.0 | BSD-3-Clause (transitive of go-mssqldb) |
+| `github.com/shopspring/decimal` | v1.4.0 | MIT (transitive of go-mssqldb) |
 
 ## Verification status
+
+**2026-07-30 (generic SQL-source connector, handoff 0033).**
+`go build ./... && go vet ./... && go test ./... -count=1` → all packages
+**ok**, **108 tests** (was 73; 30 new in `connectors/sqlsource/`, counting
+the refusal-matrix subtests). Toolchain auto-selected go1.25.12 from host
+go1.22.2 (`go.mod` `go` directive moved 1.25.0 → 1.25.7 by the go-mssqldb
+requirement). ADR-0001 license gate run for real: `scripts/license_gate.py
+--ecosystem go` → **PASS, 32/32 dependencies** (go-mssqldb BSD-3-Clause as
+the handoff assumed).
+
+**NO AGENCY DATABASE SERVER HAS EVER BEEN CONTACTED.** The agency-side
+prerequisites (read-only `headway_ro` login, `vw_headway_apc` view,
+firewall path) are with the agency's DBA; every test ran against fakes or
+a DISPOSABLE local container. Integration evidence (2026-07-30): a
+throwaway `mcr.microsoft.com/mssql/server:2022-latest` container
+(`docker run --name headway-0033-mssql`, localhost-only port, removed
+afterwards; the live Compose project untouched) ran
+`TestIntegrationKeysetPollAgainstRealSQLServer` — **PASS** in 0.11s: 5
+seeded rows through a 2-row cap produced 3 batches (2+2+1) with the exact
+positional 18-column rendering asserted byte-for-byte; an idle poll landed
+nothing; 2 late rows were picked up by keyset resume without re-reading
+history; a RESTARTED poller resumed from the persisted high-water file; a
+deliberately wrong view exposing a raw `datetime2` was refused naming the
+column and the CAST-in-the-view fix. Real-driver type handling verified:
+`bigint identity` → int64 cursor, `bit` → 1/0, `nvarchar` verbatim, NULL
+`int` → empty cell. What still needs re-verification **when the agency's
+ticket clears**, against their real server: TLS/`encrypt=true` behaviour
+through their firewall path, the real view's column list and cursor
+declaration, login read-only enforcement, warehouse collation/encoding of
+`nvarchar` values, and poll-interval load review with their DBA.
 
 **2026-07-29 (Samsara fleet-telematics connector, handoff 0028).**
 `go build ./... && go vet ./... && go test ./... -count=1` → all packages

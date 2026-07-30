@@ -25,9 +25,10 @@ Honest list — this is what is wired up right now, nothing more:
 | **TIDES passenger events (APC counts)** | A CSV file dropped into a folder, **or** pushed over the network with an API key | Boarding/alighting events. This is what lights up **Unlinked Passenger Trips (UPT)**. |
 | **Fleet telematics (Samsara)** | A read-only API token, polled once a day | Measured vehicle movement: how far each vehicle went and how long its engine ran, per day, with the measurement method recorded. **This is NOT revenue miles or revenue hours** and no figure is computed from it. Vehicle-level only — no driver data of any kind. See section 4. |
 
-That is the complete list. There is no direct connection to SQL Server,
-Oracle, a data lake, or a vendor database today — see section 5 for the
-supported path if that is where your data lives.
+That is the complete list, with one recent addition: Headway can now also
+read **directly from a SQL Server view your DBA creates** (section 5).
+There is still no connection to Oracle, Snowflake, or a data lake — see
+section 5 for the supported paths if that is where your data lives.
 
 A note on the numbers themselves: the figures Headway computes from this
 data are previews. The calculation library's own tracker
@@ -453,13 +454,91 @@ nothing because identical data is recognised and never counted twice.
 
 ## 5. "My data lives in SQL Server / a data lake"
 
-The honest answer: **today Headway has no direct database or data-lake
-connector.** It cannot log into SQL Server, Oracle, Snowflake, or a data
-lake and pull your APC tables. The supported path is:
+Two supported paths now. **SQL Server:** Headway can read directly from a
+view your DBA creates — see "Direct from SQL Server" below. **Oracle,
+Snowflake, a data lake, or anything else:** no direct connector yet; the
+supported path is:
 
 > **Export → TIDES CSV → drop the file (Path A) or push it (Path B).**
 
-This is less exotic than it sounds — it is one scheduled query.
+This is less exotic than it sounds — it is one scheduled query. The export
+path also stays fully supported for SQL Server, and it is the right choice
+when there is no DBA to create a view: the direct connector below is for
+agencies that already run a reporting warehouse.
+
+### Direct from SQL Server: the view is the contract
+
+Headway ships a **generic** database connector. Generic means: Headway
+does not know, and will never contain, your vendor's table or column
+names. Instead, **your DBA creates a view** — a saved, named query — that
+presents the data in the shape Headway's adapter for your vendor format
+declares, and Headway reads *only* that view, with a login that can read
+*only* that view. The view is the contract between your database and
+Headway: when your vendor upgrades and renames its internals, your DBA
+edits the view, and nothing on the Headway side changes.
+
+What your DBA sets up (these are the same prerequisites your Headway
+contact hands over as a ticket):
+
+1. **A read-only login** for Headway (e.g. `headway_ro`) with SELECT
+   permission on the view below and nothing else.
+2. **A view** (e.g. `dbo.vw_headway_apc`) whose columns are exactly the
+   columns Headway's adapter for your vendor format declares, in that
+   order — for the TripSpark Streets APC adapter that is the 18 columns
+   in `adapters/tripspark/streets/mapping.v0.yaml`. Two rules that save
+   debugging later: **cast dates and times to text in the view**, in
+   exactly the format your vendor's export uses (Headway refuses to
+   invent a date format — a `datetime` column left uncast is reported as
+   an error naming the column), and make sure the **key column** (next
+   item) is a whole number that only ever grows.
+3. **A cursor column**: one of the view's columns must be a unique,
+   ever-increasing whole-number key (warehouses almost always have one).
+   Headway remembers the highest key it has read and asks only for newer
+   rows — that is what makes frequent polling cheap.
+4. **A firewall path** from the Headway machine to the database port.
+
+Then, on the Headway side, in `deploy/compose/.env` (the connector is off
+until you set these; if one is missing it refuses to start and tells you
+which one):
+
+```sh
+SQLSOURCE_ENABLED=true
+# The read-only login. Never logged, never shown in an error.
+SQLSOURCE_DSN='sqlserver://headway_ro:THE_PASSWORD@warehouse-host:1433?database=WAREHOUSE&encrypt=true'
+SQLSOURCE_VIEW=dbo.vw_headway_apc
+# EXACTLY the adapter's declared columns, in the adapter's order:
+SQLSOURCE_COLUMNS=VehicleLocationAPCKey,VehicleName,TotalCount,BoardCount,AlightCount,UnmodifiedAlightCount,APCSource,IsTripper,IsDetour,TripName,RouteName,RouteShortName,PatternName,StopName,StopCode,PatternPointRank,DirectionKey,EventDateISO
+SQLSOURCE_CURSOR_COLUMN=VehicleLocationAPCKey
+SQLSOURCE_ADAPTER_LABEL=tripspark_streets
+# Optional: how often to ask for new rows (default 5m — this is the
+# "more often than nightly" knob), and the rows-per-batch cap.
+SQLSOURCE_POLL_INTERVAL=5m
+```
+
+then `docker compose --profile app up -d` (a `.env` change needs `up -d`,
+not `restart` — see `docs/updating.md`).
+
+What Headway does with it, in plain words: every few minutes it asks the
+view for rows newer than the last one it has seen, writes them down as a
+file — byte-for-byte the same pipeline as a dropped export file, with the
+same content-addressed receipts, data-quality queue, and lineage walk —
+and remembers where it stopped (under `deploy/compose/sqlsource-state/`,
+so restarts pick up where they left off, never re-reading history and
+never skipping any). Reading the same rows twice is harmless: identical
+data is recognised and never counted twice.
+
+What Headway will *not* do, by construction: it never writes to your
+database (the connector is only capable of one generated SELECT, and the
+read-only login is your enforcement of that); it never reads columns you
+did not list (`SELECT *` is refused outright — a column Headway was not
+told about is never read, let alone stored; see ADR-0013); and the
+connection string with its password is never written to a log, not even
+in error messages.
+
+If the columns do not line up — wrong names, wrong order, wrong count —
+the whole batch is refused with a message saying exactly which position
+disagrees, and nothing is stored until it is fixed. That is deliberate:
+a guessed column mapping would be worse than a loud stop.
 
 ### A worked example
 
@@ -519,8 +598,9 @@ id and are not double-counted.
 ingestion charter (`.claude/roles/INGESTION_ENGINEER.md`) plans a fleet
 of source adapters beyond today's connectors, including CAD/AVL (vendor
 APIs and scheduled SFTP/S3 file drops), APC vendor formats, farebox/AFC,
-and J1939 vehicle telematics. None of these exist yet, and no dated
-commitment exists for a native database or data-lake connector. What
+and J1939 vehicle telematics. None of these exist yet, and beyond the SQL
+Server connector above, no dated commitment exists for other native
+database or data-lake connectors (Oracle, Snowflake, …). What
 *does* exist today is the integration surface they will all use: the
 versioned wire contract in `contracts/` (the raw-record envelope and
 topic registry). A vendor or an in-house developer can build a connector

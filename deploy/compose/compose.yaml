@@ -335,11 +335,32 @@ services:
       # (e.g. tripspark_streets); the folder is scanned every POLL_INTERVAL.
       VENDOR_DROP_DIR: ${VENDOR_DROP_DIR:-}
       VENDOR_SOURCE: ${VENDOR_SOURCE:-}
+      # Generic SQL-source connector (handoff 0033). OFF unless
+      # SQLSOURCE_ENABLED=true is set in .env; the connector then REFUSES to
+      # start (plain-language message) until the DSN, view, column list,
+      # cursor column and adapter label are all set — fail-closed, nothing
+      # is guessed. The DSN carries credentials: set it only in
+      # deploy/compose/.env (never commit it) and it is never logged.
+      # SQLSOURCE_COLUMNS must be EXACTLY the registered adapter's declared
+      # positional columns, in the adapter's order (mapping.v0.yaml).
+      SQLSOURCE_ENABLED: ${SQLSOURCE_ENABLED:-}
+      SQLSOURCE_DSN: ${SQLSOURCE_DSN:-}
+      SQLSOURCE_VIEW: ${SQLSOURCE_VIEW:-}
+      SQLSOURCE_COLUMNS: ${SQLSOURCE_COLUMNS:-}
+      SQLSOURCE_CURSOR_COLUMN: ${SQLSOURCE_CURSOR_COLUMN:-}
+      SQLSOURCE_ADAPTER_LABEL: ${SQLSOURCE_ADAPTER_LABEL:-}
+      SQLSOURCE_POLL_INTERVAL: ${SQLSOURCE_POLL_INTERVAL:-}
+      SQLSOURCE_BATCH_MAX_ROWS: ${SQLSOURCE_BATCH_MAX_ROWS:-}
+      SQLSOURCE_QUERY_TIMEOUT: ${SQLSOURCE_QUERY_TIMEOUT:-}
+      SQLSOURCE_STATE_DIR: /data/sqlsource-state
     volumes:
       # Writable: the connector moves handled files to processed/ inside it.
       - ./tides-drop:/data/tides-drop
       # Writable for the same reason; harmless when the vendor drop is off.
       - ./vendor-drop:/data/vendor-drop
+      # Writable: the SQL-source high-water mark persists here so restarts
+      # never re-read warehouse history. Harmless when the connector is off.
+      - ./sqlsource-state:/data/sqlsource-state
 
   # Python normalization: Kafka raw.* -> canonical.* with lineage + DQ
   # quarantine (services/transform). Build context is the REPO ROOT — the

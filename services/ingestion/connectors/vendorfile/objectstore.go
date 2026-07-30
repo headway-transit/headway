@@ -72,3 +72,14 @@ func (f *FakeStore) Get(key string) ([]byte, bool) {
 	b, ok := f.objects[key]
 	return b, ok
 }
+
+// Keys returns every stored key (for tests asserting nothing was landed).
+func (f *FakeStore) Keys() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	keys := make([]string, 0, len(f.objects))
+	for k := range f.objects {
+		keys = append(keys, k)
+	}
+	return keys
+}

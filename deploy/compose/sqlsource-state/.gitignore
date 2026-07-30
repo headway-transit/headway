@@ -1,0 +1,19 @@
+# High-water-mark state for the generic SQL-source connector (handoff 0033).
+# The connector persists one small JSON file per adapter label here
+# (sqlsource-<label>.json) recording the last warehouse key it has read, so
+# a restart resumes instead of re-reading history. Deleting a state file is
+# safe but should be DELIBERATE: the connector then re-reads the view from
+# the beginning, which is idempotent (identical batches land identical
+# content-addressed record ids; mapped rows carry deterministic natural
+# keys) — it just costs one full re-read.
+#
+# Agency operational state, never source: nothing in here is committed.
+#
+# THIS .gitignore IS TRACKED ON PURPOSE, so the directory exists in every
+# checkout. Without it, Docker creates the bind-mount path itself on first
+# `up` — owned by ROOT — and the connector cannot write its state for
+# reasons that have nothing to do with the person running it. (Same lesson
+# as the 2026-07-28 nginx file-mode incident: never let a host permission
+# accident decide whether the product works.)
+*
+!.gitignore

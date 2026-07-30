@@ -54,6 +54,32 @@
 //	SAMSARA_POLL_INTERVAL          Go duration between poll cycles (optional, default 6h). Deliberately
 //	                               separate from POLL_INTERVAL: a daily-window API is not a 30s feed
 //	SAMSARA_MAX_PAGE_BYTES         cap on one API response page in bytes (optional, default 64 MiB)
+//	SQLSOURCE_ENABLED              "true" turns on the generic SQL-source connector (handoff 0033):
+//	                               keyset-polls an AGENCY-SUPPLIED view on the agency's own database
+//	                               server and lands each batch through the vendor-file pipeline.
+//	                               The DSN deliberately does NOT act as the on-switch: a missing DSN
+//	                               must be a loud refusal, not a silently skipped connector
+//	SQLSOURCE_DSN                  read-only connection string — REQUIRED with SQLSOURCE_ENABLED,
+//	                               from the secret store, NEVER logged (including in errors), e.g.
+//	                               sqlserver://headway_ro:pass@host:1433?database=WAREHOUSE&encrypt=true
+//	SQLSOURCE_DRIVER               optional, default "sqlserver" — the only driver v0 supports;
+//	                               anything else is refused (Postgres/Oracle are future increments)
+//	SQLSOURCE_VIEW                 the view the agency's DBA created for Headway (e.g.
+//	                               dbo.vw_headway_apc) — REQUIRED; vendor table names never
+//	                               enter Headway configuration conventions
+//	SQLSOURCE_COLUMNS              comma-separated ordered column list — REQUIRED; must be EXACTLY
+//	                               the registered adapter's declared positional columns in the
+//	                               adapter's order (mapping.v0.yaml source_format.csv.columns);
+//	                               "*" is refused (ADR-0013 minimization)
+//	SQLSOURCE_CURSOR_COLUMN        monotonic INTEGER keyset column, one of SQLSOURCE_COLUMNS —
+//	                               REQUIRED (e.g. the view's warehouse key)
+//	SQLSOURCE_ADAPTER_LABEL        envelope source — REQUIRED, no default (fail closed). Must be
+//	                               the REGISTERED adapter mapping-spec label `<vendor>_<product>`
+//	                               (adapters/), or `<vendor>_<product>_simulated` for synthetic data
+//	SQLSOURCE_STATE_DIR            writable directory persisting the high-water mark — REQUIRED
+//	SQLSOURCE_POLL_INTERVAL        Go duration between poll cycles (optional, default 5m)
+//	SQLSOURCE_BATCH_MAX_ROWS       cap on one rendered batch (optional, default 5000)
+//	SQLSOURCE_QUERY_TIMEOUT        client-side statement timeout (optional, default 60s)
 //	POLL_INTERVAL                  Go duration, default 30s (GTFS-RT polls AND drop-dir rescans;
 //	                               also the file-drop partial-copy settle time)
 //	AGENCY_ID                      optional envelope agency_id
@@ -65,6 +91,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -83,6 +110,7 @@ import (
 	"github.com/headway-transit/headway/services/ingestion/connectors/gtfsrt"
 	"github.com/headway-transit/headway/services/ingestion/connectors/gtfsstatic"
 	"github.com/headway-transit/headway/services/ingestion/connectors/samsara"
+	"github.com/headway-transit/headway/services/ingestion/connectors/sqlsource"
 	"github.com/headway-transit/headway/services/ingestion/connectors/tides"
 	"github.com/headway-transit/headway/services/ingestion/connectors/vendorfile"
 	"github.com/headway-transit/headway/services/ingestion/internal/producer"
@@ -335,8 +363,33 @@ func run(log *slog.Logger) error {
 		}()
 	}
 
+	// Generic SQL-source connector (handoff 0033). SQLSOURCE_ENABLED is the
+	// on-switch rather than the DSN, for the same reason as SAMSARA_ENABLED:
+	// a missing secret must be a loud refusal, never a connector that
+	// quietly never runs.
+	if strings.EqualFold(os.Getenv("SQLSOURCE_ENABLED"), "true") {
+		poller, db, err := sqlsourceFromEnv(agencyID, kafka, log)
+		if err != nil {
+			return err
+		}
+		defer db.Close()
+		started++
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			log.Info("sql-source poller started",
+				"view", poller.View, "source", poller.Source,
+				"cursor_column", poller.CursorColumn,
+				"columns", len(poller.Columns),
+				"interval", poller.Interval.String())
+			if err := poller.Run(ctx); err != nil && ctx.Err() == nil {
+				log.Error("sql-source poller stopped", "error", err)
+			}
+		}()
+	}
+
 	if started == 0 {
-		return fmt.Errorf("no connectors configured: set GTFS_RT_*_URL, GTFS_STATIC_URL, TIDES_DROP_DIR, DR_DROP_DIR, VENDOR_DROP_DIR, and/or SAMSARA_ENABLED=true")
+		return fmt.Errorf("no connectors configured: set GTFS_RT_*_URL, GTFS_STATIC_URL, TIDES_DROP_DIR, DR_DROP_DIR, VENDOR_DROP_DIR, SAMSARA_ENABLED=true, and/or SQLSOURCE_ENABLED=true")
 	}
 
 	log.Info("headway-ingest running", "connectors", started)
@@ -421,6 +474,67 @@ func samsaraFromEnv(agencyID string, kafka producer.Producer, log *slog.Logger) 
 		return nil, err
 	}
 	return poller, nil
+}
+
+// sqlsourceFromEnv builds the generic SQL-source poller (handoff 0033).
+// Everything Headway must never guess (DSN, view, column order, cursor,
+// adapter label, state dir) is REQUIRED; the poller's Check() produces the
+// plain-language refusals so the wording lives next to the rules it
+// enforces. The DSN is read here and handed straight to the driver — the
+// poller itself never holds it, so it can never be logged.
+func sqlsourceFromEnv(agencyID string, kafka producer.Producer, log *slog.Logger) (*sqlsource.Poller, *sql.DB, error) {
+	if drv := strings.TrimSpace(os.Getenv("SQLSOURCE_DRIVER")); drv != "" && !strings.EqualFold(drv, sqlsource.DriverSQLServer) {
+		return nil, nil, fmt.Errorf(
+			"SQLSOURCE_DRIVER=%q is not supported: v0 speaks to SQL Server "+
+				"only (driver %q). Postgres/Oracle drivers are planned "+
+				"increments on the same config shape — this refusal is the "+
+				"honest alternative to pretending", drv, sqlsource.DriverSQLServer)
+	}
+	client, bucket, err := minioFromEnv("SQLSOURCE_ENABLED")
+	if err != nil {
+		return nil, nil, err
+	}
+	db, err := sqlsource.OpenDB(os.Getenv("SQLSOURCE_DSN"))
+	if err != nil {
+		return nil, nil, err
+	}
+
+	poller := &sqlsource.Poller{
+		DB:           db,
+		View:         strings.TrimSpace(os.Getenv("SQLSOURCE_VIEW")),
+		Columns:      csvFromEnv("SQLSOURCE_COLUMNS"),
+		CursorColumn: strings.TrimSpace(os.Getenv("SQLSOURCE_CURSOR_COLUMN")),
+		Source:       strings.TrimSpace(os.Getenv("SQLSOURCE_ADAPTER_LABEL")),
+		StateDir:     strings.TrimSpace(os.Getenv("SQLSOURCE_STATE_DIR")),
+		AgencyID:     agencyID,
+		Store:        vendorfile.NewMinioStore(client, bucket),
+		Producer:     kafka,
+		Log:          log,
+	}
+	if poller.BatchMaxRows, err = intFromEnv("SQLSOURCE_BATCH_MAX_ROWS"); err != nil {
+		return nil, nil, err
+	}
+	poller.Interval = sqlsource.DefaultPollInterval
+	if v := os.Getenv("SQLSOURCE_POLL_INTERVAL"); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil {
+			return nil, nil, fmt.Errorf("SQLSOURCE_POLL_INTERVAL: %w", err)
+		}
+		poller.Interval = d
+	}
+	if v := os.Getenv("SQLSOURCE_QUERY_TIMEOUT"); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil {
+			return nil, nil, fmt.Errorf("SQLSOURCE_QUERY_TIMEOUT: %w", err)
+		}
+		poller.QueryTimeout = d
+	}
+
+	// Refuse now, at startup, rather than on the first poll.
+	if err := poller.Check(); err != nil {
+		return nil, nil, err
+	}
+	return poller, db, nil
 }
 
 // csvFromEnv splits an optional comma-separated env var, trimming blanks.
