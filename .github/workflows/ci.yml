@@ -381,6 +381,7 @@ jobs:
             -e "services/transform[test,kafka,db]" \
             -e "services/api[test,ingest]" \
             -e "services/ai[test,ollama]" \
+            -e "services/mcp[test]" \
             -e "clients/python[pandas,test]" \
             -r db/requirements.txt
       - uses: actions/setup-node@v6
