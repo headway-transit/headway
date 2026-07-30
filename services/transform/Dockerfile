@@ -25,14 +25,21 @@ RUN pip install --no-cache-dir --no-index --find-links=/tmp/wheels \
     && rm -rf /tmp/wheels
 # The wire contracts ship inside the image so the validators cannot drift
 # from what this build was certified against: the envelope schema, plus the
-# adapter-mapping and demand_response_trip schemas the vendor adapter
-# runtime loads at import (handoff 0015).
+# adapter-mapping, demand_response_trip and adapter-resolution schemas the
+# vendor adapter runtime loads at import (handoffs 0015 and 0031).
 # --chmod on both host->runtime COPYs below: this image runs as nonroot,
 # and COPY preserves host file modes — a restrictive checkout umask must
 # never make the image unreadable (the web image's live 2026-07-28 lesson).
+# The directories are created FIRST with explicit 0755: BuildKit applies
+# --chmod to the directories a COPY creates, so letting the 644 COPY mint
+# /app made /app non-traversable and the container unbootable as nonroot
+# (found live 2026-07-30, first rebuild after handoff 0031).
+RUN install -d -m 0755 /app /app/contracts /app/adapters
 COPY --chmod=644 contracts/raw-record-envelope.v0.schema.json \
      contracts/adapter-mapping.v0.schema.json \
-     contracts/demand-response-trip.v0.schema.json /app/contracts/
+     contracts/demand-response-trip.v0.schema.json \
+     contracts/adapter-resolution.v0.schema.json \
+     contracts/fleet-telematics.v0.schema.json /app/contracts/
 ENV HEADWAY_CONTRACTS_DIR=/app/contracts
 # The registered vendor adapters (mapping specs + their sample fixtures —
 # registration REQUIRES fixtures) ship with the image so raw.vendor.files

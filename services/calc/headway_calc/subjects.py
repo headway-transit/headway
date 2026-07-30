@@ -63,7 +63,7 @@ themselves stay pure. It never writes.
 
 from __future__ import annotations
 
-from headway_calc.types import SUBJECT_KINDS, SUBJECT_TRIPS, Finding
+from headway_calc.types import SUBJECT_KINDS, SUBJECT_TRIPS, Finding, SubjectRef
 
 #: Schema version of the stored context blob (dq.issues.subject_context).
 #: A reader that does not recognise the version must render the finding as
@@ -154,7 +154,7 @@ def _fetch_trip_labels(conn, trip_ids: list[str]) -> dict[str, dict]:
     return labels
 
 
-def _group_by_block(ids: tuple[str, ...], labels: dict[str, dict]) -> dict:
+def _group_by_block(subject: SubjectRef, labels: dict[str, dict]) -> dict:
     """Build one finding's stored context: trips grouped by block.
 
     Determinism matters as much as readability — the same finding must
@@ -162,7 +162,17 @@ def _group_by_block(ids: tuple[str, ...], labels: dict[str, dict]) -> dict:
     groups sort by first departure (the dispatcher's day runs forwards),
     then by block id, with unknowns last; ids inside a group keep the
     calculation's own order.
+
+    When the subject names a VEHICLE (handoff 0032 — the gap-family
+    findings are per-vehicle), the context carries it as
+    ``{"vehicle": {"vehicle_id": ..., "label": ...}}``: the id always, the
+    fleet label exactly as the feed broadcast it or null when it broadcast
+    none — frozen here like every other label, never re-resolved, never
+    invented. The key is ADDITIVE under CONTEXT_VERSION 1: a reader that
+    predates it simply ignores it, and a context without it renders exactly
+    as before.
     """
+    ids = subject.ids
     buckets: dict[str | None, list[str]] = {}
     unmatched: list[str] = []
     seen: set[str] = set()
@@ -235,6 +245,14 @@ def _group_by_block(ids: tuple[str, ...], labels: dict[str, dict]) -> dict:
         "trip_id_cap": TRIP_IDS_PER_GROUP_CAP,
         "groups": groups[:GROUP_CAP],
     }
+    if subject.vehicle is not None:
+        # The vehicle the finding concerns (handoff 0032): id always, the
+        # feed's fleet label or null — the label travelled with the calc's
+        # input rows, so nothing is looked up and nothing is invented.
+        context["vehicle"] = {
+            "vehicle_id": subject.vehicle.vehicle_id,
+            "label": subject.vehicle.label,
+        }
     if unmatched:
         # Trips Headway saw operating but that are not in the schedule feed
         # (an added/unscheduled trip, or a feed that changed under the
@@ -284,12 +302,14 @@ def resolve_contexts(conn, findings: list[Finding]) -> list[dict | None]:
         for trip_id in subject.ids:
             wanted.setdefault(trip_id, None)
 
-    if not wanted:
+    if all(f.subject is None for f in findings):
         return [None] * len(findings)
 
-    labels = _fetch_trip_labels(conn, list(wanted))
+    # A subject with no trip ids (possible in principle for a pure vehicle
+    # reference) still gets its context — it just needs no label query.
+    labels = _fetch_trip_labels(conn, list(wanted)) if wanted else {}
     return [
-        None if f.subject is None else _group_by_block(f.subject.ids, labels)
+        None if f.subject is None else _group_by_block(f.subject, labels)
         for f in findings
     ]
 

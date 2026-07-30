@@ -26,6 +26,14 @@ from decimal import ROUND_HALF_EVEN, Decimal
 from typing import Iterable
 
 from headway_calc._grouping import COVERAGE_QUANTUM, _group_gaps
+from headway_calc._vocabulary import (
+    day_phrase,
+    duration_phrase,
+    group_vehicle_ref,
+    route_names,
+    subject_phrase,
+    window_phrase,
+)
 from headway_calc.types import (
     SEVERITY_BLOCKING,
     SEVERITY_INFO,
@@ -170,13 +178,18 @@ def block_group_seconds(
         last, first = pts_n[-1], pts_n1[0]
         delta_s = (first.time - last.time).total_seconds()
         if delta_s > layover_max_seconds:
+            bounding = pts_n + pts_n1
+            vehicle_ref = group_vehicle_ref(group.vehicle_id, group.positions)
             findings.append(
                 Finding(
                     issue_type="layover_exceeds_max",
                     severity=SEVERITY_WARNING,
+                    # Route, vehicle, when (handoff 0032); exact seconds
+                    # and full ids stay in the description.
                     title=(
-                        f"Layover of {delta_s:.0f}s exceeds "
-                        f"layover_max_seconds in {group.label}"
+                        f"{subject_phrase(route_names(bounding), group.vehicle_id, vehicle_ref.label)}: "
+                        f"{duration_phrase(delta_s)} layover not counted "
+                        f"({window_phrase(last.time, first.time)})"
                     ),
                     description=(
                         f"Inter-trip interval between trip {trip_n!r} and "
@@ -193,9 +206,12 @@ def block_group_seconds(
                     source_record_ids=(last.source_record_id, first.source_record_id),
                     # The two trips bounding the interval — what a dispatcher
                     # looks up to decide whether the vehicle was really out
-                    # of service (handoff 0029).
+                    # of service (handoff 0029) — plus the vehicle itself
+                    # with its fleet label (handoff 0032).
                     subject=SubjectRef(
-                        kind=SUBJECT_TRIPS, ids=(trip_n, trip_n1)
+                        kind=SUBJECT_TRIPS,
+                        ids=(trip_n, trip_n1),
+                        vehicle=vehicle_ref,
                     ),
                 )
             )
@@ -243,14 +259,19 @@ def _block_unavailable_infos(groups: tuple[BlockGroup, ...]) -> tuple[Finding, .
     for (vehicle_id, day), day_groups in sorted(fallback.items()):
         trip_ids = tuple(tid for g in day_groups for tid in g.trip_ids)
         record_ids = block_consumed_record_ids(day_groups)
+        day_positions = tuple(p for g in day_groups for p in g.positions)
+        vehicle_ref = group_vehicle_ref(vehicle_id, day_positions)
         infos.append(
             Finding(
                 issue_type="block_unavailable",
                 severity=SEVERITY_INFO,
+                # Route, vehicle, when (handoff 0032); the schema-level
+                # cause (block_id NULL in canonical.trips) stays in the
+                # description.
                 title=(
-                    f"No block_id for vehicle {vehicle_id} on "
-                    f"{day.isoformat()}: per-trip VRH fallback "
-                    f"({len(day_groups)} trip(s))"
+                    f"{subject_phrase(route_names(day_positions), vehicle_id, vehicle_ref.label)}: "
+                    f"no block in the schedule on {day_phrase(day)} "
+                    f"({len(day_groups)} trip(s) counted per-trip)"
                 ),
                 description=(
                     f"{len(trip_ids)} trip(s) run by vehicle {vehicle_id} on "
@@ -268,7 +289,9 @@ def _block_unavailable_infos(groups: tuple[BlockGroup, ...]) -> tuple[Finding, .
                     f"as raw identifiers."
                 ),
                 source_record_ids=record_ids,
-                subject=SubjectRef(kind=SUBJECT_TRIPS, ids=trip_ids),
+                subject=SubjectRef(
+                    kind=SUBJECT_TRIPS, ids=trip_ids, vehicle=vehicle_ref
+                ),
             )
         )
     return tuple(infos)
@@ -318,15 +341,22 @@ def apply_block_gap_policy(
             continue
         for pos in pts_all:
             excluded_record_ids.setdefault(pos.source_record_id, None)
-        largest = max(delta_s for _, _, _, delta_s in gaps)
+        _, largest_prev, largest_curr, largest = max(
+            gaps, key=lambda g: g[3]
+        )
         first_trip, first_prev, first_curr, first_delta = gaps[0]
+        vehicle_ref = group_vehicle_ref(group.vehicle_id, pts_all)
         warnings.append(
             Finding(
                 issue_type="telemetry_gap_excluded",
                 severity=SEVERITY_WARNING,
+                # Route, vehicle, when — the order a dispatcher scans
+                # (handoff 0032); the largest gap is the headline, the
+                # exact seconds and full ids stay in the description.
                 title=(
-                    f"Group excluded over telemetry gap of {largest:.0f}s: "
-                    f"{group.label}"
+                    f"{subject_phrase(route_names(pts_all), group.vehicle_id, vehicle_ref.label)}: "
+                    f"{duration_phrase(largest)} telemetry silence "
+                    f"({window_phrase(largest_prev.time, largest_curr.time)})"
                 ),
                 description=(
                     f"VRH group ({group.label}, {len(group.trip_ids)} trip(s)) "
@@ -345,7 +375,11 @@ def apply_block_gap_policy(
                     f"data, not as raw identifiers in this sentence."
                 ),
                 source_record_ids=tuple(p.source_record_id for p in pts_all),
-                subject=SubjectRef(kind=SUBJECT_TRIPS, ids=group.trip_ids),
+                subject=SubjectRef(
+                    kind=SUBJECT_TRIPS,
+                    ids=group.trip_ids,
+                    vehicle=vehicle_ref,
+                ),
             )
         )
 
@@ -487,13 +521,18 @@ def excised_group_seconds(
         last, first = pts_n[-1], pts_n1[0]
         delta_s = (first.time - last.time).total_seconds()
         if delta_s > layover_max_seconds:
+            bounding = pts_n + pts_n1
+            vehicle_ref = group_vehicle_ref(group.vehicle_id, group.positions)
             findings.append(
                 Finding(
                     issue_type="layover_exceeds_max",
                     severity=SEVERITY_WARNING,
+                    # Route, vehicle, when (handoff 0032); exact seconds
+                    # and full ids stay in the description.
                     title=(
-                        f"Layover of {delta_s:.0f}s exceeds "
-                        f"layover_max_seconds in {group.label}"
+                        f"{subject_phrase(route_names(bounding), group.vehicle_id, vehicle_ref.label)}: "
+                        f"{duration_phrase(delta_s)} layover not counted "
+                        f"({window_phrase(last.time, first.time)})"
                     ),
                     description=(
                         f"Inter-trip interval between trip {trip_n!r} and "
@@ -509,9 +548,12 @@ def excised_group_seconds(
                         f"configurable, not an FTA-published number."
                     ),
                     source_record_ids=(last.source_record_id, first.source_record_id),
-                    # The two trips bounding the interval (handoff 0029).
+                    # The two trips bounding the interval (handoff 0029),
+                    # plus the vehicle with its fleet label (handoff 0032).
                     subject=SubjectRef(
-                        kind=SUBJECT_TRIPS, ids=(trip_n, trip_n1)
+                        kind=SUBJECT_TRIPS,
+                        ids=(trip_n, trip_n1),
+                        vehicle=vehicle_ref,
                     ),
                 )
             )
@@ -592,21 +634,23 @@ def apply_trip_excision_policy(
             flags.append(False)
             for pos in pts:
                 excluded_record_ids.setdefault(pos.source_record_id, None)
-            largest = max(delta_s for _, _, delta_s in gaps)
-            first_prev, first_curr, first_delta = gaps[0]
-            where = (
-                f"vehicle {group.vehicle_id} block {group.block_id} "
-                f"trip {trip_id}"
-                if group.block_id is not None
-                else f"vehicle {group.vehicle_id} trip {trip_id}"
+            largest_prev, largest_curr, largest = max(
+                gaps, key=lambda g: g[2]
             )
+            first_prev, first_curr, first_delta = gaps[0]
+            vehicle_ref = group_vehicle_ref(group.vehicle_id, pts)
             warnings.append(
                 Finding(
                     issue_type="telemetry_gap_excluded",
                     severity=SEVERITY_WARNING,
+                    # Route, vehicle, when — the order a dispatcher scans
+                    # (handoff 0032); the largest gap is the headline, the
+                    # exact seconds, trip and block ids stay in the
+                    # description and the subject.
                     title=(
-                        f"Trip excised over telemetry gap of {largest:.0f}s: "
-                        f"{where}"
+                        f"{subject_phrase(route_names(pts), group.vehicle_id, vehicle_ref.label)}: "
+                        f"{duration_phrase(largest)} telemetry silence "
+                        f"({window_phrase(largest_prev.time, largest_curr.time)})"
                     ),
                     description=(
                         f"Trip {trip_id!r} of {group.label} contains "
@@ -626,8 +670,11 @@ def apply_trip_excision_policy(
                     ),
                     source_record_ids=tuple(p.source_record_id for p in pts),
                     # The excised trip, as structured data: /dq can then name
-                    # its block, route and time of day (handoff 0029).
-                    subject=SubjectRef(kind=SUBJECT_TRIPS, ids=(trip_id,)),
+                    # its block, route and time of day (handoff 0029) — and
+                    # the vehicle with its fleet label (handoff 0032).
+                    subject=SubjectRef(
+                        kind=SUBJECT_TRIPS, ids=(trip_id,), vehicle=vehicle_ref
+                    ),
                 )
             )
         clean_flags = tuple(flags)

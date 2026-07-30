@@ -108,6 +108,7 @@ from headway_calc.attestation import (
     governing_attestation,
 )
 from headway_calc.distance import MILES_QUANTUM, haversine_miles, miles_to_decimal
+from headway_calc._vocabulary import short_id
 from headway_calc.types import (
     SEVERITY_BLOCKING,
     SEVERITY_INFO,
@@ -417,8 +418,11 @@ def compute_pmt(
                 Finding(
                     issue_type="pmt_invalid_trip_excluded",
                     severity=SEVERITY_WARNING,
+                    # Shortened id in the title (handoff 0032); the
+                    # full id stays in the description and the subject.
                     title=(
-                        f"Trip {trip_id} excluded from PMT: {reasons[0]}"
+                        f"Trip {short_id(trip_id)} excluded from PMT: "
+                        f"{reasons[0]}"
                     ),
                     description=(
                         f"Trip {trip_id!r} failed the pmt_v0 validity checks "

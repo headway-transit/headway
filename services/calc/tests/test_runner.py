@@ -310,7 +310,12 @@ def test_gapped_period_below_default_coverage_blocks_and_routes_findings(gapped_
             assert issue_type == "block_unavailable"
         elif severity == "warning":
             assert issue_type == "telemetry_gap_excluded"
-            assert "veh-202" in title and "trip-C" in title
+            # Route, vehicle, when (handoff 0032): the title leads with the
+            # vehicle handle (no label in the fixture, short id kept whole);
+            # the trip id stays in the description — the footnote, not the
+            # headline.
+            assert "veh-202" in title and "telemetry silence" in title
+            assert "trip-C" in description
             # The ENTIRE excluded group's records, per handoff 0002 rule 5.
             assert record_ids == ["rec-c-00", "rec-c-01", "rec-c-02", "rec-c-03"]
         else:

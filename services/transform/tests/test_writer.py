@@ -127,6 +127,7 @@ def test_insert_vehicle_positions_conflict_do_nothing_on_unique_key(
         speed_mps=None,
         odometer_m=None,
         source_record_id="cd" * 32,
+        vehicle_label="5335",
     )
     DbWriter(fake_connection).insert_vehicle_positions([row])
 
@@ -134,7 +135,8 @@ def test_insert_vehicle_positions_conflict_do_nothing_on_unique_key(
     assert "INSERT INTO canonical.vehicle_positions" in sql
     assert 'ON CONFLICT (vehicle_id, "time", source_record_id) DO NOTHING' in sql
     assert params == (
-        TIME, "bus-1", "T1", "R1", 44.9, -93.2, None, None, None, "cd" * 32
+        TIME, "bus-1", "T1", "R1", 44.9, -93.2, None, None, None, "cd" * 32,
+        "5335",
     )
 
 
@@ -358,3 +360,63 @@ def test_insert_trip_update_trip_level_row_binds_nulls(fake_connection) -> None:
         TIME, "T-gone", None, None, None, None, None, None, None, None,
         None, None, "CANCELED", None, "cd" * 32,
     )
+
+
+def test_multi_row_methods_issue_one_executemany_per_batch() -> None:
+    """The handoff-0032 stall lesson: a GTFS static message at MBTA scale
+    must not cost one DB round trip per row. Every multi-row method issues
+    exactly ONE executemany per call (and none at all for an empty batch)."""
+
+    class BatchCursor:
+        def __init__(self, log):
+            self._log = log
+
+        def execute(self, sql, params=()):
+            self._log.append(("execute", sql, params))
+
+        def executemany(self, sql, params_seq):
+            self._log.append(("executemany", sql, list(params_seq)))
+
+        def close(self):
+            pass
+
+    class BatchConnection:
+        def __init__(self):
+            self.log = []
+
+        def cursor(self):
+            return BatchCursor(self.log)
+
+        def commit(self):
+            pass
+
+        def rollback(self):
+            pass
+
+    conn = BatchConnection()
+    writer = DbWriter(conn)
+    rows = [
+        CanonicalVehiclePosition(
+            time=TIME,
+            vehicle_id=f"bus-{i}",
+            trip_id=None,
+            route_id=None,
+            latitude=44.9,
+            longitude=-93.2,
+            bearing=None,
+            speed_mps=None,
+            odometer_m=None,
+            source_record_id="cd" * 32,
+            vehicle_label=None,
+        )
+        for i in range(3)
+    ]
+    writer.insert_vehicle_positions(rows)
+
+    [(kind, _sql, params_seq)] = conn.log
+    assert kind == "executemany"
+    assert len(params_seq) == 3
+
+    conn.log.clear()
+    writer.insert_vehicle_positions([])
+    assert conn.log == []  # an empty batch executes nothing at all

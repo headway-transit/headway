@@ -28,6 +28,7 @@ class KafkaMessageSource:
         bootstrap_servers: str,
         group_id: str = "headway-transform",
         poll_timeout_ms: int = 1000,
+        max_poll_interval_ms: int = 1_800_000,
     ) -> None:
         # Imported lazily so unit tests don't need the kafka extra installed.
         from kafka import KafkaConsumer  # type: ignore[import-not-found]
@@ -39,6 +40,16 @@ class KafkaMessageSource:
             group_id=group_id,
             enable_auto_commit=False,
             auto_offset_reset="earliest",
+            # A whole GTFS static feed is ONE message and one DB transaction
+            # (raw record + every canonical row + lineage). At MBTA scale
+            # that legitimately takes minutes, and the kafka-python default
+            # deadline of 5 minutes expelled the consumer from the group
+            # mid-message: the offset commit then failed, the message
+            # redelivered, and the loop repeated forever — the live pipeline
+            # stalled exactly this way from 2026-07-22 to 2026-07-30
+            # (handoff 0032 evidence). 30 minutes bounds the largest
+            # single-message unit of work we ship, not a hoped-for average.
+            max_poll_interval_ms=max_poll_interval_ms,
         )
         self._buffer: list[tuple[str, Optional[bytes], bytes]] = []
 

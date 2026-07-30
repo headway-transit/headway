@@ -41,6 +41,18 @@ matching the handoff-0001 schema exactly:
 Transaction boundaries belong to the caller (the consumer commits per
 message); this class only executes statements.
 
+Batching (handoff 0032 evidence, 2026-07-30): every multi-row method issues
+ONE ``cursor.executemany`` per call instead of one ``execute`` round trip
+per row. Semantics are unchanged — under psycopg 3 executemany runs the
+same statement once per parameter set (pipelined), so ON CONFLICT clauses
+behave exactly as before and a failure on any row still aborts the caller's
+transaction — but the round trips collapse. This is not an optimization
+nicety: a whole GTFS static feed is one message, and at MBTA scale
+(3.2M stop_times + a lineage edge per entity) the per-row round trips made
+one message outlast Kafka's poll deadline, expelling the consumer and
+stalling the LIVE pipeline from 2026-07-22 to 2026-07-30 (see
+kafka_source.py).
+
 No tenant_id anywhere (ADR-0004).
 """
 
@@ -174,8 +186,9 @@ ON CONFLICT (trip_id, feed_timestamp, source_record_id,
 INSERT_VEHICLE_POSITION_SQL = """
 INSERT INTO canonical.vehicle_positions
     ("time", vehicle_id, trip_id, route_id,
-     latitude, longitude, bearing, speed_mps, odometer_m, source_record_id)
-VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+     latitude, longitude, bearing, speed_mps, odometer_m, source_record_id,
+     vehicle_label)
+VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
 ON CONFLICT (vehicle_id, "time", source_record_id) DO NOTHING
 """.strip()
 
@@ -249,6 +262,20 @@ class DbWriter:
             if close is not None:
                 close()
 
+    def _execute_many(self, sql: str, rows: list[tuple]) -> None:
+        """One executemany per batch — never one round trip per row (see the
+        module docstring: per-row round trips stalled the live pipeline).
+        An empty batch executes nothing at all."""
+        if not rows:
+            return
+        cursor = self.connection.cursor()
+        try:
+            cursor.executemany(sql, rows)
+        finally:
+            close = getattr(cursor, "close", None)
+            if close is not None:
+                close()
+
     def insert_raw_record(self, envelope: Envelope) -> None:
         """Land the raw.records registry row for a validated envelope."""
         payload_ref = (
@@ -271,44 +298,50 @@ class DbWriter:
         )
 
     def upsert_routes(self, routes: Iterable[CanonicalRoute]) -> None:
-        for route in routes:
-            self._execute(
-                UPSERT_ROUTE_SQL,
-                (route.route_id, route.short_name, route.long_name, route.mode),
-            )
+        self._execute_many(
+            UPSERT_ROUTE_SQL,
+            [
+                (route.route_id, route.short_name, route.long_name, route.mode)
+                for route in routes
+            ],
+        )
 
     def upsert_trips(self, trips: Iterable[CanonicalTrip]) -> None:
-        for trip in trips:
-            self._execute(
-                UPSERT_TRIP_SQL,
+        self._execute_many(
+            UPSERT_TRIP_SQL,
+            [
                 (
                     trip.trip_id,
                     trip.route_id,
                     trip.service_id,
                     trip.direction_id,
                     trip.block_id,
-                ),
-            )
+                )
+                for trip in trips
+            ],
+        )
 
     def upsert_stops(self, stops: Iterable[CanonicalStop]) -> None:
-        for stop in stops:
-            self._execute(
-                UPSERT_STOP_SQL,
+        self._execute_many(
+            UPSERT_STOP_SQL,
+            [
                 (
                     stop.stop_id,
                     stop.name,
                     stop.latitude,
                     stop.longitude,
                     stop.stop_code,
-                ),
-            )
+                )
+                for stop in stops
+            ],
+        )
 
     def upsert_service_calendars(
         self, calendars: Iterable[CanonicalServiceCalendar]
     ) -> None:
-        for calendar in calendars:
-            self._execute(
-                UPSERT_SERVICE_CALENDAR_SQL,
+        self._execute_many(
+            UPSERT_SERVICE_CALENDAR_SQL,
+            [
                 (
                     calendar.service_id,
                     calendar.monday,
@@ -320,22 +353,26 @@ class DbWriter:
                     calendar.sunday,
                     calendar.start_date,
                     calendar.end_date,
-                ),
-            )
+                )
+                for calendar in calendars
+            ],
+        )
 
     def upsert_service_calendar_dates(
         self, rows: Iterable[CanonicalServiceCalendarDate]
     ) -> None:
-        for row in rows:
-            self._execute(
-                UPSERT_SERVICE_CALENDAR_DATE_SQL,
-                (row.service_id, row.service_date, row.exception_type),
-            )
+        self._execute_many(
+            UPSERT_SERVICE_CALENDAR_DATE_SQL,
+            [
+                (row.service_id, row.service_date, row.exception_type)
+                for row in rows
+            ],
+        )
 
     def upsert_stop_times(self, rows: Iterable[CanonicalStopTime]) -> None:
-        for row in rows:
-            self._execute(
-                UPSERT_STOP_TIME_SQL,
+        self._execute_many(
+            UPSERT_STOP_TIME_SQL,
+            [
                 (
                     row.trip_id,
                     row.stop_id,
@@ -343,20 +380,24 @@ class DbWriter:
                     row.arrival_seconds,
                     row.departure_seconds,
                     row.shape_dist_traveled,
-                ),
-            )
+                )
+                for row in rows
+            ],
+        )
 
     def upsert_agencies(self, agencies: Iterable[CanonicalAgency]) -> None:
-        for agency in agencies:
-            self._execute(
-                UPSERT_AGENCY_SQL,
-                (agency.agency_id, agency.name, agency.timezone),
-            )
+        self._execute_many(
+            UPSERT_AGENCY_SQL,
+            [
+                (agency.agency_id, agency.name, agency.timezone)
+                for agency in agencies
+            ],
+        )
 
     def insert_trip_updates(self, rows: Iterable[CanonicalTripUpdate]) -> None:
-        for row in rows:
-            self._execute(
-                INSERT_TRIP_UPDATE_SQL,
+        self._execute_many(
+            INSERT_TRIP_UPDATE_SQL,
+            [
                 (
                     row.feed_timestamp,
                     row.trip_id,
@@ -373,15 +414,17 @@ class DbWriter:
                     row.trip_schedule_relationship,
                     row.stop_schedule_relationship,
                     row.source_record_id,
-                ),
-            )
+                )
+                for row in rows
+            ],
+        )
 
     def insert_vehicle_positions(
         self, rows: Iterable[CanonicalVehiclePosition]
     ) -> None:
-        for row in rows:
-            self._execute(
-                INSERT_VEHICLE_POSITION_SQL,
+        self._execute_many(
+            INSERT_VEHICLE_POSITION_SQL,
+            [
                 (
                     row.time,
                     row.vehicle_id,
@@ -393,15 +436,18 @@ class DbWriter:
                     row.speed_mps,
                     row.odometer_m,
                     row.source_record_id,
-                ),
-            )
+                    row.vehicle_label,
+                )
+                for row in rows
+            ],
+        )
 
     def insert_passenger_events(
         self, rows: Iterable[CanonicalPassengerEvent]
     ) -> None:
-        for row in rows:
-            self._execute(
-                INSERT_PASSENGER_EVENT_SQL,
+        self._execute_many(
+            INSERT_PASSENGER_EVENT_SQL,
+            [
                 (
                     row.event_timestamp,
                     row.service_date,
@@ -415,13 +461,15 @@ class DbWriter:
                     row.source_record_id,
                     row.vendor_trip_ref,
                     row.trip_resolution,
-                ),
-            )
+                )
+                for row in rows
+            ],
+        )
 
     def insert_dr_trips(self, rows: Iterable[CanonicalDrTrip]) -> None:
-        for row in rows:
-            self._execute(
-                INSERT_DR_TRIP_SQL,
+        self._execute_many(
+            INSERT_DR_TRIP_SQL,
+            [
                 (
                     row.pickup_timestamp,
                     row.service_date,
@@ -450,15 +498,17 @@ class DbWriter:
                     row.dispatching_point_id,
                     row.source,
                     row.source_record_id,
-                ),
-            )
+                )
+                for row in rows
+            ],
+        )
 
     def insert_telematics_days(
         self, rows: Iterable[CanonicalTelematicsDay]
     ) -> None:
-        for row in rows:
-            self._execute(
-                INSERT_TELEMATICS_DAY_SQL,
+        self._execute_many(
+            INSERT_TELEMATICS_DAY_SQL,
+            [
                 (
                     row.window_start,
                     row.window_end,
@@ -479,13 +529,15 @@ class DbWriter:
                     row.polled_at,
                     row.source,
                     row.source_record_id,
-                ),
-            )
+                )
+                for row in rows
+            ],
+        )
 
     def insert_lineage_edges(self, edges: Iterable[LineageEdge]) -> None:
-        for edge in edges:
-            self._execute(
-                INSERT_LINEAGE_EDGE_SQL,
+        self._execute_many(
+            INSERT_LINEAGE_EDGE_SQL,
+            [
                 (
                     edge.output_kind,
                     edge.output_id,
@@ -493,13 +545,15 @@ class DbWriter:
                     edge.transform_version,
                     edge.input_kind,
                     edge.input_id,
-                ),
-            )
+                )
+                for edge in edges
+            ],
+        )
 
     def insert_dq_issues(self, findings: Iterable[DQFinding]) -> None:
-        for finding in findings:
-            self._execute(
-                INSERT_DQ_ISSUE_SQL,
+        self._execute_many(
+            INSERT_DQ_ISSUE_SQL,
+            [
                 (
                     finding.issue_type,
                     finding.severity,
@@ -507,5 +561,7 @@ class DbWriter:
                     finding.description,
                     finding.source_record_ids,
                     finding.transform_dedupe_key(),
-                ),
-            )
+                )
+                for finding in findings
+            ],
+        )

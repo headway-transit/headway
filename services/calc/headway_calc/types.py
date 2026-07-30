@@ -45,6 +45,16 @@ class VehiclePosition:
     trips→routes by the reader — handoff 0009); None when the position is
     unassigned or the trip/route is unknown, in which case mode-scoped
     computations bucket it as 'unknown' (never dropped, never guessed).
+    ``vehicle_label`` (handoff 0032, migration 0037) is the feed's
+    VehicleDescriptor.label verbatim — the fleet number dispatch actually
+    uses; None when the feed carries none (a label is never invented, and
+    finding titles then fall back to a shortened vehicle_id).
+    ``route_short_name`` is the trip's route short name
+    (canonical.routes.short_name, joined trips→routes by the reader —
+    handoff 0032); None when the position is unassigned or the trip/route
+    is unknown or unnamed, in which case finding titles simply omit the
+    route. Both default None so every pre-0032 constructor (and golden)
+    builds the identical value.
     """
 
     time: datetime
@@ -55,6 +65,8 @@ class VehiclePosition:
     source_record_id: str
     block_id: str | None = None
     mode: str | None = None
+    vehicle_label: str | None = None
+    route_short_name: str | None = None
 
     def __post_init__(self) -> None:
         if self.time.tzinfo is None or self.time.utcoffset() is None:
@@ -483,6 +495,28 @@ SUBJECT_KINDS = (SUBJECT_TRIPS,)
 
 
 @dataclass(frozen=True)
+class VehicleRef:
+    """The VEHICLE a finding concerns — id plus the label dispatch uses
+    (handoff 0032).
+
+    The operational subject of a telemetry-gap finding is the vehicle, not
+    its position rows, so this is a lightweight reference rather than a
+    subject kind: ``vehicle_id`` is the feed's identifier (often opaque),
+    ``label`` is the feed's VehicleDescriptor.label — the fleet number a
+    dispatcher scans for — or None when the feed carries none. The calc
+    stays pure: the label travels WITH the input rows (VehiclePosition
+    .vehicle_label, read from canonical.vehicle_positions), so emitting it
+    here queries nothing and invents nothing. The persistence-time resolver
+    (headway_calc.subjects) freezes it into dq.issues.subject_context so
+    the UI can group gap findings by route/vehicle exactly as handoff 0029
+    groups missing trips by block.
+    """
+
+    vehicle_id: str
+    label: str | None = None
+
+
+@dataclass(frozen=True)
 class SubjectRef:
     """WHAT a finding is about, as structured data instead of prose (handoff
     0029).
@@ -504,10 +538,19 @@ class SubjectRef:
     with no way to recover the rest. ``ids`` is COMPLETE — every affected id,
     never truncated — because truncation is a presentation decision and this
     is not the presentation layer.
+
+    ``vehicle`` (handoff 0032) names the vehicle the finding concerns —
+    id plus the fleet label when the feed broadcast one — for the finding
+    families that are per-vehicle (telemetry gaps, layovers, block
+    fallbacks). None for findings that are not about one vehicle (a missing
+    trip has no vehicle by definition). Not a new subject KIND: the ids
+    still name canonical.trips rows and resolve exactly as before; the
+    vehicle rides alongside into the frozen context.
     """
 
     kind: str
     ids: tuple[str, ...] = field(default_factory=tuple)
+    vehicle: VehicleRef | None = None
 
     def __post_init__(self) -> None:
         if self.kind not in SUBJECT_KINDS:

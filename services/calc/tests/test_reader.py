@@ -41,6 +41,8 @@ def _sample_rows():
             "rec-a-00",
             "blk-1",
             "bus",  # canonical.routes.mode joined via trips (handoff 0009)
+            "5335",  # vehicle_label, migration 0037 (handoff 0032)
+            "42",  # canonical.routes.short_name joined via trips (handoff 0032)
         ),
         (
             datetime(2026, 1, 15, 12, 1, tzinfo=timezone.utc),
@@ -51,6 +53,8 @@ def _sample_rows():
             "rec-x-00",
             None,  # LEFT JOIN: no trip, no block — NULL, never a dropped row
             None,  # LEFT JOIN: no trip, no route, no mode — NULL, never guessed
+            None,  # a feed without labels stores NULL — never an invented name
+            None,  # no trip, no route, no short name — NULL, never guessed
         ),
     ]
 
@@ -69,9 +73,13 @@ def test_reader_maps_rows_to_dataclasses():
     assert first.source_record_id == "rec-a-00"
     assert first.block_id == "blk-1"  # joined from canonical.trips
     assert first.mode == "bus"  # joined from canonical.routes (handoff 0009)
+    assert first.vehicle_label == "5335"  # migration 0037 (handoff 0032)
+    assert first.route_short_name == "42"  # joined from canonical.routes
     assert positions[1].trip_id is None  # None passes through untouched
     assert positions[1].block_id is None
     assert positions[1].mode is None  # NULL mode stays None, never guessed
+    assert positions[1].vehicle_label is None  # absent stays absent
+    assert positions[1].route_short_name is None
 
 
 def test_reader_sql_columns_join_and_order_match_handoffs():
@@ -215,3 +223,42 @@ def test_reader_roundtrips_golden_fixture(golden_fixture):
             key=lambda p: (p.vehicle_id, p.time, p.source_record_id),
         )
     ]
+
+
+def test_pre_0037_database_falls_back_to_the_label_free_select():
+    """A vocabulary feature must never stop a calculation from reading its
+    inputs: on a database without canonical.vehicle_positions.vehicle_label
+    (SQLSTATE 42703) the reader rolls back and re-reads without the column —
+    labels are then honestly None and titles fall back to the shortened
+    vehicle_id."""
+    rows = [
+        (
+            datetime(2026, 1, 15, 12, 0, tzinfo=timezone.utc),
+            "veh-101",
+            "trip-A",
+            40.0,
+            -75.0,
+            "rec-a-00",
+            "blk-1",
+            "bus",
+            None,  # the fallback SELECT binds NULL for vehicle_label
+            "42",
+        ),
+    ]
+    conn = RecordingConnection(
+        position_rows=rows, vehicle_label_column_missing=True
+    )
+    positions = load_vehicle_positions(conn, PERIOD_START, PERIOD_END)
+
+    # The failed 0037 statement was rolled back, then the fallback ran.
+    assert conn.rollback_count == 1
+    selects = conn.statements_matching("FROM canonical.vehicle_positions")
+    assert len(selects) == 2
+    assert "p.vehicle_label" in selects[0][0]
+    assert "p.vehicle_label" not in selects[1][0]
+
+    # Every other field still loads; the label is honestly absent.
+    (position,) = positions
+    assert position.vehicle_id == "veh-101"
+    assert position.vehicle_label is None
+    assert position.route_short_name == "42"

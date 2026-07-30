@@ -13,7 +13,13 @@ are `Decimal`, never float.
 ## Contents
 
 - `headway_calc/types.py` — frozen dataclasses: `VehiclePosition` (now
-  carrying the trip's GTFS `block_id`, joined by the reader),
+  carrying the trip's GTFS `block_id`, joined by the reader, and — handoff
+  0032 — the feed's `vehicle_label` fleet number, migration 0037, plus the
+  route's `short_name`: gap-family finding titles lead with "Route 42,
+  vehicle 5335", falling back to the shortened id when a part is unknown,
+  never inventing a name; `headway_calc/_vocabulary.py` renders those
+  titles, and `SubjectRef.vehicle` carries the vehicle id + label into the
+  frozen `dq.issues.subject_context`),
   `PassengerEvent` (canonical.passenger_events per handoff 0005 — TIDES
   vocabulary; `event_count` NULL preserved as None, never coalesced),
   `CalcResult`
@@ -87,7 +93,9 @@ are `Decimal`, never float.
   (`canonical.vehicle_positions` ordered by `(vehicle_id, time,
   source_record_id)`, with `canonical.trips.block_id` LEFT JOINed onto every
   position — handoff 0003 / migration 0011; NULL when unassigned/absent,
-  never a dropped row), `load_passenger_events`
+  never a dropped row; plus `vehicle_label` / `routes.short_name` — handoff
+  0032 / migration 0037, with a pre-0037 fallback SELECT so an unmigrated
+  database still computes, labels honestly None), `load_passenger_events`
   (`canonical.passenger_events` per handoff 0005 / migration 0012, half-open
   on `event_timestamp`, ordered by `(event_timestamp, passenger_event_id,
   source_record_id)`; NULLs pass through) and `load_operated_trip_ids`

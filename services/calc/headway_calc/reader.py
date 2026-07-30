@@ -53,17 +53,54 @@ from headway_calc.types import (
 )
 
 #: Column names and order per handoff 0001 (canonical.vehicle_positions) plus
-#: canonical.trips.block_id (handoff 0003, migration 0011) and
-#: canonical.routes.mode (handoff 0009) via LEFT JOINs.
+#: canonical.trips.block_id (handoff 0003, migration 0011),
+#: canonical.routes.mode (handoff 0009), and — handoff 0032 — the vehicle's
+#: feed-broadcast label (canonical.vehicle_positions.vehicle_label,
+#: migration 0037) and the trip's route short name
+#: (canonical.routes.short_name), all via LEFT JOINs: gap-family finding
+#: titles lead with route and fleet number, and the calc can only format
+#: what it is GIVEN.
 _SELECT_POSITIONS_SQL = (
     "SELECT p.time, p.vehicle_id, p.trip_id, p.latitude, p.longitude, "
-    "p.source_record_id, t.block_id, r.mode "
+    "p.source_record_id, t.block_id, r.mode, p.vehicle_label, r.short_name "
     "FROM canonical.vehicle_positions AS p "
     "LEFT JOIN canonical.trips AS t ON t.trip_id = p.trip_id "
     "LEFT JOIN canonical.routes AS r ON r.route_id = t.route_id "
     "WHERE p.time >= %s AND p.time < %s "
     "ORDER BY p.vehicle_id, p.time, p.source_record_id"
 )
+
+#: The pre-migration-0037 fallback: identical, minus p.vehicle_label (the
+#: one 0037-added column; canonical.routes.short_name has existed since
+#: migration 0003). A vocabulary feature must never be the reason a
+#: calculation cannot read its inputs on a not-yet-migrated database —
+#: labels are then honestly unloadable (None), and titles fall back to the
+#: shortened vehicle_id.
+_SELECT_POSITIONS_PRE_0037_SQL = (
+    "SELECT p.time, p.vehicle_id, p.trip_id, p.latitude, p.longitude, "
+    "p.source_record_id, t.block_id, r.mode, NULL, r.short_name "
+    "FROM canonical.vehicle_positions AS p "
+    "LEFT JOIN canonical.trips AS t ON t.trip_id = p.trip_id "
+    "LEFT JOIN canonical.routes AS r ON r.route_id = t.route_id "
+    "WHERE p.time >= %s AND p.time < %s "
+    "ORDER BY p.vehicle_id, p.time, p.source_record_id"
+)
+
+#: SQLSTATE for "column does not exist" — the pre-0037 signature.
+_UNDEFINED_COLUMN_SQLSTATE = "42703"
+
+
+def _is_undefined_column(exc: BaseException) -> bool:
+    """Duck-typed SQLSTATE 42703 check — driver-free (stdlib purity), the
+    settings._is_undefined_table pattern for a missing COLUMN."""
+    candidates = (
+        getattr(exc, "sqlstate", None),
+        getattr(exc, "pgcode", None),
+        getattr(getattr(exc, "diag", None), "sqlstate", None),
+    )
+    if _UNDEFINED_COLUMN_SQLSTATE in candidates:
+        return True
+    return type(exc).__name__ == "UndefinedColumn"
 
 
 #: Column names and order per the handoff-0005 canonical.passenger_events
@@ -191,13 +228,33 @@ def load_vehicle_positions(
 
     Refuses (ValueError) an empty or inverted period: an accidental
     zero-length period would silently compute over nothing.
+
+    A database predating migration 0037 (column vehicle_label does not
+    exist, SQLSTATE 42703) is re-read with the pre-0037 SELECT after
+    rolling back the failed statement and logging a WARNING: labels are
+    then honestly unloadable (every position carries vehicle_label=None,
+    titles fall back to the shortened vehicle_id) — a vocabulary feature
+    must never stop a calculation from reading its inputs. Any other
+    database error propagates unchanged.
     """
     _refuse_bad_period(period_start, period_end)
+    bounds = (_utc_midnight(period_start), _utc_midnight(period_end))
     cur = conn.cursor()
-    cur.execute(
-        _SELECT_POSITIONS_SQL,
-        (_utc_midnight(period_start), _utc_midnight(period_end)),
-    )
+    try:
+        cur.execute(_SELECT_POSITIONS_SQL, bounds)
+    except Exception as exc:  # noqa: BLE001 — re-raised unless 42703
+        if not _is_undefined_column(exc):
+            raise
+        conn.rollback()
+        _logger.warning(
+            "canonical.vehicle_positions.vehicle_label does not exist "
+            "(pre-migration-0037 database): vehicle labels are not "
+            "loadable, so gap-family finding titles will fall back to the "
+            "shortened vehicle_id. Apply migration 0037 to store the "
+            "feed's fleet labels."
+        )
+        cur = conn.cursor()
+        cur.execute(_SELECT_POSITIONS_PRE_0037_SQL, bounds)
     return [
         VehiclePosition(
             time=row[0],
@@ -208,6 +265,8 @@ def load_vehicle_positions(
             source_record_id=row[5],
             block_id=row[6],
             mode=row[7],
+            vehicle_label=row[8],
+            route_short_name=row[9],
         )
         for row in cur.fetchall()
     ]

@@ -15,12 +15,15 @@ code cannot drift from the checked-in contract without failing loudly).
   against the actual contract file; invalid → typed `EnvelopeValidationError`
   (quarantined by the consumer, never dropped).
 - `headway_transform/gtfs_rt_positions.py` — `normalize_gtfs_rt_positions`
-  v0.1.0: base64 GTFS-Realtime FeedMessage → `CanonicalVehiclePosition` rows
+  v0.2.0: base64 GTFS-Realtime FeedMessage → `CanonicalVehiclePosition` rows
   + one `lineage.edges` row per canonical row
   (`output_id = '<vehicle_id>|<time RFC3339>|<record_id>'`) + `DQFinding`s
   for undecodable payloads / malformed entities. Event-time policy: entity
   timestamp, else header timestamp (noted as an info DQ finding), else the
-  entity is a DQ finding — a time is never guessed.
+  entity is a DQ finding — a time is never guessed. v0.2.0 (handoff 0032,
+  migration 0037) maps `VehicleDescriptor.label` verbatim into
+  `vehicle_label` — the fleet number dispatch actually uses; absent or
+  empty stores NULL, never an invented name.
 - `headway_transform/trip_updates.py` — `normalize_gtfs_rt_trip_updates`
   v0.1.0 (handoff 0014, migration 0025): base64 GTFS-Realtime FeedMessage →
   `CanonicalTripUpdate` rows — one per (TripUpdate, StopTimeUpdate), plus a

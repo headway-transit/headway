@@ -59,6 +59,7 @@ from headway_calc.attestation import (
     AttestationContext,
     governing_attestation,
 )
+from headway_calc._vocabulary import short_id
 from headway_calc.types import (
     SEVERITY_BLOCKING,
     SEVERITY_INFO,
@@ -167,9 +168,12 @@ def _null_count_warning(event: PassengerEvent) -> Finding:
     return Finding(
         issue_type="apc_null_count",
         severity=SEVERITY_WARNING,
+        # Ids in the title are shortened for scanning (handoff 0032);
+        # the full identifiers stay in the description below.
         title=(
-            f"NULL event_count on {role} event {event.passenger_event_id} "
-            f"(trip {event.trip_id})"
+            f"NULL event_count on {role} event "
+            f"{short_id(event.passenger_event_id)} "
+            f"(trip {short_id(event.trip_id) if event.trip_id else 'unassigned'})"
         ),
         description=(
             f"Passenger event {event.passenger_event_id!r} (trip_id="
@@ -338,8 +342,11 @@ def compute_upt(
                 Finding(
                     issue_type="apc_count_imbalance",
                     severity=SEVERITY_WARNING,
+                    # Shortened id in the title (handoff 0032); the
+                    # full id stays in the description and the subject.
                     title=(
-                        f"Boarding/alighting imbalance on trip {trip_id}: "
+                        f"Boarding/alighting imbalance on trip "
+                        f"{short_id(trip_id)}: "
                         f"{boardings} boarded vs {alightings} alighted"
                     ),
                     description=(
@@ -372,9 +379,11 @@ def compute_upt(
                     Finding(
                         issue_type="apc_negative_load",
                         severity=SEVERITY_WARNING,
+                        # Shortened id in the title (handoff 0032);
+                        # the full id stays in the description/subject.
                         title=(
-                            f"Passenger load drops below zero on trip {trip_id} "
-                            f"(load {load})"
+                            f"Passenger load drops below zero on trip "
+                            f"{short_id(trip_id)} (load {load})"
                         ),
                         description=(
                             f"Running the boarding/alighting events of trip "

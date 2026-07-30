@@ -366,9 +366,10 @@ def mr20_golden_expected() -> dict:
 def positions_to_rows(positions: list[VehiclePosition]) -> list[tuple]:
     """Render VehiclePositions as reader result rows (the handoff-0001
     canonical.vehicle_positions columns plus the trips.block_id join, handoff
-    0003, and the routes.mode join, handoff 0009), in the reader's SQL order
-    (vehicle_id, time, source_record_id) — the fake stands in for the
-    database, so it honors the ORDER BY."""
+    0003, the routes.mode join, handoff 0009, and — handoff 0032 — the
+    vehicle_label column, migration 0037, and the routes.short_name join),
+    in the reader's SQL order (vehicle_id, time, source_record_id) — the
+    fake stands in for the database, so it honors the ORDER BY."""
     ordered = sorted(positions, key=lambda p: (p.vehicle_id, p.time, p.source_record_id))
     return [
         (
@@ -380,6 +381,8 @@ def positions_to_rows(positions: list[VehiclePosition]) -> list[tuple]:
             p.source_record_id,
             p.block_id,
             p.mode,
+            p.vehicle_label,
+            p.route_short_name,
         )
         for p in ordered
     ]
@@ -493,6 +496,15 @@ class FakeUndefinedTable(Exception):
     sqlstate = "42P01"
 
 
+class FakeUndefinedColumn(Exception):
+    """Duck-types a driver's column-does-not-exist error (SQLSTATE 42703),
+    the way psycopg3 exposes it (an ``sqlstate`` attribute) — the
+    pre-migration-0037 signature the position reader falls back on
+    (handoff 0032)."""
+
+    sqlstate = "42703"
+
+
 class RecordingCursor:
     def __init__(self, conn: "RecordingConnection"):
         self._conn = conn
@@ -597,6 +609,17 @@ class RecordingCursor:
                 # derivation over canonical.vehicle_positions).
                 self._pending_all = list(conn.operated_mode_rows)
             else:
+                # The position SELECT (with or without p.vehicle_label —
+                # handoff 0032). A pre-0037 database is modeled by the
+                # missing flag: the 0037 SELECT raises 42703 and the reader
+                # must fall back to the label-free SELECT.
+                if (
+                    conn.vehicle_label_column_missing
+                    and "p.vehicle_label" in sql
+                ):
+                    raise FakeUndefinedColumn(
+                        'column p.vehicle_label does not exist'
+                    )
                 self._pending_all = list(conn.position_rows)
         elif "INSERT INTO dq.issues" in sql:
             if conn.fail_on == "dq.issues":
@@ -642,6 +665,7 @@ class RecordingConnection:
         service_day_overrides_table_missing: bool = False,
         trip_label_rows: list[tuple] | None = None,
         subject_context_column_missing: bool = False,
+        vehicle_label_column_missing: bool = False,
     ):
         self.position_rows = position_rows or []
         # The ops slice (handoff 0014): schedule + agency timezone reads.
@@ -685,6 +709,9 @@ class RecordingConnection:
         # Models a pre-0035 database (the dq.issues.subject_context column
         # does not exist yet).
         self.subject_context_column_missing = subject_context_column_missing
+        # Models a pre-0037 database (the canonical.vehicle_positions
+        # .vehicle_label column does not exist yet — handoff 0032).
+        self.vehicle_label_column_missing = vehicle_label_column_missing
         self.fail_on = fail_on
         self.executed: list[tuple[str, tuple | None]] = []
         # Each commit records how many statements were executed at that point,
