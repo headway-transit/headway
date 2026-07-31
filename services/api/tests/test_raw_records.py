@@ -9,6 +9,8 @@ named, and impossible to mistake for a pass.
 from __future__ import annotations
 
 import base64
+import dataclasses
+import datetime as dt
 import hashlib
 import io
 import json
@@ -829,3 +831,236 @@ class TestAudit:
             e for e in fake_db.audit_events
             if e["action"] == "raw_record_payload_preview"
         ] == []
+
+
+# ----------------------------------------------- durable landing (handoff 0036)
+
+
+def rescue_key(record) -> str:
+    """The deterministic key gtfsrt.ObjectKey / the backfill tool write to."""
+    return f"raw/gtfs_rt/{record['record_id']}.pb"
+
+
+class TestBase64ObjectStoreFallback:
+    """Handoff 0036 design point 5: a base64 row's bytes are resolved from
+    the object store at the DETERMINISTIC key first (re-hash on read), then
+    the bounded envelope-stream lookup, then the honest 410. The row itself
+    is never touched — legacy rows keep payload_encoding='base64' forever."""
+
+    def test_rescued_bytes_verify_from_the_object_store_without_a_broker_lookup(
+        self, client, fake_db, fake_envelope_stream, fake_store
+    ):
+        payload = gtfs_rt_frame()
+        record = seed_gtfs_rt(fake_db, fake_envelope_stream, payload=payload)
+        # The backfill landed the bytes at the derived key; the broker has
+        # since aged the message out entirely.
+        fake_store.objects[rescue_key(record)] = payload
+        fake_envelope_stream.messages.clear()
+
+        body = client.post(
+            f"/raw/records/{record['record_id']}/verify",
+            headers=auth_header(fake_db, "vera"),
+        ).json()
+        assert body["result"] == "match"
+        assert body["read_from"] == "object_store"
+        assert body["actual_digest"] == record["record_id"]
+        # No broker lookup happened at all — the store answered first.
+        assert fake_envelope_stream.lookups == []
+
+    def test_the_object_store_is_checked_before_the_broker(
+        self, client, fake_db, fake_envelope_stream, fake_store
+    ):
+        payload = gtfs_rt_frame()
+        record = seed_gtfs_rt(fake_db, fake_envelope_stream, payload=payload)
+        fake_store.objects[rescue_key(record)] = payload  # both hold the bytes
+
+        body = client.post(
+            f"/raw/records/{record['record_id']}/verify",
+            headers=auth_header(fake_db, "vera"),
+        ).json()
+        assert body["result"] == "match"
+        assert body["read_from"] == "object_store"
+        assert fake_envelope_stream.lookups == []
+
+    def test_rescued_preview_decodes_from_the_object_store(
+        self, client, fake_db, fake_envelope_stream, fake_store
+    ):
+        payload = gtfs_rt_frame(vehicles=2)
+        record = seed_gtfs_rt(fake_db, fake_envelope_stream, payload=payload)
+        fake_store.objects[rescue_key(record)] = payload
+        fake_envelope_stream.messages.clear()
+
+        response = client.get(
+            f"/raw/records/{record['record_id']}/payload",
+            headers=auth_header(fake_db, "vera"),
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["read_from"] == "object_store"
+        assert body["gtfs_realtime"]["decoded"] is True
+
+    def test_rescued_download_byte_fidelity(
+        self, client, fake_db, fake_envelope_stream, fake_store
+    ):
+        payload = gtfs_rt_frame()
+        record = seed_gtfs_rt(fake_db, fake_envelope_stream, payload=payload)
+        fake_store.objects[rescue_key(record)] = payload
+        fake_envelope_stream.messages.clear()
+
+        response = client.get(
+            f"/raw/records/{record['record_id']}/download",
+            headers=auth_header(fake_db, "stella"),
+        )
+        assert response.status_code == 200
+        assert response.content == payload
+        assert sha256(response.content) == record["record_id"]
+
+    def test_a_corrupt_object_at_the_derived_key_is_rehashed_and_never_served(
+        self, client, fake_db, fake_envelope_stream, fake_store
+    ):
+        """Re-hash on read: an object at the content-addressed key whose
+        bytes do NOT hash to the record id is not this record — the reader
+        skips it and the broker fallback serves the real bytes."""
+        payload = gtfs_rt_frame()
+        record = seed_gtfs_rt(fake_db, fake_envelope_stream, payload=payload)
+        fake_store.objects[rescue_key(record)] = payload + b"tampered"
+
+        body = client.post(
+            f"/raw/records/{record['record_id']}/verify",
+            headers=auth_header(fake_db, "vera"),
+        ).json()
+        assert body["result"] == "match"
+        assert body["read_from"] == "ingest_envelope_stream"
+        assert len(fake_envelope_stream.lookups) == 1
+
+    def test_corrupt_object_and_expired_broker_is_still_the_honest_410(
+        self, client, fake_db, fake_envelope_stream, fake_store
+    ):
+        payload = gtfs_rt_frame()
+        record = seed_gtfs_rt(fake_db, fake_envelope_stream, payload=payload)
+        fake_store.objects[rescue_key(record)] = b"not the record's bytes"
+        fake_envelope_stream.messages.clear()
+
+        response = client.post(
+            f"/raw/records/{record['record_id']}/verify",
+            headers=auth_header(fake_db, "vera"),
+        )
+        assert response.status_code == 410
+        body = response.json()
+        assert body["result"] == "unavailable"
+        assert body["reason"] == "not_retained"
+        assert body["dq_issue_id"] is None
+
+    def test_unrescued_and_expired_is_410_naming_both_places_checked(
+        self, client, fake_db, fake_envelope_stream, fake_store
+    ):
+        record = seed_gtfs_rt(fake_db, fake_envelope_stream)
+        fake_envelope_stream.messages.clear()
+
+        response = client.post(
+            f"/raw/records/{record['record_id']}/verify",
+            headers=auth_header(fake_db, "vera"),
+        )
+        assert response.status_code == 410
+        body = response.json()
+        assert body["reason"] == "not_retained"
+        assert "object store" in body["detail"]
+        assert "no longer retains" in body["detail"]
+        # Still deliberately NOT a finding (0035 ruling stands).
+        assert body["dq_issue_id"] is None
+        assert fake_db.dq_issues == {}
+
+    def test_rescued_bytes_serve_even_with_no_broker_configured(
+        self, fake_db, settings, fake_store, fake_producer,
+        fake_webhook_sender, test_signer, fake_calc_launcher
+    ):
+        """After backfill, an installation can answer for a legacy base64
+        record from the store alone — no KAFKA_BROKERS needed."""
+        from headway_api.app import create_app
+
+        payload = gtfs_rt_frame()
+        record = fake_db.add_raw_record(
+            record_id=sha256(payload),
+            source="gtfs_rt",
+            connector="headway-gtfs-rt",
+            content_type="application/x-protobuf",
+            payload_encoding="base64",
+            payload_ref=None,
+        )
+        fake_store.objects[rescue_key(record)] = payload
+        reader = raw_payloads.CompositeRawPayloadReader(
+            raw_payloads.ObjectStorePayloadReader(fake_store), None
+        )
+        application = create_app(
+            settings=settings,
+            db=fake_db,
+            object_store=fake_store,
+            producer=fake_producer,
+            webhook_sender=fake_webhook_sender,
+            calc_run_launcher=fake_calc_launcher,
+            raw_payload_reader=reader,
+        )
+        application.state.signer = test_signer
+        with TestClient(application) as client:
+            body = client.post(
+                f"/raw/records/{record['record_id']}/verify",
+                headers=auth_header(fake_db, "vera"),
+            ).json()
+        assert body["result"] == "match"
+        assert body["read_from"] == "object_store"
+
+    def test_store_only_installation_says_it_checked_the_store_when_bytes_are_gone(
+        self, fake_db, settings, fake_store, fake_producer,
+        fake_webhook_sender, test_signer, fake_calc_launcher
+    ):
+        from headway_api.app import create_app
+
+        record = fake_db.add_raw_record(
+            record_id="c" * 64,
+            source="gtfs_rt",
+            connector="headway-gtfs-rt",
+            content_type="application/x-protobuf",
+            payload_encoding="base64",
+            payload_ref=None,
+        )
+        reader = raw_payloads.CompositeRawPayloadReader(
+            raw_payloads.ObjectStorePayloadReader(fake_store), None
+        )
+        application = create_app(
+            settings=settings,
+            db=fake_db,
+            object_store=fake_store,
+            producer=fake_producer,
+            webhook_sender=fake_webhook_sender,
+            calc_run_launcher=fake_calc_launcher,
+            raw_payload_reader=reader,
+        )
+        application.state.signer = test_signer
+        with TestClient(application) as client:
+            response = client.post(
+                f"/raw/records/{record['record_id']}/verify",
+                headers=auth_header(fake_db, "vera"),
+            )
+        assert response.status_code == 410
+        assert "object store" in response.json()["detail"]
+
+    def test_derived_key_scheme_is_pinned(self):
+        record = raw_payloads.RawRecord(
+            record_id="a" * 64,
+            source="gtfs_rt",
+            connector="headway-gtfs-rt",
+            connector_version="0.2.0",
+            content_type="application/x-protobuf",
+            payload_encoding="base64",
+            payload_ref=None,
+            fetched_at=dt.datetime(2026, 7, 1, tzinfo=dt.timezone.utc),
+            landed_at=dt.datetime(2026, 7, 1, tzinfo=dt.timezone.utc),
+            parse_status="ok",
+            parse_error=None,
+        )
+        assert raw_payloads.derived_object_key(record) == (
+            "raw/gtfs_rt/" + "a" * 64 + ".pb"
+        )
+        # No scheme for other sources: never guess an address.
+        tides = dataclasses.replace(record, source="tides_simulated")
+        assert raw_payloads.derived_object_key(tides) is None

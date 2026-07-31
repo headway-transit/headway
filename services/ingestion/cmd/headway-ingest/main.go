@@ -83,7 +83,11 @@
 //	POLL_INTERVAL                  Go duration, default 30s (GTFS-RT polls AND drop-dir rescans;
 //	                               also the file-drop partial-copy settle time)
 //	AGENCY_ID                      optional envelope agency_id
-//	S3_ENDPOINT                    MinIO/S3 endpoint host:port (required with GTFS_STATIC_URL, TIDES_DROP_DIR or DR_DROP_DIR)
+//	S3_ENDPOINT                    MinIO/S3 endpoint host:port (required with ANY connector that
+//	                               lands payloads — GTFS_RT_*_URL, GTFS_STATIC_URL, TIDES_DROP_DIR,
+//	                               DR_DROP_DIR, VENDOR_DROP_DIR, SAMSARA_ENABLED, SQLSOURCE_ENABLED.
+//	                               GTFS-RT frames land at raw/gtfs_rt/<record_id>.pb BEFORE the
+//	                               envelope is produced — handoff 0036)
 //	S3_ACCESS_KEY, S3_SECRET_KEY   credentials (from the secret store; never logged)
 //	S3_BUCKET                      target bucket, default headway-raw
 //	S3_USE_SSL                     "true" to use TLS, default false (on-prem MinIO)
@@ -164,10 +168,22 @@ func run(log *slog.Logger) error {
 
 	var wg sync.WaitGroup
 	started := 0
+	// One store shared by all GTFS-RT pollers, built only when a feed is
+	// configured. S3_* is now REQUIRED with any GTFS_RT_*_URL (handoff
+	// 0036): frames land in the object store before producing, like every
+	// other connector — the broker is the wire, not the system of record.
+	var rtStore *gtfsrt.MinioStore
 	for _, feed := range rtFeeds {
 		url := os.Getenv(feed.env)
 		if url == "" {
 			continue
+		}
+		if rtStore == nil {
+			client, bucket, err := minioFromEnv(feed.env)
+			if err != nil {
+				return err
+			}
+			rtStore = gtfsrt.NewMinioStore(client, bucket)
 		}
 		poller := &gtfsrt.Poller{
 			URL:      url,
@@ -175,6 +191,7 @@ func run(log *slog.Logger) error {
 			Interval: interval,
 			AgencyID: agencyID,
 			HTTP:     httpClient,
+			Store:    rtStore,
 			Producer: kafka,
 			Log:      log,
 		}

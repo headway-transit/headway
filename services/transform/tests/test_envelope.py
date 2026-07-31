@@ -80,3 +80,18 @@ def test_parse_envelope_accepts_bytes_value() -> None:
     payload = b"\x01\x02"
     raw = json.dumps(make_envelope_dict(payload)).encode()
     assert parse_envelope(raw).decode_payload() == payload
+
+
+def test_payload_ref_is_accepted_and_optional() -> None:
+    """Additive contract extension (handoff 0036): a base64 envelope may
+    carry the object-store key its bytes were durably landed at."""
+    doc = make_envelope_dict(b"frame-bytes")
+    key = f"raw/gtfs_rt/{doc['record_id']}.pb"
+    doc["payload_ref"] = key
+    envelope = validate_envelope(doc)
+    assert envelope.payload_ref == key
+    # Inline payload still decodes off the wire — no object-store dependency.
+    assert envelope.decode_payload() == b"frame-bytes"
+    # And the field stays optional: an envelope without it validates and
+    # parses to None (legacy producers/replays are unaffected).
+    assert validate_envelope(make_envelope_dict(b"frame-bytes")).payload_ref is None

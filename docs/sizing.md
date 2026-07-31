@@ -30,14 +30,54 @@ ingestion is light.
 
 Disk grows with what you keep:
 - **Raw records are immutable and content-addressed** — they only grow. Budget for your
-  feed volume; GTFS-Realtime is the driver (a large agency's vehicle-position stream is
-  hundreds of MB/day raw).
+  feed volume; GTFS-Realtime is the driver (measured below: ~147 MB/day raw for a large
+  agency's vehicle-position stream).
 - **Normalized realtime predictions are the largest canonical table class**: measured at
   roughly 1 GB/hour normalized for a large agency's full trip-update stream. Headway ships
   with that connector **off by default** for exactly this reason — turn it on with a
   retention decision, not before. Smaller agencies see a small fraction of this.
 - The reference deployment's database reached ~11 GB after two weeks of heavy multi-feed
   ingestion including deliberate large replays.
+
+### Raw GTFS-Realtime frames — measured growth (handoff 0036)
+
+Since handoff 0036 every GTFS-Realtime frame lands durably in the object store at
+`raw/gtfs_rt/<record_id>.pb` before it is produced — realtime frames are the NTD
+auditor's "source documents" (ADR-0012), so the broker's retention window no longer
+silently acts as the records policy. That makes raw-frame storage a real disk line
+item. **Measured on the reference deployment (MBTA vehicle positions, 30 s poll,
+identical consecutive frames deduplicated), 2026-07-31, n = 21,562 frames:**
+
+| Feed | Per-frame (min / mean / max) | Frames/day (measured) | Raw growth |
+| --- | --- | --- | --- |
+| vehicle_positions | 282 B / 51,111 B / 90,281 B | 2,880 (= 86,400 s ÷ 30 s; matches 19 of 22 measured days exactly) | **~147 MB/day** |
+| trip_updates | *not measurable on this box* — the TU poller has been off since handoff 0014 pending a retention decision (ADR-0012), and the 113 frames it once produced have aged out of the broker | — | measure before enabling; TU frames are typically much larger than VP frames |
+| alerts | *never polled on this box* (no URL configured) | — | typically small |
+
+**Three-year projection (the NTD retention floor), vehicle positions at this feed's
+scale:** 2,880 frames/day × 51,111 B × 1,096 days ≈ **161 GB**. A small agency's VP
+feed is a fraction of MBTA's ~600-entity frames — budget proportionally to fleet
+size, but budget: this number belongs in the disk column of the tiers above for any
+agency running realtime continuously. Levers if it bites, in order of honesty: a
+longer poll interval (`POLL_INTERVAL` — fewer frames, each still complete), and
+object-store compression as a future increment. **Sampling or dropping frames is not
+a lever** — every received frame lands (Guardrail 7); an incomplete raw store is a
+finding, not a saving.
+
+Do **not** "reclaim" this space with an object-store lifecycle/expiry rule; the
+compose file says why where you would look for one (deletion is ADR-0012 tombstone
+territory, never an infra knob).
+
+**The honest asterisk on older installs:** durable landing shipped with handoff
+0036. Frames ingested *before* it was deployed lived only on the broker; the
+one-shot rescue tool (`headway-gtfsrt-backfill`) recovers whatever the broker still
+retains, but anything older is **permanently label-only** — the record's identity,
+metadata and place in every lineage trail remain intact and provable, and its bytes
+can never be produced again. The API says exactly this (HTTP 410, "not retained")
+rather than pretending. On the reference deployment, 35,106 of 56,668 realtime
+records (fetched 2026-07-09 through 2026-07-22) are in that state, and 375 of 805
+persisted figures rest on at least one such leaf. Records ingested since durable
+landing do not have this gap.
 
 ## Network
 

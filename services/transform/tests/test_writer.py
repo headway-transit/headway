@@ -420,3 +420,19 @@ def test_multi_row_methods_issue_one_executemany_per_batch() -> None:
     conn.log.clear()
     writer.insert_vehicle_positions([])
     assert conn.log == []  # an empty batch executes nothing at all
+
+
+def test_insert_raw_record_base64_with_payload_ref_registers_durable(
+    fake_connection,
+) -> None:
+    """Handoff 0036: a base64 envelope whose connector landed the bytes
+    (payload_ref set) registers in raw.records as durably held —
+    payload_encoding='object_ref' + payload_ref — like every other source."""
+    doc = make_envelope_dict(b"frame-bytes")
+    key = f"raw/gtfs_rt/{doc['record_id']}.pb"
+    doc["payload_ref"] = key
+    envelope = validate_envelope(doc)
+    DbWriter(fake_connection).insert_raw_record(envelope)
+    [(_sql, params)] = fake_connection.executed
+    assert params[5] == "object_ref"
+    assert params[6] == key

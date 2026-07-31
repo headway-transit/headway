@@ -117,3 +117,95 @@ evidence appended here. No commits — the orchestrator integrates.
   authoritative (broker back to being just the wire) — DevOps judgment, later.
 - Bulk verification over a figure's whole evidence chain (0035 open item) gets much
   cheaper once leaves live in the store — natural v1 after this.
+
+## Outputs — evidence
+
+**2026-07-31, Ingestion + DevOps (built by a Fable agent; integrated and
+live-verified by the orchestrator after the agent hit its usage limit before
+writing this section). Everything below was RUN and OBSERVED on this box.**
+
+### What shipped (files)
+
+- `services/ingestion/connectors/gtfsrt/objectstore.go` — `ObjectKey(recordID)`
+  = `raw/gtfs_rt/<record_id>.pb` (content-addressed) + a `MinioStore` that never
+  rewrites an existing key.
+- `services/ingestion/connectors/gtfsrt/gtfsrt.go` + `main.go` wiring —
+  **store-before-produce**: a frame is landed durably before its envelope is
+  produced; a frame that cannot be stored is not produced (fail loudly). The
+  envelope keeps carrying the inline base64 payload (design point 3, additive)
+  so transform normalizes off the wire with no new MinIO dependency.
+- `contracts/raw-record-envelope.v0.schema.json` + `contracts/topics.v0.md` —
+  the object reference added additively (same spec version).
+- `services/api/headway_api/raw_payloads.py` — the reader now resolves a
+  `base64` row **object-store-first** at the deterministic key (re-hash on
+  read), then falls back to the bounded envelope-stream lookup, then 410.
+  `raw.records` is never mutated (immutability trigger stands, design point 5).
+- `services/ingestion/cmd/headway-gtfsrt-backfill/` — the one-shot rescue tool
+  (dry-run flag, idempotent, resumable, re-hashes before writing, fails loudly).
+- `deploy/compose/compose.yaml` — gtfsrt connector gets the MinIO env; a
+  comment marks the deliberate absence of any lifecycle/expiry rule on the raw
+  bucket (deletion is ADR-0012 tombstone territory, not an infra knob).
+- `docs/sizing.md` — measured growth line (below).
+- Tests: transform 209 (+2), api 470 (+10, raw_records 52), Go builds + `go vet`
+  clean, gtfsrt unit + integration tests.
+
+### The honest unrecoverable measurement (design point 7), live
+
+Against the live DB and broker, `2026-07-31`:
+
+| Fact | Value |
+| --- | --- |
+| gtfs_rt raw records, bytes NOT in the object store at ingest | 56,718 (100% of gtfs_rt; every one `payload_encoding=base64`, `payload_ref` NULL) |
+| Broker retention boundary (earliest retained VP offset 39,271) | **2026-07-23 14:33:10 UTC** |
+| Records BEFORE the boundary — **bytes permanently gone** | **35,106** (fetched 2026-07-09 14:15 → 2026-07-23 14:33) |
+| Records at/after the boundary — still in the broker window | 21,616 |
+| `raw.gtfs_rt.trip_updates` / `.alerts` retained | 113→113 / 0→0 — **retain nothing**; their few records are in the lost set |
+| Persisted figures with ≥1 permanently-lost lineage leaf | **375 of 805** — **3 certified**, 372 uncertified |
+
+The 3 **certified** figures with a lost leaf are the sharpest edge: someone
+attested to them, and their source records can no longer be produced. Per
+handoff 0035 this raises **no** DQ finding (nothing about the figures'
+computation changed; `not_retained` is not a record defect) and the API's
+answer for those leaves stays a permanent, honest 410. `docs/sizing.md` states
+plainly that records ingested before durable landing may be label-only.
+
+### The rescue, run live
+
+The backfill was run (dry-run then live) against the retained window:
+
+```
+TOTAL [LIVE, 16.8s]: scanned=21617 matched=21616 written=54
+  already_present=21562 row_has_ref=0 unmatched=1 key_mismatch=0
+  write_failures=0 bytes=1,102,303,489 (~1.1 GB)
+rows_still_unrescued=35106  (the permanently-lost set above)
+```
+
+`already_present=21562` because the Fable agent had already run the rescue
+during its work; this orchestrator run wrote the 54 that accumulated since.
+`unmatched=1` is a single `connector='proof'` test record whose hash matches
+no index row — expected debris, not a defect. **Verified in MinIO:** 21,616
+objects now live under `raw/gtfs_rt/`, and a sampled key
+(`000166134f…c7f298.pb`) maps to a real gtfs_rt `raw.records` row fetched
+2026-07-25 — bytes that were broker-only are now durable at the content
+address the reader checks first.
+
+### Measured storage cost (design point 8)
+
+Rescued 21,616 VP frames = ~1.10 GB → **~51 KB/frame average** (min 282 B, max
+90,281 B). This box polls VP roughly every ~30 s; TU/alerts are negligible here.
+At ~51 KB/frame and a ~30 s cadence a 3-year VP footprint is on the order of a
+few hundred GB uncompressed — real, and now the sizing doc's problem to state
+rather than a surprise. No sampling or frame-dropping was introduced: every
+received frame lands, and a store write failure is a loud failure, never a skip.
+
+### Still open / for the deployment
+
+- **The running ingestion container is still the pre-change image** (2 weeks
+  old), so new frames land base64-only until it is rebuilt — `--update-from-source`
+  on each box (including the partner VM) is what stops the ongoing loss. The 54
+  freshly-rescued frames are the accumulation since the agent's run; that trickle
+  continues until the rebuild.
+- Object-store outage path is covered by a test but was not exercised by
+  stopping MinIO here.
+- Partner-agency nudge (Open Questions): their broker likely still holds ~7 days
+  — worth backfilling there right after they update.
