@@ -70,6 +70,11 @@
       "minLength": 1,
       "description": "Raw payload bytes base64-encoded, or the object-store key, per payload_encoding."
     },
+    "payload_ref": {
+      "type": "string",
+      "minLength": 1,
+      "description": "OPTIONAL (additive, handoff 0036): the object-store key where the payload bytes are ALSO durably stored. Lets a base64 envelope keep its inline copy on the wire (consumers normalize with no object-store dependency) while the raw-record index registers the durable address (payload_encoding=object_ref + payload_ref). The object's bytes hash to record_id. For object_ref envelopes this duplicates payload and is normally omitted."
+    },
     "parse_status": {
       "type": "string",
       "enum": ["ok", "malformed"],

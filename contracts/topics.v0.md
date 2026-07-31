@@ -5,9 +5,9 @@ Convention: `raw.<source>.<subtype>` for connector-produced raw records (envelop
 | Topic | Producer | Payload content |
 | --- | --- | --- |
 | `raw.gtfs_static.feed` | `headway-gtfs-static` | Complete GTFS static zip (payload_encoding: `object_ref`) |
-| `raw.gtfs_rt.vehicle_positions` | `headway-gtfs-rt` | One GTFS-Realtime FeedMessage protobuf frame (base64) |
-| `raw.gtfs_rt.trip_updates` | `headway-gtfs-rt` | One GTFS-Realtime FeedMessage protobuf frame (base64) |
-| `raw.gtfs_rt.alerts` | `headway-gtfs-rt` | One GTFS-Realtime FeedMessage protobuf frame (base64) |
+| `raw.gtfs_rt.vehicle_positions` | `headway-gtfs-rt` | One GTFS-Realtime FeedMessage protobuf frame (payload_encoding: `base64`, inline on the wire; since handoff 0036 the exact bytes are ALSO durably landed at `raw/gtfs_rt/<record_id>.pb` BEFORE producing, carried additively in `payload_ref` — the raw-record index registers the durable address) |
+| `raw.gtfs_rt.trip_updates` | `headway-gtfs-rt` | One GTFS-Realtime FeedMessage protobuf frame (same durable-landing contract as vehicle_positions) |
+| `raw.gtfs_rt.alerts` | `headway-gtfs-rt` | One GTFS-Realtime FeedMessage protobuf frame (same durable-landing contract as vehicle_positions) |
 | `raw.tides.passenger_events` | `headway-tides` | One TIDES `passenger_events` CSV file (payload_encoding: `object_ref`) |
 | `raw.dr.trips` | `headway-dr` | One `demand_response_trip` v0 CSV file (payload_encoding: `object_ref`; row format: `demand-response-trip.v0.schema.json` + `demand-response-trip.v0.md`, handoff 0013) |
 | `raw.vendor.files` | `headway-vendor-file` | One vendor-export file, ORIGINAL bytes (payload_encoding: `object_ref`). Envelope `source` = the registered adapter mapping-spec label `<vendor>_<product>` (or `<vendor>_<product>_simulated` for synthetic data); interpretation is defined ONLY by the registered spec (`adapters/<vendor>/<product>/mapping.v0.yaml` per `adapter-mapping.v0.schema.json`, handoff 0015). The transform runtime REFUSES unregistered labels fail-closed (raw record retained, blocking DQ issue, zero canonical writes). |

@@ -37,9 +37,12 @@ import datetime as dt
 import hashlib
 import io
 import json
+import logging
 import os
 from dataclasses import dataclass
 from typing import Iterable, Iterator, Optional, Protocol
+
+_log = logging.getLogger("headway_api.raw_payloads")
 
 # ---------------------------------------------------------------------------
 # The record, as this module needs it
@@ -293,10 +296,12 @@ class ObjectStorePayloadReader:
         return key
 
     def size(self, record: RawRecord) -> Optional[int]:
+        return self.size_key(self._key(record))
+
+    def size_key(self, key: str) -> Optional[int]:
         stat = getattr(self._store, "stat", None)
         if stat is None:
             return None
-        key = self._key(record)
         try:
             size = stat(key)
             if size is None:
@@ -318,7 +323,9 @@ class ObjectStorePayloadReader:
             ) from exc
 
     def open(self, record: RawRecord) -> PayloadHandle:
-        key = self._key(record)
+        return self.open_key(self._key(record))
+
+    def open_key(self, key: str) -> PayloadHandle:
         stream = getattr(self._store, "stream", None)
         try:
             if stream is not None:
@@ -354,6 +361,28 @@ def _missing_object_message(key: str) -> str:
     )
 
 
+#: Deterministic object-store keys for base64 (broker-inline) records, by
+#: source (handoff 0036). The GTFS-Realtime connector now lands every frame
+#: at this key BEFORE producing, and the backfill tool rescued what the
+#: broker still held to the same key — but legacy ``raw.records`` rows keep
+#: ``payload_encoding='base64'`` forever (the index is immutable by
+#: trigger), so the key must be derivable from the row's own columns. It is:
+#: source + record_id, nothing else. Mirrors ``gtfsrt.ObjectKey`` in
+#: services/ingestion/connectors/gtfsrt/objectstore.go.
+DERIVED_KEY_FORMATS_BY_SOURCE = {
+    "gtfs_rt": "raw/gtfs_rt/{record_id}.pb",
+}
+
+
+def derived_object_key(record: RawRecord) -> Optional[str]:
+    """The content-addressed key a base64 record's bytes would have been
+    durably landed at, or None when no scheme exists for its source."""
+    fmt = DERIVED_KEY_FORMATS_BY_SOURCE.get(record.source)
+    if fmt is None:
+        return None
+    return fmt.format(record_id=record.record_id)
+
+
 #: Which topics can carry a given source's inline (base64) envelopes.
 #: Straight from contracts/topics.v0.md — connectors must not invent topics,
 #: and neither does this reader. GTFS-Realtime is the only base64 producer.
@@ -377,12 +406,14 @@ LOOKUP_TIMEOUT_MS = 6000
 class EnvelopeStreamPayloadReader:
     """``payload_encoding = 'base64'`` — the ingest envelope on the broker.
 
-    GTFS-Realtime frames are not written to the object store: the connector
-    base64-encodes the exact bytes into the envelope and produces it keyed
-    by ``record_id`` (services/ingestion/connectors/gtfsrt). The broker is
-    therefore the only place those bytes exist, and it keeps them for its
-    retention window — after which this reader says so in plain words
-    instead of pretending the record was never readable.
+    Historically the GTFS-Realtime connector wrote nothing to the object
+    store: it base64-encoded the exact bytes into the envelope keyed by
+    ``record_id`` and the broker was the only place those bytes existed.
+    Since handoff 0036 the connector lands frames durably and the composite
+    reader checks the object store FIRST; this reader is the fallback for
+    legacy rows whose bytes were never rescued, bounded by the broker's
+    retention window — after which it says so in plain words instead of
+    pretending the record was never readable.
 
     The payload is verified against the record id before it is returned: a
     message whose bytes do not hash to the record id is not this record.
@@ -421,11 +452,105 @@ class EnvelopeStreamPayloadReader:
 
 
 class CompositeRawPayloadReader:
-    """Routes by ``payload_encoding`` — the record says where its bytes are."""
+    """Routes by ``payload_encoding`` — the record says where its bytes are.
+
+    For ``base64`` (broker-inline) records the resolution order is the
+    handoff-0036 design, in these exact steps:
+
+    1. **Object store at the deterministic key first.** The connector now
+       lands frames durably and the backfill rescued the retained window, so
+       a legacy row's bytes are usually in the store even though the
+       immutable row itself still says ``base64``. The bytes are re-hashed
+       before use — an object that does not hash to the record id is not
+       this record and is skipped loudly.
+    2. **The bounded envelope-stream lookup** (which re-hashes too).
+    3. **The honest 410**: never kept, no longer retained, said plainly.
+    """
 
     def __init__(self, object_reader=None, stream_reader=None):
         self._object_reader = object_reader
         self._stream_reader = stream_reader
+
+    # -- base64: the rescued-object fast path ------------------------------
+
+    def _open_rescued(self, record: RawRecord) -> Optional[PayloadHandle]:
+        """The record's bytes from the object store at the derived key, hash-
+        verified — or None when they are not (usably) there."""
+        key = derived_object_key(record)
+        if key is None or self._object_reader is None:
+            return None
+        open_key = getattr(self._object_reader, "open_key", None)
+        if open_key is None:
+            return None
+        try:
+            handle = open_key(key)
+            data = b"".join(handle.chunks)
+        except PayloadUnavailable:
+            # Missing (never landed / not backfillable) or the store is
+            # unreachable: either way the broker lookup is still worth
+            # trying — the record's bytes may well be on the wire.
+            return None
+        if hashlib.sha256(data).hexdigest() != record.record_id:
+            # A content-addressed object whose bytes do not hash to its key
+            # is storage corruption. It is NOT this record's bytes, so it is
+            # never served; the broker fallback may still hold the real
+            # ones. Logged loudly — a verify on a record whose only copy is
+            # this corrupt object will answer 410, and this log line is the
+            # trail from that answer to the corrupt object.
+            _log.error(
+                "object at derived key %s does not hash to record_id %s; "
+                "ignoring it (possible object-store corruption)",
+                key,
+                record.record_id,
+            )
+            return None
+        return PayloadHandle(LOCATION_OBJECT_STORE, len(data), iter((data,)))
+
+    def _base64_open(self, record: RawRecord) -> PayloadHandle:
+        rescued = self._open_rescued(record)
+        if rescued is not None:
+            return rescued
+        store_was_checked = (
+            self._object_reader is not None
+            and derived_object_key(record) is not None
+        )
+        if self._stream_reader is None:
+            if store_was_checked:
+                raise PayloadUnavailable(
+                    REASON_NOT_RETAINED,
+                    "This record's bytes rode inline in the ingest envelope. "
+                    "Headway checked the object store at the address they "
+                    "would have been durably landed at and they are not "
+                    "there, and this installation has no broker connection "
+                    "(KAFKA_BROKERS) to search the envelope stream with. The "
+                    "record's identity and its place in the trail are "
+                    "unaffected; its bytes cannot be produced here.",
+                )
+            raise PayloadUnavailable(
+                REASON_NOT_CONFIGURED,
+                "This record's bytes rode inline in the ingest envelope, "
+                "and this Headway installation has no broker connection "
+                "configured to read it back. Nothing is wrong with the "
+                "record; the API is missing its KAFKA_BROKERS setting.",
+            )
+        try:
+            return self._stream_reader.open(record)
+        except PayloadUnavailable as exc:
+            if exc.reason == REASON_NOT_RETAINED and store_was_checked:
+                raise PayloadUnavailable(
+                    REASON_NOT_RETAINED,
+                    "This record's bytes rode inline in the ingest envelope "
+                    "before durable landing was deployed. Headway checked "
+                    "the object store at the address they would have been "
+                    "rescued to, and the broker — which no longer retains "
+                    "that message. The record's identity and its place in "
+                    "the trail are unaffected, but these bytes were never "
+                    "durably kept and can no longer be produced. Records "
+                    "ingested since durable landing do not have this gap.",
+                ) from exc
+            raise
+
+    # -- routing ------------------------------------------------------------
 
     def _for(self, record: RawRecord):
         if record.payload_encoding == "object_ref":
@@ -439,15 +564,7 @@ class CompositeRawPayloadReader:
                 )
             return self._object_reader
         if record.payload_encoding == "base64":
-            if self._stream_reader is None:
-                raise PayloadUnavailable(
-                    REASON_NOT_CONFIGURED,
-                    "This record's bytes rode inline in the ingest envelope, "
-                    "and this Headway installation has no broker connection "
-                    "configured to read it back. Nothing is wrong with the "
-                    "record; the API is missing its KAFKA_BROKERS setting.",
-                )
-            return self._stream_reader
+            return None  # handled by _base64_open / size below
         raise PayloadUnavailable(
             REASON_NOT_RETAINED,
             f"This record records an unknown payload encoding "
@@ -456,10 +573,25 @@ class CompositeRawPayloadReader:
         )
 
     def size(self, record: RawRecord) -> Optional[int]:
-        return self._for(record).size(record)
+        reader = self._for(record)
+        if reader is not None:
+            return reader.size(record)
+        # base64: a rescued object's size is cheap; absence is honest None
+        # (measured on open), never an error at label time.
+        key = derived_object_key(record)
+        size_key = getattr(self._object_reader, "size_key", None)
+        if key is not None and size_key is not None:
+            try:
+                return size_key(key)
+            except PayloadUnavailable:
+                return None
+        return None
 
     def open(self, record: RawRecord) -> PayloadHandle:
-        return self._for(record).open(record)
+        reader = self._for(record)
+        if reader is not None:
+            return reader.open(record)
+        return self._base64_open(record)
 
 
 # ---------------------------------------------------------------------------

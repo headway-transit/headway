@@ -277,10 +277,23 @@ class DbWriter:
                 close()
 
     def insert_raw_record(self, envelope: Envelope) -> None:
-        """Land the raw.records registry row for a validated envelope."""
-        payload_ref = (
-            envelope.payload if envelope.payload_encoding == "object_ref" else None
-        )
+        """Land the raw.records registry row for a validated envelope.
+
+        ``raw.records`` records where the bytes are DURABLY held, not how
+        they happened to ride the wire (handoff 0036). A base64 envelope
+        that carries ``payload_ref`` — the connector landed the exact bytes
+        in the object store before producing — therefore registers as
+        ``payload_encoding='object_ref'`` with that key, exactly like every
+        object_ref source. Only a base64 envelope with no durable address
+        (none are produced by current connectors; legacy replays still
+        exist on the wire) lands as broker-only ``base64``.
+        """
+        if envelope.payload_encoding == "object_ref":
+            encoding, payload_ref = "object_ref", envelope.payload
+        elif envelope.payload_ref:
+            encoding, payload_ref = "object_ref", envelope.payload_ref
+        else:
+            encoding, payload_ref = envelope.payload_encoding, None
         self._execute(
             INSERT_RAW_RECORD_SQL,
             (
@@ -289,7 +302,7 @@ class DbWriter:
                 envelope.connector,
                 envelope.connector_version,
                 envelope.content_type,
-                envelope.payload_encoding,
+                encoding,
                 payload_ref,
                 envelope.fetched_at,
                 envelope.parse_status,

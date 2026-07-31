@@ -43,21 +43,30 @@ func validFrame(t *testing.T) []byte {
 
 func newTestPoller(t *testing.T, serverBody func() []byte, ft FeedType) (*Poller, *producer.Fake, *httptest.Server) {
 	t.Helper()
+	p, fake, srv, _ := newTestPollerWithStore(t, serverBody, ft)
+	return p, fake, srv
+}
+
+func newTestPollerWithStore(t *testing.T, serverBody func() []byte, ft FeedType) (*Poller, *producer.Fake, *httptest.Server, *FakeStore) {
+	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", ContentType)
 		w.Write(serverBody())
 	}))
 	t.Cleanup(srv.Close)
 	fake := producer.NewFake()
+	store := NewFakeStore()
 	p := &Poller{
 		URL:      srv.URL,
 		FeedType: ft,
 		Interval: time.Second,
+		Store:    store,
 		Producer: fake,
 		Log:      slog.New(slog.NewTextHandler(testWriter{t}, nil)),
 		Clock:    func() time.Time { return time.Date(2026, 7, 8, 12, 0, 0, 0, time.UTC) },
+		Sleep:    func(time.Duration) {},
 	}
-	return p, fake, srv
+	return p, fake, srv, store
 }
 
 type testWriter struct{ t *testing.T }
@@ -197,5 +206,140 @@ func TestDuplicateConsecutiveFrameSkipped(t *testing.T) {
 func TestUnknownFeedTypeRejected(t *testing.T) {
 	if _, err := FeedType("bogus").Topic(); err == nil {
 		t.Fatal("expected error for unknown feed type")
+	}
+}
+
+// --- durable landing (handoff 0036) ---------------------------------------
+
+func TestFrameLandsInObjectStoreBeforeProduceWithPayloadRef(t *testing.T) {
+	frame := validFrame(t)
+	p, fake, _, store := newTestPollerWithStore(t, func() []byte { return frame }, VehiclePositions)
+
+	if err := p.PollOnce(context.Background()); err != nil {
+		t.Fatalf("PollOnce: %v", err)
+	}
+
+	recordID := envelope.RecordID(frame)
+	wantKey := "raw/gtfs_rt/" + recordID + ".pb"
+	if got := ObjectKey(recordID); got != wantKey {
+		t.Fatalf("ObjectKey = %q, want %q (must be derivable from raw.records columns alone)", got, wantKey)
+	}
+	stored, ok := store.Get(wantKey)
+	if !ok {
+		t.Fatalf("frame bytes not landed at %s", wantKey)
+	}
+	if string(stored) != string(frame) {
+		t.Errorf("stored object bytes differ from raw frame bytes")
+	}
+
+	msgs := fake.Messages()
+	if len(msgs) != 1 {
+		t.Fatalf("produced %d messages, want 1", len(msgs))
+	}
+	var m map[string]any
+	if err := json.Unmarshal(msgs[0].Value, &m); err != nil {
+		t.Fatalf("envelope not JSON: %v", err)
+	}
+	// Additive contract: inline base64 payload stays for wire consumers,
+	// payload_ref carries the durable object key.
+	if m["payload_encoding"] != envelope.EncodingBase64 {
+		t.Errorf("payload_encoding = %v, want base64 (inline copy stays on the wire)", m["payload_encoding"])
+	}
+	if m["payload_ref"] != wantKey {
+		t.Errorf("payload_ref = %v, want %v", m["payload_ref"], wantKey)
+	}
+	decoded, err := base64.StdEncoding.DecodeString(m["payload"].(string))
+	if err != nil || string(decoded) != string(frame) {
+		t.Errorf("inline payload no longer carries the exact raw bytes")
+	}
+}
+
+func TestStoreRefusalMeansNothingIsProduced(t *testing.T) {
+	frame := validFrame(t)
+	p, fake, _, store := newTestPollerWithStore(t, func() []byte { return frame }, VehiclePositions)
+	store.Err = context.DeadlineExceeded // any persistent failure
+
+	if err := p.PollOnce(context.Background()); err == nil {
+		t.Fatal("PollOnce must fail loudly when the frame cannot be durably stored")
+	}
+	if got := len(fake.Messages()); got != 0 {
+		t.Fatalf("store failed but %d message(s) were produced — store-before-produce violated", got)
+	}
+	if store.Puts != storeAttempts {
+		t.Errorf("store attempts = %d, want %d (retry with backoff)", store.Puts, storeAttempts)
+	}
+
+	// The frame must be retried in full on the next poll (lastRecordID was
+	// never set), and succeed once the store recovers.
+	store.Err = nil
+	if err := p.PollOnce(context.Background()); err != nil {
+		t.Fatalf("PollOnce after store recovery: %v", err)
+	}
+	if got := len(fake.Messages()); got != 1 {
+		t.Fatalf("recovered poll produced %d messages, want 1", got)
+	}
+}
+
+func TestTransientStoreFailureIsRetriedThenProduced(t *testing.T) {
+	frame := validFrame(t)
+	p, fake, _, store := newTestPollerWithStore(t, func() []byte { return frame }, TripUpdates)
+	store.FailPuts = storeAttempts - 1 // fails, fails, then succeeds
+
+	if err := p.PollOnce(context.Background()); err != nil {
+		t.Fatalf("PollOnce should succeed after transient store failures: %v", err)
+	}
+	if got := len(fake.Messages()); got != 1 {
+		t.Fatalf("produced %d messages, want 1", got)
+	}
+	if _, ok := store.Get(ObjectKey(envelope.RecordID(frame))); !ok {
+		t.Fatalf("frame not in store after retries")
+	}
+}
+
+func TestMalformedFrameIsStillLandedDurably(t *testing.T) {
+	garbage := []byte("not a protobuf frame at all")
+	p, _, _, store := newTestPollerWithStore(t, func() []byte { return garbage }, Alerts)
+
+	if err := p.PollOnce(context.Background()); err != nil {
+		t.Fatalf("PollOnce: %v", err)
+	}
+	stored, ok := store.Get(ObjectKey(envelope.RecordID(garbage)))
+	if !ok {
+		t.Fatal("malformed frame was not landed in the object store")
+	}
+	if string(stored) != string(garbage) {
+		t.Errorf("malformed frame bytes were mutated on landing")
+	}
+}
+
+func TestDuplicateFrameIsNotReStored(t *testing.T) {
+	frame := validFrame(t)
+	p, fake, _, store := newTestPollerWithStore(t, func() []byte { return frame }, VehiclePositions)
+
+	ctx := context.Background()
+	if err := p.PollOnce(ctx); err != nil {
+		t.Fatalf("poll 1: %v", err)
+	}
+	if err := p.PollOnce(ctx); err != nil {
+		t.Fatalf("poll 2 (duplicate): %v", err)
+	}
+	if store.Puts != 1 {
+		t.Errorf("duplicate frame re-stored: %d puts, want 1", store.Puts)
+	}
+	if got := len(fake.Messages()); got != 1 {
+		t.Errorf("duplicate frame re-produced: %d messages, want 1", got)
+	}
+}
+
+func TestNoStoreConfiguredRefusesToProduce(t *testing.T) {
+	frame := validFrame(t)
+	p, fake, _, _ := newTestPollerWithStore(t, func() []byte { return frame }, VehiclePositions)
+	p.Store = nil
+
+	if err := p.PollOnce(context.Background()); err == nil {
+		t.Fatal("a poller without an object store must refuse, not fall back to broker-only retention")
+	}
+	if got := len(fake.Messages()); got != 0 {
+		t.Fatalf("produced %d messages with no store, want 0", got)
 	}
 }

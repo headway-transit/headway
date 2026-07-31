@@ -46,8 +46,16 @@ type Envelope struct {
 	ContentType      string `json:"content_type"`
 	PayloadEncoding  string `json:"payload_encoding"`
 	Payload          string `json:"payload"`
-	ParseStatus      string `json:"parse_status"`
-	ParseError       string `json:"parse_error,omitempty"`
+	// PayloadRef is the object-store key where the payload bytes are ALSO
+	// durably stored (handoff 0036, additive same-version extension). It is
+	// what lets a base64 envelope — whose inline payload downstream
+	// normalizers keep reading straight off the wire — still register in
+	// raw.records as durably held (payload_encoding=object_ref +
+	// payload_ref). For object_ref envelopes it is redundant with Payload
+	// and left empty.
+	PayloadRef  string `json:"payload_ref,omitempty"`
+	ParseStatus string `json:"parse_status"`
+	ParseError  string `json:"parse_error,omitempty"`
 }
 
 // Params carries everything needed to build an envelope around raw bytes.
@@ -89,6 +97,25 @@ func New(payload []byte, p Params) (Envelope, error) {
 	if err := e.Validate(); err != nil {
 		return Envelope{}, err
 	}
+	return e, nil
+}
+
+// NewStored builds a base64-encoded envelope whose exact payload bytes have
+// ALSO been landed in the object store at objectKey (store-before-produce,
+// handoff 0036). The inline base64 copy stays on the wire so consumers keep
+// normalizing without an object-store dependency; payload_ref is the durable
+// address the raw-record index registers. The caller must have completed the
+// store write before producing this envelope — an envelope pointing at an
+// object that does not exist is a lie.
+func NewStored(payload []byte, objectKey string, p Params) (Envelope, error) {
+	e, err := New(payload, p)
+	if err != nil {
+		return Envelope{}, err
+	}
+	if objectKey == "" {
+		return Envelope{}, fmt.Errorf("envelope: NewStored requires a non-empty object key")
+	}
+	e.PayloadRef = objectKey
 	return e, nil
 }
 
@@ -155,6 +182,11 @@ func (e Envelope) Validate() error {
 	}
 	if e.ParseStatus == ParseMalformed && e.ParseError == "" {
 		return fmt.Errorf("envelope: parse_error is required when parse_status is malformed")
+	}
+	if e.PayloadEncoding == EncodingObjectRef && e.PayloadRef != "" && e.PayloadRef != e.Payload {
+		return fmt.Errorf(
+			"envelope: object_ref envelope carries payload (key %q) and payload_ref (%q) that disagree",
+			e.Payload, e.PayloadRef)
 	}
 	if _, err := time.Parse(time.RFC3339, e.FetchedAt); err != nil {
 		return fmt.Errorf("envelope: fetched_at is not RFC3339: %w", err)

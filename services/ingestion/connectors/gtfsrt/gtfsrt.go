@@ -8,6 +8,15 @@
 // parse_status ok/malformed. The raw bytes are what is enveloped and
 // produced — never the reparsed form. Malformed frames are NEVER dropped:
 // they are produced with parse_status "malformed" (fail loudly, Guardrail 7).
+//
+// Durable landing (handoff 0036): every frame is written to the object
+// store at its content-addressed key (ObjectKey) BEFORE the envelope is
+// produced — the platform's store-before-produce fence. A frame that cannot
+// be durably stored is NOT produced: the store write is retried with
+// backoff and then the poll fails loudly. The envelope keeps carrying the
+// inline base64 payload (downstream normalizers read it straight off the
+// wire) and additionally carries payload_ref, the durable object key, so
+// raw.records registers the frame as durably held like every other source.
 package gtfsrt
 
 import (
@@ -61,11 +70,16 @@ type Poller struct {
 	AgencyID string // optional
 
 	HTTP     *http.Client
+	Store    ObjectStore // REQUIRED: frames land durably before producing (handoff 0036)
 	Producer producer.Producer
 	Log      *slog.Logger
 
 	// Clock is injectable for tests; defaults to time.Now.
 	Clock func() time.Time
+
+	// Sleep is injectable for tests (store-retry backoff); defaults to
+	// time.Sleep via sleep().
+	Sleep func(time.Duration)
 
 	// lastRecordID is the content hash of the last frame produced, used to
 	// skip identical consecutive frames (same bytes -> same record_id).
@@ -86,6 +100,63 @@ func (p *Poller) httpClient() *http.Client {
 		return p.HTTP
 	}
 	return http.DefaultClient
+}
+
+func (p *Poller) sleep(d time.Duration) {
+	if p.Sleep != nil {
+		p.Sleep(d)
+		return
+	}
+	time.Sleep(d)
+}
+
+// Store-write retry policy: a transient object-store hiccup should not cost
+// a frame, but the poll loop must not wedge behind a dead store either —
+// after the attempts below the poll fails LOUDLY (logged as an error by
+// Run) and nothing is produced. Disk full is a page, not a skip.
+const (
+	storeAttempts       = 3
+	storeInitialBackoff = 500 * time.Millisecond
+)
+
+// land writes the frame's bytes to the object store at its
+// content-addressed key, retrying transient failures with exponential
+// backoff. It returns the key on success; on failure the caller must NOT
+// produce (store-before-produce fence).
+func (p *Poller) land(ctx context.Context, recordID string, body []byte) (string, error) {
+	if p.Store == nil {
+		// Fail closed: a poller without a store would silently recreate the
+		// broker-only retention hole this connector just closed.
+		return "", fmt.Errorf(
+			"gtfsrt %s: no object store configured; refusing to produce a frame "+
+				"that is not durably stored (set S3_ENDPOINT/S3_ACCESS_KEY/"+
+				"S3_SECRET_KEY — raw realtime frames are NTD source documents "+
+				"and the broker is the wire, not the system of record)",
+			p.FeedType)
+	}
+	key := ObjectKey(recordID)
+	backoff := storeInitialBackoff
+	var err error
+	for attempt := 1; attempt <= storeAttempts; attempt++ {
+		if err = p.Store.Put(ctx, key, body); err == nil {
+			return key, nil
+		}
+		if ctx.Err() != nil {
+			break
+		}
+		if attempt < storeAttempts {
+			p.Log.Warn("object store write failed; retrying before producing (store-before-produce)",
+				"connector", ConnectorName, "feed_type", string(p.FeedType),
+				"record_id", recordID, "attempt", attempt, "error", err)
+			p.sleep(backoff)
+			backoff *= 2
+		}
+	}
+	return "", fmt.Errorf(
+		"gtfsrt %s: frame %s could not be durably stored after %d attempts and "+
+			"was NOT produced (a frame that is not in the object store must not "+
+			"enter the pipeline): %w",
+		p.FeedType, recordID, storeAttempts, err)
 }
 
 // PollOnce fetches the feed once and produces an envelope unless the frame
@@ -140,7 +211,14 @@ func (p *Poller) PollOnce(ctx context.Context) error {
 		parseError = fmt.Sprintf("gtfs-realtime FeedMessage parse failed: %v", err)
 	}
 
-	env, err := envelope.New(body, envelope.Params{
+	// Store-before-produce (handoff 0036): the exact received bytes land at
+	// their content-addressed key first. If this fails, nothing is produced.
+	key, err := p.land(ctx, recordID, body)
+	if err != nil {
+		return err
+	}
+
+	env, err := envelope.NewStored(body, key, envelope.Params{
 		Source:           Source,
 		Connector:        ConnectorName,
 		ConnectorVersion: ConnectorVersion,
@@ -168,11 +246,13 @@ func (p *Poller) PollOnce(ctx context.Context) error {
 		// surfaced loudly; the Data Engineer's rule engine consumes these.
 		p.Log.Error("malformed frame landed (never dropped)",
 			"connector", ConnectorName, "feed_type", string(p.FeedType),
-			"record_id", recordID, "topic", topic, "parse_error", parseError)
+			"record_id", recordID, "topic", topic, "object_key", key,
+			"parse_error", parseError)
 	} else {
-		p.Log.Info("frame produced",
+		p.Log.Info("frame landed and produced",
 			"connector", ConnectorName, "feed_type", string(p.FeedType),
-			"record_id", recordID, "topic", topic, "bytes", len(body))
+			"record_id", recordID, "topic", topic, "object_key", key,
+			"bytes", len(body))
 	}
 	return nil
 }
