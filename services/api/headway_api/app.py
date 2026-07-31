@@ -30,6 +30,7 @@ from .routers import (
     metrics,
     ops,
     public,
+    raw_records,
     reports,
     safety,
     sampling,
@@ -74,6 +75,7 @@ def create_app(
     producer=None,
     webhook_sender=None,
     calc_run_launcher=None,
+    raw_payload_reader=None,
 ) -> FastAPI:
     """Build the API.
 
@@ -90,6 +92,13 @@ def create_app(
     - ``calc_run_launcher``: injected calc-run dispatch seam (handoff 0026 —
       a fake in tests records launches instead of spawning subprocesses);
       omit for the real background-thread launcher in routers/calc_runs.py.
+    - ``raw_payload_reader``: injected raw-payload read seam (handoff 0035 —
+      a fake in tests serves bytes from a dict). Omit and the raw-record
+      inspector builds the live reader on first use from the same seams
+      ingest uses: the object store for ``payload_encoding='object_ref'``
+      and the ingest envelope stream (KAFKA_BROKERS) for the inline
+      ``base64`` payloads GTFS-Realtime frames arrive as. Missing
+      configuration refuses in plain words — never an empty preview.
     """
     app = FastAPI(
         title="Headway API",
@@ -118,6 +127,9 @@ def create_app(
     # None = the real background-thread launcher (routers/calc_runs.py picks
     # it up at request time); tests inject a recording fake.
     app.state.calc_run_launcher = calc_run_launcher
+    # None = built on first use from app.state.object_store + KAFKA_BROKERS
+    # (routers/raw_records.py); tests inject a fake reader.
+    app.state.raw_payload_reader = raw_payload_reader
     app.state.machine_rate_limiter = RateLimiter(
         app.state.settings.machine_requests_per_minute
     )
@@ -158,6 +170,7 @@ def create_app(
     app.include_router(webhooks.router)
     app.include_router(reports.router)
     app.include_router(public.router)
+    app.include_router(raw_records.router)
     app.include_router(branding.router)
     app.include_router(safety.router)
     app.include_router(sampling.router)

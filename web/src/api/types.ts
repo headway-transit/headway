@@ -1681,6 +1681,185 @@ export interface CalcRunRecord {
   stale_note: string | null;
 }
 
+// ---- /raw/records/{id} — the raw-record inspector (handoff 0035) ----
+
+/**
+ * Where the payload physically lives and how big it is. Headway stores raw
+ * payloads in two places and the record says which: an object in the object
+ * store (`object_ref` records) or inline in the ingest envelope on the
+ * broker (`base64` records — GTFS-Realtime frames). `size_bytes` is null on
+ * purpose when the size cannot be read cheaply; that is honest, not missing.
+ */
+export interface StoredBytes {
+  location: "object_store" | "ingest_envelope_stream" | string;
+  object_key: string | null;
+  size_bytes: number | null;
+  /** 'available' | 'missing' | 'unavailable' | 'measured_on_open' */
+  status: string;
+  note: string;
+}
+
+export interface ContentAddress {
+  algorithm: string;
+  digest: string;
+  note: string;
+}
+
+/**
+ * The withholding rule for THIS record's contents, decided and enforced
+ * server-side. `preview_allowed` exists so the UI can explain a refusal
+ * rather than dangle a button that 403s — it is never the gate itself.
+ */
+export interface RawRecordSensitivity {
+  classification: string;
+  label: string;
+  minimum_role: string;
+  reason: string;
+  preview_allowed: boolean;
+  refusal: string | null;
+}
+
+export interface RawRecordDecoder {
+  /** 'gtfs_realtime' | 'delimited_text' | 'text' | 'none' */
+  kind: string;
+  note: string;
+}
+
+/** The label on the evidence bag: what this raw record is. */
+export interface RawRecordLabel {
+  record_id: string;
+  source: string;
+  simulated: boolean;
+  connector: string;
+  connector_version: string;
+  content_type: string;
+  payload_encoding: string;
+  fetched_at: string;
+  landed_at: string;
+  parse_status: string;
+  parse_error: string | null;
+  stored_bytes: StoredBytes;
+  content_address: ContentAddress;
+  sensitivity: RawRecordSensitivity;
+  decoder: RawRecordDecoder;
+  immutability_note: string;
+}
+
+/**
+ * The verdict of re-reading the stored bytes and re-hashing them. The HTTP
+ * status agrees with `result` (match 200, mismatch 409, unreadable
+ * 404/410/503), so a caller that only checks the status cannot mistake a
+ * failure for a pass — the client reads the body on every one of them.
+ */
+export interface RawRecordVerdict {
+  record_id: string;
+  verified_at: string;
+  /** 'match' | 'mismatch' | 'missing' | 'unavailable' */
+  result: string;
+  algorithm: string;
+  expected_digest: string;
+  actual_digest: string | null;
+  size_bytes: number | null;
+  read_from: string | null;
+  reason: string | null;
+  headline: string;
+  detail: string;
+  /** The blocking DQ issue a failing verdict raised, when there is one. */
+  dq_issue_id: string | null;
+}
+
+/** One decoded GTFS-Realtime entity. Absent fields are null, never zero. */
+export interface GtfsRealtimeEntity {
+  entity_id: string | null;
+  is_deleted: boolean | null;
+  /** 'vehicle_position' | 'trip_update' | 'alert' | 'unrecognized' */
+  kind: string | null;
+  vehicle_id?: string | null;
+  vehicle_label?: string | null;
+  trip_id?: string | null;
+  route_id?: string | null;
+  direction_id?: number | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  bearing?: number | null;
+  speed?: number | null;
+  timestamp?: number | null;
+  timestamp_utc?: string | null;
+  current_status?: string | null;
+  stop_id?: string | null;
+  occupancy_status?: string | null;
+  start_date?: string | null;
+  schedule_relationship?: string | null;
+  delay?: number | null;
+  stop_time_update_count?: number | null;
+  stop_time_updates?: GtfsRealtimeStopTimeUpdate[];
+  cause?: string | null;
+  effect?: string | null;
+  header_text?: string | null;
+  description_text?: string | null;
+  informed_entity_count?: number | null;
+}
+
+export interface GtfsRealtimeStopTimeUpdate {
+  stop_id: string | null;
+  stop_sequence: number | null;
+  arrival_time: number | null;
+  arrival_delay: number | null;
+  departure_time: number | null;
+  departure_delay: number | null;
+}
+
+export interface GtfsRealtimePreview {
+  decoded: boolean;
+  decode_error: string | null;
+  gtfs_realtime_version?: string | null;
+  incrementality?: string | null;
+  header_timestamp?: number | null;
+  header_timestamp_utc?: string | null;
+  entity_count?: number;
+  entity_kinds?: Record<string, number>;
+  entities?: GtfsRealtimeEntity[];
+}
+
+export interface DelimitedPreview {
+  readable: boolean;
+  complete: boolean;
+  note: string | null;
+  header: string[] | null;
+  header_source: string | null;
+  rows: string[][];
+}
+
+export interface TextPreview {
+  readable: boolean;
+  complete: boolean;
+  note: string | null;
+  lines: string[];
+}
+
+export interface UndecodedPreview {
+  content_type: string;
+  reason: string;
+}
+
+/** A bounded look inside one raw record, with every cap that applied. */
+export interface RawRecordPreview {
+  record_id: string;
+  content_type: string;
+  size_bytes: number;
+  read_from: string;
+  decoder: string;
+  decoder_note: string;
+  truncated: boolean;
+  truncation_note: string | null;
+  caps: Record<string, number>;
+  gtfs_realtime: GtfsRealtimePreview | null;
+  delimited: DelimitedPreview | null;
+  text: TextPreview | null;
+  undecoded: UndecodedPreview | null;
+  download_note: string;
+}
+
 // ---- error envelopes (FastAPI) ----
 
 export interface ValidationErrorItem {

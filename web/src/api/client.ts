@@ -47,6 +47,9 @@ import type {
   Mr20Package,
   OpsVehiclesLatest,
   PublicMetricValue,
+  RawRecordLabel,
+  RawRecordPreview,
+  RawRecordVerdict,
   ResetPasswordResponse,
   RoutesCollection,
   ResolveRequest,
@@ -1161,4 +1164,86 @@ export function getSourcesStatus(
       ? `?${new URLSearchParams({ window_hours: String(windowHours) })}`
       : "";
   return request<SourcesStatusResponse>("GET", `/sources/status${qs}`);
+}
+
+// ---- the raw-record inspector (handoff 0035) ----
+
+/**
+ * GET /raw/records/{id} — the label on the evidence bag. Every field is a
+ * raw.records column or a measurement taken server-side; an absent value is
+ * served absent and rendered absent.
+ */
+export function getRawRecord(recordId: string): Promise<RawRecordLabel> {
+  return request<RawRecordLabel>(
+    "GET",
+    `/raw/records/${encodeURIComponent(recordId)}`,
+  );
+}
+
+/**
+ * POST /raw/records/{id}/verify — integrity as an action, not a claim.
+ *
+ * The ONE call in this client that reads the body on a non-2xx response,
+ * deliberately: the API answers 409 for a mismatch and 404/410/503 for
+ * unreadable bytes precisely so a caller checking only the status cannot
+ * mistake a failure for a pass — and the failing body is the verdict the
+ * auditor came for. A 401 still redirects to sign-in like every other call.
+ */
+export async function verifyRawRecord(
+  recordId: string,
+): Promise<RawRecordVerdict> {
+  const path = `/raw/records/${encodeURIComponent(recordId)}/verify`;
+  const session = getSession();
+  const headers: Record<string, string> = { Accept: "application/json" };
+  if (session) headers["Authorization"] = `Bearer ${session.token}`;
+
+  let response: Response;
+  try {
+    response = await fetch(`${BASE_URL}${path}`, { method: "POST", headers });
+  } catch {
+    throw new ApiError(NETWORK_ERROR_STATUS, NETWORK_ERROR_MESSAGE);
+  }
+  if (response.status === 401) {
+    clearSession();
+    unauthorizedHandler?.();
+    throw new ApiError(401, "Your session has expired. Please sign in again.");
+  }
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch {
+    throw new ApiError(response.status, UNREADABLE_ERROR_MESSAGE);
+  }
+  if (body && typeof body === "object" && "result" in body) {
+    return body as RawRecordVerdict;
+  }
+  // No verdict in the body (403, 404 on an unknown record id, 5xx): surface
+  // the server's plain-language message, never a fabricated verdict.
+  const detail = (body as ErrorEnvelope | null)?.detail;
+  throw new ApiError(
+    response.status,
+    typeof detail === "string" ? detail : UNREADABLE_ERROR_MESSAGE,
+  );
+}
+
+/** GET /raw/records/{id}/payload — the bounded, decoded window. */
+export function getRawRecordPayload(
+  recordId: string,
+): Promise<RawRecordPreview> {
+  return request<RawRecordPreview>(
+    "GET",
+    `/raw/records/${encodeURIComponent(recordId)}/payload`,
+  );
+}
+
+/**
+ * GET /raw/records/{id}/download — the exact stored bytes. Saved byte for
+ * byte (saveBlob re-encodes nothing), so hashing the saved file reproduces
+ * the record id.
+ */
+export function downloadRawRecord(recordId: string): Promise<ExportDownload> {
+  return requestExport(
+    `/raw/records/${encodeURIComponent(recordId)}/download`,
+    recordId,
+  );
 }

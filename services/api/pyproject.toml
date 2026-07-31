@@ -48,6 +48,24 @@ dependencies = [
 ingest = [
     "minio>=7.2",           # Apache-2.0 — MinIO/S3 object store client
     "kafka-python-ng>=2.2", # Apache-2.0 — Kafka producer (maintained fork)
+    # The raw-record inspector (handoff 0035) READS the same two stores back:
+    # object_ref payloads from MinIO, and the base64 payloads GTFS-Realtime
+    # frames ride inline on the broker (contracts/topics.v0.md) — the only
+    # place those bytes exist. Hence the two additions below, both on the
+    # same optional extra: an installation without ingest configured refuses
+    # the inspector's payload endpoints in plain words, exactly as the
+    # ingest endpoint already refuses with a 503.
+    "python-snappy>=0.7",   # BSD — the Go producer snappy-compresses batches
+                            # by default and kafka-python-ng cannot decode
+                            # them without this. >=0.7 is a pure-Python shim
+                            # over cramjam (manylinux wheels), so no
+                            # libsnappy-dev and no C toolchain in the image —
+                            # the services/transform Dockerfile precedent.
+    "gtfs-realtime-bindings>=1.0.0",  # Apache-2.0 — the SAME pinned bindings
+                            # services/transform normalizes with, so what an
+                            # auditor reads in a decoded preview is what the
+                            # pipeline read. Decoding is display only; no
+                            # figure originates here.
 ]
 test = [
     "pytest>=8",

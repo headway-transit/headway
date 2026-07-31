@@ -2314,6 +2314,216 @@
         }
       }
     },
+    "/raw/records/{record_id}": {
+      "get": {
+        "tags": [
+          "raw-records"
+        ],
+        "summary": "Raw Record Label",
+        "description": "What this record is \u2014 the label on the evidence bag.\n\nDeliberately does NOT read the payload: a lineage trail can bottom out\nin dozens of raw records, and the label must stay cheap enough to show\nbeside every one of them. For an object-store payload the size comes\nfrom a metadata call; for a payload carried inline on the broker the\nsize is stated as measured-on-open rather than guessed. An object store\nthat is down degrades to a label with an honest note, never to an error\npage \u2014 the record's identity does not depend on the store being up.",
+        "operationId": "raw_record_label_raw_records__record_id__get",
+        "parameters": [
+          {
+            "name": "record_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Record Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RawRecordLabel"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/raw/records/{record_id}/verify": {
+      "post": {
+        "tags": [
+          "raw-records"
+        ],
+        "summary": "Verify Raw Record",
+        "description": "Re-read the stored bytes, re-compute their SHA-256, report the verdict.\n\nOpen to any signed-in role, including for payloads whose CONTENTS are\nwithheld: a hash discloses nothing about rider addresses, and the whole\npoint of this action is that nobody has to take the integrity claim on\ntrust.\n\nA mismatch means the stored bytes are not the bytes this record was\ncreated from. That is either tampering or corruption, and either way\nevery figure computed from this record is in question \u2014 so it answers\n409, raises a blocking data-quality issue, and is audited.",
+        "operationId": "verify_raw_record_raw_records__record_id__verify_post",
+        "parameters": [
+          {
+            "name": "record_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Record Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VerificationVerdict"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Bytes missing from the store",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VerificationVerdict"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Integrity MISMATCH",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VerificationVerdict"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "Bytes no longer retained",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VerificationVerdict"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Storage unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VerificationVerdict"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/raw/records/{record_id}/payload": {
+      "get": {
+        "tags": [
+          "raw-records"
+        ],
+        "summary": "Raw Record Payload",
+        "description": "A bounded look inside the record, with the caps stated.\n\nThis is the moment a steward sees their own bus, at that minute, at\nthose coordinates, as the origin of a number. What is shown is decoded\nfrom the stored bytes at request time \u2014 never from a cached rendering,\nnever from the normalized copy downstream \u2014 so the preview is evidence\nabout the record and not about Headway's opinion of it.",
+        "operationId": "raw_record_payload_raw_records__record_id__payload_get",
+        "parameters": [
+          {
+            "name": "record_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Record Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PayloadPreview"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/raw/records/{record_id}/download": {
+      "get": {
+        "tags": [
+          "raw-records"
+        ],
+        "summary": "Raw Record Download",
+        "description": "The exact stored bytes, streamed, with the record's own content type.\n\nNot truncated and not transformed: a download that altered the bytes\nwould be worthless as evidence. The response carries the content address\nin a header so a downloaded file can be tied back to the record it came\nfrom without depending on the filename.",
+        "operationId": "raw_record_download_raw_records__record_id__download_get",
+        "parameters": [
+          {
+            "name": "record_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Record Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/branding/logo": {
       "get": {
         "tags": [
@@ -5148,6 +5358,29 @@
         ],
         "title": "CompareRow"
       },
+      "ContentAddress": {
+        "properties": {
+          "algorithm": {
+            "type": "string",
+            "title": "Algorithm"
+          },
+          "digest": {
+            "type": "string",
+            "title": "Digest"
+          },
+          "note": {
+            "type": "string",
+            "title": "Note"
+          }
+        },
+        "type": "object",
+        "required": [
+          "algorithm",
+          "digest",
+          "note"
+        ],
+        "title": "ContentAddress"
+      },
       "CreateKeyRequest": {
         "properties": {
           "name": {
@@ -5383,6 +5616,24 @@
           "ss50_citation"
         ],
         "title": "DeadlinesResponse"
+      },
+      "DecoderBlock": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "note": {
+            "type": "string",
+            "title": "Note"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "note"
+        ],
+        "title": "DecoderBlock"
       },
       "DeleteServiceDayOverrideResponse": {
         "properties": {
@@ -7180,6 +7431,120 @@
         ],
         "title": "OptionsResponse"
       },
+      "PayloadPreview": {
+        "properties": {
+          "record_id": {
+            "type": "string",
+            "title": "Record Id"
+          },
+          "content_type": {
+            "type": "string",
+            "title": "Content Type"
+          },
+          "size_bytes": {
+            "type": "integer",
+            "title": "Size Bytes"
+          },
+          "read_from": {
+            "type": "string",
+            "title": "Read From"
+          },
+          "decoder": {
+            "type": "string",
+            "title": "Decoder"
+          },
+          "decoder_note": {
+            "type": "string",
+            "title": "Decoder Note"
+          },
+          "truncated": {
+            "type": "boolean",
+            "title": "Truncated"
+          },
+          "truncation_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Truncation Note"
+          },
+          "caps": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Caps"
+          },
+          "gtfs_realtime": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gtfs Realtime"
+          },
+          "delimited": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delimited"
+          },
+          "text": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text"
+          },
+          "undecoded": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Undecoded"
+          },
+          "download_note": {
+            "type": "string",
+            "title": "Download Note"
+          }
+        },
+        "type": "object",
+        "required": [
+          "record_id",
+          "content_type",
+          "size_bytes",
+          "read_from",
+          "decoder",
+          "decoder_note",
+          "truncated",
+          "caps",
+          "download_note"
+        ],
+        "title": "PayloadPreview",
+        "description": "A bounded look inside. Every cap that applied is stated in ``caps``."
+      },
       "PlanCreate": {
         "properties": {
           "report_year": {
@@ -7792,6 +8157,99 @@
           "audit_event_id"
         ],
         "title": "PutServiceDayOverrideResponse"
+      },
+      "RawRecordLabel": {
+        "properties": {
+          "record_id": {
+            "type": "string",
+            "title": "Record Id"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "simulated": {
+            "type": "boolean",
+            "title": "Simulated"
+          },
+          "connector": {
+            "type": "string",
+            "title": "Connector"
+          },
+          "connector_version": {
+            "type": "string",
+            "title": "Connector Version"
+          },
+          "content_type": {
+            "type": "string",
+            "title": "Content Type"
+          },
+          "payload_encoding": {
+            "type": "string",
+            "title": "Payload Encoding"
+          },
+          "fetched_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Fetched At"
+          },
+          "landed_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Landed At"
+          },
+          "parse_status": {
+            "type": "string",
+            "title": "Parse Status"
+          },
+          "parse_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parse Error"
+          },
+          "stored_bytes": {
+            "$ref": "#/components/schemas/StoredBytes"
+          },
+          "content_address": {
+            "$ref": "#/components/schemas/ContentAddress"
+          },
+          "sensitivity": {
+            "$ref": "#/components/schemas/SensitivityBlock"
+          },
+          "decoder": {
+            "$ref": "#/components/schemas/DecoderBlock"
+          },
+          "immutability_note": {
+            "type": "string",
+            "title": "Immutability Note"
+          }
+        },
+        "type": "object",
+        "required": [
+          "record_id",
+          "source",
+          "simulated",
+          "connector",
+          "connector_version",
+          "content_type",
+          "payload_encoding",
+          "fetched_at",
+          "landed_at",
+          "parse_status",
+          "stored_bytes",
+          "content_address",
+          "sensitivity",
+          "decoder",
+          "immutability_note"
+        ],
+        "title": "RawRecordLabel",
+        "description": "The label on the evidence bag. Every field is a ``raw.records`` column\nor a measurement taken now; nothing is inferred."
       },
       "RequirementResponse": {
         "properties": {
@@ -8694,6 +9152,50 @@
         ],
         "title": "SandboxPreviewResponse"
       },
+      "SensitivityBlock": {
+        "properties": {
+          "classification": {
+            "type": "string",
+            "title": "Classification"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "minimum_role": {
+            "type": "string",
+            "title": "Minimum Role"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason"
+          },
+          "preview_allowed": {
+            "type": "boolean",
+            "title": "Preview Allowed"
+          },
+          "refusal": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Refusal"
+          }
+        },
+        "type": "object",
+        "required": [
+          "classification",
+          "label",
+          "minimum_role",
+          "reason",
+          "preview_allowed"
+        ],
+        "title": "SensitivityBlock"
+      },
       "ServiceDayOverride": {
         "properties": {
           "service_date": {
@@ -9058,6 +9560,52 @@
         ],
         "title": "StopsCollection",
         "description": "GeoJSON FeatureCollection of canonical.stops. The extra members are\nGeoJSON foreign members (RFC 7946 \u00a76.1) carrying Headway's honesty\nmetadata."
+      },
+      "StoredBytes": {
+        "properties": {
+          "location": {
+            "type": "string",
+            "title": "Location"
+          },
+          "object_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Object Key"
+          },
+          "size_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Size Bytes"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "note": {
+            "type": "string",
+            "title": "Note"
+          }
+        },
+        "type": "object",
+        "required": [
+          "location",
+          "status",
+          "note"
+        ],
+        "title": "StoredBytes",
+        "description": "Where the payload lives and how big it is \u2014 measured, never assumed."
       },
       "SubscriptionResponse": {
         "properties": {
@@ -9472,6 +10020,106 @@
           "message"
         ],
         "title": "VerificationResult"
+      },
+      "VerificationVerdict": {
+        "properties": {
+          "record_id": {
+            "type": "string",
+            "title": "Record Id"
+          },
+          "verified_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Verified At"
+          },
+          "result": {
+            "type": "string",
+            "title": "Result"
+          },
+          "algorithm": {
+            "type": "string",
+            "title": "Algorithm"
+          },
+          "expected_digest": {
+            "type": "string",
+            "title": "Expected Digest"
+          },
+          "actual_digest": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actual Digest"
+          },
+          "size_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Size Bytes"
+          },
+          "read_from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Read From"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "headline": {
+            "type": "string",
+            "title": "Headline"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail"
+          },
+          "dq_issue_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dq Issue Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "record_id",
+          "verified_at",
+          "result",
+          "algorithm",
+          "expected_digest",
+          "headline",
+          "detail"
+        ],
+        "title": "VerificationVerdict",
+        "description": "The result of re-reading the bytes and re-computing their hash.\n\n``result`` is the whole answer in one word and the HTTP status agrees\nwith it: match is 200, mismatch is 409, and an unreadable payload is\n404/410/503 by reason. A caller that only checks the status code cannot\nmistake a failure for a pass."
       }
     }
   }

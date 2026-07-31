@@ -219,6 +219,49 @@ class MinioObjectStore:
         semantics. Ingest itself never deletes: raw records are immutable."""
         self._client.remove_object(self._bucket, key)
 
+    def stat(self, key: str) -> Optional[int]:
+        """Object size in bytes without reading it, or None when absent.
+
+        Added for the raw-record inspector's label (handoff 0035): a lineage
+        trail can bottom out in dozens of raw records, and each one's label
+        must not cost a whole-object read. A raw GTFS static zip on this box
+        is ~24 MB — that is the difference this call makes."""
+        from minio.error import S3Error
+
+        try:
+            return self._client.stat_object(self._bucket, key).size
+        except S3Error as exc:
+            if exc.code in ("NoSuchKey", "NoSuchObject"):
+                return None
+            raise
+
+    def stream(self, key: str, chunk_size: int = 1024 * 1024):
+        """``(size, chunk iterator)`` for one object, or ``(None, None)``
+        when it does not exist.
+
+        Added for the raw-record inspector (handoff 0035) so integrity
+        verification hashes a 24 MB object a megabyte at a time and the
+        download endpoint streams it, instead of both holding it whole."""
+        from minio.error import S3Error
+
+        try:
+            response = self._client.get_object(self._bucket, key)
+        except S3Error as exc:
+            if exc.code in ("NoSuchKey", "NoSuchObject"):
+                return None, None
+            raise
+        length = response.getheader("Content-Length")
+        size = int(length) if length is not None else None
+
+        def chunks():
+            try:
+                yield from response.stream(chunk_size)
+            finally:
+                response.close()
+                response.release_conn()
+
+        return size, chunks()
+
 
 class KafkaEnvelopeProducer:
     """kafka-python-ng adapter (from the ``ingest`` extra). Flushes per send:

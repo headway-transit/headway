@@ -642,7 +642,13 @@ export const copy = {
     toggleInputs: (label: string) => `Inputs of ${label}`,
     madeBy: (name: string, version: string) =>
       `made by ${name} (version ${version})`,
-    rawLeaf: "raw source record as received — the end of the trail",
+    /**
+     * The end of the trail, but no longer a dead end (handoff 0035). It used
+     * to read "raw source record as received — the end of the trail", and a
+     * UAT auditor's verdict on that was exact: "It doesn't really provide any
+     * data to validate or verify." The leaf now opens.
+     */
+    rawLeaf: "raw source record, exactly as Headway received it",
     /** The visual lineage graph (handoff 0007, pillar 2). */
     graph: {
       viewToggleLabel: "How to show the trail",
@@ -672,6 +678,75 @@ export const copy = {
       "canonical.routes": "Cleaned route",
       "raw.records": "Raw source record",
     } as Record<string, string>,
+  },
+
+  /**
+   * The raw-record inspector (handoff 0035): the label, the integrity
+   * button and the window on the last link in the chain of custody. Plain
+   * language throughout — the reader is an auditor or an operations
+   * manager, not a data engineer.
+   */
+  rawRecord: {
+    openLabel: (id: string) => `Open the raw source record ${id}`,
+    open: "Open this record",
+    close: "Close this record",
+    loading: "Reading this record's label…",
+    /** Field labels on the label itself. */
+    source: "Source",
+    connector: "Collected by",
+    fetchedAt: "Received",
+    landedAt: "Stored",
+    contentType: "File type",
+    size: "Size",
+    parseStatus: "Read on arrival",
+    parseOk: "Read successfully",
+    parseMalformed: "Could not be read",
+    storedAt: "Bytes held",
+    sizeUnknown: "measured when you open the contents",
+    /** The hash: still here, deliberately demoted to a footnote. */
+    fingerprintHeading: "Fingerprint (SHA-256)",
+    inspect: "Look inside",
+    hideInspect: "Hide the contents",
+    verify: "Verify integrity",
+    verifying: "Re-reading the bytes and re-computing the fingerprint…",
+    download: "Download the exact bytes",
+    downloading: "Preparing the download…",
+    verdictMatch: "Integrity verified",
+    verdictMismatch: "INTEGRITY CHECK FAILED",
+    verdictMissing: "The bytes are missing",
+    verdictUnavailable: "Could not be checked",
+    verdictDigests: "Fingerprints compared",
+    verdictExpected: "This record's id (the fingerprint of the bytes as received)",
+    verdictActual: "The fingerprint of the bytes stored right now",
+    verdictIssue: (id: string) => `Data-quality finding raised: ${id}`,
+    verdictIssueLink: "Open the finding",
+    verifiedAt: (when: string) => `Checked ${when}`,
+    withheldHeading: "Contents withheld",
+    previewHeading: "Inside this record",
+    previewLoading: "Reading the contents…",
+    entitiesHeading: "Vehicles and updates in this message",
+    feedHeading: "Feed message",
+    feedVersion: "GTFS-Realtime version",
+    feedIncrementality: "Message type",
+    feedTimestamp: "Feed timestamp",
+    feedEntities: "Records inside",
+    entityVehicle: "Vehicle",
+    entityRoute: "Route",
+    entityTrip: "Trip",
+    entityPosition: "Position",
+    entityTime: "Reported at",
+    entityStatus: "Status",
+    entityStop: "Stop",
+    entityOccupancy: "Occupancy",
+    entityDelay: "Delay (seconds)",
+    entityStopUpdates: "Stop updates",
+    entityAlert: "Service alert",
+    absent: "not reported",
+    rowsHeading: "First rows of the file",
+    linesHeading: "First lines of the file",
+    noColumns: "Columns are shown without names",
+    undecodedHeading: "Headway cannot show this file's contents",
+    error: "Headway could not read this record.",
   },
 
   dq: {

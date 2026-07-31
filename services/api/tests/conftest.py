@@ -27,7 +27,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-from headway_api import auth, machine_auth, signing  # noqa: E402
+from headway_api import auth, machine_auth, raw_payloads, signing  # noqa: E402
 from headway_api.app import Settings, create_app  # noqa: E402
 
 TEST_SECRET = "test-only-session-secret-not-for-production"
@@ -629,6 +629,47 @@ class FakeConn:
             return FakeCursor(
                 [(issue["resolution_minutes"],)] if issue else []
             )
+
+        # -- raw-record inspector (handoff 0035) ----------------------------
+        if q.startswith("SELECT record_id, source, connector, connector_version"):
+            rows = [
+                (
+                    r["record_id"], r["source"], r["connector"],
+                    r["connector_version"], r["content_type"],
+                    r["payload_encoding"], r["payload_ref"], r["fetched_at"],
+                    r["landed_at"], r["parse_status"], r["parse_error"],
+                )
+                for r in self.raw_records
+                if r["record_id"] == params[0]
+            ]
+            return FakeCursor(rows)
+
+        # The integrity-failure finding's idempotence probe: is there
+        # already an unresolved issue of this type against this record?
+        if q.startswith("SELECT issue_id FROM dq.issues WHERE issue_type"):
+            issue_type, record_id = params
+            rows = [
+                (i["issue_id"],)
+                for i in self.dq_issues.values()
+                if i["issue_type"] == issue_type
+                and i["status"] != "resolved"
+                and record_id in (i["source_record_ids"] or [])
+            ]
+            return FakeCursor(rows[:1])
+
+        if q.startswith("INSERT INTO dq.issues (issue_type, severity, status, "
+                        "title, description, source_record_ids)"):
+            issue_type, severity, status, title, description, ids = params
+            issue = self.add_dq_issue(
+                issue_type=issue_type,
+                severity=severity,
+                status=status,
+                title=title,
+                description=description,
+                source_record_ids=list(ids),
+                created_at=dt.datetime.now(UTC),
+            )
+            return FakeCursor([(issue["issue_id"],)])
 
         # -- machine API keys (handoff 0006) --------------------------------
         if "FROM auth.api_keys WHERE key_hash" in q:
@@ -1604,14 +1645,19 @@ class FakeConn:
         return p
 
     def add_raw_record(self, **overrides):
-        """Seed one raw.records registry row (handoff 0025 sources status)."""
+        """Seed one raw.records registry row (handoff 0025 sources status;
+        the full column set the inspector reads, handoff 0035)."""
         now = dt.datetime.now(UTC)
         r = {
             "record_id": uuid.uuid4().hex * 2,  # 64 hex chars, like sha256
             "source": "gtfs_rt",
             "connector": "headway-gtfs-rt",
             "connector_version": "0.1.0",
+            "content_type": "application/x-protobuf",
+            "payload_encoding": "base64",
+            "payload_ref": None,
             "parse_status": "ok",
+            "parse_error": None,
             "fetched_at": now,
             "landed_at": now,
         }
@@ -1970,6 +2016,21 @@ class FakeObjectStore:
         self.call_log.append(("store.delete", key))
         self.objects.pop(key, None)
 
+    # -- raw-record inspector seams (handoff 0035), mirroring MinioObjectStore
+    def stat(self, key):
+        """Size without reading, None when the object is not there."""
+        self.call_log.append(("store.stat", key))
+        data = self.objects.get(key)
+        return None if data is None else len(data)
+
+    def stream(self, key, chunk_size=1024 * 1024):
+        self.call_log.append(("store.stream", key))
+        data = self.objects.get(key)
+        if data is None:
+            return None, None
+        chunks = [data[i : i + chunk_size] for i in range(0, len(data), chunk_size)]
+        return len(data), iter(chunks or [b""])
+
 
 class FakeProducer:
     def __init__(self, call_log=None):
@@ -1979,6 +2040,27 @@ class FakeProducer:
     def produce(self, topic, key, value):
         self.call_log.append(("producer.produce", topic, key))
         self.produced.append((topic, key, value))
+
+
+class FakeEnvelopeStream:
+    """Stands in for the broker in the raw-record inspector (handoff 0035).
+
+    GTFS-Realtime payloads are never written to the object store: the
+    connector base64-encodes the exact bytes into the ingest envelope and
+    produces it keyed by record_id (contracts/topics.v0.md), so the broker
+    is the only place those bytes exist. This fake replaces ONLY the bounded
+    topic lookup — the routing, the hashing and the decoding under test are
+    the real ones. A record_id absent from ``messages`` reproduces the real
+    "the broker no longer retains that message" path.
+    """
+
+    def __init__(self):
+        self.messages: dict[str, bytes] = {}
+        self.lookups: list[tuple[str, tuple]] = []
+
+    def __call__(self, record, topics):
+        self.lookups.append((record.record_id, tuple(topics)))
+        return self.messages.get(record.record_id)
 
 
 class FakeCalcRunLauncher:
@@ -2060,8 +2142,24 @@ def fake_calc_launcher():
 
 
 @pytest.fixture
+def fake_envelope_stream():
+    return FakeEnvelopeStream()
+
+
+@pytest.fixture
+def fake_payload_reader(fake_store, fake_envelope_stream):
+    """The REAL composite reader over a fake store and a fake broker
+    (handoff 0035): routing by payload_encoding, streaming reads, hashing
+    and decoding are all the production code paths."""
+    return raw_payloads.CompositeRawPayloadReader(
+        raw_payloads.ObjectStorePayloadReader(fake_store),
+        raw_payloads.EnvelopeStreamPayloadReader(fake_envelope_stream),
+    )
+
+
+@pytest.fixture
 def app(fake_db, settings, fake_store, fake_producer, fake_webhook_sender,
-        test_signer, fake_calc_launcher):
+        test_signer, fake_calc_launcher, fake_payload_reader):
     application = create_app(
         settings=settings,
         db=fake_db,
@@ -2069,6 +2167,7 @@ def app(fake_db, settings, fake_store, fake_producer, fake_webhook_sender,
         producer=fake_producer,
         webhook_sender=fake_webhook_sender,
         calc_run_launcher=fake_calc_launcher,
+        raw_payload_reader=fake_payload_reader,
     )
     # The installation signing key (handoff 0019), injected like every other
     # external seam — signing.get_signer serves this cached instance.

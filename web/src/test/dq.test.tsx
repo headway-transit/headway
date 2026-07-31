@@ -826,7 +826,10 @@ describe("/dq", () => {
     ).toBeInTheDocument();
 
     await expectNoAxeViolations();
-  });
+    // Explicit timeout, like the other heavy tests here: three paged renders
+    // plus an axe pass exceeds the 5 s default under full-suite parallel load
+    // (the CI flake seen 2026-07-30).
+  }, 15000);
 
   it("fetches a finding's source records only when the disclosure is opened (handoff 0030), complete and copyable", async () => {
     signInAs("viewer");

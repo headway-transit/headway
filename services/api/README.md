@@ -24,6 +24,10 @@ preserved end to end; floating point never touches a figure).
 | GET | `/geometry/stops` | any signed-in role | GeoJSON FeatureCollection of `canonical.stops` (Point per stop, `[lon, lat]`; properties `stop_id`, `name`). Stops with NULL coordinates (legal per GTFS) are EXCLUDED AND COUNTED (`stops_without_coordinates`), never given an invented point. Ops-category foreign members; strong content-hash `ETag` (canonical.stops has no ingest-time column — recorded choice) + `Cache-Control: private, max-age=300`; matching `If-None-Match` → 304. Cap 50,000 with truncation honesty. |
 | GET | `/geometry/routes` | any signed-in role | v0 **HONEST SCHEMATIC** (handoff 0023): per route, a LineString through the ordered stops of its most common trip pattern (straight lines between stops; deterministic tie-break). Labeled `geometry_kind: "schematic_stop_sequence"` at collection level AND per feature — shapes.txt has never been ingested and the map must not imply street geometry (shapes.txt ingestion is the recorded v1). Undrawable routes (<2 located stops) excluded and counted; per-feature `stops_missing_coordinates`. The pattern aggregation walks every `stop_times` row (~3.6 s live over 3.1M rows) so the collection is cached per process ≤ 900 s — staleness bounded and STATED (`computed_at` + `cache_ttl_seconds` in the response) — with a content-hash `ETag` for cheap revalidation. |
 | GET | `/metrics/values/{id}/lineage` | any signed-in role, **or** machine key scope `read:metrics` | "Explain this number": recursive traversal of `lineage.edges` (recursive CTE) from the figure down to `raw.records`, returned as a tree `{kind, id, transform_name, transform_version, inputs: [...]}`. A figure with no lineage is a loud 500, never an empty 200. Machine path rate-limited per key + audited (actor `key:<prefix>`); every auth failure is one generic 401 that never reveals which credential type was expected. |
+| GET | `/raw/records/{id}` | any signed-in role | **The label on the last link of the chain of custody** (handoff 0035): source, connector + version, `fetched_at`/`landed_at`, content type, payload encoding, `parse_status` (+ the parser's own `parse_error`, verbatim), where the bytes live and how big they are, the content address, the sensitivity rule that governs the contents, and which decoder the preview would use. Every field is a `raw.records` column or a measurement taken now — nothing is inferred, and an absent value is served absent. Deliberately does NOT read the payload: a trail can bottom out in thousands of records (one live VRH figure has 1,138), so the label costs one metadata call (2.4 ms live) and never a whole-object read. An object store that is down degrades to a label with an honest note, never an error page. |
+| POST | `/raw/records/{id}/verify` | any signed-in role | **Integrity as an action, not a claim**: re-reads the stored bytes (streamed, a megabyte at a time), re-computes the SHA-256, and reports the verdict with BOTH digests. `match` → 200. **`mismatch` → 409** plus a **blocking `dq.issues` row** (`raw_record_integrity_mismatch`, idempotent — pressing the button five times does not file five findings) so a tampered or corrupted payload lands in the steward's queue and not only on one screen. Bytes missing from the object store → 404 + a `raw_record_payload_missing` finding (a raw record is supposed to be permanent, so its absence is a real finding). Bytes that rode inline in the ingest envelope and have aged out of the broker's retention → **410, and NOT a finding**: that is a deployment setting, said plainly. Storage unconfigured/unreachable → 503. The non-2xx statuses are the point: a caller that checks only the status cannot mistake a failure for a pass. Open to every signed-in role INCLUDING for payloads whose contents are withheld — a hash discloses nothing, and nobody should be told that proving integrity is above their pay grade. Audited with the verdict. |
+| GET | `/raw/records/{id}/payload` | any signed-in role, **subject to the payload's sensitivity class** | **The window**: a bounded, decoded preview with every cap stated in the response. GTFS-Realtime protobuf → the feed header plus the first 25 entities with their real values (vehicle, route, trip, coordinates, event time, status), decoded with the SAME pinned Apache-2.0 bindings the transform service normalizes with. `text/csv` from a connector whose CONTRACT declares a comma-delimited header row (`headway-tides`, `headway-dr`, `headway-api-ingest`) → the file's own header + first 20 rows. Any other text/JSON → the first 20 lines verbatim, with NO column names invented (what a vendor export's columns mean is defined only by its registered mapping spec, which this API does not hold). Anything else → its type, its size, and the exact bytes to download — never a rendering the API cannot vouch for. Decoding reads at most 4 MiB; a byte-truncated last row is dropped rather than shown half-real. Audited. |
+| GET | `/raw/records/{id}/download` | any signed-in role, **same sensitivity gate** | The exact stored bytes, streamed, with the record's own content type, `X-Headway-Record-Id` and `X-Headway-Content-Address` headers. Never truncated, never transformed — hashing the saved file reproduces the record id (proven live on a 2.7 KB realtime frame and a 24 MB GTFS static zip). Audited. |
 | POST | `/certifications` | `certifying_official` only | The SIGNING certification (handoff 0019): the certifier's typed full name + title are entered against the intent statement; the server assembles the canonical document (figures + receipt hashes + certifier identity + acknowledgments incl. statistician attestations + timestamp), signs it Ed25519 with the installation key, inserts `cert.certifications` (document + signature + key fingerprint, migration 0030), marks the figures `certified`, and writes the `audit.events` row — all in ONE transaction. Refuses 409 while any blocking DQ issue is open/owned (`resolved` and `attested` are the closed states); refuses 503 (nothing written) when no signing key is configured — a certification is never recorded unsigned. |
 | GET | `/certifications` | any signed-in role | Certification records: covered ids, certifier, timestamp, signed flag, key fingerprint, typed signer name/title (parsed from the signed document). Pre-signature records read `signed=false` honestly — never backfilled. |
 | GET | `/certifications/intent` | any signed-in role | The fixed ESIGN-style intent statement the ceremony renders and the honest-scope statement printed on the certificate (installation key = integrity + attribution within this system, NOT PKI non-repudiation; per-certifier WebAuthn keys are the documented v1). |
@@ -688,3 +692,77 @@ provenance relocation, server-side severity filter, counts/page agreement).
 `openapi.json` regenerated: OpenAPI 3.1.0, 63 paths (`DqIssuePage`,
 `DqIssueSummary` added; `DqIssue` keeps `source_record_ids` on the by-id
 response only). Live measurements in handoff 0030's evidence.
+
+## The raw-record inspector (handoff 0035)
+
+First-agency UAT, the sharpest finding of the week: an ITS manager walked a
+VRH figure back through its lineage to the source — exactly what this
+platform is built for — and hit a wall of hashes labelled *"raw source record
+as received — the end of the trail."* His verdict: **"It doesn't really
+provide any data to validate or verify."**
+
+He was right. A content address genuinely proves tamper-evidence, but proof
+you cannot *inspect* asks for trust at the exact step where this platform must
+never ask for it. `routers/raw_records.py` + `raw_payloads.py` give the sealed
+evidence bag a label, a window, and a seal the auditor can test:
+`GET /raw/records/{id}`, `POST .../verify`, `GET .../payload`,
+`GET .../download` (table above).
+
+### Where the bytes actually are — and why that is two places
+
+`raw.records` is an INDEX, not a payload table (migration 0002). The payload
+lives in one of two places, and the record says which:
+
+| `payload_encoding` | Where the bytes are | Read back by |
+| --- | --- | --- |
+| `object_ref` | The object store, at `payload_ref` (GTFS static zips, TIDES/DR/vendor CSVs, telematics JSON) | `ObjectStorePayloadReader` — MinIO `stat` for the label's size, streamed `get_object` for verify/download |
+| `base64` | **Inline in the ingest envelope on the Kafka topic** — the GTFS-Realtime connector never writes to the object store (contracts/topics.v0.md; `services/ingestion/connectors/gtfsrt`) | `EnvelopeStreamPayloadReader` — a BOUNDED lookup: seek the topic by `fetched_at` (minus 5 min), scan at most 400 messages for the message keyed with this `record_id`, and **re-hash the payload before returning it** (the key alone is not trusted) |
+
+This mattered more than it looks. The realtime frames are exactly the records
+a VRH walk bottoms out in, so an inspector that only read the object store
+would have failed on the one case the UAT finding was about. It also surfaced
+a real platform gap, recorded honestly rather than papered over: **once the
+broker's retention window passes, a GTFS-Realtime record's bytes are gone**
+and Headway says so (410 `not_retained`) instead of pretending. Durable
+retention for realtime frames is an ingestion/deployment decision, not
+something this endpoint can fix.
+
+`KAFKA_BROKERS` is therefore now read by the API for a SECOND purpose
+(previously producer-only). Without it, `base64` payloads refuse with a plain
+503 naming the missing setting — never an empty preview.
+
+### The sensitivity rule (docs/data-classification.md)
+
+Sensitivity follows the payload, not the storage layer. The rule, in one
+sentence: **a raw record's CONTENTS are withheld from the broadest read role
+when the payload can carry rider pickup/dropoff coordinates; its LABEL and its
+INTEGRITY CHECK are never withheld from anyone.**
+
+| Class | Applies to | Minimum role | Why |
+| --- | --- | --- | --- |
+| `rider_location` | Demand-response / paratransit payloads — connector `headway-dr`, or an object key under `raw/dr/` (the machine-ingest connector lands both TIDES and DR files, so the key prefix is the discriminator) | `data_steward` | Pickup and dropoff coordinates are rider home and destination addresses, and an ADA paratransit trip record can disclose disability status by its mere existence. Migration 0028 already withholds exactly these columns from the read-only analyst role; a raw record is as sensitive as the payload inside it, so the same withholding applies here. |
+| `undetermined` | Every vendor export (`headway-vendor-file`) | `data_steward` | What a vendor export MEANS is defined only by its registered mapping spec (`adapters/<vendor>/<product>/mapping.v0.yaml`), which the API does not hold — and one reference spec (acme/paravan) targets `demand_response_trip`. Fail closed rather than assume the safer answer. |
+| `internal` | Everything else (GTFS-RT, GTFS static, TIDES, telematics) | `viewer` | Agency operational data. Telematics is deliberately NOT tightened here: the platform's stated control for employee-monitoring data is minimisation at the connector (handoff 0028), not withholding at read, and inventing a second rule would be inventing policy. |
+
+Decided from the record's own ingest metadata, never from downstream evidence:
+a paratransit file that has landed but not yet been transformed must be
+withheld from the second it exists, not from the moment a transform proves
+what it was. Refusals are 403s that say why, in words.
+
+### Audit
+
+Every look INSIDE a record is an append-only audit row —
+`raw_record_payload_preview` and `raw_record_download`, whatever the
+sensitivity class — because this is the only surface in Headway that serves
+raw record CONTENT, and "who opened the evidence, and when" is a question an
+auditor is entitled to ask. `raw_record_verify` records the verdict (and the
+DQ issue id when one was raised). Reading the LABEL is not audited, like every
+other signed-in GET.
+
+### Honest scope (v0)
+
+Read-only, all of it: `raw.records` is immutable at the database level and
+this router only ever SELECTs. No re-parsing, no editing, no re-ingestion.
+The decoder set is GTFS-Realtime + text/CSV; everything else states its type
+and hands over bytes. Bulk verification of a whole figure's evidence chain is
+the natural v1 (recorded in the handoff), not v0.

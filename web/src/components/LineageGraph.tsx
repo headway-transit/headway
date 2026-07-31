@@ -98,7 +98,18 @@ function shortId(id: string): string {
   return id.length > 26 ? `${id.slice(0, 25)}…` : id;
 }
 
-export function LineageGraph({ root }: { root: LineageNode }) {
+export function LineageGraph({
+  root,
+  onSelectRaw,
+}: {
+  root: LineageNode;
+  /**
+   * Handoff 0035: when given, each raw node becomes an activatable button
+   * that opens the raw-record inspector, so the graph reaches exactly what
+   * the text view reaches. Optional so the graph still renders standalone.
+   */
+  onSelectRaw?: (recordId: string) => void;
+}) {
   const summary = useMemo(() => summarize(root), [root]);
   const [rawExpanded, setRawExpanded] = useState(false);
   const [rawShown, setRawShown] = useState(PAGE_SIZE);
@@ -148,10 +159,15 @@ export function LineageGraph({ root }: { root: LineageNode }) {
     ...visibleRaw.map(
       (id): GraphNodeSpec => ({
         key: `raw:${id}`,
-        name: copy.lineage.graph.rawNode(id),
+        // The full record id stays in the accessible name either way; when
+        // the node can be opened, the name says so (handoff 0035).
+        name: onSelectRaw
+          ? copy.rawRecord.openLabel(id)
+          : copy.lineage.graph.rawNode(id),
         line1: shortId(id),
         line2: copy.lineage.kindLabels["raw.records"],
-        role: "img",
+        role: onSelectRaw ? "button" : "img",
+        onActivate: onSelectRaw ? () => onSelectRaw(id) : undefined,
         variant: "raw",
       }),
     ),
