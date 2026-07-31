@@ -1,0 +1,4 @@
+
+# Compiled command binaries (build artifacts, never committed)
+/headway-gtfsrt-backfill
+/headway-ingest
