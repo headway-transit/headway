@@ -1622,6 +1622,9 @@ export interface CalcRunMetricOutcome {
   outcome: "persisted" | "refused";
   value: string | null;
   metric_value_id: string | null;
+  /** Identical re-run over unchanged data: the runner reused the EXISTING
+   *  metric row instead of writing a duplicate. Absent on pre-dedupe runs. */
+  already_on_record?: boolean;
   coverage: string | null;
   blocking_issue_ids: string[];
   warning_issue_ids: string[];

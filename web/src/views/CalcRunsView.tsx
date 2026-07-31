@@ -412,6 +412,12 @@ function OutcomeRow({ o }: { o: CalcRunMetricOutcome }) {
         {persisted ? (
           <>
             {o.value} {o.unit}
+            {o.already_on_record && (
+              <>
+                {" "}
+                <span className="field-hint">{cr.outcomeAlreadyOnRecord}</span>
+              </>
+            )}
           </>
         ) : (
           <>

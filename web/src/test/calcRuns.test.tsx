@@ -213,6 +213,45 @@ describe("the calculations room (/calc-runs)", () => {
     expect(
       screen.queryByText("This refusal is Headway working as designed"),
     ).not.toBeInTheDocument();
+    // A first run carries no already-on-record note.
+    expect(
+      screen.queryByText(/not duplicated/),
+    ).not.toBeInTheDocument();
+  });
+
+  it("an identical re-run says the figure was not duplicated", async () => {
+    // The persist dedupe (identical figure already on record): the outcome
+    // still shows the figure verbatim with its receipt links, PLUS the
+    // plain-words note — a re-run must never read as a second figure.
+    signInAs("data_steward");
+    const rerun = {
+      ...SUCCEEDED_RUN,
+      summary: {
+        ...SUCCEEDED_RUN.summary,
+        metrics: [
+          {
+            ...SUCCEEDED_RUN.summary.metrics[0],
+            already_on_record: true,
+          },
+        ],
+      },
+    };
+    mockApi({ "GET /calc/runs": { status: 200, body: [rerun] } });
+    renderApp("/calc-runs");
+
+    expect(await screen.findByText(/1832041\.174/)).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Same result as the figure already on record — not duplicated",
+      ),
+    ).toBeInTheDocument();
+    // The receipt links still point at the (one) existing row.
+    expect(
+      screen.getByRole("link", { name: "How this number was made" }),
+    ).toHaveAttribute(
+      "href",
+      "/metrics/22222222-bbbb-4000-8000-000000000001/lineage",
+    );
   });
 
   it("starts a run with the picked custom period and confirms plainly", async () => {

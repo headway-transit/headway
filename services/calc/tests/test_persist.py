@@ -20,19 +20,28 @@ FAKE_METRIC_VALUE_ID = "11111111-2222-3333-4444-555555555555"
 
 
 class FakeCursor:
-    def __init__(self):
+    """Answers the identical-figure probe from ``existing_rows`` (empty by
+    default — no duplicate on record) and the INSERT..RETURNING with the
+    fake id."""
+
+    def __init__(self, existing_rows=()):
         self.executed: list[tuple[str, tuple]] = []
+        self._existing_rows = list(existing_rows)
+        self._last_sql = ""
 
     def execute(self, sql, params=None):
         self.executed.append((sql, params))
+        self._last_sql = sql
 
     def fetchone(self):
+        if self._last_sql.lstrip().startswith("SELECT"):
+            return self._existing_rows[0] if self._existing_rows else None
         return (FAKE_METRIC_VALUE_ID,)
 
 
 class FakeConnection:
-    def __init__(self):
-        self._cursor = FakeCursor()
+    def __init__(self, existing_rows=()):
+        self._cursor = FakeCursor(existing_rows)
 
     def cursor(self):
         return self._cursor
@@ -62,15 +71,19 @@ def _detail():
 
 def test_persist_writes_metric_value_and_lineage_edges():
     conn = FakeConnection()
-    metric_value_id = persist_result(
+    persisted = persist_result(
         conn, _ok_result(), period_start=date(2026, 1, 1), period_end=date(2026, 1, 31)
     )
-    assert metric_value_id == FAKE_METRIC_VALUE_ID
+    assert persisted.metric_value_id == FAKE_METRIC_VALUE_ID
+    assert persisted.already_on_record is False
 
     executed = conn._cursor.executed
-    assert len(executed) == 1 + 3  # one metric_values insert + one edge per input record
+    # identical-figure probe + one metric_values insert + one edge per record
+    assert len(executed) == 1 + 1 + 3
 
-    mv_sql, mv_params = executed[0]
+    probe_sql, probe_params = executed[0]
+    assert probe_sql.startswith("SELECT metric_value_id FROM computed.metric_values")
+    mv_sql, mv_params = executed[1]
     assert "INSERT INTO computed.metric_values" in mv_sql
     assert (
         "(metric, unit, period_start, period_end, scope, value, calc_name, calc_version, detail, category)"
@@ -95,7 +108,7 @@ def test_persist_writes_metric_value_and_lineage_edges():
     assert isinstance(mv_params[5], Decimal)
 
     for (edge_sql, edge_params), record_id in zip(
-        executed[1:], ("rec-a-00", "rec-a-01", "rec-b-00")
+        executed[2:], ("rec-a-00", "rec-a-01", "rec-b-00")
     ):
         assert "INSERT INTO lineage.edges" in edge_sql
         assert (
@@ -168,10 +181,12 @@ def test_persist_accepts_result_with_warnings():
         ),
         detail=_detail(),
     )
-    metric_value_id = persist_result(conn, result, date(2026, 1, 1), date(2026, 1, 31))
-    assert metric_value_id == FAKE_METRIC_VALUE_ID
-    # Lineage covers input_record_ids only — never the excluded records.
-    edge_ids = [params[5] for sql, params in conn._cursor.executed[1:]]
+    persisted = persist_result(conn, result, date(2026, 1, 1), date(2026, 1, 31))
+    assert persisted.metric_value_id == FAKE_METRIC_VALUE_ID
+    assert persisted.already_on_record is False
+    # Lineage covers input_record_ids only — never the excluded records
+    # (executed: probe, metric_values insert, then the edges).
+    edge_ids = [params[5] for sql, params in conn._cursor.executed[2:]]
     assert edge_ids == ["rec-a-00"]
 
 
@@ -306,3 +321,38 @@ def test_mr20_select_hard_excludes_ops_category():
     from headway_calc.mr20 import _SELECT_LATEST_SQL
 
     assert "category = 'ntd'" in _SELECT_LATEST_SQL
+
+
+def test_persist_identical_figure_returns_existing_row_and_inserts_nothing():
+    """The identical-figure dedupe: a byte-identical recompute (same metric,
+    unit, period, scope, value, calc name+version, detail, category) never
+    creates a second computed.metric_values row — pressing 'Compute figures'
+    twice is one figure, not two. The existing row's id comes back with
+    already_on_record=True; no value insert, no lineage edges."""
+    existing_id = "99999999-8888-7777-6666-555555555555"
+    conn = FakeConnection(existing_rows=[(existing_id,)])
+    persisted = persist_result(
+        conn, _ok_result(), period_start=date(2026, 1, 1), period_end=date(2026, 1, 31)
+    )
+    assert persisted.already_on_record is True
+    assert persisted.metric_value_id == existing_id
+
+    executed = conn._cursor.executed
+    # Exactly one statement ran: the probe. Nothing was written.
+    assert len(executed) == 1
+    probe_sql, probe_params = executed[0]
+    assert probe_sql.startswith("SELECT metric_value_id FROM computed.metric_values")
+    # The probe's identity matches the insert's column tuple exactly —
+    # every column that defines the figure participates in the comparison.
+    assert probe_params == (
+        "vrm",
+        "miles",
+        date(2026, 1, 1),
+        date(2026, 1, 31),
+        "agency",
+        Decimal("12.44"),
+        "vrm_v0",
+        "0.1.0",
+        "{}",
+        "ntd",
+    )

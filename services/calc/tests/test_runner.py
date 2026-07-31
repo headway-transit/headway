@@ -469,8 +469,11 @@ def test_persist_failure_does_not_roll_back_committed_dq_issues(
     for sql, _ in conn.executed[: dq_at[0]]:
         assert sql.lstrip().startswith("SELECT")
     # The sole commit boundary sits after every dq insert and before the
-    # metric value: committed through the findings, no further.
-    assert conn.commits == [mv_at[0]]
+    # value phase (whose first statement is the identical-figure probe
+    # SELECT preceding the metric-value insert): committed through the
+    # findings, no further.
+    assert conn.commits == [mv_at[0] - 1]
+    assert max(dq_at) < mv_at[0] - 1
     # The value phase alone was rolled back; the commit record stands.
     assert conn.rollback_count == 1
 
@@ -1004,6 +1007,37 @@ def test_seeded_settings_values_reproduce_the_default_run_exactly(gapped_rows):
         "imbalance_threshold": "default",
     }
     assert a == b
+
+
+# --- identical re-run: one figure on record, never two -----------------------
+
+
+def test_identical_rerun_reuses_the_existing_figure_rows(clean_rows):
+    """Running the same period twice over unchanged data reports the run
+    honestly (the run happened, findings routed) but persists NO second
+    metric_values row: outcomes carry the EXISTING row ids with
+    already_on_record=True, and the report JSON says so."""
+    existing_id = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+    conn = RecordingConnection(
+        position_rows=clean_rows,
+        identical_metric_value_rows=[(existing_id,)],
+    )
+    report = run_period(conn, PERIOD_START, PERIOD_END)
+
+    # vrm/vrh find their identical figures already on record; upt/pmt still
+    # refuse on no count data exactly as in a first run.
+    assert report.persisted_count == 2
+    vrm, vrh, _upt, _pmt = report.outcomes
+    for outcome in (vrm, vrh):
+        assert outcome.already_on_record is True
+        assert outcome.metric_value_id == existing_id
+        assert outcome.value is not None
+    assert conn.statements_matching("INSERT INTO computed.metric_values") == []
+    assert conn.statements_matching("INSERT INTO lineage.edges") == []
+
+    parsed = json.loads(report.to_json())
+    assert parsed["metrics"][0]["already_on_record"] is True
+    assert parsed["metrics"][0]["metric_value_id"] == existing_id
 
 
 # --- the empty period: refuse, never a persisted 0.00 ------------------------

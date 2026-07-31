@@ -287,6 +287,10 @@ export const copy = {
     },
     outcomePersisted: "Figure produced",
     outcomeRefused: "Refused",
+    /** Identical re-run (persist dedupe): the figure was NOT duplicated —
+     *  say so, or a re-run reads as a second figure on the record. */
+    outcomeAlreadyOnRecord:
+      "Same result as the figure already on record — not duplicated",
     coverageLine: (coverage: string) => `Coverage: ${coverage}`,
     /** Refusal detail: name the count and link the EXACT issues. */
     refusedIssuesLead: (count: number) =>

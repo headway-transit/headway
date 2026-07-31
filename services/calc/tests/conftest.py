@@ -586,6 +586,12 @@ class RecordingCursor:
                 self._pending_all = list(conn.passenger_event_rows)
             elif "SELECT DISTINCT trip_id" in sql:
                 self._pending_all = list(conn.operated_trip_rows)
+            elif "SELECT metric_value_id FROM computed.metric_values" in sql:
+                # persist_result's identical-figure probe. Checked BEFORE
+                # the generic metric_values branch (both name the table).
+                rows = list(conn.identical_metric_value_rows)
+                self._pending_all = rows
+                self._pending_one = rows[0] if rows else None
             elif "FROM computed.metric_values" in sql:
                 # mr20's latest-per-(metric, scope) SELECT (handoff 0009);
                 # the fake serves pre-deduplicated canned rows.
@@ -666,8 +672,13 @@ class RecordingConnection:
         trip_label_rows: list[tuple] | None = None,
         subject_context_column_missing: bool = False,
         vehicle_label_column_missing: bool = False,
+        identical_metric_value_rows: list[tuple] | None = None,
     ):
         self.position_rows = position_rows or []
+        # persist_result's identical-figure probe: rows served to the
+        # SELECT metric_value_id dedupe query. Default empty — every
+        # persist inserts, exactly as before the dedupe existed.
+        self.identical_metric_value_rows = identical_metric_value_rows or []
         # The ops slice (handoff 0014): schedule + agency timezone reads.
         self.ops_schedule_rows = ops_schedule_rows or []
         self.agency_timezone_rows = agency_timezone_rows or []

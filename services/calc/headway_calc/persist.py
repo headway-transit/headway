@@ -21,9 +21,30 @@ by the runner with their own severity).
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from datetime import date
 
 from headway_calc.types import CalcResult
+
+
+@dataclass(frozen=True)
+class PersistedValue:
+    """What persist_result put on record.
+
+    ``already_on_record`` is True when an IDENTICAL figure — same metric,
+    unit, period, scope, value, calc name+version, detail JSONB and category
+    — already existed in computed.metric_values: nothing was inserted and
+    ``metric_value_id`` is the EXISTING row's id. Running the same
+    calculation twice over unchanged data is not two figures; rendering (or
+    certifying) the same number twice because a button was pressed twice
+    would misstate the record. The run itself is still fully audited (the
+    run history keeps every run); only the duplicate VALUE row is never
+    created. The detail JSONB pins coverage counts and threshold provenance,
+    so any change in inputs or policy produces a different detail and a
+    fresh row — dedupe can only collapse byte-identical evidence."""
+
+    metric_value_id: str
+    already_on_record: bool
 
 #: Metric name (computed.metric_values.metric) per calc_name, per handoff 0001
 #: (v0 metrics: 'vrm', 'vrh') plus 'upt' (handoff 0005), 'voms'
@@ -70,6 +91,17 @@ def category_for_calc(calc_name: str) -> str:
     """The computed.metric_values.category a calc's figures persist under."""
     return CATEGORY_OPS if calc_name in _OPS_CALC_NAMES else CATEGORY_NTD
 
+#: The identical-figure probe (see PersistedValue.already_on_record). The
+#: detail comparison is JSONB equality — key order never matters; the
+#: bound text is dumped with sort_keys for determinism anyway.
+_SELECT_IDENTICAL_SQL = (
+    "SELECT metric_value_id FROM computed.metric_values "
+    "WHERE metric = %s AND unit = %s AND period_start = %s AND period_end = %s "
+    "AND scope = %s AND value = %s AND calc_name = %s AND calc_version = %s "
+    "AND detail = %s::jsonb AND category = %s "
+    "ORDER BY computed_at DESC LIMIT 1"
+)
+
 #: detail is bound as text and cast to JSONB in SQL (%s::jsonb) so the write
 #: works identically across DB-API drivers without a JSON adapter.
 _INSERT_METRIC_VALUE_SQL = (
@@ -92,7 +124,7 @@ def persist_result(
     period_start: date,
     period_end: date,
     scope: str = "agency",
-) -> str:
+) -> PersistedValue:
     """Persist a CalcResult: one computed.metric_values row + lineage edges.
 
     ``scope`` is the computed.metric_values.scope value — 'agency' (the
@@ -111,8 +143,20 @@ def persist_result(
     transform_name=calc_name, transform_version=calc_version,
     input_kind='raw.records', input_id=<record_id>.
 
-    Returns the new metric_value_id (as text). Does NOT commit — transaction
-    control belongs to the caller.
+    Identical-figure dedupe: if a row with the same metric, unit, period,
+    scope, value, calc name+version, detail JSONB and category already
+    exists, NOTHING is inserted (no value row, no lineage edges — the
+    existing row already carries them) and the existing row's id is
+    returned with ``already_on_record=True``. The detail JSONB pins
+    coverage counts and threshold provenance, so only a byte-identical
+    recompute over unchanged data collapses; any real change persists a
+    fresh row. Lineage equality is implied, not re-verified: identical
+    value + identical coverage detail over the same period and calc version
+    cannot arise from different inputs in practice, and a false collapse
+    would still point at a row whose lineage proves an identical figure.
+
+    Returns a PersistedValue (metric_value_id as text + already_on_record).
+    Does NOT commit — transaction control belongs to the caller.
     """
     if result.blocking_issues:
         raise ValueError(
@@ -136,22 +180,26 @@ def persist_result(
     detail_json = (
         "{}" if result.detail is None else json.dumps(result.detail.to_dict(), sort_keys=True)
     )
-    cur = conn.cursor()
-    cur.execute(
-        _INSERT_METRIC_VALUE_SQL,
-        (
-            metric,
-            result.unit,
-            period_start,
-            period_end,
-            scope,
-            result.value,
-            result.calc_name,
-            result.calc_version,
-            detail_json,
-            category_for_calc(result.calc_name),
-        ),
+    identity = (
+        metric,
+        result.unit,
+        period_start,
+        period_end,
+        scope,
+        result.value,
+        result.calc_name,
+        result.calc_version,
+        detail_json,
+        category_for_calc(result.calc_name),
     )
+    cur = conn.cursor()
+    cur.execute(_SELECT_IDENTICAL_SQL, identity)
+    existing = cur.fetchone()
+    if existing is not None:
+        return PersistedValue(
+            metric_value_id=str(existing[0]), already_on_record=True
+        )
+    cur.execute(_INSERT_METRIC_VALUE_SQL, identity)
     metric_value_id = str(cur.fetchone()[0])
 
     for record_id in result.input_record_ids:
@@ -166,4 +214,4 @@ def persist_result(
                 record_id,
             ),
         )
-    return metric_value_id
+    return PersistedValue(metric_value_id=metric_value_id, already_on_record=False)

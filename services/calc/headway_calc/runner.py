@@ -265,6 +265,11 @@ class MetricOutcome:
     ``scope`` (handoff 0009) is the computed.metric_values.scope the outcome
     was persisted under: 'agency' (fleet-wide, the default) or 'mode:<mode>'
     on a --per-mode run.
+
+    ``already_on_record``: an identical figure (value, period, scope, calc
+    version AND detail) already existed, so persist_result inserted nothing
+    and ``metric_value_id`` names the EXISTING row — re-running unchanged
+    data never duplicates a figure (see headway_calc.persist.PersistedValue).
     """
 
     calc_name: str
@@ -278,6 +283,7 @@ class MetricOutcome:
     routed_info_ids: tuple[str, ...]
     detail: dict | None
     scope: str = SCOPE_AGENCY
+    already_on_record: bool = False
 
     @property
     def persisted(self) -> bool:
@@ -299,6 +305,7 @@ class MetricOutcome:
             "value": self.value,
             "metric_value_id": self.metric_value_id,
             "persisted": self.persisted,
+            "already_on_record": self.already_on_record,
             "coverage": self.coverage,
             "detail": self.detail,
             "routed_blocking_ids": list(self.routed_blocking_ids),
@@ -795,7 +802,7 @@ def run_period(
                     )
                 )
             else:
-                metric_value_id = persist_result(
+                persisted = persist_result(
                     conn, result, period_start, period_end, scope=scope
                 )
                 persisted_any = True
@@ -806,12 +813,13 @@ def run_period(
                         metric=_METRIC_BY_CALC_NAME[result.calc_name],
                         unit=result.unit,
                         value=str(result.value),
-                        metric_value_id=metric_value_id,
+                        metric_value_id=persisted.metric_value_id,
                         routed_blocking_ids=(),
                         routed_warning_ids=warning_ids,
                         routed_info_ids=info_ids,
                         detail=detail,
                         scope=scope,
+                        already_on_record=persisted.already_on_record,
                     )
                 )
         if persisted_any:
@@ -1130,7 +1138,7 @@ def run_ops_period(
                     )
                 )
             else:
-                metric_value_id = persist_result(
+                persisted = persist_result(
                     conn, result, period_start, period_end, scope=scope
                 )
                 persisted_any = True
@@ -1141,12 +1149,13 @@ def run_ops_period(
                         metric=_METRIC_BY_CALC_NAME[result.calc_name],
                         unit=result.unit,
                         value=str(result.value),
-                        metric_value_id=metric_value_id,
+                        metric_value_id=persisted.metric_value_id,
                         routed_blocking_ids=(),
                         routed_warning_ids=warning_ids,
                         routed_info_ids=info_ids,
                         detail=detail,
                         scope=scope,
+                        already_on_record=persisted.already_on_record,
                     )
                 )
         if persisted_any:
@@ -1413,7 +1422,7 @@ def run_daytype_period(
                     )
                 )
             else:
-                metric_value_id = persist_result(
+                persisted = persist_result(
                     conn, result, period_start, period_end, scope=scope
                 )
                 persisted_any = True
@@ -1424,12 +1433,13 @@ def run_daytype_period(
                         metric=_METRIC_BY_CALC_NAME[result.calc_name],
                         unit=result.unit,
                         value=str(result.value),
-                        metric_value_id=metric_value_id,
+                        metric_value_id=persisted.metric_value_id,
                         routed_blocking_ids=(),
                         routed_warning_ids=warning_ids,
                         routed_info_ids=info_ids,
                         detail=detail,
                         scope=scope,
+                        already_on_record=persisted.already_on_record,
                     )
                 )
         if persisted_any:
