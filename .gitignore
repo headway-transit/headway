@@ -72,3 +72,6 @@ CLAUDE.local.md
 .claude/*
 !.claude/roles/
 deploy/compose/vendor-drop/
+
+# Adversarial-review packs (inlined diff+source; generated, never committed)
+review-packs/
