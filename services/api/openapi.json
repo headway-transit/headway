@@ -1648,6 +1648,241 @@
         }
       }
     },
+    "/machine/dq/issues": {
+      "get": {
+        "tags": [
+          "machine"
+        ],
+        "summary": "Machine List Dq Issues",
+        "description": "One BOUNDED page of the data-quality queue for machine consumers\n(scope ``read:dq``): the SAME keyset-paginated rows, whole-queue\n``total``, ``next_cursor``, and ``has_more`` as the human ``GET\n/dq/issues`` (handoff 0030). ``source_record_ids`` is not on a list row \u2014\nit lives on ``GET /machine/dq/issues/{id}`` exactly as it does for the\nhuman detail endpoint.",
+        "operationId": "machine_list_dq_issues_machine_dq_issues_get",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "name": "severity",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Severity"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DqIssuePage"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/machine/dq/issues/counts": {
+      "get": {
+        "tags": [
+          "machine"
+        ],
+        "summary": "Machine Count Dq Issues",
+        "description": "Whole-queue severity/status counts for machine consumers (scope\n``read:dq``): the SAME GROUP BY over the SAME rows the machine list\nserves under the same optional status filter (handoff 0017/0023). A card\ntotal can never disagree with the page below it \u2014 the query is shared with\nthe human ``GET /dq/issues/counts``.",
+        "operationId": "machine_count_dq_issues_machine_dq_issues_counts_get",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DqIssueCounts"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/machine/dq/issues/{issue_id}": {
+      "get": {
+        "tags": [
+          "machine"
+        ],
+        "summary": "Machine Get Dq Issue",
+        "description": "One issue by id for machine consumers (scope ``read:dq``): the SAME\ndetail row as the human ``GET /dq/issues/{id}``, WITH the complete,\nuntruncated ``source_record_ids`` provenance array (handoff 0026/0030).\nA missing or malformed id gets the same plain-language 404. Registered\nafter /machine/dq/issues/counts so the literal path wins.",
+        "operationId": "machine_get_dq_issue_machine_dq_issues__issue_id__get",
+        "parameters": [
+          {
+            "name": "issue_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Issue Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DqIssue"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/machine/ops/vehicles/latest": {
+      "get": {
+        "tags": [
+          "machine"
+        ],
+        "summary": "Machine Latest Vehicles",
+        "description": "Latest position per vehicle for machine consumers (scope\n``read:ops``): the SAME live-map snapshot as the human ``GET\n/ops/vehicles/latest`` (handoff 0023), staleness framing and count\nhonesty intact. Operations data \u2014 never certifiable, never an NTD\nreported figure (the ``ops_note`` / ``category`` boundary rides on every\nresponse).",
+        "operationId": "machine_latest_vehicles_machine_ops_vehicles_latest_get",
+        "parameters": [
+          {
+            "name": "max_age_seconds",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 86400,
+              "minimum": 1,
+              "description": "Staleness window: only vehicles whose latest position is at most this many seconds old (by the database clock) are served.",
+              "default": 300,
+              "title": "Max Age Seconds"
+            },
+            "description": "Staleness window: only vehicles whose latest position is at most this many seconds old (by the database clock) are served."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpsVehiclesLatest"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/settings/service-days": {
       "get": {
         "tags": [

@@ -40,13 +40,28 @@ KEY_PREFIX = "hwk_"
 KEY_ID_PREFIX_LEN = 12
 
 # v0 scope registry (handoff 0006, design point 3; ingest:dr added by
-# handoff 0013). A scope not in this tuple cannot be issued, and an endpoint
-# can only require a scope from this tuple — deny-by-default in both
-# directions.
+# handoff 0013; read:dq / read:ops added by handoff 0039). A scope not in
+# this tuple cannot be issued, and an endpoint can only require a scope from
+# this tuple — deny-by-default in both directions.
 SCOPE_INGEST_TIDES = "ingest:tides"
 SCOPE_INGEST_DR = "ingest:dr"
 SCOPE_READ_METRICS = "read:metrics"
-KNOWN_SCOPES = (SCOPE_INGEST_TIDES, SCOPE_INGEST_DR, SCOPE_READ_METRICS)
+#: The two machine READ scopes of handoff 0039: the data-quality queue and
+#: the operations (live vehicle) surface. Each is granted EXPLICITLY at key
+#: creation — no scope implies another, and neither implies read:metrics.
+#: They authorize machine-key mirrors of the human read endpoints; they NEVER
+#: relax the column-level sensitivity withholdings a machine key inherits as a
+#: VIEWER-class principal (design point 3 — a future scope, out of this wave,
+#: would be needed for sensitive content).
+SCOPE_READ_DQ = "read:dq"
+SCOPE_READ_OPS = "read:ops"
+KNOWN_SCOPES = (
+    SCOPE_INGEST_TIDES,
+    SCOPE_INGEST_DR,
+    SCOPE_READ_METRICS,
+    SCOPE_READ_DQ,
+    SCOPE_READ_OPS,
+)
 
 #: Scopes that push raw records and therefore REQUIRE a bound source_label
 #: at issuance (the envelope source is always the key's label, never

@@ -104,6 +104,29 @@ def _figure_payload(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _issue_headline(row: dict[str, Any]) -> dict[str, Any]:
+    """A data-quality finding as a queue headline — VERBATIM from the API,
+    led by what it is ABOUT in the agency's own words (title/description and
+    the calc runner's frozen subject_context), never a bare issue UUID as the
+    headline (handoff 0039, design point 4).
+
+    The issue_id is carried so the assistant can call dq_issue for the full
+    finding, but it rides BEHIND the human-readable fields, not as the lead.
+    Everything is the API row untouched; nothing is summarised or invented."""
+    return {
+        "title": row.get("title"),
+        "description": row.get("description"),
+        "severity": row.get("severity"),
+        "status": row.get("status"),
+        "owner": row.get("owner"),
+        # Verbatim agency-vocabulary context when the calc runner froze one;
+        # null is the normal case (the finding predates it) — never invented.
+        "subject_context": row.get("subject_context"),
+        "created_at": row.get("created_at"),
+        "issue_id": row.get("issue_id"),
+    }
+
+
 class HeadwayTools:
     """Tool implementations over :class:`HeadwayClient`. Kept separate from
     MCP registration so tests exercise them directly."""
@@ -263,5 +286,135 @@ class HeadwayTools:
                 "Ed25519 signature, server-side. 'verified' means the "
                 "record is exactly what was signed; anything else means it "
                 "is not, and that is a finding."
+            ),
+        }
+
+    # -- data-quality queue (scope read:dq, handoff 0039) --------------------
+
+    def dq_summary(self, status: str | None = None) -> dict[str, Any]:
+        """The queue in agency vocabulary: how many findings, by severity and
+        by workflow state, and a page of them each described in plain
+        language (route/vehicle/block, never a bare UUID as the headline)."""
+        try:
+            counts = self._client.dq_counts(status)
+            page = self._client.dq_issues(status=status)
+        except ApiRefusal as refusal:
+            return _refusal_payload(refusal)
+        return {
+            "counts": {
+                "total": counts["total"],
+                "by_severity": counts["by_severity"],
+                "by_status": counts["by_status"],
+                "resolution_minutes_total": counts["resolution_minutes_total"],
+            },
+            "top_issues": [_issue_headline(row) for row in page["issues"]],
+            "page": {
+                "returned": len(page["issues"]),
+                "total_matching": page["total"],
+                "has_more": page["has_more"],
+                "next_cursor": page["next_cursor"],
+            },
+            "reading_guide": (
+                "Counts are over the WHOLE queue under this filter (not just "
+                "the page): a card total never disagrees with the list below "
+                "it. Each finding leads with what it is ABOUT in the agency's "
+                "own words — its title/description and, when the calc runner "
+                "resolved one, its subject_context (affected trips grouped by "
+                "block, each with its route(s) and span). Call dq_issue with "
+                "an issue_id for that finding's full description and the raw "
+                "records it was raised over. 'blocking' findings are what "
+                "stand between a period and a certifiable figure — see "
+                "dq_blocking_for_period."
+            ),
+        }
+
+    def dq_issue(self, issue_id: str) -> dict[str, Any]:
+        """One finding, in full: its own plain-language description, its
+        agency-vocabulary subject_context (verbatim, when the calc runner
+        resolved one), and the complete list of raw source records it was
+        raised over — the provenance that makes it checkable."""
+        try:
+            row = self._client.dq_issue(issue_id)
+        except ApiRefusal as refusal:
+            return _refusal_payload(refusal)
+        return {
+            "issue": row,
+            "reading_guide": (
+                "Served verbatim from Headway's data-quality queue. "
+                "'description' is the finding's own plain-language account; "
+                "'subject_context' (when present, not null) names the "
+                "affected trips grouped by block with their route(s) and "
+                "span, exactly as the calculation runner froze it — Headway "
+                "never re-derives or invents a label. 'source_record_ids' is "
+                "the complete, untruncated set of raw records this finding "
+                "was raised over: the evidence, addressable one by one. This "
+                "tool reads only; acknowledging or resolving a finding "
+                "carries human accountability and is deliberately not a tool "
+                "here."
+            ),
+        }
+
+    def dq_blocking_for_period(self) -> dict[str, Any]:
+        """What stands between the queue and certifiable figures right now:
+        the OPEN, BLOCKING findings — the ones a calc run refuses over. This
+        is the machine-readable half of the calc-runs refusal story."""
+        try:
+            page = self._client.dq_issues(status="open", severity="blocking")
+        except ApiRefusal as refusal:
+            return _refusal_payload(refusal)
+        if not page["issues"]:
+            return {
+                "blocking_issues": [],
+                "count": 0,
+                "message": (
+                    "No open, blocking data-quality findings match. That is "
+                    "the ONLY thing this answers: it does not mean any period "
+                    "is certifiable — a calculation still has to run and not "
+                    "refuse for other reasons, and certification remains a "
+                    "deliberate human act. It means the blocking-finding "
+                    "queue is clear right now. Absence here is not a "
+                    "green light; it is one cleared gate."
+                ),
+            }
+        return {
+            "blocking_issues": [_issue_headline(row) for row in page["issues"]],
+            "count": len(page["issues"]),
+            "total_matching": page["total"],
+            "has_more": page["has_more"],
+            "next_cursor": page["next_cursor"],
+            "reading_guide": (
+                "These are the OPEN findings at 'blocking' severity — the "
+                "ones a calculation run refuses to emit a certifiable figure "
+                "over (Headway never fills or interpolates across an "
+                "unresolved gap). Each leads with what it is about in agency "
+                "vocabulary; call dq_issue with its issue_id for the full "
+                "description and the raw records behind it. Resolving them is "
+                "a signed-in human's job — deliberately not a tool here."
+            ),
+        }
+
+    # -- operations snapshot (scope read:ops, handoff 0039) ------------------
+
+    def ops_snapshot(self, max_age_seconds: int | None = None) -> dict[str, Any]:
+        """The live vehicle picture with staleness framing: last-seen ages
+        from the database clock, count honesty (truncation stated), and — when
+        the feed is quiet — WHY it is quiet, never a silent empty fleet."""
+        try:
+            snapshot = self._client.ops_vehicles(max_age_seconds)
+        except ApiRefusal as refusal:
+            return _refusal_payload(refusal)
+        return {
+            "snapshot": snapshot,
+            "reading_guide": (
+                "Operations data, served verbatim — never certifiable, never "
+                "an NTD reported figure (the 'category':'ops' / 'ops_note' "
+                "boundary is on the payload). 'as_of' is the database clock; "
+                "each vehicle's 'age_seconds' is how stale ITS last position "
+                "is against that clock — Headway shows last-seen, it never "
+                "interpolates a position between reports. If 'truncated' is "
+                "true the fleet is larger than one page (see 'note' and "
+                "'total_in_window'); if 'vehicles' is empty the 'note' says "
+                "whether the feed is stale or nothing was ever ingested — an "
+                "empty list is a data-availability state, not an empty fleet."
             ),
         }

@@ -303,36 +303,11 @@ def _decode_cursor(cursor: str) -> tuple[dt.datetime, uuid.UUID]:
     return created_at, issue_id
 
 
-@router.get("/dq/issues", response_model=DqIssuePage)
-def list_issues(
-    status: Optional[str] = Query(default=None),
-    severity: Optional[str] = Query(default=None),
-    limit: int = Query(default=DEFAULT_PAGE_LIMIT, ge=1, le=MAX_PAGE_LIMIT),
-    cursor: Optional[str] = Query(default=None),
-    identity: Identity = Depends(require_authenticated),
-    db=Depends(get_db),
-) -> DqIssuePage:
-    """One BOUNDED page of the data-quality queue (handoff 0030).
-
-    Until this wave the endpoint returned every row it had. On the live
-    queue that measured **98,497 issues, 850 MB of JSON, 17 seconds**, and
-    it froze the browser tab of the screen a data steward lives in. There
-    is now no way to ask for that: ``limit`` defaults to 50 and is capped
-    at 200, and pages are walked with the opaque ``cursor`` from the
-    previous response.
-
-    **Provenance moved, it did not go away.** ``source_record_ids`` is not
-    in these rows; ``GET /dq/issues/{id}`` serves it, complete and
-    untruncated, for the issue actually being worked. 716 MB of that 850 MB
-    was this one field.
-
-    **Paging is keyset, on (created_at, issue_id) ascending** — the primary
-    key breaks every tie, so the ordering is total and a row can neither be
-    skipped nor served twice while new findings land behind the reader.
-
-    ``total`` is the count over the whole queue under the same filters, so
-    a caller can always say what it has NOT loaded.
-    """
+def _validate_queue_filters(
+    status: Optional[str], severity: Optional[str]
+) -> None:
+    """The queue filter vocabulary check, shared by every caller that reads
+    the queue (the human endpoint and the machine mirror, handoff 0039)."""
     if status is not None and status not in VALID_STATUSES:
         raise HTTPException(
             status_code=422,
@@ -350,6 +325,19 @@ def list_issues(
                 f"{', '.join(KNOWN_SEVERITIES)}."
             ),
         )
+
+
+def query_issue_page(
+    db,
+    status: Optional[str],
+    severity: Optional[str],
+    limit: int,
+    cursor: Optional[str],
+) -> DqIssuePage:
+    """One bounded page of the queue, VERBATIM (handoff 0030). Factored out
+    of ``list_issues`` so the machine-key mirror (handoff 0039) serves the
+    EXACT same rows, total, cursor, and has_more from the same SQL — the two
+    can never drift. Caller validates the filter vocabulary first."""
     where: list[str] = []
     params: list = []
     if status is not None:
@@ -399,6 +387,40 @@ def list_issues(
     )
 
 
+@router.get("/dq/issues", response_model=DqIssuePage)
+def list_issues(
+    status: Optional[str] = Query(default=None),
+    severity: Optional[str] = Query(default=None),
+    limit: int = Query(default=DEFAULT_PAGE_LIMIT, ge=1, le=MAX_PAGE_LIMIT),
+    cursor: Optional[str] = Query(default=None),
+    identity: Identity = Depends(require_authenticated),
+    db=Depends(get_db),
+) -> DqIssuePage:
+    """One BOUNDED page of the data-quality queue (handoff 0030).
+
+    Until this wave the endpoint returned every row it had. On the live
+    queue that measured **98,497 issues, 850 MB of JSON, 17 seconds**, and
+    it froze the browser tab of the screen a data steward lives in. There
+    is now no way to ask for that: ``limit`` defaults to 50 and is capped
+    at 200, and pages are walked with the opaque ``cursor`` from the
+    previous response.
+
+    **Provenance moved, it did not go away.** ``source_record_ids`` is not
+    in these rows; ``GET /dq/issues/{id}`` serves it, complete and
+    untruncated, for the issue actually being worked. 716 MB of that 850 MB
+    was this one field.
+
+    **Paging is keyset, on (created_at, issue_id) ascending** — the primary
+    key breaks every tie, so the ordering is total and a row can neither be
+    skipped nor served twice while new findings land behind the reader.
+
+    ``total`` is the count over the whole queue under the same filters, so
+    a caller can always say what it has NOT loaded.
+    """
+    _validate_queue_filters(status, severity)
+    return query_issue_page(db, status, severity, limit, cursor)
+
+
 class DqIssueCounts(BaseModel):
     """Counts for the /dq summary cards (handoff 0017, design point 2):
     counted over EXACTLY the rows GET /dq/issues serves under the same
@@ -440,24 +462,12 @@ _COUNT_ISSUES = (
 )
 
 
-@router.get("/dq/issues/counts", response_model=DqIssueCounts)
-def count_issues(
-    status: Optional[str] = Query(default=None),
-    identity: Identity = Depends(require_authenticated),
-    db=Depends(get_db),
-) -> DqIssueCounts:
-    """Severity/status counts over the same rows (and the same optional
-    status filter) as GET /dq/issues — counted by the database in one
-    GROUP BY over exactly the rows the list serves (handoff 0017 guarantee
-    kept; handoff 0023 made the counting SQL-side for speed)."""
-    if status is not None and status not in VALID_STATUSES:
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                f"'{status}' is not a data-quality status Headway knows. "
-                f"Valid statuses are: {', '.join(VALID_STATUSES)}."
-            ),
-        )
+def query_issue_counts(db, status: Optional[str]) -> DqIssueCounts:
+    """The whole-queue severity/status tally, VERBATIM (handoff 0017/0023).
+    Factored out of ``count_issues`` so the machine mirror (handoff 0039)
+    counts EXACTLY the rows the list serves under the same filter — a card
+    total can never disagree with the page below it, human or machine.
+    Caller validates the filter vocabulary first."""
     sql = _COUNT_ISSUES
     params: tuple = ()
     if status is not None:
@@ -484,6 +494,27 @@ def count_issues(
     )
 
 
+@router.get("/dq/issues/counts", response_model=DqIssueCounts)
+def count_issues(
+    status: Optional[str] = Query(default=None),
+    identity: Identity = Depends(require_authenticated),
+    db=Depends(get_db),
+) -> DqIssueCounts:
+    """Severity/status counts over the same rows (and the same optional
+    status filter) as GET /dq/issues — counted by the database in one
+    GROUP BY over exactly the rows the list serves (handoff 0017 guarantee
+    kept; handoff 0023 made the counting SQL-side for speed)."""
+    if status is not None and status not in VALID_STATUSES:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"'{status}' is not a data-quality status Headway knows. "
+                f"Valid statuses are: {', '.join(VALID_STATUSES)}."
+            ),
+        )
+    return query_issue_counts(db, status)
+
+
 @router.get("/dq/issues/{issue_id}", response_model=DqIssue)
 def get_issue(
     issue_id: str,
@@ -502,6 +533,14 @@ def get_issue(
     field a list view only joined into a string); every queue row links
     here, so the walk from a finding to its raw records is one request, not
     a 850 MB download."""
+    return query_issue_detail(db, issue_id)
+
+
+def query_issue_detail(db, issue_id: str) -> DqIssue:
+    """One issue by id, WITH its full untruncated provenance array, VERBATIM
+    (handoff 0026/0030). Factored out of ``get_issue`` so the machine mirror
+    (handoff 0039) serves the identical detail row and the same plain-language
+    404 for a missing or malformed id."""
     try:
         uuid.UUID(issue_id)
     except ValueError:

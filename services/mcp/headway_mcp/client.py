@@ -65,19 +65,27 @@ def _refusal_message(response: httpx.Response) -> str:
 class HeadwayClient:
     """Thin, read-only client over the machine-key-reachable API surface.
 
-    The reachable surface is exactly what the ``read:metrics`` scope and the
+    The reachable surface is exactly what the read scopes and the
     unauthenticated public endpoints grant:
 
     - ``GET /machine/metrics`` — computed values (scope ``read:metrics``)
     - ``GET /metrics/values/{id}/lineage`` — the "explain this number"
       walk (dual-credential endpoint; the same key works there)
+    - ``GET /machine/dq/issues`` — the data-quality queue page (scope
+      ``read:dq``, handoff 0039)
+    - ``GET /machine/dq/issues/counts`` — whole-queue counts (``read:dq``)
+    - ``GET /machine/dq/issues/{id}`` — one issue with its provenance
+      (``read:dq``)
+    - ``GET /machine/ops/vehicles/latest`` — the live vehicle snapshot
+      (scope ``read:ops``, handoff 0039)
     - ``GET /public/metrics/certified`` — the certified open-data list
     - ``GET /public/certifications/{id}/verify`` — Ed25519 signature
       verification of a certification
 
     Everything else in the API requires a signed-in human session and is
-    therefore deliberately absent here (recorded in handoff 0034's
-    Response as the scope-expansion open question).
+    therefore deliberately absent here (the write actions, user accounts,
+    the audit trail, and the paratransit rider surfaces — recorded in
+    handoff 0039's docs as deliberately absent, needing a future scope).
     """
 
     def __init__(
@@ -144,6 +152,44 @@ class HeadwayClient:
 
     def lineage(self, metric_value_id: str) -> dict[str, Any]:
         return self._get(f"/metrics/values/{metric_value_id}/lineage")
+
+    # -- data-quality queue (scope read:dq, handoff 0039) --------------------
+
+    def dq_issues(
+        self,
+        status: str | None = None,
+        severity: str | None = None,
+        limit: int | None = None,
+        cursor: str | None = None,
+    ) -> dict[str, Any]:
+        params = {
+            k: v
+            for k, v in {
+                "status": status,
+                "severity": severity,
+                "limit": limit,
+                "cursor": cursor,
+            }.items()
+            if v is not None
+        }
+        return self._get("/machine/dq/issues", params or None)
+
+    def dq_counts(self, status: str | None = None) -> dict[str, Any]:
+        params = {"status": status} if status is not None else None
+        return self._get("/machine/dq/issues/counts", params)
+
+    def dq_issue(self, issue_id: str) -> dict[str, Any]:
+        return self._get(f"/machine/dq/issues/{issue_id}")
+
+    # -- operations surface (scope read:ops, handoff 0039) -------------------
+
+    def ops_vehicles(self, max_age_seconds: int | None = None) -> dict[str, Any]:
+        params = (
+            {"max_age_seconds": max_age_seconds}
+            if max_age_seconds is not None
+            else None
+        )
+        return self._get("/machine/ops/vehicles/latest", params)
 
     # -- public (unauthenticated) surface ------------------------------------
 
