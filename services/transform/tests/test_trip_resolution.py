@@ -183,13 +183,25 @@ def _visit_row(
 # Spec validation
 # ---------------------------------------------------------------------------
 
-def test_committed_tripspark_resolution_spec_loads_unconfirmed(mapping_spec):
+def test_committed_tripspark_resolution_spec_carries_confirmed_direction(mapping_spec):
+    # The agency confirmed the DirectionKey -> direction_id mapping on
+    # 2026-07-31 (derived from its own APC export + published GTFS, 27,907
+    # records, zero disagreement), so the committed spec now RESOLVES rather
+    # than refusing. This pins the accepted mapping so it can't drift.
     spec = load_resolution_spec(
         TRIPSPARK_DIR / "resolution.v0.yaml", mapping_spec
     )
     assert spec.source_label == SOURCE
-    assert spec.direction.confirmed is False
-    assert spec.direction.unconfirmed_reason
+    assert spec.direction.confirmed is True
+    assert spec.direction.unconfirmed_reason is None
+    # North/West/Outbound/Clockwise -> 0; South/East/Inbound -> 1;
+    # Counter-clockwise (8) unobserved and deliberately unmapped.
+    assert spec.direction.values == {
+        "1": 0, "2": 1, "3": 1, "4": 0, "5": 1, "6": 0, "7": 0,
+    }
+    assert "8" not in spec.direction.values
+    assert spec.direction.confirmed_by
+    assert spec.direction.confirmed_on == "2026-07-31"
     assert spec.service_day_rollover == "not_confirmed"
     assert spec.stop_match_order == ("stop_code", "stop_id")
     # The config never hardcodes the observed stop_id == stop_code

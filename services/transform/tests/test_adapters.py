@@ -652,9 +652,14 @@ def test_tripspark_label_now_registered_and_flows(fake_connection: FakeConnectio
     for _sql, params in events:
         assert params[8] == "tripspark_streets"
         assert params[9] == record_id
-        # tripspark/streets carries a resolution config whose direction
-        # convention is NOT confirmed: nothing resolves, both columns NULL.
-        assert params[10] is None and params[11] is None
+        # tripspark/streets' direction convention is now CONFIRMED (agency
+        # accepted 2026-07-31), so the resolver RUNS instead of refusing: it
+        # preserves the vendor trip ref (params[10] = the TripName), and with
+        # no GTFS trips in this fake DB every row resolves 'unmatched'
+        # (params[11]) — previously None because the unconfirmed direction gate
+        # made the resolver decline entirely.
+        assert params[10] is not None
+        assert params[11] == "unmatched"
     assert len(fake_connection.sql_for("lineage.edges")) == 8
     dq = fake_connection.sql_for("dq.issues")
     assert sum(1 for _s, p in dq if p[0] == "adapter_row_quarantined") == 5

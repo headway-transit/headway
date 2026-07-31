@@ -11,16 +11,17 @@
 # the row's service date. That four-part key was MEASURED, not assumed, on
 # the agency's live published feed — see provenance.
 #
-# TWO SETTINGS ARE DELIBERATELY UNCONFIRMED, and each one changes behavior
-# in a stated way rather than silently:
+# DIRECTION IS NOW CONFIRMED (2026-07-31); ONE SETTING REMAINS UNCONFIRMED,
+# and it changes behavior in a stated way rather than silently:
 #
-#   direction.confirmed: false — the export's DirectionKey values ("1"/"2"
-#     in the sample's shape) have not been confirmed against GTFS
-#     direction_id (0/1) by the agency. GTFS gives 0 and 1 no inherent
-#     meaning, so any assignment here would be a coin flip that puts
-#     passenger counts on the wrong half of the trips. Until the agency
-#     confirms, the resolver resolves NOTHING for this source and says so
-#     once per file (trip_resolution_not_confirmed finding).
+#   direction.confirmed: true — the export's DirectionKey values were
+#     derived against GTFS direction_id from the agency's own APC export +
+#     published GTFS (27,907 records, zero disagreement) and ACCEPTED by the
+#     agency's ITS manager on 2026-07-31. GTFS gives 0 and 1 no inherent
+#     meaning, so the mapping is an agency fact, recorded under
+#     trip.match.direction.values with confirmed_by/confirmed_on. CCW (code
+#     8) was unobserved and is left unmapped — a CCW/NULL/out-of-range row
+#     resolves UNMATCHED with the reason stated, never guessed.
 #
 #   service_day_rollover: not_confirmed — the verified sample is an evening
 #     window; how the export dates a trip that runs past midnight is not
@@ -55,15 +56,30 @@ trip:
       format: "%H:%M"
     direction:
       from_column: DirectionKey
-      confirmed: false
-      unconfirmed_reason: >-
-        The export's DirectionKey values have not been confirmed against
-        this agency's GTFS direction_id convention. The agency must state
-        which DirectionKey value corresponds to GTFS direction_id 0 and
-        which to 1 (checking a handful of known trips against the published
-        schedule settles it in minutes); enter the mapping under
-        trip.match.direction.values with confirmed_by/confirmed_on, set
-        confirmed to true, and re-drop the file.
+      confirmed: true
+      # DirectionKey -> GTFS direction_id, DERIVED from the agency's own APC
+      # export and published GTFS (27,907 matched records across 19 routes,
+      # zero disagreement) and then ACCEPTED by the agency. Keys are the
+      # agency's Direction table: 1=North 2=South 3=East 4=West 5=Inbound
+      # 6=Outbound 7=Clockwise 8=Counter-clockwise. In words: North, West,
+      # Outbound, Clockwise -> 0; South, East, Inbound -> 1. Code 8 (CCW) did
+      # not appear in the evidence and is deliberately LEFT UNMAPPED, so a CCW
+      # row resolves UNMATCHED with the reason stated rather than being
+      # guessed; the same holds for NULL/blank and any out-of-range value.
+      values:
+        "1": 0
+        "2": 1
+        "3": 1
+        "4": 0
+        "5": 1
+        "6": 0
+        "7": 0
+      confirmed_by: >-
+        The operating agency's ITS manager, accepting the DirectionKey ->
+        GTFS direction_id mapping Headway derived from the agency's own APC
+        export and its published GTFS feed (27,907 matched records, zero
+        disagreement; Counter-clockwise unobserved, left unmapped).
+      confirmed_on: "2026-07-31"
     service:
       from_field: service_date
       service_day_rollover: not_confirmed

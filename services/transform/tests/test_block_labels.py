@@ -118,13 +118,18 @@ def test_derivation_reads_trip_names_with_the_resolvers_own_parse(tmp_path):
     assert "1 part(s)" in bad.reason and "Nothing was assumed" in bad.reason
 
 
-def test_the_committed_tripspark_config_still_refuses_resolution(tmp_path):
-    """Deriving block names must not flip the direction gate: the committed
-    resolution.v0.yaml stays confirmed: false (handoff 0038, binding)."""
+def test_the_committed_tripspark_config_has_agency_confirmed_direction(tmp_path):
+    """Block-name derivation is independent of the direction gate, and the
+    agency confirmed the direction mapping on 2026-07-31 — so the committed
+    resolution.v0.yaml now carries confirmed: true. (Block-label derivation
+    never touched it either way; this just tracks the current, live state.)"""
     committed = load_resolution_spec(
         REPO_ROOT / "adapters" / "tripspark" / "streets" / "resolution.v0.yaml"
     )
-    assert committed.direction.confirmed is False
+    assert committed.direction.confirmed is True
+    assert committed.direction.values == {
+        "1": 0, "2": 1, "3": 1, "4": 0, "5": 1, "6": 0, "7": 0,
+    }
 
 
 # ---------------------------------------------------------------------------
