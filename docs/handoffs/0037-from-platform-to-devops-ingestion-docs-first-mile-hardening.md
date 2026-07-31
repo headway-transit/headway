@@ -110,3 +110,78 @@ printout, and one full wizard run). No commits — the orchestrator integrates.
   auto-configuring TripUpdates/ServiceAlerts alongside VehiclePositions when present
   (v0 should already offer all three when the registry has them — record what v0
   actually does).
+
+## Outputs — evidence
+
+**2026-07-31, DevOps + Ingestion + Docs (built by a Fable agent; integrated and
+live-verified by the orchestrator after the agent hit its usage limit before
+writing this section). Live checks below were RUN on this box.**
+
+### What shipped (files)
+
+- `install/install.sh` — feed-URL syntax check (`feed_url_syntax_ok`, no
+  network) + live check (`feed_live_check`, one consented fetch) at entry;
+  `--check-feeds` (re-validate `.env`, nonzero on failure); drop-dir + `processed/`
+  ownership creation; `--discover-feeds` wizard. ~28 references to the new flows.
+- `services/ingestion/internal/permsg/` — `Hint(err, dir, hostDir)`: turns a
+  bare permission error into the exact fix command; unit tests.
+- `services/ingestion/connectors/{tides,vendorfile}` — permission-denied paths
+  now emit the `permsg` hint; `permission_test.go` in each.
+- `tools/view-ddl/` — the zero-SQL generator (`generate.py`, 12 tests) +
+  `sample/` (CREATE VIEW with `CONVERT` ISO dates, login+grant, verify query,
+  and `SSMS-CLICK-PATH.md`).
+- `docs/connecting-your-data.md` — Excel-mangling warning; `ROADMAP.md` — the
+  deferred pieces (in-app upload, AI-crawl wizard fallback).
+
+### Live checks run on this box
+
+**Feed-URL syntax (the field typos, named specifically):**
+
+```
+REJECT https//cdn…/gtfs.zip    → "colon missing near the start … 'https//' but
+                                  addresses start 'https://'"
+REJECT https:/example.com/x    → "one slash short"
+REJECT http://example .com/a   → "the address contains a space"
+REJECT ftp://x.com/a           → "'ftp://' … not a kind of address Headway can fetch"
+REJECT cdn.example.com/gtfs    → "does not start with https://"
+OK     https://cdn.mbta.com/realtime/VehiclePositions.pb
+```
+
+**Feed live check (against real MBTA feeds):** good VP feed and good GTFS zip
+both verified; a real-host wrong-path (`…/NotAFeed.pb`) was correctly rejected —
+*"This address answered with a web page, not a live GTFS-Realtime feed. That
+usually means a typo in the path…"*. Honest limit recorded in the code: this is
+a signature/shape check (ZIP `PK`, protobuf tag `0x0a`), not a full parse — the
+real decode is the ingestion service's job.
+
+**Permission fix message** (forced `fs.ErrPermission` on a vendor drop path):
+
+> — HOW TO FIX THIS: Headway's collector runs as a locked-down user account
+> (user id 65532) that cannot read or change files owned by another account,
+> such as root. … run this one command on the Headway machine:
+> `sudo chown -R 65532:65532 deploy/compose/vendor-drop` … no restart needed. …
+> **Do not use chmod 777**: it would let every account on the machine change
+> your agency's data files.
+
+**Discovery wizard:** the MobilityData catalog endpoint
+(`storage.googleapis.com/…/mdb-csv/o/sources.csv`) is reachable and carries real
+rows (4 MBTA entries). The wizard states exactly what it will fetch and names the
+URL **before** any network contact, asks yes/no, then searches by agency name and
+**never offers a candidate that does not live-verify** (the dead-URL trap from the
+BFT crawl). Consent-decline path logged.
+
+### Tests / build
+
+view-ddl 12; `permsg` + connector permission tests; `go build ./...`,
+`go vet ./...`, `go test ./...` all green after merge with Wave 1 (both waves'
+`main.go` and `compose.yaml` edits coexist); `bash -n install/install.sh` clean;
+privacy grep over the committed-bound files clean (no agency name/URL).
+
+### Recorded honestly / not run
+
+- The **full interactive `--discover-feeds` end-to-end** (it reads the agency
+  name from stdin) was verified by code inspection + the live catalog fetch, not
+  by a scripted stdin run.
+- A disposable-MinIO integration test for the drop-dir ownership path was not
+  added; the ownership creation is shell in `install.sh`, exercised by the
+  syntax check and manual reasoning, not a container run.

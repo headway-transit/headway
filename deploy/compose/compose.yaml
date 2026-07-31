@@ -346,12 +346,20 @@ services:
       # into ./tides-drop on the host. SIMULATED data must use source
       # tides_simulated (binding rule, contracts/topics.v0.md).
       TIDES_DROP_DIR: /data/tides-drop
+      # Host-side path of the same folder (handoff 0037): only used so a
+      # permission error can print its fix command against a path the
+      # operator's shell can reach. Relative to the Headway folder.
+      TIDES_DROP_DIR_HOST: deploy/compose/tides-drop
       TIDES_SOURCE: ${TIDES_SOURCE:-tides_simulated}
       # Native vendor-export drop (handoff 0015). OFF unless BOTH vars are
       # set in .env (the connector refuses a drop dir with no source label —
       # fail-closed). VENDOR_SOURCE must name a registered adapter label
       # (e.g. tripspark_streets); the folder is scanned every POLL_INTERVAL.
       VENDOR_DROP_DIR: ${VENDOR_DROP_DIR:-}
+      # Host-side path of the vendor drop (handoff 0037; see
+      # TIDES_DROP_DIR_HOST above). The compose file always mounts
+      # ./vendor-drop, so this is where the fix command must point.
+      VENDOR_DROP_DIR_HOST: deploy/compose/vendor-drop
       VENDOR_SOURCE: ${VENDOR_SOURCE:-}
       # Generic SQL-source connector (handoff 0033). OFF unless
       # SQLSOURCE_ENABLED=true is set in .env; the connector then REFUSES to
