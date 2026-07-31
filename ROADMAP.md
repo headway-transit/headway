@@ -8,6 +8,15 @@ item is one line plus the source that demands it. The roadmap is governed in the
 
 ## Now (next ~3 waves)
 
+- **Revenue classification of boardings (NEXT — agency-confirmed 2026-07-31)** — a
+  live diagnostic with the partner agency found ~3.3% of APC boardings are
+  non-revenue prep / pull-out / pull-in activity (staff boarding an unlogged vehicle),
+  clustered at the edges of the service day. Wave: schedule-derived revenue windows +
+  no-run detection, auto-classify the clear cases, and a human-in-the-loop review
+  queue where an analyst validates the ambiguous ones and records a **justification
+  note** that becomes part of the figure's receipt. Detours already count correctly
+  (surface, don't fix). Full design in `docs/handoffs/0040-*.md`.
+
 - ~~**Fresh-box installer test**~~ **DONE 2026-07-22**: first complete guided install,
   by a partner agency ITS manager on a fresh Ubuntu 26.04 VM. *(HANDOFF.md state table)*
 - **In-app connection experience** — from the first agency UAT (2026-07-28, first
