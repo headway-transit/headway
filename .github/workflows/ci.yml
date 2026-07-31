@@ -105,6 +105,12 @@ jobs:
       fail-fast: false
       matrix:
         service: [calc, transform, api, ai]
+        include:
+          # api's raw-record inspector tests (handoff 0035) decode GTFS-Realtime
+          # frames, so they need the ingest extra's protobuf bindings — the same
+          # pairing the integration job below already installs.
+          - service: api
+            extras: test,ingest
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
@@ -117,7 +123,7 @@ jobs:
         # (calc: pytest+hypothesis; transform: pytest; api: pytest+httpx; ai: pytest)
         # headway-calc is a sibling path package, not on PyPI — install it alongside
         # so api's `headway-calc>=0.5` resolves (harmless no-op for the other services)
-        run: python -m pip install -e services/calc -e "services/${{ matrix.service }}[test]"
+        run: python -m pip install -e services/calc -e "services/${{ matrix.service }}[${{ matrix.extras || 'test' }}]"
       - name: pytest
         working-directory: services/${{ matrix.service }}
         run: python -m pytest -q
