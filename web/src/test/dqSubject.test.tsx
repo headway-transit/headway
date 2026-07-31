@@ -9,7 +9,12 @@ import {
 } from "./helpers";
 import type { DqIssue, DqIssueCounts } from "../api/types";
 import type { RouteHandler } from "./helpers";
-import { blockingIssue, dqPage, subjectContextIssue } from "./fixtures";
+import {
+  blockLabelSubjectIssue,
+  blockingIssue,
+  dqPage,
+  subjectContextIssue,
+} from "./fixtures";
 
 /**
  * "Which trips this affects" — the finding's subject rendered in the
@@ -263,6 +268,65 @@ describe("/dq — the finding's subject in the agency's vocabulary", () => {
       expect(card).not.toHaveTextContent(marker);
     }
     expect(card).toHaveTextContent("Every operated trip in this period");
+  });
+
+  it("leads with the agency's block name when the frozen context carries one, keeping the feed id in the technical detail", async () => {
+    // Handoff 0038: the feed's block_id is an opaque UUID; the word on the
+    // run board is the operational name. The name is the headline, the id
+    // stays one disclosure away — the 0032 vehicle-label presentation.
+    signInAs("viewer");
+    mockApi(dqRoutes([blockLabelSubjectIssue]));
+    renderApp("/dq");
+
+    const card = await subjectCard();
+    const table = within(card).getByRole("table", {
+      name: "Affected trips grouped by block",
+    });
+    // The mapped block reads as its operational name…
+    const labeled = within(table)
+      .getByRole("rowheader", { name: "42-9" })
+      .closest("tr") as HTMLElement;
+    expect(labeled).toHaveTextContent("4 trips");
+    // …and its UUID is not in the table at all.
+    expect(table).not.toHaveTextContent(
+      "0f00d1e5-1111-4222-8333-444455556666",
+    );
+
+    // The UNMAPPED block shows its feed id exactly as it always has —
+    // nothing is invented for it.
+    expect(
+      within(table).getByRole("rowheader", {
+        name: "9e00d1e5-7777-4888-8999-000011112222",
+      }),
+    ).toBeInTheDocument();
+
+    // The feed id is still available: named beside the label inside the
+    // technical disclosure, copyable for anyone working a ticket.
+    await userEvent.click(
+      within(card).getByText("Technical detail: trip identifiers"),
+    );
+    expect(card).toHaveTextContent(
+      "42-9 — feed block id 0f00d1e5-1111-4222-8333-444455556666",
+    );
+
+    await expectNoAxeViolations();
+  });
+
+  it("renders a context frozen before the block mapping existed exactly as before", async () => {
+    // subjectContextIssue's groups carry no block_label key at all — the
+    // pre-0038 frozen shape. Every block renders by its id, as always.
+    signInAs("viewer");
+    mockApi(dqRoutes([subjectContextIssue]));
+    renderApp("/dq");
+
+    const card = await subjectCard();
+    const table = within(card).getByRole("table", {
+      name: "Affected trips grouped by block",
+    });
+    expect(
+      within(table).getByRole("rowheader", { name: "L455-173" }),
+    ).toBeInTheDocument();
+    expect(card).not.toHaveTextContent("feed block id");
   });
 
   it("shows the subject on a finding opened by deep link, not only in the queue", async () => {

@@ -68,6 +68,13 @@ item is one line plus the source that demands it. The roadmap is governed in the
   was built for exactly this) and report deadhead as the audited difference, never a
   plug. *(REGULATORY_TRACKER.md pp. 128–136 quotes; contracts/fleet-telematics.v0)*
 
+- **Block-label mapping rides the vendor-drop path** (handoff 0038 open question): today
+  an agency refreshes its block-name mapping (`canonical.block_labels`) by re-running
+  `tools/block-labels/derive.py` against a new trip→block export. The self-service
+  increment: accept the mapping file through the existing vendor-drop folder so the
+  agency refreshes it like any other delivery, with the same derivation report landing
+  as findings instead of console output.
+
 ## Next
 
 - **APC certification workflow support** — the pp. 147–148 FTA approval/benchmarking

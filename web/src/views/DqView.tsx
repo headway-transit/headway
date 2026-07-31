@@ -813,7 +813,16 @@ function SubjectContext({
         <dl>
           {groups.map((group, i) => (
             <div key={`${group.block_id ?? "no-block"}-ids-${i}`}>
-              <dt>{group.block_id ?? copy.dq.subject.blockAbsent}</dt>
+              {/* The feed id stays copyable here even when the table above
+                  leads with the operational name (handoff 0038). */}
+              <dt>
+                {group.block_label && group.block_id
+                  ? copy.dq.subject.technicalBlockLabeled(
+                      group.block_label,
+                      group.block_id,
+                    )
+                  : (group.block_id ?? copy.dq.subject.blockAbsent)}
+              </dt>
               <dd>
                 <code>{group.trip_ids.join(", ")}</code>
               </dd>
@@ -833,19 +842,27 @@ function SubjectContext({
   );
 }
 
-/** One block's row: the identity, how many trips, which routes, when. */
+/** One block's row: the identity, how many trips, which routes, when.
+ *
+ * The identity leads with the agency's OPERATIONAL block name when the
+ * frozen context carries one (handoff 0038) — the word on the run board —
+ * with the feed id available in the technical disclosure below (the
+ * handoff-0032 vehicle-label presentation). An unmapped block shows the
+ * feed id exactly as it always has, and a blockless group says so in
+ * words. Nothing is invented in any case. */
 function SubjectGroupRow({ group }: { group: DqSubjectGroup }) {
   return (
     <tr>
       <th scope="row">
-        {group.block_id ?? (
-          <>
-            <em>{copy.dq.subject.blockAbsent}</em>
-            <span className="field-hint">
-              {copy.dq.subject.blockAbsentHint}
-            </span>
-          </>
-        )}
+        {group.block_label ??
+          group.block_id ?? (
+            <>
+              <em>{copy.dq.subject.blockAbsent}</em>
+              <span className="field-hint">
+                {copy.dq.subject.blockAbsentHint}
+              </span>
+            </>
+          )}
       </th>
       <td className="figure">
         {copy.dq.subject.tripCount(formatCount(group.trip_count))}

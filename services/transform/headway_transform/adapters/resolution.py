@@ -303,6 +303,79 @@ def _dates_to_strings(value: object) -> object:
 
 
 @dataclass(frozen=True)
+class TripNameParse:
+    """Outcome of parsing ONE vendor trip name per a spec's parse rules.
+
+    This is the parse half of :meth:`TripResolver.resolve_trip`, split out
+    so other consumers of the same vendor vocabulary — the block-label
+    derivation (handoff 0038) joins the agency's trip->block export through
+    exactly this parse — reuse the resolver's reading of a trip name instead
+    of reimplementing it. One parse, one meaning: 'route - pattern - start'
+    comes apart the same way everywhere.
+
+    ``reason`` is empty on success and otherwise carries the plain-language
+    explanation resolve_trip has always reported (what split how, what was
+    assumed: nothing).
+    """
+
+    parsed: Optional[dict[str, str]]
+    start_seconds: Optional[int]
+    reason: str = ""
+
+    @property
+    def ok(self) -> bool:
+        return not self.reason
+
+    @property
+    def parsed_text(self) -> str:
+        return ", ".join(f"{k} {v!r}" for k, v in (self.parsed or {}).items())
+
+
+def parse_trip_name(spec: ResolutionSpec, vendor_ref: str) -> TripNameParse:
+    """Parse a vendor trip name exactly as the spec declares — nothing more.
+
+    Splits on the declared separator into the declared components, strips
+    when declared, and reads the start-time component with the declared
+    format. No matching happens here: the result is the parsed components
+    plus the start time as GTFS service-day seconds, or a stated reason.
+    """
+    parts = vendor_ref.split(spec.separator)
+    if spec.strip_components:
+        parts = [p.strip() for p in parts]
+    if len(parts) != len(spec.components):
+        return TripNameParse(
+            parsed=None,
+            start_seconds=None,
+            reason=(
+                f"the trip name splits on {spec.separator!r} into "
+                f"{len(parts)} part(s), but this agency's trip names are "
+                f"configured as {len(spec.components)}: "
+                f"{', '.join(spec.components)}. Nothing was assumed about "
+                "which part is which"
+            ),
+        )
+    parsed = dict(zip(spec.components, parts))
+    parsed_text = ", ".join(f"{k} {v!r}" for k, v in parsed.items())
+
+    raw_start = parsed[spec.start_component]
+    try:
+        start = datetime.strptime(raw_start, spec.start_format)
+    except ValueError:
+        return TripNameParse(
+            parsed=parsed,
+            start_seconds=None,
+            reason=(
+                f"the start time {raw_start!r} in the trip name does not "
+                f"read as {spec.start_format!r} (parsed: {parsed_text})"
+            ),
+        )
+    return TripNameParse(
+        parsed=parsed,
+        start_seconds=start.hour * 3600 + start.minute * 60 + start.second,
+    )
+
+
+@dataclass(frozen=True)
 class TripOutcome:
     """What resolution decided about ONE vendor row's trip identity."""
 
@@ -395,40 +468,25 @@ class TripResolver:
                 ),
             )
 
-        parts = vendor_ref.split(spec.separator)
-        if spec.strip_components:
-            parts = [p.strip() for p in parts]
-        if len(parts) != len(spec.components):
+        # The one parse everything shares (handoff 0038 reuses it for the
+        # block-label derivation): declared separator, declared components,
+        # declared start-time format — never a guess about which part is
+        # which.
+        name_parse = parse_trip_name(spec, vendor_ref)
+        if not name_parse.ok:
             return TripOutcome(
                 status=UNMATCHED,
                 vendor_ref=vendor_ref,
                 subject=f"trip {vendor_ref!r}",
-                reason=(
-                    f"the trip name splits on {spec.separator!r} into "
-                    f"{len(parts)} part(s), but this agency's trip names are "
-                    f"configured as {len(spec.components)}: "
-                    f"{', '.join(spec.components)}. Nothing was assumed about "
-                    "which part is which"
-                ),
+                reason=name_parse.reason,
             )
-        parsed = dict(zip(spec.components, parts))
-        parsed_text = ", ".join(f"{k} {v!r}" for k, v in parsed.items())
+        parsed = name_parse.parsed
+        assert parsed is not None and name_parse.start_seconds is not None
+        parsed_text = name_parse.parsed_text
 
         route_value = parsed[spec.route_component]
         raw_start = parsed[spec.start_component]
-        try:
-            start = datetime.strptime(raw_start, spec.start_format)
-        except ValueError:
-            return TripOutcome(
-                status=UNMATCHED,
-                vendor_ref=vendor_ref,
-                subject=f"trip {vendor_ref!r}",
-                reason=(
-                    f"the start time {raw_start!r} in the trip name does not "
-                    f"read as {spec.start_format!r} (parsed: {parsed_text})"
-                ),
-            )
-        start_seconds = start.hour * 3600 + start.minute * 60 + start.second
+        start_seconds = name_parse.start_seconds
 
         raw_direction = (row.get(spec.direction.from_column) or "").strip()
         if raw_direction not in spec.direction.values:

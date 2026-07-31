@@ -36,18 +36,25 @@ THE THREE RULES THIS MODULE OBEYS
    departure. A dispatcher recognises "18 trips, Route 42, 06:14–14:22" as a
    block even when its id is a UUID.
 
+THE BLOCK-LABEL MAPPING (handoff 0038)
+--------------------------------------
+The gap this module long recorded — no agency block-label mapping (feed
+``block_id`` → operational name like ``225-4``) — is now closed the only
+honest way it could be: the agency supplied the mapping. Their trip→block
+export, joined to their GTFS through the handoff-0031 trip-name parse
+(tools/block-labels/derive.py), lands ``canonical.block_labels``:
+agency-local reference data with provenance, loaded per agency, never
+guessed. This module LEFT JOINs it in the one label query and freezes the
+operational name into each group as ``block_label`` — rule 1 and rule 2
+still hold exactly: frozen at persistence, and an unmapped block carries
+``block_label: null`` and renders precisely as it did before the table
+existed (MBTA, whose ``block_id`` already IS the operational name, has no
+rows in the table and is untouched). A pre-0038 database is detected by a
+one-row probe and served by the label query this module always used.
+
 WHAT IS DELIBERATELY NOT HERE
 -----------------------------
-No agency block-label mapping (feed ``block_id`` → operational name like
-``225-4``). The partner agency's feed carries opaque UUIDs in ``block_id``,
-so no display change can turn one into ``225-4`` — the names are not in the
-data. The right fix is their GTFS export emitting the operational name in
-``block_id``, which costs them one export setting and benefits every
-downstream consumer. A Headway-side mapping table is a permanent maintenance
-burden adopted to work around a one-line export change, and is recorded as
-an open question rather than built.
-
-Also not here: **trip headsign.** The handoff lists it as an available
+**Trip headsign.** The handoff lists it as an available
 label, but ``canonical.trips`` carries no headsign column and the transform
 never maps one — the field does not exist anywhere in Headway today.
 Inventing one is exactly what rule 2 forbids, and adding it means a
@@ -110,6 +117,44 @@ _SELECT_TRIP_LABELS_SQL = (
     "ORDER BY t.trip_id"
 )
 
+#: The migration-0038 variant of the label query: the same rows plus the
+#: agency's OPERATIONAL block name from canonical.block_labels (handoff
+#: 0038 — agency-loaded reference data, tools/block-labels). LEFT JOIN, so
+#: an unmapped block reads exactly as it always has: block_label NULL,
+#: nothing invented. Joined here — in the ONE label query — rather than
+#: looked up per finding, for the same batching reason as everything else
+#: in this module.
+_SELECT_TRIP_LABELS_WITH_BLOCK_LABELS_SQL = (
+    "SELECT t.trip_id, t.block_id, t.route_id, r.short_name, r.long_name, "
+    "d.first_departure_seconds, d.last_departure_seconds, bl.block_label "
+    "FROM canonical.trips AS t "
+    "LEFT JOIN canonical.routes AS r ON r.route_id = t.route_id "
+    "LEFT JOIN canonical.block_labels AS bl ON bl.block_id = t.block_id "
+    "LEFT JOIN ("
+    "SELECT trip_id, min(departure_seconds) AS first_departure_seconds, "
+    "max(departure_seconds) AS last_departure_seconds "
+    "FROM canonical.stop_times "
+    "WHERE trip_id = ANY(%s) AND departure_seconds IS NOT NULL "
+    "GROUP BY trip_id"
+    ") AS d ON d.trip_id = t.trip_id "
+    "WHERE t.trip_id = ANY(%s) "
+    "ORDER BY t.trip_id"
+)
+
+#: Migration 0038 is ADDITIVE, and the agency updater applies migrations
+#: before rebuilding services — so in a supported deployment the table is
+#: there by the time this runs. A developer database that has not been
+#: migrated yet must not lose label resolution (let alone a finding) over a
+#: naming feature: this one-row probe (issued once per batch, and only when
+#: a batch actually carries trip subjects) selects the pre-0038 label query
+#: instead. The headway_calc.dq migration-0035 probe precedent — a probe,
+#: not a try/rollback, because resolve_contexts may run inside a
+#: transaction that already holds work this module must not discard.
+_BLOCK_LABELS_TABLE_SQL = (
+    "SELECT 1 FROM information_schema.tables "
+    "WHERE table_schema = 'canonical' AND table_name = 'block_labels'"
+)
+
 
 def _clock(seconds: int | None) -> str | None:
     """GTFS service-day seconds as a clock time a person reads.
@@ -132,19 +177,51 @@ def _clock(seconds: int | None) -> str | None:
     return f"{total // 3600:02d}:{(total % 3600) // 60:02d}"
 
 
+def _block_labels_table_exists(conn) -> bool:
+    """Does canonical.block_labels exist (migration 0038)? One row, once
+    per batch — see _BLOCK_LABELS_TABLE_SQL for why a probe and not a
+    try/rollback."""
+    cur = conn.cursor()
+    cur.execute(_BLOCK_LABELS_TABLE_SQL)
+    return cur.fetchone() is not None
+
+
 def _fetch_trip_labels(conn, trip_ids: list[str]) -> dict[str, dict]:
     """One SELECT; returns {trip_id: label dict} for the trips that EXIST.
 
     A trip absent from the result is absent from the return value — the
     caller reports it as unmatched rather than inventing a row for it.
+    ``block_label`` is the agency's operational block name when the
+    migration-0038 mapping knows it, and None otherwise (including on a
+    pre-0038 database) — never a guess.
     """
+    with_block_labels = _block_labels_table_exists(conn)
+    sql = (
+        _SELECT_TRIP_LABELS_WITH_BLOCK_LABELS_SQL
+        if with_block_labels
+        else _SELECT_TRIP_LABELS_SQL
+    )
     cur = conn.cursor()
-    cur.execute(_SELECT_TRIP_LABELS_SQL, (trip_ids, trip_ids))
+    cur.execute(sql, (trip_ids, trip_ids))
     labels: dict[str, dict] = {}
     for row in cur.fetchall():
-        trip_id, block_id, route_id, short_name, long_name, first_s, last_s = row
+        if with_block_labels:
+            (
+                trip_id,
+                block_id,
+                route_id,
+                short_name,
+                long_name,
+                first_s,
+                last_s,
+                block_label,
+            ) = row
+        else:
+            trip_id, block_id, route_id, short_name, long_name, first_s, last_s = row
+            block_label = None
         labels[str(trip_id)] = {
             "block_id": block_id,
+            "block_label": block_label,
             "route_id": route_id,
             "route_short_name": short_name,
             "route_long_name": long_name,
@@ -215,6 +292,17 @@ def _group_by_block(subject: SubjectRef, labels: dict[str, dict]) -> dict:
         groups.append(
             {
                 "block_id": block_id,
+                # The agency's operational name for the block (handoff 0038,
+                # canonical.block_labels), frozen here like every other
+                # label. None whenever the mapping does not know it — an
+                # unmapped block reads exactly as it did before the mapping
+                # existed. Additive under CONTEXT_VERSION 1, like the
+                # handoff-0032 vehicle key.
+                "block_label": (
+                    labels[members[0]]["block_label"]
+                    if block_id is not None
+                    else None
+                ),
                 "trip_count": len(members),
                 "routes": ordered_routes[:ROUTES_PER_GROUP_CAP],
                 "route_count": len(ordered_routes),

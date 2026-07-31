@@ -293,6 +293,24 @@ loaded schedule feed is not the one that was in effect for those dates,
 or the direction confirmation is still pending. The finding text says
 which.
 
+#### Naming your blocks the way your run board does
+
+Some scheduling systems export a GTFS feed whose `block_id` is a long
+random-looking string, while your dispatchers call the same block
+something like `225-4`. Headway never invents a name it does not have, so
+findings over such a feed can only show the long id — **unless you supply
+the mapping**. If your system can export a trip→block list (two columns:
+the trip name in your own format, the block name your dispatchers use),
+Headway derives which feed block each name belongs to using the same
+trip-name reading as the matching above, loads it as reference data, and
+from then on new findings that group trips by block lead with your block
+names — the long id stays one click away for anyone tracing a record.
+Rows the derivation cannot place are counted and reported, never guessed.
+See `tools/block-labels/README.md` for how to run it. (If your vendor can
+simply put the operational block name in the feed's `block_id`, that is
+still the better fix — it helps every consumer of your feed, not just
+Headway.)
+
 > **Buying or replacing a system right now?** The cheapest time to
 > guarantee you can get your data out is before you sign. See
 > [`docs/procurement-data-requirements.md`](procurement-data-requirements.md)

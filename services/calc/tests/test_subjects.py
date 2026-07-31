@@ -47,11 +47,23 @@ def label_row(
     long_name=None,
     first_s=None,
     last_s=None,
+    block_label=None,
 ):
-    """One canonical.trips × routes × stop_times label row, the reader's
-    column order. Every label defaults to ABSENT — the point of the module
-    is that absence is representable."""
-    return (trip_id, block_id, route_id, short_name, long_name, first_s, last_s)
+    """One canonical.trips × routes × block_labels × stop_times label row,
+    the reader's migration-0038 column order. Every label defaults to
+    ABSENT — the point of the module is that absence is representable.
+    ``block_label`` (handoff 0038) is the agency's operational block name,
+    None whenever canonical.block_labels has no row for the block."""
+    return (
+        trip_id,
+        block_id,
+        route_id,
+        short_name,
+        long_name,
+        first_s,
+        last_s,
+        block_label,
+    )
 
 
 def finding_with(ids, issue_type="apc_missing_trips_above_fta_threshold"):
@@ -272,6 +284,94 @@ def test_trip_id_cap_truncates_the_sample_but_never_the_trip_count():
     assert group["trip_count"] == n
     assert len(group["trip_ids"]) == TRIP_IDS_PER_GROUP_CAP
     assert context["trip_id_cap"] == TRIP_IDS_PER_GROUP_CAP
+
+
+# --- the agency's own block names (handoff 0038) ----------------------------
+
+
+def test_a_mapped_block_carries_its_operational_name():
+    """canonical.block_labels knows the block: the group carries the name
+    dispatch uses, alongside — never instead of — the feed id."""
+    conn = RecordingConnection(
+        trip_label_rows=[
+            label_row(
+                "t1", "feed-block-uuid-1", "42", "42", None, 22440, 30000,
+                block_label="42-9",
+            ),
+            label_row("t2", "B-unmapped", "9", "9", None, 18000, 21600),
+        ]
+    )
+    (context,) = resolve_contexts(conn, [finding_with(["t1", "t2"])])
+    by_block = {g["block_id"]: g for g in context["groups"]}
+    assert by_block["feed-block-uuid-1"]["block_label"] == "42-9"
+    # The feed id stays — it is the provenance, the label is the headline.
+    assert by_block["feed-block-uuid-1"]["block_id"] == "feed-block-uuid-1"
+    # An unmapped block shows exactly what it showed before the mapping
+    # existed: its id, and no invented name.
+    assert by_block["B-unmapped"]["block_label"] is None
+
+
+def test_an_unmapped_block_and_a_blockless_group_both_carry_no_label():
+    conn = RecordingConnection(
+        trip_label_rows=[label_row("t1", None, "42", "42", None, 3600, 7200)]
+    )
+    (context,) = resolve_contexts(conn, [finding_with(["t1"])])
+    (group,) = context["groups"]
+    assert group["block_id"] is None
+    assert group["block_label"] is None
+
+
+def test_the_label_query_joins_block_labels_and_probes_the_table_once():
+    conn = RecordingConnection(
+        trip_label_rows=[
+            label_row("t1", "B1", "42", "42", None, 3600, 7200, "42-9")
+        ]
+    )
+    resolve_contexts(
+        conn, [finding_with(["t1"]), finding_with(["t1"])]
+    )
+    assert len(conn.statements_matching("information_schema.tables")) == 1
+    (label_select,) = conn.statements_matching("t.block_id, t.route_id")
+    assert "canonical.block_labels" in label_select[0]
+    assert "bl.block_label" in label_select[0]
+
+
+def test_a_pre_0038_database_still_resolves_every_other_label():
+    """The mapping table is additive in both directions: a database without
+    it serves the pre-0038 label SELECT and block_label is honestly None —
+    a naming feature must never break label resolution."""
+    conn = RecordingConnection(
+        trip_label_rows=[
+            # The pre-0038 SELECT returns 7 columns — no block_label.
+            ("t1", "B1", "42", "42", "Dayton Transfer", 22440, 30000)
+        ],
+        block_labels_table_missing=True,
+    )
+    (context,) = resolve_contexts(conn, [finding_with(["t1"])])
+    (group,) = context["groups"]
+    assert group["block_id"] == "B1"
+    assert group["block_label"] is None
+    assert group["routes"][0]["short_name"] == "42"
+    (label_select,) = conn.statements_matching("t.block_id, t.route_id")
+    assert "canonical.block_labels" not in label_select[0]
+
+
+def test_route_findings_freezes_the_block_label_on_the_row():
+    conn = RecordingConnection(
+        trip_label_rows=[
+            label_row(
+                "t1", "feed-block-uuid-1", "42", "42", None, 22440, 51720,
+                block_label="42-9",
+            )
+        ]
+    )
+    route_findings(
+        conn, [finding_with(["t1"])], "upt_v0", "0.2.0", PERIOD_START, PERIOD_END
+    )
+    (sql, params) = conn.statements_matching("INSERT INTO dq.issues")[0]
+    stored = json.loads(params[7])
+    assert stored["groups"][0]["block_label"] == "42-9"
+    assert stored["groups"][0]["block_id"] == "feed-block-uuid-1"
 
 
 # --- clock conversion -------------------------------------------------------

@@ -374,6 +374,16 @@ export interface DqSubjectRoute {
  */
 export interface DqSubjectGroup {
   block_id: string | null;
+  /**
+   * The agency's OPERATIONAL name for the block ("225-4") from the
+   * migration-0038 mapping (handoff 0038), frozen when the finding was
+   * raised. Optional AND nullable: null — or absent, on contexts frozen
+   * before the mapping existed — means the mapping does not know this
+   * block, and the UI shows the feed's `block_id` exactly as it always
+   * has. Nothing is ever substituted for a missing name; the feed id
+   * stays available in the technical detail either way.
+   */
+  block_label?: string | null;
   trip_count: number;
   routes: DqSubjectRoute[];
   route_count: number;
