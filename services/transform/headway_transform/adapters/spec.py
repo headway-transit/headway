@@ -157,6 +157,12 @@ class MappingSpec:
     header: bool
     #: Positional column names for headerless exports (empty when header).
     columns: tuple[str, ...]
+    #: Headerless only. When True, a first row whose values equal the
+    #: declared ``columns`` is dropped as an optional column-name header, so
+    #: an export made WITH or WITHOUT the header row both process (an operator
+    #: need not know to disable "include column headers"). Only the exact
+    #: header is ever skipped; a real data row is never dropped.
+    skip_optional_header: bool
     timezone_name: str
     filters: tuple[Filter, ...]
     fields: tuple[FieldDef, ...]
@@ -412,6 +418,7 @@ def load_spec(path: Path | str) -> MappingSpec:
     csv_opts = source_format.get("csv") or {}
     header = csv_opts.get("header", True)
     columns = tuple(csv_opts.get("columns") or ())
+    skip_optional_header = bool(csv_opts.get("skip_optional_header", False))
     filters = tuple(_build_filter(f) for f in document.get("filters") or ())
 
     if not header:
@@ -421,6 +428,12 @@ def load_spec(path: Path | str) -> MappingSpec:
                 "source_format/csv/columns: duplicate positional column "
                 "name(s) " + ", ".join(repr(d) for d in duplicates)
             )
+    if skip_optional_header and header:
+        problems.append(
+            "source_format/csv/skip_optional_header: only valid for a "
+            "headerless format (header: false) — a header:true format "
+            "already consumes its column-name row"
+        )
 
     if problems:
         raise SpecError(path, problems)
@@ -437,6 +450,7 @@ def load_spec(path: Path | str) -> MappingSpec:
         skip_leading_rows=csv_opts.get("skip_leading_rows", 0),
         header=header,
         columns=columns,
+        skip_optional_header=skip_optional_header,
         timezone_name=tz_name,
         filters=filters,
         fields=fields,

@@ -49,6 +49,50 @@ def _run(spec_path: Path, fixture: Path):
     return spec, run_adapter(spec, data, record_id, spec.source_label)
 
 
+def test_tripspark_tolerates_an_optional_header_row(tmp_path):
+    """A real SSMS/warehouse export often includes a column-name header row
+    (skip_optional_header: true). An export WITH the header and one WITHOUT it
+    must process IDENTICALLY — the header is dropped, never quarantined, and
+    never counted as a data row; no boarding is lost either way."""
+    spec = load_spec(TRIPSPARK_SPEC)
+    assert spec.skip_optional_header is True
+
+    bom = "﻿".encode("utf-8")
+    headerless = (TRIPSPARK_DIR / "fixtures" / "stop_visits.csv").read_bytes()
+    body = headerless[len(bom):] if headerless.startswith(bom) else headerless
+    with_header = bom + ",".join(spec.columns).encode("utf-8") + b"\r\n" + body
+
+    a = run_adapter(spec, headerless, hashlib.sha256(headerless).hexdigest(), spec.source_label)
+    b = run_adapter(spec, with_header, hashlib.sha256(with_header).hexdigest(), spec.source_label)
+
+    assert a.total_rows == b.total_rows            # header not counted
+    assert a.quarantined_count == b.quarantined_count  # header not quarantined
+    assert len(a.passenger_events) == len(b.passenger_events)  # no boarding lost
+    # And the dropped header never appears as a quarantine finding.
+    assert not any("VehicleLocationAPCKey" in f.description for f in b.findings)
+
+
+def test_skip_optional_header_requires_a_headerless_format(tmp_path):
+    """skip_optional_header is only meaningful for header: false — a
+    header: true format already consumes its column-name row."""
+    doc = {
+        "mapping_spec_version": 0,
+        "vendor": "x", "product": "y", "source_label": "x_y",
+        "target_contract": "tides_passenger_events",
+        "source_format": {"kind": "csv", "csv": {
+            "header": True, "skip_optional_header": True,
+        }},
+        "timezone": "UTC",
+        "fields": {"service_date": {"derived": "local_date_of", "of": "event_timestamp"},
+                   "event_timestamp": {"from": "T", "coerce": "datetime", "format": "%Y-%m-%dT%H:%M:%S"}},
+    }
+    import yaml
+    p = tmp_path / "m.yaml"
+    p.write_text(yaml.safe_dump(doc))
+    with pytest.raises(SpecError, match="skip_optional_header"):
+        load_spec(p)
+
+
 MINIMAL_TIDES_SPEC = """\
 mapping_spec_version: 0
 vendor: testvendor

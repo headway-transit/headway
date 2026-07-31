@@ -27,10 +27,17 @@ source_format:
   # The sample export carries a UTF-8 byte-order mark.
   encoding: utf-8-sig
   csv:
-    # NO header row: positions are declared from the agency's sample. A row
-    # whose field count differs from these 18 positions quarantines —
+    # Positions are declared from the agency's sample (headerless contract):
+    # a row whose field count differs from these 18 positions quarantines —
     # positions are never mapped by guesswork.
     header: false
+    # A real SSMS/warehouse export often includes a column-name header row
+    # (it is the default in most query tools). Tolerate it: a first row whose
+    # values are exactly these column names is dropped as a header, so an
+    # export made with OR without headers both process and an operator never
+    # has to know to disable "include column headers". Only the literal
+    # header is skipped — a data row is never lost.
+    skip_optional_header: true
     columns:
       - VehicleLocationAPCKey
       - VehicleName

@@ -399,6 +399,24 @@ def _validate_record(
     return rows, edges, None
 
 
+def _drop_optional_header(reader, columns: tuple[str, ...]):
+    """Yield rows from a headerless DictReader, dropping a first row whose
+    values are exactly the declared ``columns`` (an optional column-name
+    header). Only the literal header is skipped: a real data row is never
+    dropped, because its values would not all equal the column names. A
+    header-only file yields nothing (handled downstream as "no data rows").
+
+    csv.Error raised while pulling a row propagates unchanged, so the
+    row_guard.iter_rows per-row error capture still applies to every row."""
+    try:
+        first = next(reader)
+    except StopIteration:
+        return
+    if not all((first.get(c) or "").strip() == c for c in columns):
+        yield first
+    yield from reader
+
+
 def run_adapter(
     spec: MappingSpec,
     file_bytes: bytes,
@@ -533,6 +551,13 @@ def run_adapter(
             delimiter=spec.delimiter,
             quotechar=spec.quotechar,
         )
+        if spec.skip_optional_header:
+            # Tolerate an optional column-name header: an SSMS/warehouse
+            # export made WITH the header row and one made WITHOUT it both
+            # process. Only a FIRST row that IS exactly the declared columns
+            # is dropped — a real data row is never lost (its values would
+            # not all equal the column names).
+            reader = _drop_optional_header(reader, spec.columns)
 
     filtered_by: dict[int, int] = {}
     # (emission index, predicate index) -> suppressed-emission count.

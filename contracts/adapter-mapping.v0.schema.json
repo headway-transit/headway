@@ -279,6 +279,10 @@
               "items": {"type": "string", "minLength": 1},
               "minItems": 1,
               "description": "Positional column names for a headerless export (header: false), in file order, one name per position. Names are spec-local labels for the positions the agency's sample demonstrated; 'from'/filter/concat references resolve against this list. Unique; declared only when header is false."
+            },
+            "skip_optional_header": {
+              "type": "boolean",
+              "description": "Headerless formats only (header: false). When true, a FIRST row whose values exactly equal the declared positional 'columns' is dropped as an optional column-name header, so an export made with OR without the header row both process (an operator need not know to disable 'include column headers'). A row that is not the exact header is kept - only the literal header is ever skipped, so no data row is lost."
             }
           },
           "allOf": [
