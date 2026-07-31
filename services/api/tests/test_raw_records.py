@@ -1044,6 +1044,99 @@ class TestBase64ObjectStoreFallback:
         assert response.status_code == 410
         assert "object store" in response.json()["detail"]
 
+    def _unreachable_store(self):
+        """An object reader that models the store being DOWN: every read
+        raises store-unreachable (not object-missing)."""
+        class _Down:
+            def open_key(self, key):
+                raise raw_payloads.PayloadUnavailable(
+                    raw_payloads.REASON_STORE_UNREACHABLE, "object store is down"
+                )
+
+            def size(self, record):
+                return None
+
+            def open(self, record):
+                raise raw_payloads.PayloadUnavailable(
+                    raw_payloads.REASON_STORE_UNREACHABLE, "object store is down"
+                )
+        return _Down()
+
+    def _make_client(self, reader, fake_db, settings, fake_store, fake_producer,
+                     fake_webhook_sender, test_signer, fake_calc_launcher):
+        from headway_api.app import create_app
+        application = create_app(
+            settings=settings, db=fake_db, object_store=fake_store,
+            producer=fake_producer, webhook_sender=fake_webhook_sender,
+            calc_run_launcher=fake_calc_launcher, raw_payload_reader=reader,
+        )
+        application.state.signer = test_signer
+        return TestClient(application)
+
+    def test_transient_store_outage_is_503_not_a_false_permanent_410(
+        self, fake_db, settings, fake_store, fake_producer,
+        fake_webhook_sender, test_signer, fake_calc_launcher
+    ):
+        """F3 (external adversarial review): a rescued record whose object
+        store is unreachable AND whose broker has aged out must answer a
+        transient 503 — NOT a 410 falsely claiming the evidence is gone
+        forever. The bytes may be sitting in the store we couldn't reach."""
+        record = fake_db.add_raw_record(
+            record_id="d" * 64, source="gtfs_rt", connector="headway-gtfs-rt",
+            content_type="application/x-protobuf",
+            payload_encoding="base64", payload_ref=None,
+        )
+
+        class _AgedOutBroker:
+            def open(self, rec):
+                raise raw_payloads.PayloadUnavailable(
+                    raw_payloads.REASON_NOT_RETAINED, "broker no longer retains it"
+                )
+
+            def size(self, rec):
+                return None
+
+        reader = raw_payloads.CompositeRawPayloadReader(
+            self._unreachable_store(), _AgedOutBroker()
+        )
+        with self._make_client(reader, fake_db, settings, fake_store,
+                               fake_producer, fake_webhook_sender, test_signer,
+                               fake_calc_launcher) as client:
+            response = client.post(
+                f"/raw/records/{record['record_id']}/verify",
+                headers=auth_header(fake_db, "vera"),
+            )
+        assert response.status_code == 503
+        detail = response.json()["detail"].lower()
+        assert "transient" in detail and "try again" in detail
+        # Must NOT use the permanent-loss phrasing the 410 path uses.
+        assert "can no longer be produced" not in detail
+        assert "never durably kept" not in detail
+
+    def test_store_unreachable_with_no_broker_is_also_503(
+        self, fake_db, settings, fake_store, fake_producer,
+        fake_webhook_sender, test_signer, fake_calc_launcher
+    ):
+        """Same defect, no-broker installation: store unreachable + no broker
+        fallback is a transient 503, never a permanent 410."""
+        record = fake_db.add_raw_record(
+            record_id="e" * 64, source="gtfs_rt", connector="headway-gtfs-rt",
+            content_type="application/x-protobuf",
+            payload_encoding="base64", payload_ref=None,
+        )
+        reader = raw_payloads.CompositeRawPayloadReader(
+            self._unreachable_store(), None
+        )
+        with self._make_client(reader, fake_db, settings, fake_store,
+                               fake_producer, fake_webhook_sender, test_signer,
+                               fake_calc_launcher) as client:
+            response = client.post(
+                f"/raw/records/{record['record_id']}/verify",
+                headers=auth_header(fake_db, "vera"),
+            )
+        assert response.status_code == 503
+        assert "transient" in response.json()["detail"].lower()
+
     def test_derived_key_scheme_is_pinned(self):
         record = raw_payloads.RawRecord(
             record_id="a" * 64,

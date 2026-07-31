@@ -231,6 +231,45 @@ def test_dq_scope_does_not_grant_ops(client, fake_db, dq_key):
     assert json.loads(events[0]["detail"])["required_scope"] == "read:ops"
 
 
+def test_repeated_scope_denials_coalesce_to_one_audit_row(client, fake_db, dq_key):
+    """F1 (external adversarial review): rejected requests never reach the
+    in-body rate limiter, yet each auth/scope failure writes to audit.events —
+    a write-amplification DoS. A flood of identical out-of-scope calls from one
+    client must still return 403 every time but write the audit row ONCE."""
+    fake_db.add_vehicle_position()
+    for _ in range(6):
+        r = client.get(
+            "/machine/ops/vehicles/latest", headers=machine_header(dq_key)
+        )
+        assert r.status_code == 403  # never suppressed to the caller
+    events = [
+        e for e in fake_db.audit_events if e["action"] == "machine_scope_denied"
+    ]
+    assert len(events) == 1  # six failures, one audit write
+
+
+def test_failure_audit_throttle_coalesces_counts_and_bounds_memory():
+    """Unit-level: the throttle records the first failure per (bucket, reason)
+    per window, suppresses the rest, folds the suppressed count into the next
+    recorded event, keeps distinct buckets independent, and bounds memory."""
+    from headway_api.machine_auth import FailureAuditThrottle
+
+    now = [1000.0]
+    t = FailureAuditThrottle(window_seconds=60.0, clock=lambda: now[0])
+    assert t.on_failure("1.2.3.4", "unknown_key") == 0  # first: recorded
+    assert t.on_failure("1.2.3.4", "unknown_key") is None  # suppressed
+    assert t.on_failure("1.2.3.4", "unknown_key") is None  # suppressed
+    assert t.on_failure("1.2.3.4", "revoked_key") == 0  # different reason
+    assert t.on_failure("5.6.7.8", "unknown_key") == 0  # different IP
+    now[0] += 61.0  # window rolls over
+    assert t.on_failure("1.2.3.4", "unknown_key") == 2  # 2 were suppressed
+
+    bounded = FailureAuditThrottle(window_seconds=60.0, max_buckets=8, clock=lambda: 0.0)
+    for i in range(100):
+        bounded.on_failure(f"ip-{i}", "unknown_key")
+    assert len(bounded._last) <= 8
+
+
 def test_ops_scope_does_not_grant_dq(client, fake_db, ops_key):
     r = client.get("/machine/dq/issues", headers=machine_header(ops_key))
     assert r.status_code == 403

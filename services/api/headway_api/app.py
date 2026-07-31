@@ -15,7 +15,7 @@ from fastapi import FastAPI
 
 from . import __version__, auth, webhooks
 from .db import lifespan
-from .machine_auth import RateLimiter
+from .machine_auth import FailureAuditThrottle, RateLimiter
 from .routers import (
     attestations,
     branding,
@@ -133,6 +133,10 @@ def create_app(
     app.state.machine_rate_limiter = RateLimiter(
         app.state.settings.machine_requests_per_minute
     )
+    # Coalesce repeated auth/scope FAILURE audit writes so rejected requests
+    # (which never reach the in-body rate limiter) cannot amplify into
+    # unbounded audit.events INSERTs — adversarial-review finding F1.
+    app.state.machine_audit_throttle = FailureAuditThrottle()
     app.state.public_rate_limiter = RateLimiter(
         app.state.settings.public_requests_per_minute
     )

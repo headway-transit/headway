@@ -473,23 +473,33 @@ class CompositeRawPayloadReader:
 
     # -- base64: the rescued-object fast path ------------------------------
 
-    def _open_rescued(self, record: RawRecord) -> Optional[PayloadHandle]:
+    def _open_rescued(self, record: RawRecord) -> tuple[Optional[PayloadHandle], bool]:
         """The record's bytes from the object store at the derived key, hash-
-        verified — or None when they are not (usably) there."""
+        verified. Returns ``(handle, store_unreachable)``: ``handle`` is the
+        verified bytes or None; ``store_unreachable`` is True when the store
+        could not be reached, as opposed to the object being confirmed absent.
+
+        The distinction is load-bearing: a broker miss AFTER a confirmed-absent
+        object is permanent loss (410), but a broker miss after an UNREACHABLE
+        store is a transient outage (503) — the bytes may be sitting durably in
+        the store we simply couldn't read. Collapsing the two would let a MinIO
+        blip make the API falsely declare a rescued record's evidence gone
+        forever (the exact failure this retention wave exists to prevent)."""
         key = derived_object_key(record)
         if key is None or self._object_reader is None:
-            return None
+            return None, False
         open_key = getattr(self._object_reader, "open_key", None)
         if open_key is None:
-            return None
+            return None, False
         try:
             handle = open_key(key)
             data = b"".join(handle.chunks)
-        except PayloadUnavailable:
-            # Missing (never landed / not backfillable) or the store is
-            # unreachable: either way the broker lookup is still worth
-            # trying — the record's bytes may well be on the wire.
-            return None
+        except PayloadUnavailable as exc:
+            # Object confirmed missing → fall through to the broker; the bytes
+            # may be on the wire. Store UNREACHABLE → also try the broker, but
+            # remember it, so a broker miss is reported as a transient 503,
+            # never a permanent 410 that would falsely claim lost evidence.
+            return None, exc.reason == REASON_STORE_UNREACHABLE
         if hashlib.sha256(data).hexdigest() != record.record_id:
             # A content-addressed object whose bytes do not hash to its key
             # is storage corruption. It is NOT this record's bytes, so it is
@@ -503,11 +513,30 @@ class CompositeRawPayloadReader:
                 key,
                 record.record_id,
             )
-            return None
-        return PayloadHandle(LOCATION_OBJECT_STORE, len(data), iter((data,)))
+            return None, False
+        return PayloadHandle(LOCATION_OBJECT_STORE, len(data), iter((data,))), False
+
+    # A rescued record whose object store is unreachable and whose broker has
+    # aged out must NOT be reported as permanent loss — the bytes may be in the
+    # store; we simply cannot reach it. This is a transient 503, retryable.
+    _STORE_DOWN_NO_BROKER = (
+        "Headway could not reach the object store to read this record's bytes, "
+        "and this installation has no broker connection (KAFKA_BROKERS) to fall "
+        "back on. This is a transient storage outage, not confirmed data loss — "
+        "the record's identity and place in the trail are unaffected, and its "
+        "bytes should be readable again once the object store is reachable. "
+        "Try again shortly."
+    )
+    _STORE_DOWN_BROKER_MISS = (
+        "Headway could not reach the object store to read this record's bytes, "
+        "and the broker no longer retains the envelope to fall back on. This is "
+        "a transient storage outage, not confirmed data loss — Headway cannot "
+        "tell right now whether the bytes are durably stored, so it will not "
+        "declare them gone. Try again once the object store is reachable."
+    )
 
     def _base64_open(self, record: RawRecord) -> PayloadHandle:
-        rescued = self._open_rescued(record)
+        rescued, store_unreachable = self._open_rescued(record)
         if rescued is not None:
             return rescued
         store_was_checked = (
@@ -515,6 +544,10 @@ class CompositeRawPayloadReader:
             and derived_object_key(record) is not None
         )
         if self._stream_reader is None:
+            if store_unreachable:
+                raise PayloadUnavailable(
+                    REASON_STORE_UNREACHABLE, self._STORE_DOWN_NO_BROKER
+                )
             if store_was_checked:
                 raise PayloadUnavailable(
                     REASON_NOT_RETAINED,
@@ -536,6 +569,16 @@ class CompositeRawPayloadReader:
         try:
             return self._stream_reader.open(record)
         except PayloadUnavailable as exc:
+            if store_unreachable and exc.reason in (
+                REASON_NOT_RETAINED,
+                REASON_NOT_CONFIGURED,
+            ):
+                # The store — where a rescued record's bytes live — was
+                # unreachable, and the broker fallback also came up empty.
+                # This is a transient outage, not permanent loss.
+                raise PayloadUnavailable(
+                    REASON_STORE_UNREACHABLE, self._STORE_DOWN_BROKER_MISS
+                ) from exc
             if exc.reason == REASON_NOT_RETAINED and store_was_checked:
                 raise PayloadUnavailable(
                     REASON_NOT_RETAINED,

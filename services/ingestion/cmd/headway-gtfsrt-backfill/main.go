@@ -48,6 +48,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -71,6 +72,19 @@ var topics = []string{
 	"raw.gtfs_rt.trip_updates",
 	"raw.gtfs_rt.alerts",
 }
+
+// Idle-poll safety valve: completion is defined as progress reaching every
+// partition's recorded end offset, which assumes a gapless log. If a partition
+// ends in a gap (compaction, aborted transactions, or a retention race that
+// deletes frames before we read them), the consumer silently skips those
+// offsets and progress never reaches the end — without this bound the tool
+// would block in PollFetches forever. After maxIdlePolls consecutive polls of
+// idlePollTimeout that deliver nothing, we stop and report the shortfall
+// honestly rather than hang: records that do not exist cannot be rescued.
+const (
+	idlePollTimeout = 10 * time.Second
+	maxIdlePolls    = 3
+)
 
 // envelopeLite is the slice of the raw-record envelope v0 this tool needs.
 type envelopeLite struct {
@@ -206,17 +220,49 @@ func run(log *slog.Logger) error {
 	}
 
 	start := time.Now()
+	idle := 0
 	for !finished() {
-		fetches := client.PollFetches(ctx)
+		// Bound each poll (see idlePollTimeout) so a partition that never
+		// delivers its recorded end offset cannot wedge the tool forever.
+		pollCtx, cancel := context.WithTimeout(ctx, idlePollTimeout)
+		fetches := client.PollFetches(pollCtx)
+		cancel()
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 		if errs := fetches.Errors(); len(errs) > 0 {
+			realErr := false
 			for _, fe := range errs {
+				if errors.Is(fe.Err, context.DeadlineExceeded) {
+					continue // our own idle-poll timeout, not a broker failure
+				}
+				realErr = true
 				log.Error("fetch error", "topic", fe.Topic, "partition", fe.Partition, "error", fe.Err)
 			}
-			return fmt.Errorf("broker fetch failed; re-run to resume (idempotent)")
+			if realErr {
+				return fmt.Errorf("broker fetch failed; re-run to resume (idempotent)")
+			}
 		}
+		if fetches.NumRecords() == 0 {
+			idle++
+			if idle >= maxIdlePolls {
+				for t, parts := range ends {
+					for p, end := range parts {
+						cur := int64(0)
+						if progress[t] != nil {
+							cur = progress[t][p]
+						}
+						if cur < end {
+							log.Warn("stopped on idle before the recorded end offset; those offsets were never delivered (log gap: compaction, aborted transaction, or retention race) — records that do not exist cannot be rescued; re-run to resume if the broker recovers",
+								"topic", t, "partition", p, "progress", cur, "end_offset", end)
+						}
+					}
+				}
+				break
+			}
+			continue
+		}
+		idle = 0
 		fetches.EachRecord(func(r *kgo.Record) {
 			c := perTopic[r.Topic]
 			if c == nil {
