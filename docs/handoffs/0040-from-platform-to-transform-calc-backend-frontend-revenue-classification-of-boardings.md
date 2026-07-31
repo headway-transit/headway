@@ -86,6 +86,23 @@ look at this one**.
 6. **Surface the detour flag** on ridership for transparency (analysts can see
    detour-time boardings even though they already count).
 
+7. **Handle supplemental / catch-up service and deadhead** — the ITS manager
+   flagged that dispatch routinely sends an **extra bus** to recover a route that has
+   fallen behind (e.g. a 7th block covering one trip so the late buses catch up), and
+   **deadheads** the late bus (running empty) to reposition it. Verified against a real
+   day: **no double-counting risk** — no exact scheduled trip was served by two
+   physical vehicles, so a rider always boards one bus and is counted once; extra
+   buses spread the same riders across vehicles, they don't inflate the total. The
+   supplemental vendor "tripper" flag was **unpopulated** in the observed export, so it
+   cannot be relied on to identify catch-up buses. The real risk is the **opposite —
+   under-count**: a catch-up bus dispatch runs **without a formal trip assignment**
+   appears as a *mid-service no-run boarding* (the ambiguous residual in point 4), and
+   the prep-window default would wrongly exclude those **real** riders. This is exactly
+   why point 4's HITL review is load-bearing and cannot be a pure time rule: only a
+   human who knows the day's dispatch decisions can tell a catch-up bus (revenue) from
+   a maintenance/prep event (non-revenue). **Deadhead** movement is non-revenue like
+   prep — any counts recorded while a bus is deadheading exclude with that reason.
+
 7. **NTD verification (quote-or-own-it):** quote the FTA revenue-service / UPT
    definition into `services/calc/REGULATORY_TRACKER.md` before this governs a
    certified figure — the exclusion of non-revenue boardings must rest on the
