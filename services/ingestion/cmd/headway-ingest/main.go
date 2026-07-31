@@ -14,6 +14,10 @@
 //	TIDES_SOURCE                   envelope source for TIDES drops — REQUIRED with TIDES_DROP_DIR,
 //	                               no default (fail closed); simulator drops MUST set
 //	                               "tides_simulated" (handoff 0005, Shared Constraint 2)
+//	TIDES_DROP_DIR_HOST            the same folder as the OPERATOR sees it on the host (optional;
+//	                               compose sets deploy/compose/tides-drop). Used only so
+//	                               permission errors can print a fix command against a path
+//	                               that exists outside the container (handoff 0037)
 //	DR_DROP_DIR                    scan this directory every POLL_INTERVAL for demand_response_trips*.csv (optional, handoff 0013)
 //	DR_SOURCE                      envelope source for DR drops — REQUIRED with DR_DROP_DIR,
 //	                               no default (fail closed); simulator drops MUST set
@@ -24,6 +28,9 @@
 //	                               mapping-spec label `<vendor>_<product>` (adapters/), or
 //	                               `<vendor>_<product>_simulated` for synthetic data; the
 //	                               transform runtime refuses unregistered labels
+//	VENDOR_DROP_DIR_HOST           the same folder as the OPERATOR sees it on the host (optional;
+//	                               compose sets deploy/compose/vendor-drop). Same purpose as
+//	                               TIDES_DROP_DIR_HOST (handoff 0037)
 //	DROP_MAX_FILE_BYTES            cap on a dropped file's size in bytes (optional, default 256 MiB);
 //	                               oversize files are moved to <drop dir>/rejected/ and logged
 //	SAMSARA_ENABLED                "true" turns on the Samsara fleet-telematics poller (handoff 0028).
@@ -243,9 +250,13 @@ func run(log *slog.Logger) error {
 			return err
 		}
 		scanner := &tides.Scanner{
-			Dir:          dropDir,
-			Source:       source,
-			AgencyID:     agencyID,
+			Dir:      dropDir,
+			Source:   source,
+			AgencyID: agencyID,
+			// The folder as the OPERATOR sees it (compose sets it): lets a
+			// permission error print a fix command against a path that
+			// exists on the host (handoff 0037, design point 4).
+			HostDir:      os.Getenv("TIDES_DROP_DIR_HOST"),
 			MaxFileBytes: dropMaxBytes,
 			Interval:     interval,
 			Store:        tides.NewMinioStore(client, bucket),
@@ -319,9 +330,13 @@ func run(log *slog.Logger) error {
 			return err
 		}
 		scanner := &vendorfile.Scanner{
-			Dir:          dropDir,
-			Source:       source,
-			AgencyID:     agencyID,
+			Dir:      dropDir,
+			Source:   source,
+			AgencyID: agencyID,
+			// The folder as the OPERATOR sees it (compose sets it): lets a
+			// permission error print a fix command against a path that
+			// exists on the host (handoff 0037, design point 4).
+			HostDir:      os.Getenv("VENDOR_DROP_DIR_HOST"),
 			MaxFileBytes: dropMaxBytes,
 			Interval:     interval,
 			Store:        vendorfile.NewMinioStore(client, bucket),
