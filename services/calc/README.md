@@ -128,6 +128,14 @@ are `Decimal`, never float.
   threshold's provenance (`threshold_sources`) and
   per-metric detail. Threshold precedence: explicit argument >
   `app.settings` row > code default. See "Runner" below.
+  **Empty-input guard:** a period whose primary inputs hold nothing
+  measurable REFUSES per metric (`no_data_in_period`, blocking) instead of
+  persisting a figure — vrm/vrh/voms need vehicle telemetry, upt/pmt need
+  passenger counts or operated trips. A 0.00 over no evidence is an
+  invented number, not a measurement (a real agency's empty month once
+  persisted exactly such zeros). The guard sits in the runner and the
+  preview path, before any `compute_*` call, so shipped calc versions
+  recompute bit-for-bit over the inputs they are given.
 - `headway_calc/_cli.py` — the ONE process boundary (argv, env, psycopg);
   exempt from the stdlib-purity guardrail, contains no calculation logic.
 - `REGULATORY_TRACKER.md` — calc/version → citation → verification status.
