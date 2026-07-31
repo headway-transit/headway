@@ -12,6 +12,11 @@ EXPECTED_TOOLS = {
     "verify_claim",
     "certified_figures",
     "verify_certification",
+    # handoff 0039: read:dq / read:ops toolset growth.
+    "dq_summary",
+    "dq_issue",
+    "dq_blocking_for_period",
+    "ops_snapshot",
 }
 
 
@@ -60,6 +65,25 @@ def test_descriptions_are_refusal_forward_and_honest(tools):
     assert "never hidden" in by_name["certified_figures"]
 
 
+def test_dq_and_ops_descriptions_lead_with_vocabulary_and_read_only(tools):
+    server = build_server(tools)
+    by_name = {t.name: t.description for t in _list_tools(server)}
+    # dq_summary leads with agency vocabulary, never a bare UUID headline.
+    assert "vocabulary" in by_name["dq_summary"]
+    assert "never a bare issue UUID" in by_name["dq_summary"]
+    # dq_issue advertises the full description + untruncated provenance, and
+    # names resolving as deliberately absent.
+    assert "untruncated" in by_name["dq_issue"]
+    assert "no acknowledge/resolve" in by_name["dq_issue"].lower()
+    # blocking-for-period is the calc-runs refusal story and is honest that
+    # an empty queue is not a certification green light.
+    assert "refuses to emit" in by_name["dq_blocking_for_period"]
+    assert "green light" in by_name["dq_blocking_for_period"]
+    # ops_snapshot never interpolates and an empty snapshot is not an empty fleet.
+    assert "never interpolate" in by_name["ops_snapshot"].lower()
+    assert "not an empty fleet" in by_name["ops_snapshot"]
+
+
 def test_instructions_state_the_guarantee_boundary_and_absences():
     assert "Headway guarantees what these tools returned" in " ".join(INSTRUCTIONS.split())
     # Sensitivity per docs/data-classification.md: the highest-sensitivity
@@ -67,6 +91,7 @@ def test_instructions_state_the_guarantee_boundary_and_absences():
     assert "paratransit trip coordinates" in INSTRUCTIONS
     assert "operator-identified" in INSTRUCTIONS
     assert "audit trail" in INSTRUCTIONS
-    # Honest scope: the session-only surfaces are named, not implied.
-    assert "data-quality queue" in INSTRUCTIONS
-    assert "Write actions do not exist here" in INSTRUCTIONS
+    # Honest scope (handoff 0039): write actions are deliberately absent, and
+    # the still-session-only surfaces are named, not implied.
+    assert "every\nWRITE action" in INSTRUCTIONS or "WRITE action" in INSTRUCTIONS
+    assert "sources status" in INSTRUCTIONS

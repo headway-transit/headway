@@ -148,6 +148,16 @@ def latest_vehicles(
     interval. There is no push transport (honest scope, handoff 0023; SSE is
     a recorded open question if polling ever measurably hurts).
     """
+    return query_latest_vehicles(db, max_age_seconds)
+
+
+def query_latest_vehicles(db, max_age_seconds: int) -> OpsVehiclesLatest:
+    """The live-map snapshot, VERBATIM (handoff 0023). Factored out of
+    ``latest_vehicles`` so the machine mirror (handoff 0039) serves the EXACT
+    same rows, the same ``truncated`` / ``total_in_window`` count honesty, the
+    same ``age_seconds`` (from the database clock), and the same staleness
+    ``note`` — never interpolation, never a silent empty fleet. Every field of
+    OpsVehiclesLatest is preserved: the two paths can never drift."""
     rows = db.execute(_SELECT_LATEST, (max_age_seconds, MAX_VEHICLES + 1)).fetchall()
     truncated = len(rows) > MAX_VEHICLES
     if truncated:

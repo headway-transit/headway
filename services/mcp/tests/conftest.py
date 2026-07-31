@@ -67,6 +67,91 @@ VERIFY_RESULT = {
     "certified_at": "2026-07-15T00:00:00Z",
 }
 
+# -- data-quality queue rows (handoff 0039). A finding is NOT a figure: it
+# carries no value/receipt fields — it leads with what it is ABOUT in the
+# agency's vocabulary. The list row (queue) omits source_record_ids, exactly
+# as the API does; the detail row carries the full untruncated array.
+DQ_ISSUE_ID = "44444444-4444-4444-4444-444444444444"
+DQ_SUMMARY_ROW = {
+    "issue_id": DQ_ISSUE_ID,
+    "issue_type": "apc_missing_trips_above_fta_threshold",
+    "severity": "blocking",
+    "status": "open",
+    "owner": None,
+    "title": "APC coverage below the 2% line for route 1 on 2026-07-09",
+    "description": (
+        "9,123 operated trips, 91 with missing APC data (>2%): a certifiable "
+        "PMT figure is refused until a statistician attests the factoring."
+    ),
+    "created_at": "2026-07-15T22:56:06Z",
+    "resolved_at": None,
+    "resolution": None,
+    "resolution_minutes": None,
+    "subject_context": {
+        "version": 1,
+        "blocks": [
+            {"block_id": "b-17", "routes": ["1"], "span": "05:12–23:40", "trips": 42}
+        ],
+    },
+}
+DQ_ISSUE_DETAIL = {
+    **DQ_SUMMARY_ROW,
+    "source_record_ids": ["rec-aaa", "rec-bbb", "rec-ccc"],
+}
+DQ_PAGE = {
+    "issues": [DQ_SUMMARY_ROW],
+    "total": 1,
+    "limit": 50,
+    "next_cursor": None,
+    "has_more": False,
+}
+DQ_COUNTS = {
+    "total": 3,
+    "by_severity": {"blocking": 1, "warning": 1, "info": 1},
+    "by_status": {"open": 2, "owned": 0, "resolved": 1, "attested": 0},
+    "resolution_minutes_total": 45,
+}
+
+# -- operations snapshot (handoff 0039): verbatim OpsVehiclesLatest, `truncated`
+# and staleness note intact.
+OPS_SNAPSHOT = {
+    "as_of": "2026-07-30T12:00:00Z",
+    "max_age_seconds": 300,
+    "category": "ops",
+    "ops_note": (
+        "Operations data — not an NTD reported figure. Live vehicle "
+        "positions are never certifiable."
+    ),
+    "vehicles": [
+        {
+            "vehicle_id": "bus-1701",
+            "latitude": 42.3601,
+            "longitude": -71.0589,
+            "recorded_at": "2026-07-30T11:59:30Z",
+            "age_seconds": 30,
+            "bearing": None,
+            "speed_mps": None,
+            "trip_id": None,
+            "route_id": "1",
+            "source_record_id": "a" * 64,
+            "source": "gtfs_rt_vehicle_positions",
+            "simulated": False,
+        }
+    ],
+    "vehicle_count": 1,
+    "total_in_window": 1,
+    "cap": 5000,
+    "truncated": False,
+    "newest_position_at": "2026-07-30T11:59:30Z",
+    "note": None,
+}
+
+DQ_SCOPE_DENIAL_DETAIL = (
+    "This machine API key ('test') does not have the 'read:dq' permission "
+    "it needs for this endpoint."
+)
+DQ_ISSUE_404_DETAIL = "No data-quality issue with that id exists."
+
 LINEAGE_404_DETAIL = (
     "No metric value with that id exists, so there is no number to explain."
 )
@@ -81,6 +166,9 @@ class FakeApi:
 
     def __init__(self):
         self.metrics_rows: list[dict] = [FIGURE_ROW]
+        self.dq_page: dict = DQ_PAGE
+        self.dq_counts: dict = DQ_COUNTS
+        self.ops_snapshot: dict = OPS_SNAPSHOT
         self.requests: list[httpx.Request] = []
         self.deny_scope = False
 
@@ -91,6 +179,17 @@ class FakeApi:
             return httpx.Response(403, json={"detail": SCOPE_DENIAL_DETAIL})
         if path == "/machine/metrics":
             return httpx.Response(200, json=self.metrics_rows)
+        if path == "/machine/dq/issues/counts":
+            return httpx.Response(200, json=self.dq_counts)
+        if path == "/machine/dq/issues":
+            return httpx.Response(200, json=self.dq_page)
+        if path.startswith("/machine/dq/issues/"):
+            issue_id = path.split("/")[4]
+            if issue_id == DQ_ISSUE_ID:
+                return httpx.Response(200, json=DQ_ISSUE_DETAIL)
+            return httpx.Response(404, json={"detail": DQ_ISSUE_404_DETAIL})
+        if path == "/machine/ops/vehicles/latest":
+            return httpx.Response(200, json=self.ops_snapshot)
         if path.startswith("/metrics/values/") and path.endswith("/lineage"):
             metric_value_id = path.split("/")[3]
             if metric_value_id == FIGURE_ROW["metric_value_id"]:

@@ -43,7 +43,7 @@ def result_payload(result) -> object:
     return [getattr(block, "text", str(block)) for block in result.content]
 
 
-async def run(figure_id: str, certification_id: str) -> None:
+async def run(figure_id: str, certification_id: str, issue_id: str = "") -> None:
     params = StdioServerParameters(
         command=sys.executable,
         args=["-m", "headway_mcp"],
@@ -126,6 +126,37 @@ async def run(figure_id: str, certification_id: str) -> None:
                 {"certification_id": certification_id},
             )
 
+            # -- handoff 0039: the read:dq / read:ops tools ------------------
+            await call(
+                "DQ queue summary in agency vocabulary (counts + headlines)",
+                "dq_summary",
+            )
+            await call(
+                "DQ blocking-for-period — what a calc run refuses over",
+                "dq_blocking_for_period",
+            )
+            if issue_id:
+                await call(
+                    "DQ issue detail — full description + raw-record provenance",
+                    "dq_issue",
+                    {"issue_id": issue_id},
+                )
+            await call(
+                "DQ issue detail — LIVE REFUSAL, unknown id passed through verbatim",
+                "dq_issue",
+                {"issue_id": "00000000-0000-0000-0000-000000000000"},
+            )
+            await call(
+                "ops snapshot — live vehicles with last-seen staleness framing",
+                "ops_snapshot",
+                {"max_age_seconds": 300},
+            )
+            await call(
+                "ops snapshot — a 1s window, staleness note not an empty fleet",
+                "ops_snapshot",
+                {"max_age_seconds": 1},
+            )
+
 
 CLAIM_MATCH = "221996.24"
 CLAIM_MISMATCH = "221996"
@@ -136,6 +167,9 @@ if __name__ == "__main__":
     parser.add_argument(
         "--certification-id", default="a3f4c2f4-3700-488f-8dc7-cdc4ca90f196"
     )
+    # A real dq.issues id for the detail call (handoff 0039). Empty = skip the
+    # real-id call and show only the live-refusal (unknown-id) one.
+    parser.add_argument("--issue-id", default="")
     parser.add_argument("--claim-match", default=CLAIM_MATCH)
     parser.add_argument("--claim-mismatch", default=CLAIM_MISMATCH)
     parser.add_argument("--truncate", type=int, default=TRUNCATE)
@@ -143,4 +177,4 @@ if __name__ == "__main__":
     TRUNCATE = ns.truncate
     CLAIM_MATCH = ns.claim_match
     CLAIM_MISMATCH = ns.claim_mismatch
-    asyncio.run(run(ns.figure_id, ns.certification_id))
+    asyncio.run(run(ns.figure_id, ns.certification_id, ns.issue_id))
