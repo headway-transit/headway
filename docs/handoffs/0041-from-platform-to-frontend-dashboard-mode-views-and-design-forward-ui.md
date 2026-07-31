@@ -44,6 +44,19 @@ software is usually boring and unpleasant. This wave is the first place to prove
    — designed, not a flat blank.
 
 ### The design philosophy this wave establishes (applies to all UI work)
+
+**North star (the success test):** an auditor opens Headway for the first time and
+their jaw drops — not at flash, but because it has *all* the data, it is genuinely
+easy to use, it is beautiful, and it makes the most tedious part of their job —
+tracing a reported figure back to the source records that defend it — something they
+actually *enjoy*. An auditor's dread is the hunt through spreadsheets and PDFs to
+prove a number; Headway turns that hunt into the beautiful, instant, interactive
+centerpiece. Every design decision below serves that moment. (This is a jaw-drop only
+Headway can deliver: plenty of dashboards are pretty, but a pretty dashboard that can
+*show its work* — click any figure to its lineage, raw records, quoted FTA
+definition, and the human justification notes — is the moat. The receipts we've been
+building all along ARE the wow; this wave is their presentation layer.)
+
 The aspiration is **jaw-dropping** — the standard is the Hugging Face incident-replay
 dashboard the project lead set as the target, already distilled in
 `docs/design/toc-replay-dashboard.md`. Modern, immersive, genuinely enjoyable to
