@@ -379,6 +379,21 @@ services:
       SQLSOURCE_BATCH_MAX_ROWS: ${SQLSOURCE_BATCH_MAX_ROWS:-}
       SQLSOURCE_QUERY_TIMEOUT: ${SQLSOURCE_QUERY_TIMEOUT:-}
       SQLSOURCE_STATE_DIR: /data/sqlsource-state
+      # Samsara fleet-telematics poller (handoff 0028). OFF unless
+      # SAMSARA_ENABLED=true. The API token is a SECRET: set it only in
+      # deploy/compose/.env (never commit, never logged — it travels as a
+      # request header). Request the LEAST-PRIVILEGE token — "Read Vehicle
+      # Statistics" scope, restricted to the vanpool tag (SAMSARA_TAG_IDS) —
+      # never a whole-account read token. SAMSARA_SOURCE=samsara for a real
+      # account; SAMSARA_SERVICE_DAY_TZ is the agency's IANA zone (no default,
+      # fail-closed). Restrict the poll to the vanpool with SAMSARA_TAG_IDS.
+      SAMSARA_ENABLED: ${SAMSARA_ENABLED:-}
+      SAMSARA_API_TOKEN: ${SAMSARA_API_TOKEN:-}
+      SAMSARA_SOURCE: ${SAMSARA_SOURCE:-}
+      SAMSARA_SERVICE_DAY_TZ: ${SAMSARA_SERVICE_DAY_TZ:-}
+      SAMSARA_BASE_URL: ${SAMSARA_BASE_URL:-}
+      SAMSARA_TAG_IDS: ${SAMSARA_TAG_IDS:-}
+      SAMSARA_VEHICLE_IDS: ${SAMSARA_VEHICLE_IDS:-}
     volumes:
       # Writable: the connector moves handled files to processed/ inside it.
       - ./tides-drop:/data/tides-drop
