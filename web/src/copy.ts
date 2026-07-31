@@ -902,6 +902,14 @@ export const copy = {
       unmatchedHeading: "Trips not in the schedule feed",
       unmatchedBody: (count: string) =>
         `${count} affected ${count === "1" ? "trip is" : "trips are"} not in the published schedule, so Headway has no block, route, or time for ${count === "1" ? "it" : "them"}. That usually means the trip was added by dispatch after the schedule was published.`,
+      /**
+       * A block the agency's own mapping names (handoff 0038): the
+       * operational name is the headline in the table, and the feed's
+       * identifier stays one disclosure away — the 0032 vehicle-label
+       * presentation. Never shown unless the mapping stated it.
+       */
+      technicalBlockLabeled: (label: string, blockId: string) =>
+        `${label} — feed block id ${blockId}`,
       /** The forensic disclosure: collapsed, never removed. */
       technicalToggle: "Technical detail: trip identifiers",
       technicalIntro: (cap: string) =>

@@ -61,3 +61,71 @@ orchestrator integrates.
 - Whether ambiguous TripName→trip matches (same route+start on two services) should
   consult the row's service date the way full resolution does — do it if cheap, else
   record the count and leave them unmapped.
+
+## Outputs — evidence
+
+**2026-07-31, Transform + Calc (built by a Fable agent; integrated and
+verified by the orchestrator after the agent hit its usage limit before
+writing this section).**
+
+### What shipped (files)
+
+- `db/migrations/0038_block_labels.sql` — `canonical.block_labels`
+  (feed `block_id` → operational name, per-source provenance columns:
+  mapping file + sha256, derivation method + resolution-config hash + match
+  key). One row per block_id; no row = UNMAPPED, consumers show the feed id
+  unchanged. Applied live (table present on this box).
+- `tools/block-labels/derive.py` — the loader/deriver: parses each `TripName`
+  with the **handoff-0031 resolution machinery** (route short name + first
+  scheduled departure), joins to loaded GTFS trips → `block_id`, and pairs
+  it with the export's block name. Dry-run by default; `--yes` to load.
+- `services/transform/headway_transform/block_labels.py` + tests (17).
+- `services/calc/headway_calc/subjects.py` — attaches the operational name at
+  persistence, **frozen** (the 0032/0029 rule); an unmapped block shows
+  exactly what it showed before; old findings are never rewritten.
+- `web/src/views/DqView.tsx` + copy/types/fixtures — renders the operational
+  name with the feed id available (the 0032 vehicle-label presentation).
+
+### Live run of the deriver (and why it proves the no-guess guarantee)
+
+This dev box runs **MBTA** GTFS, not the partner feed (MBTA `block_id`s are
+already operational names like `C01-29`). Running the deriver against the
+partner's real mapping CSV (`tripblock-2026-07-29.reversed.csv`, 1,429 rows,
+sha256 `22feacee…41fb5`) and the live MBTA schedule was therefore a
+**deliberate mismatch** — and the tool behaved exactly as designed:
+
+```
+mapping rows: 1429
+  matched:     87   (coincidental route+start collisions against the WRONG feed)
+  unmatched:   1102 (TripName splits into 1 part, not the configured 3 — reported, not guessed)
+block labels derived: 25
+label conflicts (block_id excluded): 18   (e.g. B26-21 → both '26-1' and '26-2' — "never picked between")
+DRY RUN — nothing written.
+```
+
+The 18 conflicts and 1,102 honest "nothing was assumed about which part is
+which" refusals are the guarantee working: a block that resolves to two
+different labels is **excluded**, never coin-flipped; a TripName that does not
+parse is reported with its reason. **Nothing was loaded** — writing MBTA-feed
+block_ids under partner block names would be exactly the cross-agency
+contamination the confirm-before-load discipline exists to prevent.
+
+### What is proven vs. what awaits the partner feed
+
+- **Proven here:** migration applies; the deriver runs end-to-end against a
+  live DB; its refusal/no-guess behavior is demonstrated on real data;
+  `canonical.block_labels` is empty so **every existing MBTA finding renders
+  its block_id unchanged** (no regression — web 289 green).
+- **Awaits the partner's GTFS** (loaded on their VM, not this box): the real
+  `block_id → name` derivation and a finding carrying a real partner block
+  name. This is the same box-is-MBTA constraint the direction-evidence work
+  hit; it is a data-availability gap, not a code gap. `resolution.v0.yaml`
+  stays `confirmed: false` — deriving a label mapping never touched it.
+
+### Tests
+
+calc 620 (+5), transform 226 (+block_labels 17), web 289 (+2); privacy grep
+over committed files clean (the partner CSV stays gitignored; fixtures are
+synthetic). Merge conflict in `services/calc/tests/conftest.py` (both this
+wave and the dedupe wave added a `RecordingConnection` parameter) resolved by
+keeping both.

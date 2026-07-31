@@ -568,10 +568,24 @@ class RecordingCursor:
                 row = None if conn.subject_context_column_missing else (1,)
                 self._pending_one = row
                 self._pending_all = [] if row is None else [row]
+            elif "information_schema.tables" in sql:
+                # headway_calc.subjects' migration-0038 table probe
+                # (handoff 0038): does canonical.block_labels exist?
+                # Present by default; the missing flag models a pre-0038
+                # database, where labels must still resolve via the
+                # 7-column pre-0038 SELECT.
+                row = None if conn.block_labels_table_missing else (1,)
+                self._pending_one = row
+                self._pending_all = [] if row is None else [row]
             elif "t.block_id, t.route_id" in sql:
-                # headway_calc.subjects' label SELECT (handoff 0029). Its
-                # bounded aggregate also names canonical.stop_times, so this
-                # branch must come BEFORE the geometry branch.
+                # headway_calc.subjects' label SELECT (handoff 0029; the
+                # handoff-0038 variant additionally joins
+                # canonical.block_labels and reads bl.block_label as an 8th
+                # column). Its bounded aggregate also names
+                # canonical.stop_times, so this branch must come BEFORE the
+                # geometry branch. The canned rows must match the SELECT the
+                # module chose: 8-tuples for the 0038 variant, 7-tuples for
+                # the pre-0038 one.
                 self._pending_all = list(conn.trip_label_rows)
             elif "st.arrival_seconds" in sql:
                 # The ops schedule SELECT (handoff 0014) — names
@@ -673,6 +687,7 @@ class RecordingConnection:
         subject_context_column_missing: bool = False,
         vehicle_label_column_missing: bool = False,
         identical_metric_value_rows: list[tuple] | None = None,
+        block_labels_table_missing: bool = False,
     ):
         self.position_rows = position_rows or []
         # persist_result's identical-figure probe: rows served to the
@@ -711,11 +726,13 @@ class RecordingConnection:
             SEEDED_SETTINGS_ROWS if settings_rows is None else settings_rows
         )
         self.settings_table_missing = settings_table_missing
-        # Finding-subject label rows (handoff 0029, migration 0035):
-        # (trip_id, block_id, route_id, short_name, long_name,
-        #  first_departure_seconds, last_departure_seconds). Empty by
-        # default — every trip then resolves as UNMATCHED, which is the
-        # honest reading of "this database knows nothing about that trip".
+        # Finding-subject label rows (handoff 0029, migration 0035; 0038
+        # appended block_label): (trip_id, block_id, route_id, short_name,
+        # long_name, first_departure_seconds, last_departure_seconds,
+        # block_label) — or the 7-column pre-0038 shape when
+        # block_labels_table_missing is set. Empty by default — every trip
+        # then resolves as UNMATCHED, which is the honest reading of "this
+        # database knows nothing about that trip".
         self.trip_label_rows = trip_label_rows or []
         # Models a pre-0035 database (the dq.issues.subject_context column
         # does not exist yet).
@@ -723,6 +740,10 @@ class RecordingConnection:
         # Models a pre-0037 database (the canonical.vehicle_positions
         # .vehicle_label column does not exist yet — handoff 0032).
         self.vehicle_label_column_missing = vehicle_label_column_missing
+        # Models a pre-0038 database (the canonical.block_labels mapping
+        # table does not exist yet — handoff 0038). The probe then reports
+        # absence and subjects.py uses its pre-0038 7-column label SELECT.
+        self.block_labels_table_missing = block_labels_table_missing
         self.fail_on = fail_on
         self.executed: list[tuple[str, tuple | None]] = []
         # Each commit records how many statements were executed at that point,

@@ -879,6 +879,61 @@ export const subjectContextIssue: DqIssue = {
   },
 };
 
+/**
+ * A finding whose frozen context carries the agency's OPERATIONAL block
+ * names (migration 0038, handoff 0038) — the feed's block_id is an opaque
+ * UUID, the label is the word on the run board. One group is mapped, one is
+ * not: the unmapped one must render its feed id exactly as before the
+ * mapping existed. Synthetic twin values throughout (handoff 0016).
+ */
+export const blockLabelSubjectIssue: DqIssue = {
+  issue_id: "dq-subject-2",
+  issue_type: "apc_missing_trips_above_fta_threshold",
+  severity: "blocking",
+  status: "open",
+  owner: null,
+  title:
+    "No passenger counts arrived for any operated trip: all 6 trips in this period",
+  description:
+    "Every operated trip in this period is affected — all 6 of the trips Headway saw running have no passenger counts at all.",
+  source_record_ids: null,
+  created_at: "2026-07-30T11:00:00Z",
+  resolved_at: null,
+  resolution: null,
+  resolution_minutes: null,
+  subject_context: {
+    version: 1,
+    kind: "canonical.trips",
+    total: 6,
+    grouped_by: "block",
+    group_count: 2,
+    group_cap: 25,
+    trip_id_cap: 20,
+    groups: [
+      {
+        block_id: "0f00d1e5-1111-4222-8333-444455556666",
+        block_label: "42-9",
+        trip_count: 4,
+        routes: [{ route_id: "42", short_name: "42", long_name: "Crosstown" }],
+        route_count: 1,
+        first_departure: "06:14",
+        last_departure: "14:22",
+        trip_ids: ["7a000001-aaaa-4bbb-8ccc-000000000001"],
+      },
+      {
+        block_id: "9e00d1e5-7777-4888-8999-000011112222",
+        block_label: null,
+        trip_count: 2,
+        routes: [{ route_id: "9", short_name: "9", long_name: "Riverside" }],
+        route_count: 1,
+        first_departure: "05:00",
+        last_departure: "09:40",
+        trip_ids: ["7a000001-aaaa-4bbb-8ccc-000000000002"],
+      },
+    ],
+  },
+};
+
 export const warningIssue: DqIssue = {
   issue_id: "dq-2",
   issue_type: "source_conflict",
