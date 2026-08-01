@@ -10,6 +10,7 @@
     "preview": "vite preview",
     "test": "vitest",
     "check:contrast": "node scripts/check-contrast.mjs",
+    "check:map-contrast": "vitest run src/test/basemap-style.test.ts --reporter=verbose",
     "extract:quotes": "node scripts/extract-quotes.mjs"
   },
   "dependencies": {

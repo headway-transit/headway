@@ -20,6 +20,13 @@
  * whenever tiles render (ODbL). Either way the network log stays
  * same-origin only, pinned by test in BOTH states.
  *
+ * Those streets are drawn in one of HEADWAY'S OWN two basemap styles
+ * (handoff 0043 — src/map/basemapStyle.ts), light or dark, chosen by the
+ * user independently of the app theme and defaulting to light. Both are
+ * authored against a measured WCAG bar rather than taken as a vendor
+ * flavor, because a partner agency's ITS manager reported that a dark
+ * theme buried the street network — and the measurement agreed with them.
+ *
  * Honesty surfaces, all VERBATIM from the server envelopes:
  *   - the legend states that route lines are schematic (geometry_note,
  *     mirroring geometry_kind — we have never ingested shapes.txt);
@@ -45,20 +52,21 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Map as MapLibreMap, addProtocol, setWorkerUrl } from "maplibre-gl";
-import type {
-  GeoJSONSource,
-  LayerSpecification,
-  MapLayerMouseEvent,
-} from "maplibre-gl";
+import type { GeoJSONSource, MapLayerMouseEvent } from "maplibre-gl";
 import type { GeoJSON } from "geojson";
 import "maplibre-gl/dist/maplibre-gl.css";
 // PMTiles protocol (BSD-3-Clause, license-gate verified): teaches MapLibre
 // to read the single self-hosted /basemap/region.pmtiles archive via
 // same-origin byte-range requests. No tile server, no external host.
 import { Protocol as PmtilesProtocol } from "pmtiles";
-// Protomaps basemap themes (BSD-3-Clause, license-gate verified): the
-// light/dark street-layer definitions rendered from the archive.
-import { labels, noLabels } from "protomaps-themes-base";
+// Headway's OWN two basemap styles (handoff 0043): light and dark, both
+// AUTHORED against a measured contrast bar instead of taken as a vendor
+// flavor — see src/map/basemapStyle.ts for the reason and the numbers.
+import {
+  BASEMAP_STYLES,
+  basemapLayerSpecs,
+  type BasemapStyleId,
+} from "../map/basemapStyle.ts";
 // MapLibre's own worker-URL guess is a SIBLING maplibre-gl-worker.mjs of
 // its bundle — a file a bundled app does not serve, so sources would never
 // parse (found live: a silent stall, no dots). `?worker&url` makes vite
@@ -128,11 +136,6 @@ const LIST_CAP = 100;
  *  compose mount; the vite dev middleware serves the same path in dev. */
 const BASEMAP_PATH = "/basemap/region.pmtiles";
 
-/** The single vendored glyph stack (web/public/basemap-fonts — Noto Sans
- *  Regular, SIL OFL 1.1). Every basemap label layer is rewritten to it so
- *  no request for an unvendored font can ever fire. */
-const BASEMAP_FONT = "Noto Sans Regular";
-
 /**
  * The street-style choice is DELIBERATELY INDEPENDENT of the app theme
  * (first-agency UAT, 2026-07-29: in dark mode the dark streets were hard
@@ -141,8 +144,15 @@ const BASEMAP_FONT = "Noto Sans Regular";
  * the streets that make the dots easiest to find, whatever chrome they
  * prefer. Light streets are therefore the default in BOTH themes, and the
  * choice is the user's, persisted per browser.
+ *
+ * Handoff 0043 keeps that decoupling and adds the missing half: the dark
+ * option is no longer a vendor flavor that measured 1.5:1 for a street
+ * against its ground — BOTH styles are now authored by Headway and gated
+ * at WCAG 3:1 (streets, water) and 4.5:1 (names). The toggle changes ONLY
+ * the tiles: app panels, the audience lens and the app theme are all
+ * chosen separately and are untouched by it.
  */
-export type BasemapStyle = "light" | "dark";
+export type BasemapStyle = BasemapStyleId;
 const BASEMAP_STYLE_KEY = "headway-basemap-style";
 
 function storedBasemapStyle(): BasemapStyle {
@@ -192,36 +202,6 @@ async function detectBasemap(): Promise<Exclude<BasemapState, "checking">> {
     // No answer at all: treated as no basemap — the map never blocks on it.
     return "absent";
   }
-}
-
-/**
- * The Protomaps street layers for one STYLE (not the app theme — see
- * BasemapStyle), adapted to this page's rules:
- *   - ids namespaced "basemap-*" (this style already owns "background");
- *   - the flavor's own background dropped (the token water-tone canvas
- *     stays, so the area outside the extracted region looks unchanged);
- *   - the POI icon layer dropped and icon references stripped — sprites
- *     are not vendored in v0 (limitation stated in the legend);
- *   - every label layer forced onto the one vendored glyph stack.
- */
-function basemapLayerSpecs(style: BasemapStyle): LayerSpecification[] {
-  const specs = [
-    ...noLabels("basemap", style),
-    ...labels("basemap", style, "en"),
-  ] as LayerSpecification[];
-  const out: LayerSpecification[] = [];
-  for (const spec of specs) {
-    if (spec.id === "background" || spec.id === "pois") continue;
-    const layer = JSON.parse(JSON.stringify(spec)) as LayerSpecification;
-    layer.id = `basemap-${layer.id}`;
-    if (layer.type === "symbol" && layer.layout) {
-      const layout = layer.layout as Record<string, unknown>;
-      if (layout["text-font"]) layout["text-font"] = [BASEMAP_FONT];
-      delete layout["icon-image"];
-    }
-    out.push(layer);
-  }
-  return out;
 }
 
 /** Map paint tokens for HEADWAY'S OWN MARKS — the canvas, route lines,
@@ -437,11 +417,23 @@ export function MapView() {
   }, []);
 
   // Theme switch: repaint the canvas layers from the new token values.
+  //
+  // The BACKGROUND is the one exception. It is the ground the whole map
+  // sits on, so once street tiles are drawing it must belong to the STREET
+  // style, not the app theme — otherwise picking the dark map leaves a
+  // pale halo of app-theme canvas around the extracted region and every
+  // contrast number measured against `theme.earth` stops describing what
+  // is on screen outside it. With no basemap downloaded there are no
+  // street tiles to agree with, so the app token stays.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady) return;
     const c = mapColors();
-    map.setPaintProperty("background", "background-color", c.bg);
+    const ground =
+      basemap === "present"
+        ? String(BASEMAP_STYLES[basemapStyle].theme.background)
+        : c.bg;
+    map.setPaintProperty("background", "background-color", ground);
     if (map.getLayer("routes-line")) {
       map.setPaintProperty("routes-line", "line-color", c.route);
     }
@@ -455,7 +447,7 @@ export function MapView() {
     if (map.getLayer("vehicles-selected")) {
       map.setPaintProperty("vehicles-selected", "circle-stroke-color", c.vehicle);
     }
-  }, [theme, mapReady]);
+  }, [theme, mapReady, basemap, basemapStyle]);
 
   // ---- the self-hosted basemap: detected, never assumed ----
   useEffect(() => {
@@ -671,7 +663,11 @@ export function MapView() {
       </div>
       <p className="chart-desc">{t.window.note}</p>
 
-      {/* ---- street style: the user's own choice, not the app theme ---- */}
+      {/* ---- street style: the user's own choice, not the app theme.
+              Real <button>s in a labeled group with aria-pressed — the
+              house filter-bar pattern, reachable and operable from the
+              keyboard, and the same control whichever app theme or
+              audience lens is active. Switching repaints tiles only. ---- */}
       {basemap === "present" && (
         <>
           <div
@@ -830,6 +826,11 @@ export function MapView() {
             STAYS — streets underneath change nothing about route honesty. */}
         {basemap === "present" && (
           <>
+            {/* Which street style is drawing, and the promise it keeps —
+                the ITS manager's complaint answered where they look. */}
+            <p className="chart-desc">
+              {t.basemap.legendStyleLine(BASEMAP_STYLES[basemapStyle].name)}
+            </p>
             <p className="chart-desc">{t.basemap.legendCredit}</p>
             <p className="chart-desc">{t.basemap.legendLimit}</p>
           </>

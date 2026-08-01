@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Headway basemap style preview (developer tool)</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        font-family: system-ui, sans-serif;
+      }
+      #map {
+        position: absolute;
+        inset: 0;
+      }
+      #caption {
+        position: absolute;
+        left: 12px;
+        bottom: 12px;
+        z-index: 2;
+        margin: 0;
+        padding: 6px 10px;
+        border-radius: 4px;
+        font-size: 13px;
+        line-height: 1.4;
+        background: rgba(255, 255, 255, 0.92);
+        color: #1f2328;
+      }
+      #caption.on-dark {
+        background: rgba(5, 7, 11, 0.92);
+        color: #f2f5fa;
+      }
+    </style>
+  </head>
+  <body>
+    <!--
+      DEVELOPER TOOL — not part of the shipped app.
+
+      `vite build` has exactly one HTML input (web/index.html), so this page
+      never enters the production artifact; it is served only by `npm run dev`
+      and `npm run preview`. Its whole job is to let a person LOOK at the two
+      authored basemap styles over this installation's real
+      /basemap/region.pmtiles archive, without needing an API or a login —
+      which is what produced the screenshots in the handoff-0043 evidence.
+
+      It imports the SAME `basemapLayerSpecs()` the /map page imports, so what
+      you see here is the style that ships, not a mock-up of it. Like the app,
+      it makes zero external requests: the archive, the glyphs and the code all
+      come from this origin.
+
+      Query string:  ?style=light|dark  &zoom=14  &lng=..&lat=..
+    -->
+    <div id="map"></div>
+    <p id="caption"></p>
+    <script type="module" src="./preview.ts"></script>
+  </body>
+</html>

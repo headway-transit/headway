@@ -2086,16 +2086,23 @@ export const copy = {
       /** Street style — deliberately INDEPENDENT of the app theme (first
        *  agency UAT 2026-07-29: dark streets under dark chrome were hard
        *  to read). Light is the default in both themes; the choice is the
-       *  user's and persists in this browser. */
+       *  user's and persists in this browser. Handoff 0043 re-authored
+       *  BOTH styles against a measured contrast bar, so the note now
+       *  says what the dark option actually promises. */
       style: {
         label: "Street style",
         light: "Light",
         dark: "Dark",
-        note: "The street background keeps its own setting, separate from the light/dark theme of the rest of Headway — whichever makes vehicles and routes easiest to see for you. Saved in this browser.",
+        note: "The street background has its own setting, separate from the light/dark theme of the rest of Headway — pick whichever makes streets, routes and vehicles easiest for you to see. Both settings are contrast-checked before release: street lines are held to at least 3:1 against the ground behind them and every place and street name to at least 4.5:1, so the network stays readable either way. Light is the starting point; the dark map is drawn with light streets on a near-black ground for low-light control rooms. Saved in this browser.",
       },
       /** Legend entries for the basemap-present state. */
       legendLine:
         "Street map background — OpenStreetMap data stored on this computer; no request leaves this installation to draw it.",
+      /** Names the street style actually drawing and the legibility
+       *  promise it keeps (handoff 0043 — the ITS manager's report that a
+       *  dark theme buried the streets is answered here, in the legend). */
+      legendStyleLine: (styleName: string) =>
+        `Street style in use: ${styleName}. Both street styles are drawn by Headway, not taken as-is from the map data, and both are measured before release — street lines to at least 3:1 contrast against the ground they sit on and every name to at least 4.5:1, with a halo behind each name so it never dissolves into the map.`,
       legendCredit:
         "Map data © OpenStreetMap contributors (Open Database License), extracted via Protomaps. Full credit: openstreetmap.org/copyright",
       /** The recorded v0 limitation, stated where people look (sprites are
