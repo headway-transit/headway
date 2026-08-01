@@ -184,3 +184,82 @@ def test_empty_file_is_single_info_finding() -> None:
         assert findings[0].issue_type == "empty_passenger_events_file"
         assert findings[0].severity == "info"
         assert findings[0].source_record_ids == [RECORD_ID]
+
+
+# ---------------------------------------------------------------------------
+# Handoff 0040: revenue_classification (assignment status)
+# ---------------------------------------------------------------------------
+
+HEADER_RC = HEADER + ",revenue_classification"
+
+
+def test_assigned_classification_carried_onto_row() -> None:
+    """An 'assigned' status maps like a normal row and lands on the event."""
+    csv_bytes = build_csv(
+        "PE-1,2026-07-08,2026-07-08T12:00:00Z,T1,1,Passenger boarded,bus-1,2,assigned",
+        header=HEADER_RC,
+    )
+    rows, edges, findings = normalize(csv_bytes, RECORD_ID, "tides")
+    assert findings == []
+    assert len(rows) == 1
+    assert rows[0].revenue_classification == "assigned"
+    assert rows[0].trip_id == "T1" and rows[0].trip_stop_sequence == 1
+
+
+def test_unassigned_no_run_row_normalizes_with_null_trip_and_sequence() -> None:
+    """The no-run 'ghost' boarding: NO trip, NO stop-sequence — the TIDES
+    minimum-1 requirement is RELAXED for an unassigned row (additive
+    extension), so the row lands instead of quarantining, marked
+    'unassigned', with trip_id and trip_stop_sequence NULL (never guessed)."""
+    csv_bytes = build_csv(
+        "PE-GHOST,2026-07-08,2026-07-08T12:00:00Z,,,Passenger boarded,bus-9,1,unassigned",
+        header=HEADER_RC,
+    )
+    rows, edges, findings = normalize(csv_bytes, RECORD_ID, "tides")
+    assert findings == []
+    assert len(rows) == 1
+    row = rows[0]
+    assert row.revenue_classification == "unassigned"
+    assert row.trip_id is None
+    assert row.trip_stop_sequence is None
+    assert row.event_type == "Passenger boarded" and row.event_count == 1
+    assert len(edges) == 1  # still one lineage edge, never dropped
+
+
+def test_assigned_row_missing_sequence_still_quarantines() -> None:
+    """The relaxation is gated on the 'unassigned' status: a row marked
+    'assigned' (or unmarked) with no stop-sequence still quarantines exactly
+    as before — the normal path is unchanged."""
+    csv_bytes = build_csv(
+        "PE-1,2026-07-08,2026-07-08T12:00:00Z,T1,,Passenger boarded,bus-1,1,assigned",
+        header=HEADER_RC,
+    )
+    rows, _edges, findings = normalize(csv_bytes, RECORD_ID, "tides")
+    assert rows == []
+    assert len(findings) == 1
+    assert findings[0].issue_type == "malformed_passenger_event"
+    assert "trip_stop_sequence" in findings[0].description
+
+
+def test_unrecognised_classification_is_finding_not_guess() -> None:
+    """A revenue_classification value outside the two allowed values is a
+    finding, never silently accepted — the never-guess discipline."""
+    csv_bytes = build_csv(
+        "PE-1,2026-07-08,2026-07-08T12:00:00Z,T1,1,Passenger boarded,bus-1,1,revenue",
+        header=HEADER_RC,
+    )
+    rows, _edges, findings = normalize(csv_bytes, RECORD_ID, "tides")
+    assert rows == []
+    assert len(findings) == 1
+    assert "revenue_classification 'revenue'" in findings[0].description
+
+
+def test_classification_absent_stays_null_pre_0040_byte_identical() -> None:
+    """No revenue_classification column at all (a first-party TIDES feed):
+    the row lands with revenue_classification None — the pre-0040 behavior."""
+    csv_bytes = build_csv(
+        "PE-1,2026-07-08,2026-07-08T12:00:00Z,T1,1,Passenger boarded,bus-1,2",
+    )
+    rows, _edges, findings = normalize(csv_bytes, RECORD_ID, "tides")
+    assert findings == []
+    assert rows[0].revenue_classification is None

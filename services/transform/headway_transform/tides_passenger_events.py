@@ -56,6 +56,21 @@ REQUIRED_FIELDS = (
     "vehicle_id",
 )
 
+# Handoff 0040 additive extension: an UNASSIGNED boarding — a vehicle fired
+# the APC while moving with no run assignment at all (prep/pull-out/pull-in)
+# — has no trip, no stop and no stop-sequence. TIDES makes trip_stop_sequence
+# required, but the additive-extension rule (same spec version) lets Headway
+# carry a row that resolved to no run: for revenue_classification =
+# 'unassigned', trip_stop_sequence is OPTIONAL (absent = NULL, never guessed).
+# Every other required field still holds — the vehicle, the timestamp, the
+# event_type and the passenger_event_id are all present on a ghost boarding.
+# This is the ONLY relaxation, and it is gated on the explicit 'unassigned'
+# status: the normal assigned path is unchanged, and a normal row missing a
+# stop-sequence still quarantines exactly as before.
+UNASSIGNED = "unassigned"
+ASSIGNED = "assigned"
+REVENUE_CLASSIFICATIONS = frozenset({ASSIGNED, UNASSIGNED})
+
 # The full event_type enum from the verified TIDES schema (16 values,
 # fetched 2026-07-10). Any value outside this set is a DQFinding, never a
 # guess — the UPT calc's boarding/alighting selection depends on exact
@@ -110,6 +125,17 @@ class CanonicalPassengerEvent:
     # the agency's vocabulary and the audit path back into their system.
     vendor_trip_ref: str | None = None  # TEXT
     trip_resolution: str | None = None  # TEXT: resolved|ambiguous|unmatched
+    # --- revenue classification (handoff 0040 / migration 0039) -----------
+    # The TRANSFORM's assignment status, additive and nullable: 'assigned' —
+    # the row resolved to a run; 'unassigned' — the row carried NO run
+    # assignment at all (the "ghost" boarding fired during prep/pull-out/
+    # pull-in, or rarely a catch-up bus dispatched without a trip). NULL for
+    # every first-party TIDES file and every pre-0040 row: a TIDES feed
+    # states trip_id_performed itself and nothing classifies it. This is an
+    # ASSIGNMENT STATUS, NEVER the revenue verdict — whether an unassigned
+    # boarding is non-revenue prep (excluded from UPT) or a real catch-up
+    # rider (counted) is the calc library's decision, not the transform's.
+    revenue_classification: str | None = None  # TEXT: assigned|unassigned
 
     @property
     def output_id(self) -> str:
@@ -196,7 +222,31 @@ def normalize(
 
         problems: list[str] = []
 
-        missing = [name for name in REQUIRED_FIELDS if not _cell(row, name)]
+        # Handoff 0040: the assignment/revenue status (optional, additive).
+        # Validated against the two allowed values — an unrecognised value is
+        # a finding, never guessed, exactly like an out-of-enum event_type.
+        revenue_classification = _cell(row, "revenue_classification") or None
+        if (
+            revenue_classification is not None
+            and revenue_classification not in REVENUE_CLASSIFICATIONS
+        ):
+            problems.append(
+                f"revenue_classification {revenue_classification!r} is not one "
+                f"of {sorted(REVENUE_CLASSIFICATIONS)} (handoff 0040 "
+                "assignment status)"
+            )
+            revenue_classification = None
+
+        # For an UNASSIGNED (no-run) boarding, trip_stop_sequence is optional
+        # — there is no stop to rank. Every other required field still holds.
+        # The relaxation is gated on the explicit status: a normal assigned
+        # row missing a stop-sequence still quarantines as before.
+        required = REQUIRED_FIELDS
+        if revenue_classification == UNASSIGNED:
+            required = tuple(
+                name for name in REQUIRED_FIELDS if name != "trip_stop_sequence"
+            )
+        missing = [name for name in required if not _cell(row, name)]
         if missing:
             problems.append(
                 "missing required field(s) "
@@ -295,6 +345,7 @@ def normalize(
             event_count=event_count,
             source=source,
             source_record_id=record_id,
+            revenue_classification=revenue_classification,
         )
         rows.append(event)
         edges.append(

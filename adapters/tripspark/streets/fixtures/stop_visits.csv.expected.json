@@ -1,7 +1,7 @@
 {
   "total_rows": 12,
-  "mapped": 3,
+  "mapped": 4,
   "quarantined": 5,
-  "filtered": 4,
-  "emitted": 4
+  "filtered": 3,
+  "emitted": 5
 }

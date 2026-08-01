@@ -111,7 +111,24 @@ def _is_undefined_column(exc: BaseException) -> bool:
 _SELECT_PASSENGER_EVENTS_SQL = (
     "SELECT e.event_timestamp, e.service_date, e.passenger_event_id, "
     "e.vehicle_id, e.trip_id, e.trip_stop_sequence, e.event_type, "
-    "e.event_count, e.source, e.source_record_id, r.mode "
+    "e.event_count, e.source, e.source_record_id, r.mode, "
+    "e.revenue_classification "
+    "FROM canonical.passenger_events AS e "
+    "LEFT JOIN canonical.trips AS t ON t.trip_id = e.trip_id "
+    "LEFT JOIN canonical.routes AS r ON r.route_id = t.route_id "
+    "WHERE e.event_timestamp >= %s AND e.event_timestamp < %s "
+    "ORDER BY e.event_timestamp, e.passenger_event_id, e.source_record_id"
+)
+
+#: The pre-migration-0039 fallback: identical, minus e.revenue_classification
+#: (the one 0039-added column). A database not yet carrying the assignment
+#: status must still compute UPT — every row then reads
+#: revenue_classification NULL (the pre-0040 trip-assignment proxy), exactly
+#: as upt_v0 0.2.0 did. The vehicle_label precedent (migration 0037).
+_SELECT_PASSENGER_EVENTS_PRE_0039_SQL = (
+    "SELECT e.event_timestamp, e.service_date, e.passenger_event_id, "
+    "e.vehicle_id, e.trip_id, e.trip_stop_sequence, e.event_type, "
+    "e.event_count, e.source, e.source_record_id, r.mode, NULL "
     "FROM canonical.passenger_events AS e "
     "LEFT JOIN canonical.trips AS t ON t.trip_id = e.trip_id "
     "LEFT JOIN canonical.routes AS r ON r.route_id = t.route_id "
@@ -192,6 +209,30 @@ _SELECT_OPS_SCHEDULE_SQL = (
 #: migration 0026) — otp_v0's schedule anchor. Deterministic ORDER BY.
 _SELECT_AGENCY_TIMEZONES_SQL = (
     "SELECT DISTINCT timezone FROM canonical.agencies ORDER BY timezone"
+)
+
+
+#: The schedule-derived revenue-service window bounds per service date
+#: (handoff 0040, revenue classification). For each date a trip was OPERATED
+#: (observed in canonical.vehicle_positions), the earliest scheduled
+#: departure and latest scheduled arrival over THAT day's operated trips'
+#: scheduled stop_times — the [first trip, last trip] window the calc anchors
+#: to UTC through the agency timezone. The service date is the UTC calendar
+#: date of the position (the voms_v0 day convention — documented; the window
+#: is a corroborating signal, not a certified figure). Times are GTFS
+#: service-day seconds (nullable on non-timepoint rows — a NULL simply does
+#: not bound the window; never interpolated). Deterministic ORDER BY.
+_SELECT_REVENUE_WINDOW_SECONDS_SQL = (
+    "SELECT d.service_date, MIN(st.departure_seconds), MAX(st.arrival_seconds) "
+    "FROM ("
+    "  SELECT DISTINCT (p.time AT TIME ZONE 'UTC')::date AS service_date, "
+    "         p.trip_id "
+    "  FROM canonical.vehicle_positions AS p "
+    "  WHERE p.trip_id IS NOT NULL AND p.time >= %s AND p.time < %s"
+    ") AS d "
+    "JOIN canonical.stop_times AS st ON st.trip_id = d.trip_id "
+    "GROUP BY d.service_date "
+    "ORDER BY d.service_date"
 )
 
 
@@ -293,11 +334,24 @@ def load_passenger_events(
     period.
     """
     _refuse_bad_period(period_start, period_end)
+    bounds = (_utc_midnight(period_start), _utc_midnight(period_end))
     cur = conn.cursor()
-    cur.execute(
-        _SELECT_PASSENGER_EVENTS_SQL,
-        (_utc_midnight(period_start), _utc_midnight(period_end)),
-    )
+    try:
+        cur.execute(_SELECT_PASSENGER_EVENTS_SQL, bounds)
+    except Exception as exc:  # noqa: BLE001 — re-raised unless 42703
+        if not _is_undefined_column(exc):
+            raise
+        conn.rollback()
+        _logger.warning(
+            "canonical.passenger_events.revenue_classification does not exist "
+            "(pre-migration-0039 database): the no-run assignment status is "
+            "not loadable, so every event reads revenue_classification NULL "
+            "and upt_v0 uses the trip-assignment proxy exactly as before "
+            "(byte-for-byte 0.2.0). Apply migration 0039 to record the "
+            "assignment status."
+        )
+        cur = conn.cursor()
+        cur.execute(_SELECT_PASSENGER_EVENTS_PRE_0039_SQL, bounds)
     return [
         PassengerEvent(
             event_timestamp=row[0],
@@ -311,6 +365,7 @@ def load_passenger_events(
             source=row[8],
             source_record_id=row[9],
             mode=row[10],
+            revenue_classification=row[11],
         )
         for row in cur.fetchall()
     ]
@@ -449,6 +504,54 @@ def load_agency_timezones(conn) -> list[str]:
     cur = conn.cursor()
     cur.execute(_SELECT_AGENCY_TIMEZONES_SQL, ())
     return [row[0] for row in cur.fetchall()]
+
+
+def load_revenue_window_seconds(
+    conn,
+    period_start: date,
+    period_end: date,
+) -> dict[date, tuple[int | None, int | None]]:
+    """Per service date, the (min departure, max arrival) scheduled seconds
+    over that day's operated trips — the revenue-window input (handoff 0040).
+
+    The corroborating signal for classifying no-run boardings: the calc
+    anchors these seconds to UTC through the agency timezone
+    (headway_calc.revenue_window.build_windows) and treats an unassigned
+    boarding before the first departure or after the last arrival as
+    non-revenue prep/pull-in, and one inside the window as pending human
+    review. A pre-migration-0019 database (no canonical.stop_times, SQLSTATE
+    42P01) returns an empty map after rolling back and logging a WARNING — no
+    schedule, no window, and the calc treats every no-run boarding
+    conservatively (held pending) rather than guessing. Deterministic order
+    (service_date). Refuses (ValueError) an empty or inverted period.
+    """
+    from headway_calc.settings import _is_undefined_table
+
+    _refuse_bad_period(period_start, period_end)
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            _SELECT_REVENUE_WINDOW_SECONDS_SQL,
+            (_utc_midnight(period_start), _utc_midnight(period_end)),
+        )
+    except Exception as exc:  # noqa: BLE001 — re-raised unless 42P01
+        if not _is_undefined_table(exc):
+            raise
+        conn.rollback()
+        _logger.warning(
+            "canonical.stop_times does not exist (pre-migration-0019 "
+            "database): no revenue-service window is derivable, so every "
+            "no-run boarding is held pending review rather than "
+            "auto-classified. Apply migration 0019 to load the schedule."
+        )
+        return {}
+    return {
+        row[0]: (
+            None if row[1] is None else int(row[1]),
+            None if row[2] is None else int(row[2]),
+        )
+        for row in cur.fetchall()
+    }
 
 
 def load_operated_trip_ids(

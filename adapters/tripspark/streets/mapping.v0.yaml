@@ -63,14 +63,36 @@ source_format:
 # quarantine their rows.
 timezone: America/Los_Angeles
 
-filters:
-  - column: TripName
-    op: not_empty
-    reason: >-
-      APC reports without a trip assignment (blank TripName) lack the trip
-      and stop-sequence identity the passenger_events contract requires;
-      this spec maps the assigned export, and unassigned reports are out of
-      its scope by declaration.
+# No-run classification (handoff 0040). A row with a blank TripName carried
+# NO run assignment at all — trip, route, stop, direction and stop-sequence
+# are all blank. The live diagnostic (2026-07-31) identified these as
+# drivers/staff boarding during prep, pull-out and pull-in while the vehicle
+# is moving with the APC on but not logged into a run (and, rarely, a
+# catch-up bus dispatched without a formal trip assignment). They are NO
+# LONGER filtered out (a lossy ~3.3% drop): they are emitted as passenger
+# events marked revenue_classification 'unassigned', with the run-identity
+# fields (trip name and stop rank) dropped, so the calc library can exclude
+# the non-revenue prep boardings from UPT and route the ambiguous
+# mid-service ones to a human — with the receipts to prove it.
+unassigned:
+  when:
+    - column: TripName
+      op: equals
+      value: ""
+      reason: >-
+        A blank TripName is an APC report the vehicle fired with no run
+        assignment at all — a no-run 'ghost' boarding, not an assigned trip.
+  revenue_classification: unassigned
+  # A no-run row has no trip and no stop rank to map; both are dropped
+  # (left NULL, never guessed). The remaining fields — vehicle, timestamp,
+  # service date, board/alight counts, StopCode in the event id — still map,
+  # so the boarding is a complete, countable-or-excludable event.
+  drop_fields: [trip_id_performed, trip_stop_sequence]
+  reason: >-
+    A blank TripName means the APC report carried no run assignment; the
+    vehicle was moving with the counter on but not logged into a run
+    (prep / pull-out / pull-in, or a catch-up bus dispatched without a
+    trip). Not in revenue service, so not dropped and not silently counted.
 
 # Base fields shared by both emissions.
 fields:

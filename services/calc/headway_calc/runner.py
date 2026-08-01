@@ -84,13 +84,16 @@ from headway_calc.mode import (
 from headway_calc.persist import _METRIC_BY_CALC_NAME, persist_result
 from headway_calc.pmt import compute_pmt
 from headway_calc.reader import (
+    load_agency_timezones,
     load_attestations,
     load_dr_trips,
     load_operated_trip_ids,
     load_passenger_events,
+    load_revenue_window_seconds,
     load_trip_geometries,
     load_vehicle_positions,
 )
+from headway_calc.revenue_window import build_windows
 from headway_calc.settings import load_policy_settings
 from headway_calc.types import CalcResult, Finding
 from headway_calc.upt import IMBALANCE_THRESHOLD, MISSING_TRIP_THRESHOLD, compute_upt
@@ -187,6 +190,7 @@ def _fleet_results(
     attestations_for,
     period_start: date,
     period_end: date,
+    revenue_windows=None,
 ) -> tuple[CalcResult, ...]:
     """The four fleet-wide results, with the empty-input guard applied.
 
@@ -219,6 +223,7 @@ def _fleet_results(
             missing_trip_threshold=missing_threshold,
             imbalance_threshold=imbal_threshold,
             attestations=attestations_for("upt", SCOPE_AGENCY),
+            revenue_windows=revenue_windows,
         )
         if have_count_inputs
         else _no_data_refusal(
@@ -621,6 +626,16 @@ def run_period(
     operated_trip_ids = load_operated_trip_ids(conn, period_start, period_end)
     trip_geometries = load_trip_geometries(conn, period_start, period_end)
     dr_trips = load_dr_trips(conn, period_start, period_end)
+    # Revenue-service window (handoff 0040): the schedule-derived corroborating
+    # signal for classifying no-run boardings. One timezone => a window per
+    # service date; zero or many distinct zones => no window (a schedule
+    # anchor is never guessed, so ambiguous no-run boardings are held pending
+    # review rather than mis-classified). upt_v0 0.3.0 only.
+    agency_timezones = load_agency_timezones(conn)
+    revenue_windows = build_windows(
+        load_revenue_window_seconds(conn, period_start, period_end),
+        agency_timezones[0] if len(agency_timezones) == 1 else None,
+    )
     # Statistician attestations (handoff 0019): unrevoked cert.attestations
     # rows covering the run period; each scoped upt/pmt computation receives
     # ONLY the attestations matching its metric AND scope AND period (the
@@ -646,6 +661,7 @@ def run_period(
         _attestations_for,
         period_start,
         period_end,
+        revenue_windows,
     )
 
     # Scoped result list: the fleet-wide ('agency') results first — unchanged
@@ -678,6 +694,7 @@ def run_period(
                 attestations_for_scope=lambda scope: _attestations_for(
                     "upt", scope
                 ),
+                revenue_windows=revenue_windows,
             ),
             compute_pmt_by_mode(
                 passenger_events,
@@ -1682,6 +1699,14 @@ def preview_period(
     # run's would be a lie. Loading them is a SELECT: the no-writes
     # guarantee stands.
     attestations = load_attestations(conn, period_start, period_end)
+    # Revenue windows resolved exactly as a real run (handoff 0040) — a
+    # preview whose no-run classification differed from the next real run's
+    # would be a lie. All SELECTs: the no-writes guarantee stands.
+    agency_timezones = load_agency_timezones(conn)
+    revenue_windows = build_windows(
+        load_revenue_window_seconds(conn, period_start, period_end),
+        agency_timezones[0] if len(agency_timezones) == 1 else None,
+    )
 
     variant_reports: list[PreviewVariantReport] = []
     for variant in variants:
@@ -1718,6 +1743,7 @@ def preview_period(
             ),
             period_start,
             period_end,
+            revenue_windows,
         )
         variant_reports.append(
             PreviewVariantReport(

@@ -196,8 +196,9 @@ INSERT_PASSENGER_EVENT_SQL = """
 INSERT INTO canonical.passenger_events
     (event_timestamp, service_date, passenger_event_id, vehicle_id,
      trip_id, trip_stop_sequence, event_type, event_count,
-     source, source_record_id, vendor_trip_ref, trip_resolution)
-VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+     source, source_record_id, vendor_trip_ref, trip_resolution,
+     revenue_classification)
+VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
 ON CONFLICT (passenger_event_id, event_timestamp, source_record_id) DO NOTHING
 """.strip()
 
@@ -474,6 +475,7 @@ class DbWriter:
                     row.source_record_id,
                     row.vendor_trip_ref,
                     row.trip_resolution,
+                    row.revenue_classification,
                 )
                 for row in rows
             ],

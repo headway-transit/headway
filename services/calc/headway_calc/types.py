@@ -123,6 +123,20 @@ class PassengerEvent:
     source: str
     source_record_id: str
     mode: str | None = None
+    # --- revenue classification (handoff 0040 / migration 0039) -----------
+    # The TRANSFORM's assignment status: 'assigned' — the row resolved to a
+    # run; 'unassigned' — a no-run "ghost" boarding a vehicle fired while
+    # moving with the APC on but not logged into a run (prep/pull-out/pull-in,
+    # or a catch-up bus dispatched without a trip). None for every first-party
+    # TIDES feed and every pre-0040 row (a TIDES feed states trip_id_performed
+    # itself and nothing classifies it). This is the assignment STATUS the
+    # transform recorded — NEVER the revenue verdict. upt_v0 0.3.0 derives the
+    # revenue verdict (revenue / excluded-non-revenue / pending-review) from
+    # this status + the schedule-derived revenue window + the detour flag; a
+    # NULL classification is handled by the pre-0040 trip-assignment proxy
+    # (trip_id present = revenue counted; trip_id NULL = excluded), so a feed
+    # that never sets it computes byte-for-byte as upt_v0 0.2.0.
+    revenue_classification: str | None = None
 
     def __post_init__(self) -> None:
         if (
@@ -759,6 +773,21 @@ class UptDetail:
     missing_trip_threshold: Decimal
     imbalance_threshold: Decimal
     attestation: dict | None = None
+    # --- revenue classification split (upt_v0 0.3.0, handoff 0040) ---------
+    # The no-run ("unassigned") boardings, split by the calc's revenue
+    # verdict. ``revenue_boardings`` is the counted base
+    # (total_boardings_counted — the assigned, in-revenue-service boardings);
+    # ``excluded_non_revenue_boardings`` is auto-classified prep/pull-in,
+    # EXCLUDED from UPT; ``pending_review_boardings`` is the ambiguous
+    # mid-service case, HELD OUT of the figure until a human classifies it
+    # (the exclude-until-classified default, ``pending_review_policy``). All
+    # three are boarding COUNTS (event_count sums), so they add up to every
+    # boarding the calc saw. Emitted in ``to_dict`` ONLY when any no-run
+    # boarding was classified, so a pre-0040 feed's detail is byte-identical
+    # to upt_v0 0.2.0's output.
+    excluded_non_revenue_boardings: int = 0
+    pending_review_boardings: int = 0
+    pending_review_policy: str = "exclude_until_classified"
 
     def to_dict(self) -> dict:
         detail = {
@@ -776,6 +805,16 @@ class UptDetail:
         }
         if self.attestation is not None:
             detail["attestation"] = dict(self.attestation)
+        # The revenue split appears only when a no-run boarding was
+        # classified — every pre-0040 (all-assigned) run's detail stays
+        # byte-for-byte upt_v0 0.2.0's.
+        if self.excluded_non_revenue_boardings or self.pending_review_boardings:
+            detail["revenue_classification"] = {
+                "revenue_boardings": self.total_boardings_counted,
+                "excluded_non_revenue_boardings": self.excluded_non_revenue_boardings,
+                "pending_review_boardings": self.pending_review_boardings,
+                "pending_review_policy": self.pending_review_policy,
+            }
         return detail
 
 
