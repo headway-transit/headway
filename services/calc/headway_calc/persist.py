@@ -64,6 +64,18 @@ _METRIC_BY_CALC_NAME = {
     "dr_upt_v0": "upt",
     "dr_voms_v0": "voms",
     "dr_pmt_v0": "pmt",
+    # Vanpool (VP mode) figures (handoff 0042) — VP is a mode, so its figures
+    # land in the existing metric surfaces under scope 'mode:VP' (the DR scope
+    # pattern). In v0 every VP calc REFUSES (value None), so persist_result
+    # never actually writes a VP row — this mapping exists so a future
+    # reportable VP version (once an agency revenue-service declaration lands)
+    # can persist without a persist.py change, and so an accidental attempt to
+    # persist a refused VP result raises the value=None refusal, not the
+    # "unknown calc_name" error.
+    "vp_vrm_v0": "vrm",
+    "vp_vrh_v0": "vrh",
+    "vp_upt_v0": "upt",
+    "vp_voms_v0": "voms",
     # OPERATIONS metrics (handoff 0014) — category 'ops' below.
     "otp_v0": "otp",
     "headway_adherence_v0": "headway_adherence",

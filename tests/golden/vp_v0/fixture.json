@@ -1,0 +1,49 @@
+{
+  "description": "Golden fixture for the vp_*_v0 calcs 0.1.0 (handoff 0042): Vanpool (VP mode) figures over canonical.vehicle_telematics_days (migration 0034, the fleet-telematics.v0 contract). EVERY VP figure REFUSES in v0 — telematics distance is NOT revenue miles and engine time is NOT revenue hours (the honesty wall), and the FTA vanpool rules (2026 NTD Policy Manual, quoted in REGULATORY_TRACKER.md) require inputs telematics cannot supply. The scenario is a two-van simulated vanpool day pulled from Samsara-shaped telematics; the goldens pin the REFUSAL CONTRACT (value None, the naming blocking finding) plus the observed-movement CONTEXT detail, the basis-conflict warning, the unmeasured-series warning, and the simulated-source info. Synthetic, NOT FTA-certified; regression anchor only. See BASIS.md.",
+  "vanpool_day": {
+    "rows": [
+      {
+        "vehicle_id": "van-42", "service_date": "2026-07-15",
+        "window_start": "2026-07-15T04:00:00+00:00", "window_end": "2026-07-16T04:00:00+00:00",
+        "measure": "distance", "basis": "ecu_odometer", "unit": "meters",
+        "reading_kind": "cumulative_counter", "sample_count": 40,
+        "value": "72000",
+        "first_reading_at": "2026-07-15T06:30:00+00:00", "first_reading_value": "1000000",
+        "last_reading_at": "2026-07-15T18:15:00+00:00", "last_reading_value": "1072000",
+        "max_sample_gap_seconds": 45,
+        "source": "samsara_simulated", "source_record_id": "rec-vp-01"
+      },
+      {
+        "vehicle_id": "van-42", "service_date": "2026-07-15",
+        "window_start": "2026-07-15T04:00:00+00:00", "window_end": "2026-07-16T04:00:00+00:00",
+        "measure": "distance", "basis": "gps_distance", "unit": "meters",
+        "reading_kind": "cumulative_counter", "sample_count": 70,
+        "value": "72900",
+        "first_reading_at": "2026-07-15T06:31:00+00:00", "first_reading_value": "5000000",
+        "last_reading_at": "2026-07-15T18:14:00+00:00", "last_reading_value": "5072900",
+        "max_sample_gap_seconds": 60,
+        "source": "samsara_simulated", "source_record_id": "rec-vp-02"
+      },
+      {
+        "vehicle_id": "van-42", "service_date": "2026-07-15",
+        "window_start": "2026-07-15T04:00:00+00:00", "window_end": "2026-07-16T04:00:00+00:00",
+        "measure": "engine_time", "basis": "ecu_engine_time", "unit": "seconds",
+        "reading_kind": "cumulative_counter", "sample_count": 40,
+        "value": "43200",
+        "first_reading_at": "2026-07-15T06:30:00+00:00", "first_reading_value": "8000000",
+        "last_reading_at": "2026-07-15T18:15:00+00:00", "last_reading_value": "8043200",
+        "max_sample_gap_seconds": 45,
+        "source": "samsara_simulated", "source_record_id": "rec-vp-03"
+      },
+      {
+        "vehicle_id": "van-77", "service_date": "2026-07-15",
+        "window_start": "2026-07-15T04:00:00+00:00", "window_end": "2026-07-16T04:00:00+00:00",
+        "measure": "distance", "basis": "ecu_odometer", "unit": "meters",
+        "reading_kind": "cumulative_counter", "sample_count": 1,
+        "value": null,
+        "first_reading_at": "2026-07-15T07:00:00+00:00", "first_reading_value": "2000000",
+        "source": "samsara_simulated", "source_record_id": "rec-vp-04"
+      }
+    ]
+  }
+}

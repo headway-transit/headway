@@ -1,0 +1,91 @@
+{
+  "_comment": "Expected outputs for the vp_v0 golden fixture (handoff 0042). EVERY VP figure REFUSES: value is null, one naming blocking finding, plus the observed-movement context detail, the basis-conflict warning (van-42 ecu_odometer 72000 m vs gps_distance 72900 m disagree by 900 m > 100 m tolerance), the unmeasured-series warning (van-77 ecu_odometer has one reading, value absent), and the simulated-source info (all rows samsara_simulated). observed_distance_meters = 72000 + 72900 = 144900; observed_engine_seconds = 43200. Hand-worked in BASIS.md. Synthetic, NOT FTA-certified.",
+  "vrm": {
+    "value": null,
+    "unit": "miles",
+    "calc_name": "vp_vrm_v0",
+    "calc_version": "0.1.0",
+    "input_record_ids": [],
+    "blocking_issue_types": ["vp_vrm_needs_revenue_service_declaration"],
+    "warning_types": ["vp_telematics_basis_conflict", "vp_telematics_series_unmeasured"],
+    "info_types": ["simulated_source_data"],
+    "detail": {
+      "figure": "vrm",
+      "reportable": false,
+      "refusal_reason": "vp_vrm_needs_revenue_service_declaration",
+      "vehicle_days_seen": 4,
+      "vehicle_days_unmeasured": 1,
+      "observed_distance_meters": "144900",
+      "observed_engine_seconds": "43200",
+      "by_basis": {"ecu_engine_time": "43200", "ecu_odometer": "72000", "gps_distance": "72900"},
+      "basis_conflicts": 1,
+      "source_mix": {"samsara_simulated": 4}
+    }
+  },
+  "vrh": {
+    "value": null,
+    "unit": "hours",
+    "calc_name": "vp_vrh_v0",
+    "calc_version": "0.1.0",
+    "input_record_ids": [],
+    "blocking_issue_types": ["vp_vrh_needs_revenue_service_declaration"],
+    "warning_types": ["vp_telematics_basis_conflict", "vp_telematics_series_unmeasured"],
+    "info_types": ["simulated_source_data"],
+    "detail": {
+      "figure": "vrh",
+      "reportable": false,
+      "refusal_reason": "vp_vrh_needs_revenue_service_declaration",
+      "vehicle_days_seen": 4,
+      "vehicle_days_unmeasured": 1,
+      "observed_distance_meters": "144900",
+      "observed_engine_seconds": "43200",
+      "by_basis": {"ecu_engine_time": "43200", "ecu_odometer": "72000", "gps_distance": "72900"},
+      "basis_conflicts": 1,
+      "source_mix": {"samsara_simulated": 4}
+    }
+  },
+  "upt": {
+    "value": null,
+    "unit": "unlinked_passenger_trips",
+    "calc_name": "vp_upt_v0",
+    "calc_version": "0.1.0",
+    "input_record_ids": [],
+    "blocking_issue_types": ["vp_upt_needs_passenger_roster"],
+    "warning_types": ["vp_telematics_basis_conflict", "vp_telematics_series_unmeasured"],
+    "info_types": ["simulated_source_data"],
+    "detail": {
+      "figure": "upt",
+      "reportable": false,
+      "refusal_reason": "vp_upt_needs_passenger_roster",
+      "vehicle_days_seen": 4,
+      "vehicle_days_unmeasured": 1,
+      "observed_distance_meters": "144900",
+      "observed_engine_seconds": "43200",
+      "by_basis": {"ecu_engine_time": "43200", "ecu_odometer": "72000", "gps_distance": "72900"},
+      "basis_conflicts": 1,
+      "source_mix": {"samsara_simulated": 4}
+    }
+  },
+  "voms": {
+    "value": null,
+    "unit": "vehicles",
+    "calc_name": "vp_voms_v0",
+    "calc_version": "0.1.0",
+    "input_record_ids": [],
+    "blocking_issue_types": ["vp_voms_needs_revenue_service_declaration"],
+    "warning_types": ["vp_telematics_basis_conflict", "vp_telematics_series_unmeasured"],
+    "info_types": ["simulated_source_data"],
+    "detail": {
+      "figure": "voms",
+      "reportable": false,
+      "refusal_reason": "vp_voms_needs_revenue_service_declaration",
+      "vehicle_days_seen": 4,
+      "vehicle_days_unmeasured": 1,
+      "observed_distance_meters": "144900",
+      "observed_engine_seconds": "43200",
+      "by_basis": {"ecu_engine_time": "43200", "ecu_odometer": "72000", "gps_distance": "72900"},
+      "basis_conflicts": 1,
+      "source_mix": {"samsara_simulated": 4}
+    }
+  }
+}

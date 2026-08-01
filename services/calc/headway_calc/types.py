@@ -309,6 +309,135 @@ class DrTrip:
         return self.riders + self.attendants_companions
 
 
+#: Distance/engine-time measurement bases (fleet-telematics.v0 wire contract;
+#: canonical.vehicle_telematics_days, migration 0034). Kept DISTINCT and never
+#: silently substituted (the honesty wall). Distance bases first, then
+#: engine-time bases.
+VP_DISTANCE_BASES = ("ecu_odometer", "gps_odometer", "gps_distance")
+VP_ENGINE_TIME_BASES = (
+    "ecu_engine_time",
+    "estimated_engine_time",
+    "duty_status_time",
+)
+VP_MEASURE_DISTANCE = "distance"
+VP_MEASURE_ENGINE_TIME = "engine_time"
+VP_READING_CUMULATIVE = "cumulative_counter"
+VP_READING_PERIOD_TOTAL = "period_total"
+
+
+@dataclass(frozen=True)
+class VpTelematicsDay:
+    """One canonical fleet-telematics measurement series (read contract:
+    canonical.vehicle_telematics_days, migration 0034 — the
+    fleet-telematics.v0 wire contract normalized; handoff 0028).
+
+    ONE vehicle, ONE service date, ONE ``measure`` (distance | engine_time)
+    on ONE ``basis``. A van with both an ECU odometer and a GPS distance
+    counter is TWO VpTelematicsDay rows for the same day, never one
+    reconciled number — the honesty wall makes basis substitution
+    structurally impossible.
+
+    THE HONESTY WALL (fleet-telematics.v0.md): ``distance`` is ALL movement
+    the vehicle did — revenue service, deadhead, personal use (a vanpool van
+    lives at a participant's house), maintenance travel — it is NOT revenue
+    miles. ``engine_time`` is engine runtime including idling — it is NOT
+    revenue hours. This type carries MEASURED VEHICLE MOVEMENT; turning it
+    into a reportable VP figure is exactly what headway_calc.vp adjudicates
+    against the FTA vanpool rules quoted in REGULATORY_TRACKER.md.
+
+    ``value`` is Decimal in ``unit`` (meters | seconds), or None — None means
+    UNMEASURED (fewer than two readings of a cumulative counter, or a counter
+    that ran backwards): never coalesced to 0, never interpolated. Endpoints
+    are still carried when present so the subtraction is auditable.
+    ``max_sample_gap_seconds`` is the honesty field — how blind the
+    measurement is between its endpoints; None when ``sample_count`` < 2.
+    ``source`` is the registered envelope label ('samsara' real,
+    'samsara_simulated' synthetic — the handoff-0005 simulated-data rule).
+    ``source_record_id`` anchors lineage (ADR-0007).
+    """
+
+    vehicle_id: str
+    service_date: date
+    window_start: datetime
+    window_end: datetime
+    measure: str
+    basis: str
+    unit: str
+    reading_kind: str
+    sample_count: int
+    source: str
+    source_record_id: str
+    vehicle_label: str | None = None
+    value: Decimal | None = None
+    first_reading_at: datetime | None = None
+    first_reading_value: Decimal | None = None
+    last_reading_at: datetime | None = None
+    last_reading_value: Decimal | None = None
+    max_sample_gap_seconds: int | None = None
+
+    def __post_init__(self) -> None:
+        for name, val in (
+            ("window_start", self.window_start),
+            ("window_end", self.window_end),
+        ):
+            if val.tzinfo is None or val.utcoffset() is None:
+                raise ValueError(
+                    f"VpTelematicsDay.{name} must be timezone-aware; got "
+                    f"{val!r} (vehicle_id={self.vehicle_id!r})"
+                )
+        if self.window_end <= self.window_start:
+            raise ValueError(
+                f"VpTelematicsDay.window_end must be > window_start "
+                f"(vehicle_id={self.vehicle_id!r})"
+            )
+        if self.measure == VP_MEASURE_DISTANCE:
+            allowed = VP_DISTANCE_BASES
+            want_unit = "meters"
+        elif self.measure == VP_MEASURE_ENGINE_TIME:
+            allowed = VP_ENGINE_TIME_BASES
+            want_unit = "seconds"
+        else:
+            raise ValueError(
+                f"VpTelematicsDay.measure must be one of "
+                f"{(VP_MEASURE_DISTANCE, VP_MEASURE_ENGINE_TIME)}; got "
+                f"{self.measure!r} (vehicle_id={self.vehicle_id!r})"
+            )
+        if self.basis not in allowed:
+            raise ValueError(
+                f"VpTelematicsDay.basis {self.basis!r} does not match measure "
+                f"{self.measure!r} (allowed: {allowed}) — the honesty wall "
+                f"forbids a basis crossing its measure "
+                f"(vehicle_id={self.vehicle_id!r})"
+            )
+        if self.unit != want_unit:
+            raise ValueError(
+                f"VpTelematicsDay.unit must be {want_unit!r} for measure "
+                f"{self.measure!r}; got {self.unit!r} "
+                f"(vehicle_id={self.vehicle_id!r})"
+            )
+        if self.reading_kind not in (VP_READING_CUMULATIVE, VP_READING_PERIOD_TOTAL):
+            raise ValueError(
+                f"VpTelematicsDay.reading_kind must be one of "
+                f"{(VP_READING_CUMULATIVE, VP_READING_PERIOD_TOTAL)}; got "
+                f"{self.reading_kind!r} (vehicle_id={self.vehicle_id!r})"
+            )
+        if self.sample_count < 0:
+            raise ValueError(
+                f"VpTelematicsDay.sample_count must be >= 0; got "
+                f"{self.sample_count} (vehicle_id={self.vehicle_id!r})"
+            )
+        for name, val in (
+            ("value", self.value),
+            ("first_reading_value", self.first_reading_value),
+            ("last_reading_value", self.last_reading_value),
+        ):
+            if val is not None and val < 0:
+                raise ValueError(
+                    f"VpTelematicsDay.{name} must be >= 0 or None; got {val!r} "
+                    f"(vehicle_id={self.vehicle_id!r})"
+                )
+
+
 @dataclass(frozen=True)
 class OpsScheduledStop:
     """One scheduled stop of a trip, joined with its stop's coordinates and
@@ -1315,6 +1444,61 @@ class DaytypeUptAvgDetail:
 
 
 @dataclass(frozen=True)
+class VpTelematicsDetail:
+    """Detail of one headway_calc.vp result (handoff 0042), persisted verbatim
+    into computed.metric_values.detail (JSONB, migration 0010) — or carried by
+    a REFUSED result whose value is None (the detail then records exactly what
+    was missing and what the observed movement was, so the refusal is
+    auditable).
+
+    - ``figure`` — the VP figure requested ('vrm' | 'vrh' | 'upt' | 'voms').
+    - ``reportable`` — always False in v0 (the calc is never certifiable —
+      see the tracker: telematics is NOT revenue service, all sources are
+      simulated); the field is explicit so a consumer never infers it.
+    - ``refusal_reason`` — the machine key of the blocking finding when the
+      figure REFUSES (None when a context figure was emitted).
+    - ``observed_distance_meters`` / ``observed_engine_seconds`` — the SI
+      movement actually measured over the window, per basis, as decimal
+      strings — CONTEXT, never a reportable figure. ``by_basis`` breaks these
+      down so no basis is silently merged with another.
+    - ``vehicle_days_seen`` / ``vehicle_days_unmeasured`` — series seen and
+      those whose ``value`` was absent (fewer than two readings, or a counter
+      regression) — an unmeasured series is stated, never zeroed.
+    - ``basis_conflicts`` — vehicle-days carrying two distance bases that
+      disagree beyond a stated tolerance (Shared Constraint 7 — surfaced,
+      never averaged); each is its own warning finding.
+    - ``source_mix`` — series per envelope source (ALWAYS present: the
+      handoff-0005 simulated-data rule; any '_simulated' suffix means the
+      figure can never be certifiable).
+    """
+
+    figure: str
+    reportable: bool
+    refusal_reason: str | None
+    vehicle_days_seen: int
+    vehicle_days_unmeasured: int
+    observed_distance_meters: str | None
+    observed_engine_seconds: str | None
+    by_basis: dict[str, str]
+    basis_conflicts: int
+    source_mix: dict[str, int]
+
+    def to_dict(self) -> dict:
+        return {
+            "figure": self.figure,
+            "reportable": self.reportable,
+            "refusal_reason": self.refusal_reason,
+            "vehicle_days_seen": self.vehicle_days_seen,
+            "vehicle_days_unmeasured": self.vehicle_days_unmeasured,
+            "observed_distance_meters": self.observed_distance_meters,
+            "observed_engine_seconds": self.observed_engine_seconds,
+            "by_basis": {k: self.by_basis[k] for k in sorted(self.by_basis)},
+            "basis_conflicts": self.basis_conflicts,
+            "source_mix": {k: self.source_mix[k] for k in sorted(self.source_mix)},
+        }
+
+
+@dataclass(frozen=True)
 class CalcResult:
     """The output of one calculation run.
 
@@ -1355,6 +1539,7 @@ class CalcResult:
         | HeadwayAdherenceDetail
         | DaysOperatedDetail
         | DaytypeUptAvgDetail
+        | VpTelematicsDetail
         | None
     ) = None
 
