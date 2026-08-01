@@ -726,6 +726,73 @@ export const dashboardValues: MetricValue[] = [
 ];
 
 /**
+ * Per-mode figures (handoff 0009's `--per-mode` path, as handoff 0041's
+ * Mode selector reads them): the SAME periods as the agency rows above,
+ * persisted under `scope = 'mode:<mode>'`. Deliberately NOT a partition
+ * that adds up to the agency figure — the dashboard must never be able to
+ * derive one from the others, and these values make an accidental sum
+ * obvious.
+ *
+ * `mode:subway` carries a figure OUTSIDE the March/February window the
+ * other fixtures use, so the "this mode has scopes but nothing in the
+ * selected dates" empty state is exercisable.
+ */
+export const dashboardModeValues: MetricValue[] = [
+  {
+    ...vrmValue,
+    metric_value_id: "mv-vrm-bus-mar",
+    scope: "mode:bus",
+    period_start: "2026-03-01",
+    period_end: "2026-03-31",
+    value: "8888.80",
+    calc_version: "0.2.0",
+    certification_status: "certified",
+    detail: { ...vrmCoverageDetail, coverage: "0.8400" },
+  },
+  {
+    ...vrhValue,
+    metric_value_id: "mv-vrh-bus-mar",
+    scope: "mode:bus",
+    period_start: "2026-03-01",
+    period_end: "2026-03-31",
+    value: "701.05",
+    calc_version: "0.2.0",
+    certification_status: "certified",
+    detail: { ...vrmCoverageDetail, coverage: "0.8700" },
+  },
+  {
+    ...uptValue,
+    metric_value_id: "mv-upt-bus-mar",
+    scope: "mode:bus",
+    period_start: "2026-03-01",
+    period_end: "2026-03-31",
+    value: "900.00",
+    certification_status: "certified",
+    detail: undefined,
+  },
+  {
+    ...vrmValue,
+    metric_value_id: "mv-vrm-dr-mar",
+    scope: "mode:DR",
+    period_start: "2026-03-01",
+    period_end: "2026-03-31",
+    value: "1234.50",
+    calc_version: "0.2.0",
+    detail: undefined,
+  },
+  {
+    ...vrmValue,
+    metric_value_id: "mv-vrm-subway-jan",
+    scope: "mode:subway",
+    period_start: "2026-01-01",
+    period_end: "2026-01-31",
+    value: "77.70",
+    calc_version: "0.2.0",
+    detail: undefined,
+  },
+];
+
+/**
  * One page of the queue as GET /dq/issues serves it since handoff 0030 —
  * the rows PLUS the whole-queue truth (total / has_more / next_cursor).
  * Defaults describe a queue that fits on one page; override for paging

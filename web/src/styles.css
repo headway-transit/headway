@@ -2,11 +2,43 @@
    scripts/check-contrast.mjs (npm run check:contrast). If you change a token,
    update that script and re-run it.
 
+   ---------------------------------------------------------------------
+   VISUAL DIRECTION (handoff 0041, settled — do not re-litigate):
+   "Vignelli transit-diagram x avionics data-density, executed FLAT."
+
+   - GROUND: warm obsidian / graphite, matte. Panels are separated by 1px
+     HAIRLINE ETCHING (--color-border). No bevels, no faux-3D, no
+     skeuomorphic texture — --shadow-1 is therefore `none` in both themes;
+     only genuinely-floating things (tooltip, toast) keep --shadow-2.
+   - IDENTITY ACCENT: signal-orange (--signal). Exactly ONE, and it is
+     NON-SEMANTIC: wordmark rule, active control, sparkline, section
+     eyebrows. It NEVER encodes state.
+   - SEMANTIC STATUS: --status-ok / --status-watch / --status-alert, kept
+     deliberately SEPARATE from the identity accent and CVD-safe. No new
+     signal hues. Identity-orange is held apart from watch-amber in
+     lightness as well as hue (dark: 7.13:1 vs 12.90:1 on the card ground —
+     a 1.81x separation), and every status also ships an icon and words.
+   - TYPOGRAPHY: --font-display for headings and eyebrows, --font-mono with
+     tabular-nums for EVERY figure, timestamp, id and receipt.
+   - HONEST ATTENTION: `.attn` puts a halo on the card FRAME (edge-rail),
+     never behind a figure — a glow behind a number would eat its contrast
+     ratio, and glow must say "look here", never "this is good". Scarce, and
+     always accompanied by a shape + a sentence, so the signal survives for
+     a reader who perceives no glow. prefers-reduced-motion collapses the
+     pulse to a static rail.
+   ---------------------------------------------------------------------
+
    Two deliberately selected themes (handoff 0008, pillar A): the light set
    here and the dark set under :root[data-theme="dark"]. The theme attribute
    is stamped by src/theme.ts (explicit user choice persisted in
    localStorage, else prefers-color-scheme) and inline in index.html before
    first paint.
+
+   The LIGHT surfaces (--color-bg #ffffff, --color-surface #f6f8fa) are
+   PINNED: the server-side branding guardrail (services/api branding.py)
+   certifies every accepted agency brand color against exactly those two
+   values. Changing them would silently invalidate a server guarantee, so it
+   needs a backend handoff — not a CSS edit.
 
    Chart colors (--series-*, --chart-*) are validated separately by the
    dataviz palette validator against the chart surface of EACH mode — they
@@ -29,6 +61,7 @@
 
   --color-bg: #ffffff; /* card / content surface */
   --color-surface: #f6f8fa; /* page plane + inset panels */
+  --color-raised: #f6f8fa; /* the one step UP (dark theme uses a real step) */
   --color-text: #1f2328; /* 15.80:1 on --color-bg */
   --color-text-muted: #57606a; /* 6.39:1 on --color-bg */
   --color-accent: var(--brand-accent); /* links, primary actions, focus */
@@ -68,6 +101,28 @@
   --chart-status-warning: #946300; /* 5.19:1 on the chart surface */
   --chart-status-info: #1d4e89; /* 8.39:1 on the chart surface */
 
+  /* ---- The ONE identity accent (handoff 0041): signal-orange.
+     NON-SEMANTIC — wordmark rule, active control, sparkline, eyebrows. It
+     never encodes state, so it is never read as "good" or "bad".
+     6.01:1 on --color-bg and 5.65:1 on --color-surface as text; white on it
+     is 6.01:1, which is what lets it fill a pressed control.
+     NOTE it is deliberately NOT --color-accent in the light theme: that one
+     carries the AGENCY's brand color, which the server contrast-certifies.
+     Identity is Headway's; accent is the agency's. */
+  --signal: #a84400;
+  --signal-text: #ffffff;
+  --signal-soft: rgba(168, 68, 0, 0.08);
+  --signal-line: rgba(168, 68, 0, 0.35);
+
+  /* ---- The semantic status set (ok / watch / alert), kept SEPARATE from
+     identity. Each is an existing AA-verified value; the glows are frame
+     halos only (never behind a figure). */
+  --status-ok: #1c632f; /* 7.30:1 on --color-bg */
+  --status-watch: #946300; /* 5.19:1 on --color-bg */
+  --status-alert: #9f1b1b; /* 7.93:1 on --color-bg */
+  --status-alert-glow: rgba(159, 27, 27, 0.3);
+  --status-watch-glow: rgba(148, 99, 0, 0.28);
+
   /* The living map (handoff 0024): a self-hosted water-tone canvas — no
      tiles, so the background IS a token. Marks are meaningful non-text
      (SC 1.4.11, >= 3:1 vs --map-bg; scripts/check-contrast.mjs): route
@@ -79,7 +134,8 @@
 
   --focus-ring: 3px solid var(--color-accent);
 
-  /* Spacing rhythm */
+  /* Spacing rhythm — a strict grid (the Grafana panel discipline in
+     docs/design/transit-ui-survey-2026-08.md §4.5). */
   --space-1: 0.25rem;
   --space-2: 0.5rem;
   --space-3: 1rem;
@@ -93,11 +149,30 @@
   --text-xl: 1.6rem;
   --text-hero: 2rem;
 
-  /* Card surfaces: subtle elevation, never decoration over data */
-  --radius-1: 6px;
-  --radius-2: 10px;
-  --shadow-1: 0 1px 2px rgba(31, 35, 40, 0.07), 0 1px 1px rgba(31, 35, 40, 0.04);
-  --shadow-2: 0 4px 12px rgba(31, 35, 40, 0.12);
+  /* ---- Type stacks (handoff 0041).
+     TODO (deferred, needs an asset commit): production should SELF-HOST
+     Overpass — open-licensed (OFL), FHWA highway-sign heritage — the same
+     way the basemap vendors Noto under web/public/basemap-fonts/. Overpass
+     is not in the repo and this build makes ZERO external requests, so
+     --font-display falls back to the industrial grotesques a Linux/macOS/
+     Windows box already has. Adding a CDN font would break on-prem parity
+     and is forbidden. When Overpass lands, it goes first in the stack and
+     nothing else changes. */
+  --font-display:
+    "Overpass", "Archivo", "Roboto", "Liberation Sans", "Helvetica Neue",
+    Helvetica, system-ui, sans-serif;
+  --font-ui: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono:
+    ui-monospace, "SFMono-Regular", "JetBrains Mono", "DejaVu Sans Mono",
+    Menlo, Consolas, monospace;
+
+  /* Card surfaces: FLAT. Separation is a 1px hairline etch, not elevation —
+     --shadow-1 is `none` on purpose (see the direction note above). Only
+     genuinely floating layers (tooltip, toast) take --shadow-2. */
+  --radius-1: 3px;
+  --radius-2: 4px;
+  --shadow-1: none;
+  --shadow-2: 0 6px 20px rgba(31, 35, 40, 0.18);
 }
 
 /* The dark theme — a deliberately selected token set, not an inversion.
@@ -108,14 +183,21 @@
    surfaces, so brand accents never restyle dark-mode text/controls.
    --brand-primary still paints the decorative header bar (non-text). */
 :root[data-theme="dark"] {
-  --color-bg: #161b22; /* card / content surface */
-  --color-surface: #0d1117; /* page plane + inset panels */
-  --color-text: #e6edf3; /* 14.64:1 on --color-bg */
-  --color-text-muted: #9ea7b3; /* 7.11:1 on --color-bg */
-  --color-accent: #58a6ff; /* 6.85:1 on --color-bg */
-  --color-accent-text: #0d1117; /* 7.49:1 on --color-accent */
-  --color-border: #30363d;
-  --color-input-border: #8b949e; /* 5.62:1 (>= 3:1 non-text) on bg */
+  /* The obsidian ground (handoff 0041): warm-black void as the page plane,
+     graphite as the card/content surface, hairline etch between them. */
+  --color-bg: #0f131b; /* graphite — card / content surface */
+  --color-surface: #07090e; /* void — page plane + inset panels */
+  --color-raised: #1a2130; /* the one step UP, for nested wells */
+  --color-text: #e9eef5; /* 15.95:1 on --color-bg */
+  --color-text-muted: #96a3b7; /* 7.28:1 on --color-bg */
+  /* The dark accent has ALWAYS been pinned here (the server's brand-color
+     guardrail certifies light surfaces only — services/api branding.py), so
+     the dark theme is Headway's to choose: it takes the identity
+     signal-orange. 7.13:1 on --color-bg, 7.64:1 on --color-surface. */
+  --color-accent: #ff7a1a;
+  --color-accent-text: #07090e; /* 7.64:1 on --color-accent */
+  --color-border: #242c3a; /* the hairline etch */
+  --color-input-border: #8b949e; /* 6.05:1 (>= 3:1 non-text) on bg */
 
   --color-danger-text: #ffb3ab; /* 8.93:1 on --color-danger-bg */
   --color-danger-bg: #3a1d1f;
@@ -130,13 +212,31 @@
   --color-exception-text: #cdb4f6;
   --color-exception-bg: #251a3d;
 
-  --series-1: #3987e5;
-  --series-2: #199e70;
-  --chart-grid: #21262d;
-  --chart-baseline: #30363d;
-  --chart-status-blocking: #f2827f; /* 6.82:1 on the dark chart surface */
-  --chart-status-warning: #d4a72c; /* 7.71:1 on the dark chart surface */
-  --chart-status-info: #6cb6ff; /* 8.05:1 on the dark chart surface */
+  --series-1: #3987e5; /* 5.11:1 on the dark chart surface */
+  --series-2: #199e70; /* 5.46:1 on the dark chart surface */
+  --chart-grid: #161d28; /* schematic underlay, recessive */
+  --chart-baseline: #242c3a;
+  /* Severity marks share the semantic status values below, so the palette
+     never carries two ambers or two reds (handoff 0041: no new signal hues,
+     and identity-orange stays OUT of the status set). */
+  --chart-status-blocking: #f5514e; /* 5.46:1 on the dark chart surface */
+  --chart-status-warning: #ffd166; /* 12.90:1 on the dark chart surface */
+  --chart-status-info: #6cb6ff; /* 8.65:1 on the dark chart surface */
+
+  /* Identity accent, dark set — the same one accent, non-semantic. */
+  --signal: #ff7a1a;
+  --signal-text: #07090e;
+  --signal-soft: rgba(255, 122, 26, 0.13);
+  --signal-line: rgba(255, 122, 26, 0.4);
+
+  /* Semantic status set, dark. Watch-amber sits 1.81x LIGHTER than
+     identity-orange on the card ground so the two never read as the same
+     signal, and every status still ships an icon and words. */
+  --status-ok: #3fc79b; /* 8.73:1 on --color-bg */
+  --status-watch: #ffd166; /* 12.90:1 on --color-bg */
+  --status-alert: #f5514e; /* 5.46:1 on --color-bg */
+  --status-alert-glow: rgba(245, 81, 78, 0.55);
+  --status-watch-glow: rgba(255, 209, 102, 0.5);
 
   /* Map tokens, dark set (route 3.19:1, stop 7.33:1, vehicle 8.30:1 on
      the dark water tone — scripts/check-contrast.mjs). */
@@ -145,8 +245,10 @@
   --map-stop: #9ea7b3;
   --map-vehicle: #6cb6ff;
 
-  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.55), 0 1px 1px rgba(0, 0, 0, 0.4);
-  --shadow-2: 0 4px 12px rgba(0, 0, 0, 0.6);
+  /* FLAT: separation is the hairline etch, never a bevel or a drop shadow.
+     Only genuinely-floating layers keep --shadow-2. */
+  --shadow-1: none;
+  --shadow-2: 0 8px 24px rgba(0, 0, 0, 0.7);
 }
 
 * {
@@ -155,12 +257,42 @@
 
 body {
   margin: 0;
-  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-family: var(--font-ui);
   font-size: var(--text-base);
   line-height: 1.55;
   color: var(--color-text);
-  /* The page plane; cards sit on it in --color-bg with subtle elevation. */
+  /* The page plane; cards sit on it in --color-bg, separated by a hairline
+     etch rather than elevation (handoff 0041: executed FLAT). */
   background: var(--color-surface);
+}
+
+/* ---- figures, ids, timestamps, receipts (handoff 0041) ----
+   Monospace + tabular-nums EVERYWHERE a precise thing is shown, so precision
+   reads as precision and columns of figures line up. The figure itself is
+   always the API's string verbatim; this only changes how it is drawn. */
+.mono,
+.figure,
+td.figure,
+code,
+.node-id,
+.signature-hash,
+.certificate-fingerprint,
+.raw-record-fingerprint code {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Section eyebrows: the display face, uppercase and widely tracked — the
+   transit-diagram label voice. Identity-orange is allowed here because an
+   eyebrow states WHAT a panel is, never how it is doing. */
+.eyebrow {
+  font-family: var(--font-display);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  margin: 0 0 var(--space-1);
 }
 
 /* Visible focus everywhere (WCAG 2.4.7). */
@@ -176,6 +308,14 @@ a {
   color: var(--color-accent);
 }
 
+/* Headings take the industrial-grotesque display face; body copy stays in
+   the UI stack so long plain-language paragraphs remain easy to read. */
+h1,
+h2,
+h3,
+h4 {
+  font-family: var(--font-display);
+}
 h1 {
   font-size: var(--text-xl);
   letter-spacing: -0.015em;
@@ -224,13 +364,19 @@ h3 {
   background: var(--chrome-header-bg, var(--color-bg));
   color: var(--chrome-header-text, var(--color-text));
 }
+/* The wordmark: the display face behind a signal-orange rule. This is an
+   IDENTITY moment — the one place the accent is allowed to mean nothing but
+   "this is Headway". */
 .app-header .brand {
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
+  font-family: var(--font-display);
   font-weight: 700;
   font-size: var(--text-lg);
-  letter-spacing: -0.01em;
+  letter-spacing: 0.02em;
+  border-left: 3px solid var(--signal);
+  padding-left: var(--space-2);
 }
 /* Agency logo (GET /branding/logo): header chrome, capped to the line. */
 .app-header .brand-logo {
@@ -962,11 +1108,13 @@ ul.detail-panel li {
   font-weight: 600;
 }
 /* Selection is conveyed by aria-pressed + the filled style (not color alone:
-   the pressed button is the only filled one and keeps its label). */
+   the pressed button is the only filled one and keeps its label). The fill
+   is the IDENTITY accent (handoff 0041): "this control is active" is an
+   identity moment, not a status — a pressed filter is neither good nor bad. */
 .filter-bar button[aria-pressed="true"] {
-  background: var(--color-accent);
-  border-color: var(--color-accent);
-  color: var(--color-accent-text);
+  background: var(--signal);
+  border-color: var(--signal);
+  color: var(--signal-text);
   font-weight: 600;
 }
 .dq-showing {
@@ -1117,9 +1265,9 @@ ul.detail-panel li {
 /* Selection is conveyed by aria-pressed + the filled style (not color alone:
    the pressed button is the only filled one and keeps its label). */
 .view-toggle button[aria-pressed="true"] {
-  background: var(--color-accent);
-  border-color: var(--color-accent);
-  color: var(--color-accent-text);
+  background: var(--signal);
+  border-color: var(--signal);
+  color: var(--signal-text);
   font-weight: 600;
 }
 
@@ -1280,21 +1428,41 @@ ul.detail-panel li {
 .stat-tile {
   padding: var(--space-3);
 }
+/* The readout label: display face, tracked, quiet — the panel says what
+   question it answers before it answers it (Grafana's one-question-per-card
+   discipline, docs/design/transit-ui-survey-2026-08.md §4.5). */
 .stat-tile .stat-label {
   margin: 0 0 var(--space-1);
-  font-weight: 600;
+  font-family: var(--font-display);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
 }
-/* Large standalone figure: PROPORTIONAL figures (tabular-nums makes a big
-   number look loose); the value is the API's string verbatim. */
+/* The figure: MONOSPACE, tabular-nums (handoff 0041 — every figure, id,
+   timestamp and receipt). The value is the API's string verbatim; nothing
+   here rounds, pads or reformats it, and NOTHING glows behind it. */
 .stat-tile .stat-value {
   margin: 0;
+  font-family: var(--font-mono);
   font-size: var(--text-hero);
   font-weight: 600;
-  font-variant-numeric: normal;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
   line-height: 1.15;
   overflow-wrap: anywhere;
 }
+/* "No certified figure yet" is a SENTENCE, not a figure — it must not be
+   dressed as one, or an absence starts to look like a reading. */
+.stat-tile .stat-value.stat-empty {
+  font-family: var(--font-ui);
+  font-size: var(--text-lg);
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
 .stat-tile .stat-unit {
+  font-family: var(--font-ui);
   font-size: var(--text-base);
   font-weight: 400;
   color: var(--color-text-muted);
@@ -1303,6 +1471,15 @@ ul.detail-panel li {
   margin: var(--space-1) 0 var(--space-2);
   color: var(--color-text-muted);
   font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+}
+/* The scope receipt: the persisted scope string, verbatim, so a mode slice
+   can never pass for the agency rollup (handoff 0041 #3). */
+.stat-tile .stat-scope {
+  margin: 0 0 var(--space-2);
+  font-size: 0.72rem;
+  letter-spacing: 0.02em;
+  color: var(--color-text-muted);
 }
 .stat-tile .stat-flags {
   display: flex;
@@ -2525,6 +2702,26 @@ button.figure-button {
     transform: translateY(-2px);
   }
 
+  /* The attention rail's pulse (handoff 0041). It breathes the GLOW only —
+     the rail itself, its shape and its sentence are already there without
+     it, and reduced motion simply leaves the static rail (rule 1 above).
+     The pulse never touches a figure. */
+  .attn-alert::before {
+    animation: hw-rail-pulse 2.6s ease-in-out infinite;
+  }
+  .attn-watch::before {
+    animation: hw-rail-pulse 3.4s ease-in-out infinite;
+  }
+  @keyframes hw-rail-pulse {
+    0%,
+    100% {
+      box-shadow: 0 0 6px var(--rail-glow);
+    }
+    50% {
+      box-shadow: 0 0 18px var(--rail-glow);
+    }
+  }
+
   @keyframes hw-rise-in {
     from {
       opacity: 0;
@@ -2705,9 +2902,13 @@ button.figure-button {
   width: 100%;
   height: 100%;
 }
+/* The sparkline is an IDENTITY moment (handoff 0041): one accent, and it
+   encodes nothing about whether the trend is good — a rising line and a
+   falling line are drawn the same. 6.01:1 (light) / 7.13:1 (dark) against
+   the card surface as a meaningful non-text mark (SC 1.4.11 wants 3:1). */
 .sparkline-line {
   fill: none;
-  stroke: var(--series-1);
+  stroke: var(--signal);
   stroke-width: 2;
   stroke-linejoin: round;
   stroke-linecap: round;
@@ -2723,12 +2924,12 @@ button.figure-button {
   margin: -7px 0 0 -7px;
   padding: 0;
   border-radius: 50%;
-  border: 2px solid var(--series-1);
+  border: 2px solid var(--signal);
   background: var(--color-bg);
   cursor: pointer;
 }
 .spark-point.certified {
-  background: var(--series-1);
+  background: var(--signal);
 }
 .spark-point:focus-visible {
   outline: var(--focus-ring);
@@ -2749,6 +2950,190 @@ button.figure-button {
 /* ---- Audience lens bar (handoff 0024, design point 2) ---- */
 .lens-bar {
   margin: var(--space-3) 0;
+}
+
+/* ---- The control deck (handoff 0041, design point 1) ----
+   Mode, Audience lens and "Group trends by" in ONE etched strip. Every
+   control is visible at once — no fly-out (fly-outs hide state) and no
+   sub-menu (a sub-menu splits the navigation). Flat: a hairline frame and
+   an internal hairline divider, no bevel and no elevation. */
+.control-deck {
+  margin: var(--space-3) 0 var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-2);
+  background: var(--color-bg);
+}
+.control-deck > * {
+  margin: 0;
+  padding: var(--space-3);
+}
+.control-deck > * + * {
+  border-top: 1px solid var(--color-border);
+}
+.control-deck .chart-desc:first-child {
+  margin-top: 0;
+}
+
+/* The segmented control: one etched frame, the pressed segment filled with
+   the identity accent (never a status color — an active filter is neither
+   good nor bad). aria-pressed carries the state; the label never
+   disappears, so selection is never color alone. */
+.filter-bar.seg {
+  gap: var(--space-1);
+}
+.filter-bar.seg button {
+  border-radius: var(--radius-1);
+  letter-spacing: 0.02em;
+}
+
+.mode-bar .mode-scope-receipt {
+  margin: var(--space-2) 0 var(--space-1);
+  font-size: 0.75rem;
+  letter-spacing: 0.03em;
+  color: var(--color-text-muted);
+}
+
+/* The dropdown form of the Mode selector (react-aria-components Select),
+   used once the mode count passes MODE_SEGMENT_MAX. Keyboard and
+   screen-reader semantics come from the library; only the skin is ours. */
+.mode-select {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.mode-select .filter-bar-label {
+  margin: 0;
+}
+.mode-select-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-width: 16rem;
+  font: inherit;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-input-border);
+  border-radius: var(--radius-1);
+  background: var(--color-surface);
+  color: var(--color-text);
+  cursor: pointer;
+}
+.mode-select-button[data-focus-visible] {
+  outline: var(--focus-ring);
+  outline-offset: 2px;
+}
+.mode-select-arrow {
+  color: var(--color-text-muted);
+}
+.mode-popover {
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-2);
+  box-shadow: var(--shadow-2);
+  min-width: 16rem;
+  max-height: 20rem;
+  overflow: auto;
+}
+.mode-listbox {
+  padding: var(--space-1);
+  outline: none;
+}
+.mode-option {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-2);
+  border-radius: var(--radius-1);
+  cursor: pointer;
+  outline: none;
+}
+.mode-option[data-focused],
+.mode-option[data-hovered] {
+  background: var(--color-surface);
+}
+/* The selected option keeps its words AND gains the identity rail — the
+   check is never color alone. */
+.mode-option[data-selected] {
+  border-left: 3px solid var(--signal);
+  font-weight: 700;
+}
+.mode-option[data-focus-visible] {
+  outline: var(--focus-ring);
+  outline-offset: -2px;
+}
+/* Every option carries its scope string verbatim: what you pick and what
+   the rows are filtered on are the same string, on screen. */
+.mode-option-scope {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--color-text-muted);
+}
+
+/* ---- The per-mode empty state (handoff 0041, design point 4) ----
+   Designed, warm, and honest: it names the mode, says why the space is
+   empty, and offers the next step. It never renders a fabricated zero. */
+.mode-empty {
+  padding: var(--space-4);
+  margin: var(--space-4) 0;
+  border-left: 3px solid var(--signal);
+  background:
+    linear-gradient(90deg, var(--signal-soft), transparent 55%),
+    var(--color-bg);
+}
+.mode-empty h2 {
+  margin: 0 0 var(--space-2);
+}
+.mode-empty-eyebrow {
+  margin: 0 0 var(--space-1);
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  color: var(--color-text-muted);
+}
+
+/* ---- Honest attention (handoff 0041) ----
+   `.attn` puts a halo on the card FRAME — an edge-rail, never a treatment
+   behind a figure (that would eat the figure's contrast ratio, and glow
+   must say "look here", never "this number is big"). Scarce: only a card
+   that genuinely needs a person. The accompanying `.card-flag` carries a
+   shape and a sentence, so the signal survives without any glow at all —
+   and there is deliberately NO "all clear" glow. */
+.attn {
+  position: relative;
+}
+.attn::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  pointer-events: none;
+}
+.attn-alert::before {
+  --rail-glow: var(--status-alert-glow);
+  background: var(--status-alert);
+  box-shadow: 0 0 14px var(--rail-glow);
+}
+.attn-watch::before {
+  --rail-glow: var(--status-watch-glow);
+  background: var(--status-watch);
+  box-shadow: 0 0 14px var(--rail-glow);
+}
+.card-flag {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: var(--space-2) 0;
+  font-weight: 600;
+}
+.card-flag svg {
+  flex: none;
+}
+.card-flag-alert {
+  color: var(--status-alert);
+}
+.card-flag-watch {
+  color: var(--status-watch);
 }
 
 /* ---- The admin area (handoff 0025) ----

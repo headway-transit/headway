@@ -15,6 +15,17 @@
  *   5. Unresolved DQ issues by severity — thin stacked bars in RESERVED
  *      status colors (icon + label, never color alone).
  *
+ * MODE VIEWS (handoff 0041): a data-driven Mode selector sits in the
+ * control deck beside the Audience lens. Its options are the distinct
+ * `mode:*` scopes that actually carry persisted figures (src/reports/
+ * modes.ts) — never a hardcoded mode list. Selecting a mode RE-SCOPES:
+ * every tile, chart, sparkline and table filters to that mode's own stored
+ * rows, verbatim, each with its metric_value_id receipt. Nothing on this
+ * page sums, averages, or synthesizes a per-mode figure — not even a total
+ * across modes. Surfaces that carry no mode dimension (operations metrics
+ * are per route; DQ tallies count issues) SAY they are not narrowed,
+ * instead of quietly showing agency numbers under a mode heading.
+ *
  * NUMBERS STAY SACRED. Every displayed figure (tile, tooltip, direct label,
  * table cell) is the API's string verbatim; coverage percentages come from
  * the string-only decimal shift in src/format.ts. The ONLY numeric parses in
@@ -48,6 +59,14 @@ import {
   overlapsRange,
 } from "../reports/granularity";
 import type { Granularity } from "../reports/granularity";
+import {
+  AGENCY_SCOPE,
+  isAgencyScope,
+  modeOptions,
+  rowInScope,
+  selectedModeLabel,
+} from "../reports/modes";
+import { ModeBar } from "../components/ModeBar";
 import { ChartCard } from "../components/charts/ChartCard";
 import {
   ChartLegend,
@@ -370,13 +389,17 @@ function OpsMetricCard({
 function StatTile({
   values,
   metric,
+  scope,
   spark,
   bucket,
   openSparkId,
   onToggleSpark,
 }: {
+  /** Already re-scoped to the selected mode — selection, never arithmetic. */
   values: MetricValue[];
   metric: string;
+  /** The selected scope string, shown verbatim when the tile is empty. */
+  scope: string;
   /** Persisted history figures for this tile's trend (handoff 0024 #2). */
   spark: SparklinePoint[];
   bucket: HistoryBucketKind;
@@ -421,6 +444,9 @@ function StatTile({
         <p className="stat-period">
           {copy.dashboard.noCertifiedDetail(metricLabel(metric))}
         </p>
+        <p className="stat-scope mono">
+          {copy.dashboard.mode.scopeReceipt(scope)}
+        </p>
         {trend}
       </li>
     );
@@ -435,6 +461,12 @@ function StatTile({
       </p>
       <p className="stat-period">
         {copy.dashboard.tilePeriod(latest.period_start, latest.period_end)}
+      </p>
+      {/* The row's OWN scope, verbatim — a mode slice can never pass for
+          the agency rollup, and the agency rollup can never pass for a
+          mode. */}
+      <p className="stat-scope mono">
+        {copy.dashboard.mode.scopeReceipt(latest.scope)}
       </p>
       <p className="stat-flags">
         <span className="tag certified">{copy.dashboard.tileCertifiedTag}</span>
@@ -539,6 +571,9 @@ export function DashboardView() {
   // "Executive" (month) is the default rhythm.
   const [preset, setPreset] = useState<string | null>("executive");
   const [bucket, setBucket] = useState<HistoryBucketKind>("month");
+  // The mode dimension (handoff 0041). "agency" is the persisted
+  // agency-wide rollup, NOT a client-side total of the modes.
+  const [modeScope, setModeScope] = useState<string>(AGENCY_SCOPE);
   const [history, setHistory] = useState<HistoryResponse | null>(null);
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [openSparkId, setOpenSparkId] = useState<string | null>(null);
@@ -562,7 +597,12 @@ export function DashboardView() {
     let stale = false;
     setHistory(null);
     setHistoryError(null);
-    getMetricsHistory({ bucket })
+    // A mode selection RE-SCOPES the request: the server returns that
+    // mode's persisted rows. The agency default sends no scope param so
+    // the fleet-wide rows come back exactly as before.
+    getMetricsHistory(
+      isAgencyScope(modeScope) ? { bucket } : { bucket, scope: modeScope },
+    )
       .then((data) => {
         if (!stale) setHistory(data);
       })
@@ -573,7 +613,7 @@ export function DashboardView() {
     return () => {
       stale = true;
     };
-  }, [bucket]);
+  }, [bucket, modeScope]);
 
   const applyPreset = (key: string | null) => {
     setPreset(key);
@@ -599,7 +639,7 @@ export function DashboardView() {
         if (
           point.metric === metric &&
           point.category !== "ops" &&
-          (point.scope === "fleet" || point.scope === "agency")
+          rowInScope(point.scope, modeScope)
         ) {
           out.push({ point, bucketKey: b.bucket_key });
         }
@@ -615,15 +655,23 @@ export function DashboardView() {
   const opsFirst = preset === "operations";
 
   const all = values ?? [];
+  // The mode dimension, DERIVED FROM THE DATA (handoff 0041 #2): the
+  // distinct mode:* scopes the API actually served. No mode is named in
+  // the frontend — a new mode appears the day its calc wave lands.
+  const modeOpts = modeOptions(all);
+  const modeLabel = selectedModeLabel(modeScope);
+  const agencyView = isAgencyScope(modeScope);
+  // Every NTD row in the selected scope, whatever the dates. RE-SCOPE, not
+  // derive: this is a filter over the served rows and nothing else.
+  const scopedNtd = all.filter((v) => !isOps(v) && rowInScope(v.scope, modeScope));
   // Date-range SELECTION (string comparison on ISO dates — see
   // granularity.ts): every chart and table below the filter row shows the
   // same slice, so the numbers always agree. The hero tiles sit ABOVE the
   // row and keep their fixed "latest certified" meaning.
   const byMetric = (metric: string) =>
-    all
+    scopedNtd
       .filter(
         (v) =>
-          !isOps(v) &&
           v.metric === metric &&
           overlapsRange(v.period_start, v.period_end, fromDate, toDate),
       )
@@ -774,6 +822,23 @@ export function DashboardView() {
     ...vrhValues.map((v) => ({ value: v })),
   ];
 
+  /**
+   * A card's empty line. Under a mode it NAMES the mode and says why the
+   * space is empty (handoff 0041 #4) — a fabricated zero is never shown,
+   * and a blank card never passes for "nothing happened".
+   */
+  const cardEmpty = (what: string, agencyText: string) =>
+    agencyView
+      ? agencyText
+      : copy.dashboard.mode.cardEmpty(
+          copy.dashboard.mode.cardEmptyWhat[what] ?? what,
+          modeLabel,
+        );
+
+  /** Does the selected mode have any NTD figure in the selected dates? */
+  const scopedInRange =
+    uptValues.length + vrmValues.length + vrhValues.length;
+
   return (
     <>
       <h1>{copy.dashboard.heading}</h1>
@@ -794,13 +859,23 @@ export function DashboardView() {
 
       {values && (
         <>
-          <LensBar
-            preset={preset}
-            bucket={bucket}
-            groupingNote={history?.grouping_note ?? null}
-            onPreset={applyPreset}
-            onBucket={applyBucket}
-          />
+          {/* The control deck: Mode, then Audience lens and Group trends
+              by — one honest strip, everything visible at once (handoff
+              0041 #1: no fly-out, no sub-menu). */}
+          <div className="control-deck">
+            <ModeBar
+              options={modeOpts}
+              scope={modeScope}
+              onScope={setModeScope}
+            />
+            <LensBar
+              preset={preset}
+              bucket={bucket}
+              groupingNote={history?.grouping_note ?? null}
+              onPreset={applyPreset}
+              onBucket={applyBucket}
+            />
+          </div>
           {/* A trend that failed to load is stated, never blank — the tiles
               themselves still render their certified figures. */}
           {historyError && (
@@ -809,14 +884,19 @@ export function DashboardView() {
             </p>
           )}
           <section aria-label={copy.dashboard.tilesHeading}>
-            <h2>{copy.dashboard.tilesHeading}</h2>
+            <h2>
+              {agencyView
+                ? copy.dashboard.tilesHeading
+                : copy.dashboard.mode.tilesFor(modeLabel)}
+            </h2>
             <p className="chart-desc">{copy.dashboard.tilesIntro}</p>
             <ul className="stat-grid">
               {["vrm", "vrh", "upt"].map((metric) => (
                 <StatTile
                   key={metric}
-                  values={all}
+                  values={scopedNtd}
                   metric={metric}
+                  scope={modeScope}
                   spark={sparkFor(metric)}
                   bucket={bucket}
                   openSparkId={openSparkId}
@@ -854,8 +934,12 @@ export function DashboardView() {
               onGranularity={setGranularity}
             />
             {(() => {
-            const chartsGrid = (
-            <div className="dashboard-grid">
+            /* The three FIGURE cards — the only ones the Mode selector
+               re-scopes. The data-quality card below is deliberately kept
+               out of this group: it carries no mode dimension, so an empty
+               mode must never make an open blocking issue disappear. */
+            const figureCards = (
+            <>
               {/* (2) daily UPT line */}
               <ChartCard
                 heading={copy.dashboard.upt.heading}
@@ -880,7 +964,7 @@ export function DashboardView() {
                 }}
               >
                 {uptValues.length === 0 ? (
-                  <p>{copy.dashboard.upt.empty}</p>
+                  <p>{cardEmpty("upt", copy.dashboard.upt.empty)}</p>
                 ) : (
                   <>
                     <TimeSeriesChart
@@ -919,7 +1003,7 @@ export function DashboardView() {
                 }}
               >
                 {vrmValues.length === 0 && vrhValues.length === 0 ? (
-                  <p>{copy.dashboard.service.empty}</p>
+                  <p>{cardEmpty("service", copy.dashboard.service.empty)}</p>
                 ) : (
                   <>
                     <div className="small-multiples">
@@ -972,7 +1056,7 @@ export function DashboardView() {
                 }}
               >
                 {coverageSeries.length === 0 ? (
-                  <p>{copy.dashboard.coverage.empty}</p>
+                  <p>{cardEmpty("coverage", copy.dashboard.coverage.empty)}</p>
                 ) : (
                   <>
                     <ChartLegend series={coverageSeries} />
@@ -991,10 +1075,32 @@ export function DashboardView() {
                 )}
               </ChartCard>
 
-              {/* (5) unresolved DQ issues by severity — status colors */}
+            </>
+            );
+
+            /* (5) unresolved DQ issues by severity — status colors.
+                  The honest attention rail (handoff 0041): an OPEN BLOCKING
+                  issue is the one thing on this page that genuinely needs a
+                  human, so the card FRAME carries the alert rail — with a
+                  shape and a sentence, so the signal survives for anyone
+                  who perceives no glow. The figures inside are untouched.
+                  It is ALWAYS rendered, whatever the mode: an unresolved
+                  blocking issue must never vanish because a mode slice
+                  happens to be empty. */
+            const dqCard = (
               <ChartCard
                 heading={copy.dashboard.dq.heading}
                 description={copy.dashboard.dq.description}
+                flag={
+                  (dqCounts?.open.by_severity?.blocking ?? 0) > 0
+                    ? {
+                        tone: "alert",
+                        label: copy.dashboard.dq.blockingFlag(
+                          formatCount(dqCounts?.open.by_severity?.blocking ?? 0),
+                        ),
+                      }
+                    : undefined
+                }
                 table={{
                   caption: copy.dashboard.dq.tableCaption,
                   columns: [
@@ -1040,11 +1146,19 @@ export function DashboardView() {
                     )}
                   </>
                 )}
+                {/* The DQ queue carries NO mode dimension: it counts
+                    issues, not figures. Under a mode the card says it is
+                    not narrowed, rather than showing agency tallies under
+                    a mode heading (handoff 0041). */}
+                {!agencyView && (
+                  <p className="chart-desc">
+                    {copy.dashboard.mode.dqNote(modeLabel)}
+                  </p>
+                )}
                 <p>
                   <Link to="/dq">{copy.dashboard.dq.goToQueue}</Link>
                 </p>
               </ChartCard>
-            </div>
             );
 
             // ---- Operations metrics (handoff 0014, design point 5):
@@ -1057,6 +1171,15 @@ export function DashboardView() {
             <section aria-label={copy.ops.dashboard.heading}>
               <h2>{copy.ops.dashboard.heading}</h2>
               <p className="chart-desc">{copy.ops.dashboard.intro}</p>
+              {/* Operations metrics are computed PER ROUTE. There is no
+                  per-mode operations figure, so this section is not
+                  narrowed by the Mode selector — and says so, rather than
+                  letting agency figures sit under a mode heading. */}
+              {!agencyView && (
+                <p className="chart-desc">
+                  {copy.dashboard.mode.opsNote(modeLabel)}
+                </p>
+              )}
               {otpValues.length === 0 && cvhValues.length === 0 ? (
                 <p>{copy.ops.dashboard.empty}</p>
               ) : (
@@ -1130,14 +1253,47 @@ export function DashboardView() {
             </section>
             );
 
+            /* An INVITING per-mode empty state (handoff 0041 #4): a mode
+               with nothing computed in these dates gets a designed panel
+               that names it and says why it is empty — never a blank grid
+               of "0"s, and never a fabricated zero. The operations section
+               still renders below it (with its own not-narrowed note),
+               because it carries no mode dimension at all. */
+            const modeEmpty = (
+              <section
+                className="card mode-empty"
+                aria-label={copy.dashboard.mode.emptyHeading(modeLabel)}
+              >
+                <p className="mode-empty-eyebrow mono">
+                  {copy.dashboard.mode.scopeReceipt(modeScope)}
+                </p>
+                <h2>{copy.dashboard.mode.emptyHeading(modeLabel)}</h2>
+                <p>{copy.dashboard.mode.emptyBody(modeLabel)}</p>
+                <p className="chart-desc">{copy.dashboard.mode.emptyWiden}</p>
+                {canComputeFigures(session) && (
+                  <p>
+                    <Link to="/calc-runs">{copy.dashboard.emptyDoor}</Link>
+                  </p>
+                )}
+              </section>
+            );
+            /* The data-quality card rides along either way — a mode with no
+               figures must not hide an open blocking issue. */
+            const figuresBlock = (
+              <div className="dashboard-grid">
+                {!agencyView && scopedInRange === 0 ? modeEmpty : figureCards}
+                {dqCard}
+              </div>
+            );
+
             return opsFirst ? (
               <>
                 {opsSection}
-                {chartsGrid}
+                {figuresBlock}
               </>
             ) : (
               <>
-                {chartsGrid}
+                {figuresBlock}
                 {opsSection}
               </>
             );
