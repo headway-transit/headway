@@ -80,6 +80,27 @@ wave lands that language on the real map**, and it is explicitly **queued behind
    accessible) — keyboard users reach every flagged item through the list, matching the
    demo.
 
+### Mode-appropriate geometry (binding — the visualization adapts to the mode)
+
+8. **One visual language, mode-honest geometry.** A single schematic/diagram treatment
+   is only *honest* for rail (fixed lines, ordered stations — geography can be
+   abstracted). Applied to the rest of the service it misrepresents:
+   - **Fixed-route bus** runs on real streets → render GTFS `shapes.txt` polylines that
+     follow the streets over the forensic basemap, **not** straight schematic connectors.
+   - **Rail** → the diagram/Vignelli treatment is honest and iconic *here*; offer it as
+     an optional **"diagram view"** toggle for rail, never as the default for street modes.
+   - **Demand-responsive (Vanpool, Via Connect, Dial-A-Ride/paratransit)** has **no fixed
+     lines at all** — a schematic fabricates a structure the service does not have. Render
+     the **service zone** (translucent boundary + demand density) and trips as
+     origin→destination arcs or vehicle points.
+9. **Demand-responsive privacy floor (non-negotiable).** DAR/paratransit locations can
+   disclose disability status (already withheld column-level, migration 0028 +
+   `docs/data-classification.md`). This view **never plots rider-address pins** — it shows
+   **aggregated zone density**, not dots on homes. Honesty (no fabricated network) and
+   privacy (no rider re-identification) are the same move here. The demo's flat SVG
+   schematic was a CSP stand-in *and* is mode-apt only for rail — do not carry it forward
+   as the street-mode or demand-responsive default.
+
 ## Outputs
 
 Two contrast-verified basemap styles (light default) + the independent map-theme
@@ -95,11 +116,17 @@ for), then the mode marks, then the findings layer + inspector.
 - **Where does the map-theme toggle live** — in the map controls only, or promoted to a
   global setting alongside app theme? (Recommended: map-scoped, since it is a legibility
   choice about the tiles, not an app-wide preference.)
-- **Route geometry fidelity** — `/geometry/routes` v0 is the *schematic* built from
-  ordered stop sequences, not true GTFS `shapes.txt` polylines. On a real basemap a
-  schematic line will not follow the streets; do we ingest `shapes.txt` for this view,
-  or label the lines as schematic connectors? (This is the honesty seam to get right —
-  a line that looks like a street but isn't would mislead.)
+- **Route geometry fidelity (direction set, point 8).** `/geometry/routes` v0 is the
+  *schematic* built from ordered stop sequences, not true GTFS `shapes.txt` polylines —
+  it must NOT be the street-mode default (a line that looks like a street but isn't would
+  mislead). Resolved direction: ingest `shapes.txt` for fixed-route street rendering;
+  reserve the schematic/diagram for the optional rail view. Remaining question is
+  sequencing — does `shapes.txt` ingestion gate the first map wave, or does the map ship
+  fixed-route as points/stops first and add street polylines in a follow-up?
+- **Demand-responsive zone data** — the service-zone boundary + demand-density for
+  VP/Via/DAR needs a source (zone polygons from the agency, or derived from trip O/D
+  aggregates). What's the minimum privacy-safe aggregate (hex-bin? zone-level counts?)
+  that shows density without re-identifying a paratransit rider?
 - **Sprite generation in the license/offline gate** — the mode-shape sprite sheet must
   be built and vendored self-hosted; confirm the build step fits the existing
   basemap-asset pipeline (handoff 0027's download-basemap path).
