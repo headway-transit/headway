@@ -807,6 +807,18 @@
       "citation": "Sampling floor — 2026 NTD Policy Manual, Full Reporting, p. 149"
     },
     {
+      "quote": "A transit vehicle is in revenue service when it is providing public transportation and is available to carry passengers.",
+      "citation": "Revenue Service — 2026 NTD Policy Manual, Full Reporting, p. 128, quoted above"
+    },
+    {
+      "quote": "Unlinked Passenger Trips (UPT) are the number of boardings on public transportation vehicles … . Employees or contractors on transit agency business are not passengers.",
+      "citation": "UPT / non-passengers — 2026 NTD Policy Manual, Full Reporting, p. 143, quoted above"
+    },
+    {
+      "quote": "When transit vehicles are 'deadheading,' they operate closed door and do not carry passengers. Deadhead includes … Leaving or returning to the garage or yard facility …; … When the driver does not have the duty to carry passengers.",
+      "citation": "Deadhead — 2026 NTD Policy Manual, Full Reporting, p. 129, quoted above"
+    },
+    {
       "quote": "However, if the vehicle trips with missing data exceed 2 percent of total trips, agencies must have a qualified statistician approve the factoring method used to account for the missing percentage.",
       "citation": "The permission sentence — 2026 NTD Policy Manual, Full Reporting, p. 146, PDF p. 164"
     },
@@ -835,6 +847,238 @@
     {
       "quote": "VOMS is the number of revenue vehicles/passenger cars operated to meet the maximum service requirement during the month … excludes atypical days or one-time special events",
       "citation": "Monthly VOMS — 2025 NTD Monthly and Weekly Reference Policy Manual, p. 33"
+    }
+  ],
+  "vp_upt_v0": [
+    {
+      "quote": "Vanpool operates as a ride sharing arrangement, providing transportation to a pre-arranged group of individuals. To be considered public transportation, Vanpool programs must • Use vehicles with a minimum seating capacity of seven people, including the driver; • Use vehicles for which 80 percent of the yearly mileage comes from commuting; • Be open to the public (any vans that are restricted by rule to particular employers are not public transportation); • Be actively engaged in advertising the Vanpool service to the public and in matching interested members of the public to vans with available seats; and • Be publicly sponsored.",
+      "citation": "The VP mode definition — 2026 NTD Policy Manual (Full Reporting), p. 36"
+    },
+    {
+      "quote": "Actual Vehicle Revenue Hours (VRH) and Actual Vehicle Revenue Miles (VRM) are the hours and miles vehicles travel while in revenue service. Revenue hours for conventional scheduled services include the following: • Running time • Layover/recovery time ... VRM and VRH exclude the miles and hours related to the following: • Deadhead time • Operator training • Maintenance testing • Other non-revenue uses of the vehicles.",
+      "citation": "VRM/VRH revenue-service definition — 2026 NTD Policy Manual (Full Reporting), p. 128"
+    },
+    {
+      "quote": "A transit vehicle is in revenue service when it is providing public transportation and is available to carry passengers.",
+      "citation": "VRM/VRH revenue-service definition — 2026 NTD Policy Manual (Full Reporting), p. 128"
+    },
+    {
+      "quote": "all movement, including non-revenue uses",
+      "citation": "VRM/VRH revenue-service definition — 2026 NTD Policy Manual (Full Reporting), p. 128"
+    },
+    {
+      "quote": "FTA mandates that almost all service data be collected and recorded daily so that the data are 100 percent accurate. For example, agencies must collect and record 100 percent of all miles and hours vehicles travel in revenue service. FTA does not allow agencies to estimate these data. However, FTA recognizes that certain statistics are challenging to collect ... transit agencies may estimate Unlinked Passenger Trips (UPT) and PMT through sampling ...",
+      "citation": "The 100%-count, no-estimation rule — 2026 NTD Policy Manual (Full Reporting), p. 122"
+    },
+    {
+      "quote": "For agencies that operate Vanpools, there may be times when passengers fail to report data for VRM and VRH for certain trips. If this occurs, please contact the assigned NTD analyst.",
+      "citation": "VP VRM/VRH is rider-self-reported — 2026 NTD Policy Manual (Full Reporting), p. 131"
+    },
+    {
+      "quote": "Unlinked Passenger Trips (UPT) are the number of boardings on public transportation vehicles during the fiscal year. ... For Vanpool (VP) service, agencies generally must report the driver as a passenger and include the driver in UPT counts. In almost all cases, the Vanpool driver is unpaid and is traveling for personal reasons (e.g., work commuting, shopping). In the rare case when the driver is employed as a driver and not traveling for personal reasons, then the driver should not be counted as a passenger.",
+      "citation": "VP driver-as-passenger UPT rule — 2026 NTD Policy Manual (Full Reporting), p. 143"
+    },
+    {
+      "quote": "Demand Response and Vanpool",
+      "citation": "VP — 2026 NTD Policy Manual (Full Reporting), and DR"
+    },
+    {
+      "quote": "The largest number of vehicles in revenue service at any one time during the reporting year (includes atypical service).",
+      "citation": "VP — 2026 NTD Policy Manual (Full Reporting), and DR"
+    },
+    {
+      "quote": "and all spare vehicles available at this time.",
+      "citation": "VP — 2026 NTD Policy Manual (Full Reporting), and DR"
+    },
+    {
+      "quote": "VOMS excludes atypical days or one-time special events for non-DR modes.",
+      "citation": "VP — 2026 NTD Policy Manual (Full Reporting), and DR"
+    },
+    {
+      "quote": "For fixed-route modes and DR services, report days operated when service was available, even if no rides were provided. For VP modes, only report days operated when service was provided. If the service was available but no trips took place, this does not count as a day operated.",
+      "citation": "VP days-operated exception (p. 155), verbatim — 2026 NTD Policy Manual (Full Reporting), context, not itself computed here"
+    },
+    {
+      "quote": "This is the number of seats onboard the vehicle and does not include the driver's seat except for Vanpool where the driver is typically a passenger.",
+      "citation": "Seating-capacity note (p. 202), verbatim — 2026 NTD Policy Manual (Full Reporting), corroborating the driver-as-passenger treatment"
+    },
+    {
+      "quote": "explain the refusal",
+      "citation": "DELIVER — 2026 NTD Policy Manual (Full Reporting), context only, never a reportable figure"
+    }
+  ],
+  "vp_voms_v0": [
+    {
+      "quote": "Vanpool operates as a ride sharing arrangement, providing transportation to a pre-arranged group of individuals. To be considered public transportation, Vanpool programs must • Use vehicles with a minimum seating capacity of seven people, including the driver; • Use vehicles for which 80 percent of the yearly mileage comes from commuting; • Be open to the public (any vans that are restricted by rule to particular employers are not public transportation); • Be actively engaged in advertising the Vanpool service to the public and in matching interested members of the public to vans with available seats; and • Be publicly sponsored.",
+      "citation": "The VP mode definition — 2026 NTD Policy Manual (Full Reporting), p. 36"
+    },
+    {
+      "quote": "Actual Vehicle Revenue Hours (VRH) and Actual Vehicle Revenue Miles (VRM) are the hours and miles vehicles travel while in revenue service. Revenue hours for conventional scheduled services include the following: • Running time • Layover/recovery time ... VRM and VRH exclude the miles and hours related to the following: • Deadhead time • Operator training • Maintenance testing • Other non-revenue uses of the vehicles.",
+      "citation": "VRM/VRH revenue-service definition — 2026 NTD Policy Manual (Full Reporting), p. 128"
+    },
+    {
+      "quote": "A transit vehicle is in revenue service when it is providing public transportation and is available to carry passengers.",
+      "citation": "VRM/VRH revenue-service definition — 2026 NTD Policy Manual (Full Reporting), p. 128"
+    },
+    {
+      "quote": "all movement, including non-revenue uses",
+      "citation": "VRM/VRH revenue-service definition — 2026 NTD Policy Manual (Full Reporting), p. 128"
+    },
+    {
+      "quote": "FTA mandates that almost all service data be collected and recorded daily so that the data are 100 percent accurate. For example, agencies must collect and record 100 percent of all miles and hours vehicles travel in revenue service. FTA does not allow agencies to estimate these data. However, FTA recognizes that certain statistics are challenging to collect ... transit agencies may estimate Unlinked Passenger Trips (UPT) and PMT through sampling ...",
+      "citation": "The 100%-count, no-estimation rule — 2026 NTD Policy Manual (Full Reporting), p. 122"
+    },
+    {
+      "quote": "For agencies that operate Vanpools, there may be times when passengers fail to report data for VRM and VRH for certain trips. If this occurs, please contact the assigned NTD analyst.",
+      "citation": "VP VRM/VRH is rider-self-reported — 2026 NTD Policy Manual (Full Reporting), p. 131"
+    },
+    {
+      "quote": "Unlinked Passenger Trips (UPT) are the number of boardings on public transportation vehicles during the fiscal year. ... For Vanpool (VP) service, agencies generally must report the driver as a passenger and include the driver in UPT counts. In almost all cases, the Vanpool driver is unpaid and is traveling for personal reasons (e.g., work commuting, shopping). In the rare case when the driver is employed as a driver and not traveling for personal reasons, then the driver should not be counted as a passenger.",
+      "citation": "VP driver-as-passenger UPT rule — 2026 NTD Policy Manual (Full Reporting), p. 143"
+    },
+    {
+      "quote": "Demand Response and Vanpool",
+      "citation": "VP — 2026 NTD Policy Manual (Full Reporting), and DR"
+    },
+    {
+      "quote": "The largest number of vehicles in revenue service at any one time during the reporting year (includes atypical service).",
+      "citation": "VP — 2026 NTD Policy Manual (Full Reporting), and DR"
+    },
+    {
+      "quote": "and all spare vehicles available at this time.",
+      "citation": "VP — 2026 NTD Policy Manual (Full Reporting), and DR"
+    },
+    {
+      "quote": "VOMS excludes atypical days or one-time special events for non-DR modes.",
+      "citation": "VP — 2026 NTD Policy Manual (Full Reporting), and DR"
+    },
+    {
+      "quote": "For fixed-route modes and DR services, report days operated when service was available, even if no rides were provided. For VP modes, only report days operated when service was provided. If the service was available but no trips took place, this does not count as a day operated.",
+      "citation": "VP days-operated exception (p. 155), verbatim — 2026 NTD Policy Manual (Full Reporting), context, not itself computed here"
+    },
+    {
+      "quote": "This is the number of seats onboard the vehicle and does not include the driver's seat except for Vanpool where the driver is typically a passenger.",
+      "citation": "Seating-capacity note (p. 202), verbatim — 2026 NTD Policy Manual (Full Reporting), corroborating the driver-as-passenger treatment"
+    },
+    {
+      "quote": "explain the refusal",
+      "citation": "DELIVER — 2026 NTD Policy Manual (Full Reporting), context only, never a reportable figure"
+    }
+  ],
+  "vp_vrh_v0": [
+    {
+      "quote": "Vanpool operates as a ride sharing arrangement, providing transportation to a pre-arranged group of individuals. To be considered public transportation, Vanpool programs must • Use vehicles with a minimum seating capacity of seven people, including the driver; • Use vehicles for which 80 percent of the yearly mileage comes from commuting; • Be open to the public (any vans that are restricted by rule to particular employers are not public transportation); • Be actively engaged in advertising the Vanpool service to the public and in matching interested members of the public to vans with available seats; and • Be publicly sponsored.",
+      "citation": "The VP mode definition — 2026 NTD Policy Manual (Full Reporting), p. 36"
+    },
+    {
+      "quote": "Actual Vehicle Revenue Hours (VRH) and Actual Vehicle Revenue Miles (VRM) are the hours and miles vehicles travel while in revenue service. Revenue hours for conventional scheduled services include the following: • Running time • Layover/recovery time ... VRM and VRH exclude the miles and hours related to the following: • Deadhead time • Operator training • Maintenance testing • Other non-revenue uses of the vehicles.",
+      "citation": "VRM/VRH revenue-service definition — 2026 NTD Policy Manual (Full Reporting), p. 128"
+    },
+    {
+      "quote": "A transit vehicle is in revenue service when it is providing public transportation and is available to carry passengers.",
+      "citation": "VRM/VRH revenue-service definition — 2026 NTD Policy Manual (Full Reporting), p. 128"
+    },
+    {
+      "quote": "all movement, including non-revenue uses",
+      "citation": "VRM/VRH revenue-service definition — 2026 NTD Policy Manual (Full Reporting), p. 128"
+    },
+    {
+      "quote": "FTA mandates that almost all service data be collected and recorded daily so that the data are 100 percent accurate. For example, agencies must collect and record 100 percent of all miles and hours vehicles travel in revenue service. FTA does not allow agencies to estimate these data. However, FTA recognizes that certain statistics are challenging to collect ... transit agencies may estimate Unlinked Passenger Trips (UPT) and PMT through sampling ...",
+      "citation": "The 100%-count, no-estimation rule — 2026 NTD Policy Manual (Full Reporting), p. 122"
+    },
+    {
+      "quote": "For agencies that operate Vanpools, there may be times when passengers fail to report data for VRM and VRH for certain trips. If this occurs, please contact the assigned NTD analyst.",
+      "citation": "VP VRM/VRH is rider-self-reported — 2026 NTD Policy Manual (Full Reporting), p. 131"
+    },
+    {
+      "quote": "Unlinked Passenger Trips (UPT) are the number of boardings on public transportation vehicles during the fiscal year. ... For Vanpool (VP) service, agencies generally must report the driver as a passenger and include the driver in UPT counts. In almost all cases, the Vanpool driver is unpaid and is traveling for personal reasons (e.g., work commuting, shopping). In the rare case when the driver is employed as a driver and not traveling for personal reasons, then the driver should not be counted as a passenger.",
+      "citation": "VP driver-as-passenger UPT rule — 2026 NTD Policy Manual (Full Reporting), p. 143"
+    },
+    {
+      "quote": "Demand Response and Vanpool",
+      "citation": "VP — 2026 NTD Policy Manual (Full Reporting), and DR"
+    },
+    {
+      "quote": "The largest number of vehicles in revenue service at any one time during the reporting year (includes atypical service).",
+      "citation": "VP — 2026 NTD Policy Manual (Full Reporting), and DR"
+    },
+    {
+      "quote": "and all spare vehicles available at this time.",
+      "citation": "VP — 2026 NTD Policy Manual (Full Reporting), and DR"
+    },
+    {
+      "quote": "VOMS excludes atypical days or one-time special events for non-DR modes.",
+      "citation": "VP — 2026 NTD Policy Manual (Full Reporting), and DR"
+    },
+    {
+      "quote": "For fixed-route modes and DR services, report days operated when service was available, even if no rides were provided. For VP modes, only report days operated when service was provided. If the service was available but no trips took place, this does not count as a day operated.",
+      "citation": "VP days-operated exception (p. 155), verbatim — 2026 NTD Policy Manual (Full Reporting), context, not itself computed here"
+    },
+    {
+      "quote": "This is the number of seats onboard the vehicle and does not include the driver's seat except for Vanpool where the driver is typically a passenger.",
+      "citation": "Seating-capacity note (p. 202), verbatim — 2026 NTD Policy Manual (Full Reporting), corroborating the driver-as-passenger treatment"
+    },
+    {
+      "quote": "explain the refusal",
+      "citation": "DELIVER — 2026 NTD Policy Manual (Full Reporting), context only, never a reportable figure"
+    }
+  ],
+  "vp_vrm_v0": [
+    {
+      "quote": "Vanpool operates as a ride sharing arrangement, providing transportation to a pre-arranged group of individuals. To be considered public transportation, Vanpool programs must • Use vehicles with a minimum seating capacity of seven people, including the driver; • Use vehicles for which 80 percent of the yearly mileage comes from commuting; • Be open to the public (any vans that are restricted by rule to particular employers are not public transportation); • Be actively engaged in advertising the Vanpool service to the public and in matching interested members of the public to vans with available seats; and • Be publicly sponsored.",
+      "citation": "The VP mode definition — 2026 NTD Policy Manual (Full Reporting), p. 36"
+    },
+    {
+      "quote": "Actual Vehicle Revenue Hours (VRH) and Actual Vehicle Revenue Miles (VRM) are the hours and miles vehicles travel while in revenue service. Revenue hours for conventional scheduled services include the following: • Running time • Layover/recovery time ... VRM and VRH exclude the miles and hours related to the following: • Deadhead time • Operator training • Maintenance testing • Other non-revenue uses of the vehicles.",
+      "citation": "VRM/VRH revenue-service definition — 2026 NTD Policy Manual (Full Reporting), p. 128"
+    },
+    {
+      "quote": "A transit vehicle is in revenue service when it is providing public transportation and is available to carry passengers.",
+      "citation": "VRM/VRH revenue-service definition — 2026 NTD Policy Manual (Full Reporting), p. 128"
+    },
+    {
+      "quote": "all movement, including non-revenue uses",
+      "citation": "VRM/VRH revenue-service definition — 2026 NTD Policy Manual (Full Reporting), p. 128"
+    },
+    {
+      "quote": "FTA mandates that almost all service data be collected and recorded daily so that the data are 100 percent accurate. For example, agencies must collect and record 100 percent of all miles and hours vehicles travel in revenue service. FTA does not allow agencies to estimate these data. However, FTA recognizes that certain statistics are challenging to collect ... transit agencies may estimate Unlinked Passenger Trips (UPT) and PMT through sampling ...",
+      "citation": "The 100%-count, no-estimation rule — 2026 NTD Policy Manual (Full Reporting), p. 122"
+    },
+    {
+      "quote": "For agencies that operate Vanpools, there may be times when passengers fail to report data for VRM and VRH for certain trips. If this occurs, please contact the assigned NTD analyst.",
+      "citation": "VP VRM/VRH is rider-self-reported — 2026 NTD Policy Manual (Full Reporting), p. 131"
+    },
+    {
+      "quote": "Unlinked Passenger Trips (UPT) are the number of boardings on public transportation vehicles during the fiscal year. ... For Vanpool (VP) service, agencies generally must report the driver as a passenger and include the driver in UPT counts. In almost all cases, the Vanpool driver is unpaid and is traveling for personal reasons (e.g., work commuting, shopping). In the rare case when the driver is employed as a driver and not traveling for personal reasons, then the driver should not be counted as a passenger.",
+      "citation": "VP driver-as-passenger UPT rule — 2026 NTD Policy Manual (Full Reporting), p. 143"
+    },
+    {
+      "quote": "Demand Response and Vanpool",
+      "citation": "VP — 2026 NTD Policy Manual (Full Reporting), and DR"
+    },
+    {
+      "quote": "The largest number of vehicles in revenue service at any one time during the reporting year (includes atypical service).",
+      "citation": "VP — 2026 NTD Policy Manual (Full Reporting), and DR"
+    },
+    {
+      "quote": "and all spare vehicles available at this time.",
+      "citation": "VP — 2026 NTD Policy Manual (Full Reporting), and DR"
+    },
+    {
+      "quote": "VOMS excludes atypical days or one-time special events for non-DR modes.",
+      "citation": "VP — 2026 NTD Policy Manual (Full Reporting), and DR"
+    },
+    {
+      "quote": "For fixed-route modes and DR services, report days operated when service was available, even if no rides were provided. For VP modes, only report days operated when service was provided. If the service was available but no trips took place, this does not count as a day operated.",
+      "citation": "VP days-operated exception (p. 155), verbatim — 2026 NTD Policy Manual (Full Reporting), context, not itself computed here"
+    },
+    {
+      "quote": "This is the number of seats onboard the vehicle and does not include the driver's seat except for Vanpool where the driver is typically a passenger.",
+      "citation": "Seating-capacity note (p. 202), verbatim — 2026 NTD Policy Manual (Full Reporting), corroborating the driver-as-passenger treatment"
+    },
+    {
+      "quote": "explain the refusal",
+      "citation": "DELIVER — 2026 NTD Policy Manual (Full Reporting), context only, never a reportable figure"
     }
   ],
   "vrh_v0": [
