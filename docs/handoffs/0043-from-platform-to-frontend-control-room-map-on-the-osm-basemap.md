@@ -91,8 +91,13 @@ wave lands that language on the real map**, and it is explicitly **queued behind
      an optional **"diagram view"** toggle for rail, never as the default for street modes.
    - **Demand-responsive (Vanpool, Via Connect, Dial-A-Ride/paratransit)** has **no fixed
      lines at all** — a schematic fabricates a structure the service does not have. Render
-     the **service zone** (translucent boundary + demand density) and trips as
-     origin→destination arcs or vehicle points.
+     the **service zone** (translucent boundary) and trips as **aggregated
+     origin→destination flows** (hub-to-hub, volume-weighted arcs) or vehicle points.
+     **Not demand-density heatmaps.** Demand *concentration* ("where should service
+     exist / where's the gap") is advisory — a **planning/optimization** concern that is a
+     separate Phase-2 initiative unlocked at production, **not** the compliance
+     instrument's job. Flows are observational (trips that occurred, in-scope); density is
+     advisory (out-of-scope here). Keep the boundary crisp.
 9. **Demand-responsive privacy floor (non-negotiable).** DAR/paratransit locations can
    disclose disability status (already withheld column-level, migration 0028 +
    `docs/data-classification.md`). This view **never plots rider-address pins** — it shows
