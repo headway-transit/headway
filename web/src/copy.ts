@@ -1628,6 +1628,15 @@ export const copy = {
        */
       wholeQueueNote:
         "These tallies always cover the whole data-quality queue. The date filter above narrows the charts, not this card — go to the data-quality queue to work the list.",
+      /**
+       * The honest attention flag (handoff 0041): the card FRAME carries an
+       * alert rail when a blocking issue is open, because that is the one
+       * thing on this page that genuinely needs a human. It is a shape + a
+       * sentence + a rail — never a rail alone, and never a treatment on a
+       * figure (glow says "look here", not "this number is big").
+       */
+      blockingFlag: (count: string) =>
+        `${count} blocking issue${count === "1" ? "" : "s"} ${count === "1" ? "is" : "are"} open. Blocking issues stop certification — this card needs a person.`,
       segmentLabel: (severity: string, count: string, status: string) =>
         `${severity}: ${count} ${status} issue${count === "1" ? "" : "s"}`,
       totalColumn: "Total",
@@ -1713,6 +1722,63 @@ export const copy = {
       groupingIntro: "How the grouping works, in the server's own words:",
       historyUnavailable: (message: string) =>
         `The trend history could not be loaded: ${message}`,
+    },
+
+    /**
+     * The Mode selector (handoff 0041, design points 1–4). Binding rules
+     * restated where the copy lives:
+     *
+     * - DATA-DRIVEN: the options are the distinct `mode:*` scopes that
+     *   actually carry persisted figures. No mode is named in this catalog
+     *   as an option — a hardcoded mode that could only ever show zero
+     *   would be a lie.
+     * - RE-SCOPE, NEVER DERIVE: picking a mode filters to that mode's own
+     *   persisted rows, verbatim, each with its metric_value_id receipt.
+     *   Nothing on this page adds, averages, or synthesizes a per-mode
+     *   number — not even a total across the modes.
+     * - INVITING EMPTY STATES: a mode with nothing computed yet says so
+     *   warmly and says why. A fabricated zero is never shown.
+     */
+    mode: {
+      rowLabel: "Mode",
+      allModes: "All modes (agency)",
+      /** The lowercase-vocabulary bucket for a record with no mode. */
+      unknownMode: "Mode not identified",
+      tosLabel: (mode: string, tos: string) => `${mode} — ${tos}`,
+      intro:
+        "Pick a mode to read that mode's own figures. Headway shows the rows the calculation service already stored for that mode, exactly as computed — it never adds the modes up, averages them, or makes a per-mode number of its own.",
+      /** Why the list is short — said out loud, so it never reads as a bug. */
+      dataDrivenNote:
+        "Only modes that already have computed figures are listed here. A mode joins the list the day its calculation wave lands; a mode that could only ever show a zero is never offered.",
+      /** The scope receipt: the persisted scope string, shown verbatim. */
+      scopeReceipt: (scope: string) => `Figure scope: ${scope}`,
+      agencyNote:
+        "Showing the agency-wide rollup — the figure the calculation service stored at scope “agency”, not a total this page added up from the modes.",
+      selectedNote: (modeLabel: string, scope: string) =>
+        `Showing ${modeLabel} only. Every figure below is a stored figure at scope “${scope}”, exactly as computed, and every one still opens its own receipt.`,
+      /** A mode with no figures at all in the current dates. */
+      emptyHeading: (modeLabel: string) => `No figures for ${modeLabel} yet`,
+      emptyBody: (modeLabel: string) =>
+        `Nothing has been computed for ${modeLabel} in the selected dates. Figures appear here the moment the calculation service stores one for this mode — Headway would rather show you an empty page than a number nobody computed.`,
+      emptyWiden:
+        "Widening the date range above, or switching back to all modes, will show what does exist.",
+      /** One card with nothing for this mode (the mode itself has data). */
+      cardEmpty: (what: string, modeLabel: string) =>
+        `No ${what} for ${modeLabel} in these dates yet. Headway shows a mode's figures only once they have been computed and stored — never a zero standing in for one.`,
+      cardEmptyWhat: {
+        upt: "unlinked passenger trips",
+        service: "vehicle revenue miles or hours",
+        coverage: "coverage information",
+      } as Record<string, string>,
+      /** Operations metrics carry no mode dimension — stated, never faked. */
+      opsNote: (modeLabel: string) =>
+        `Operations metrics are computed per route, not per mode, so this section is NOT narrowed to ${modeLabel} — it keeps showing every route. Narrowing it here would mean inventing a per-mode operations figure nobody computed.`,
+      /** DQ tallies count issues, not figures — also no mode dimension. */
+      dqNote: (modeLabel: string) =>
+        `These tallies always cover the whole data-quality queue. They are NOT narrowed to ${modeLabel}: the queue counts issues, and no issue tally has been counted per mode.`,
+      /** The tiles' heading gains the scope so a mode slice never passes
+       *  for the whole agency. */
+      tilesFor: (modeLabel: string) => `Latest certified figures — ${modeLabel}`,
     },
 
     /**

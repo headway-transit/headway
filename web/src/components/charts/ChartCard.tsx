@@ -9,11 +9,20 @@
  * The toggle mirrors the lineage view's pattern: plain buttons with
  * aria-pressed; the pressed one is the only filled one AND keeps its label,
  * so selection is never conveyed by color alone.
+ *
+ * ATTENTION (handoff 0041): a card may carry a `flag` — an edge-rail on the
+ * card FRAME plus a shape + a plain-language line. The rule the rail obeys:
+ * glow says "look here", never "this is good" and never "this number is
+ * big"; it never sits behind a figure (that would eat the figure's contrast
+ * ratio); and the flag always ships an icon and words, so the signal
+ * survives for a reader who perceives no glow at all. `prefers-reduced-
+ * motion` collapses the pulse to a static rail (see styles.css).
  */
 
 import { useId, useState } from "react";
 import type { ReactNode } from "react";
 import { copy } from "../../copy";
+import { SeverityIcon } from "../SeverityIcon";
 
 export interface ChartTable {
   caption: string;
@@ -32,6 +41,13 @@ export interface ChartCardProps {
    * OpsBadge every operations-metric card must carry (handoff 0014).
    */
   badge?: ReactNode;
+  /**
+   * An honest attention flag: `tone` picks the semantic status rail
+   * (watch | alert — never the identity accent, which encodes nothing) and
+   * `label` is the plain-language reason a human should look. Both are
+   * required together: a rail with no words would be color alone.
+   */
+  flag?: { tone: "watch" | "alert"; label: string };
   children: ReactNode;
 }
 
@@ -41,14 +57,24 @@ export function ChartCard({
   table,
   hint,
   badge,
+  flag,
   children,
 }: ChartCardProps) {
   const headingId = useId();
   const [view, setView] = useState<"chart" | "table">("chart");
 
   return (
-    <section className="card chart-card" aria-labelledby={headingId}>
+    <section
+      className={`card chart-card${flag ? ` attn attn-${flag.tone}` : ""}`}
+      aria-labelledby={headingId}
+    >
       <h2 id={headingId}>{heading}</h2>
+      {flag && (
+        <p className={`card-flag card-flag-${flag.tone}`}>
+          <SeverityIcon severity={flag.tone === "alert" ? "blocking" : "warning"} />
+          <span>{flag.label}</span>
+        </p>
+      )}
       {badge && <p className="chart-card-badge">{badge}</p>}
       <p className="chart-desc">{description}</p>
       <div
