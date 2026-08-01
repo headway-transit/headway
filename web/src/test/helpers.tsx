@@ -98,6 +98,22 @@ const DEFAULT_ROUTES: Record<string, RouteHandler> = {
       resolution_minutes_total: 0,
     },
   },
+  // /map's flagged-findings layer asks for the OPEN BLOCKING findings on
+  // every mount (handoff 0043, design point 6), and looks through recent
+  // calculation runs for the ones that named a finding. Defaults: an empty
+  // queue and no runs, so the many pre-existing map tests keep exercising
+  // exactly what they exercised. Findings tests override both.
+  "GET /dq/issues": {
+    status: 200,
+    body: {
+      issues: [],
+      total: 0,
+      limit: 50,
+      next_cursor: null,
+      has_more: false,
+    },
+  },
+  "GET /calc/runs": { status: 200, body: [] },
   // The dashboard fetches its sparkline history on every mount (handoff
   // 0024 #2); the default is an EMPTY series (no trend rendered), so the
   // many pre-existing dashboard tests keep exercising exactly what they

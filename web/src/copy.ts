@@ -2118,6 +2118,159 @@ export const copy = {
       unusable:
         "A basemap file exists on this installation but could not be used: the server did not answer a byte-range request with the expected map-archive format. The map falls back to the plain canvas. An administrator can re-run ./install/install.sh --download-basemap to replace the file.",
     },
+
+    /**
+     * Mode-aware vehicle marks (handoff 0043, design point 4).
+     *
+     * The vehicle-positions feed does not report a mode; the mode shown
+     * here is joined from the agency's OWN schedule data through the route
+     * the feed named. Every string below has to survive that: the map may
+     * never imply it knows a mode it was not told.
+     */
+    marks: {
+      /** Plain-language mode names. They mirror the GTFS Schedule
+       *  Reference's routes.txt route_type descriptions (gtfs.org) as the
+       *  transform's route_type→mode map applies them — the UI never
+       *  invents a mode definition. A mode string outside this list is
+       *  shown verbatim rather than renamed. */
+      modeLabels: {
+        bus: "Bus",
+        trolleybus: "Trolleybus",
+        rail: "Rail",
+        subway: "Subway or metro",
+        tram: "Tram, streetcar or light rail",
+        monorail: "Monorail",
+        ferry: "Ferry",
+        cable_tram: "Cable tram",
+        funicular: "Funicular",
+        aerial_lift: "Aerial lift (gondola or cable car)",
+        unknown: "Mode not known",
+      } as Record<string, string>,
+      legendHeading: "Vehicle marks by mode",
+      /** The honesty line under the mode legend: what a mode IS here. */
+      legendNote:
+        "The position feed does not say what kind of vehicle is reporting. Each mark takes its mode from the agency's own schedule data, through the route the feed named for that vehicle — so the mode is the ROUTE's mode, never a guess about the vehicle.",
+      /** Shape before colour, said in words. */
+      legendChannels:
+        "The shape of a mark is the kind of service; the colour separates modes of the same kind. Nothing on this map is signalled by colour alone — the vehicle list below names every vehicle's mode in words.",
+      legendKey: (label: string, glyph: string) => `${glyph} ${label}`,
+      /** Vehicles the join could not resolve, counted and explained. */
+      unknownNoRoute: (count: string) =>
+        `${count} vehicle${count === "1" ? "" : "s"} reported no route, so no mode could be looked up. Drawn as a hollow ring and listed as “not assigned”.`,
+      unknownRouteMissing: (count: string) =>
+        `${count} vehicle${count === "1" ? "" : "s"} named a route this installation holds no schedule data for, so no mode could be looked up. Drawn as a hollow ring — worth checking, because the feed and the schedule disagree.`,
+      /** The list column added for the mode (the readable equivalent). */
+      listColumn: "Mode",
+      listUnknown: "Not known",
+    },
+
+    /**
+     * The mode filter (handoff 0043, design point 6). Highlighting only:
+     * it repaints what is already on the map and never asks the server
+     * again, and it never removes anything from the map or the counts.
+     */
+    modeFilter: {
+      label: "Highlight one mode",
+      all: "All modes",
+      note: "Highlighting dims the other modes so one stands out. Nothing is removed from the map, the counts, or the list, and nothing is fetched again — this only changes how the map is painted.",
+      empty:
+        "No route in this agency's schedule data carries a mode yet, so there is nothing to highlight.",
+    },
+
+    /**
+     * The flagged-findings layer + its accessible entry point (handoff
+     * 0043, design points 6 and 7).
+     */
+    findings: {
+      legendKey: "Open blocking data-quality finding",
+      /** The single most important honesty line on this surface. */
+      legendNote:
+        "A data-quality finding has no recorded location — it is about a set of trips, not a place. A flag is drawn ON the schematic line of a route the finding names, so you can find the route; where it sits along that line means nothing.",
+      listHeading: "Needs investigation",
+      listIntro:
+        "Open findings that are blocking a certifiable figure and that nobody has taken on yet. This list is the way to reach every flag from the keyboard — the map canvas itself cannot be read by a screen reader.",
+      listEmpty:
+        "Nothing is flagged for investigation right now: no open finding is blocking a figure. That is the honest state, not an empty screen.",
+      listLoading: "Checking for findings that need a person…",
+      /** The meta line under a flag that IS on the map: which route it was
+       *  anchored to, and how many other routes it also names. */
+      onMap: (label: string) => `Flagged on route ${label} — drawn on the map`,
+      onMapAlso: (count: string) =>
+        ` · also on ${count} other route${count === "1" ? "" : "s"}`,
+      countLine: (flagged: string, drawn: string) =>
+        `${flagged} finding${flagged === "1" ? "" : "s"} need a person. ${drawn} of them are drawn on the map.`,
+      capNote: (cap: string) =>
+        `The map draws at most ${cap} flags at once so the flagged marks stay meaningful. Every finding is in the list above, whether or not it has a flag.`,
+      /** Why a finding has no flag — one honest sentence each. */
+      gapNoSubject:
+        "No flag: this finding is about the calculation run as a whole, not about identifiable trips, so there is no route to anchor it to.",
+      gapNoRoute:
+        "No flag: this finding's trips are not attributed to any route, so there is no line to anchor it to.",
+      gapRouteNotDrawn:
+        "No flag: the routes this finding names have no line on this map — the schedule data has no drawn geometry for them.",
+      gapOverCap:
+        "No flag: the map's flag limit was already reached. The finding is fully readable here.",
+      error: (message: string) =>
+        `Headway could not load the findings for this map: ${message}`,
+    },
+
+    /**
+     * The relationship inspector (handoff 0043, design point 7): the
+     * finding, and everything the API can honestly connect it to.
+     */
+    inspector: {
+      label: "Finding details",
+      heading: (title: string) => title,
+      close: "Close finding details",
+      /** The visible label; the full sentence above is the accessible name,
+       *  so the control is never an unlabeled icon and never a wrapped
+       *  three-line block in a narrow panel. */
+      closeShort: "Close",
+      openedFromMap: "Opened from the map.",
+      severityLabel: "Severity",
+      statusLabel: "Status",
+      raisedLabel: "Raised",
+      idLabel: "Finding id",
+      chainHeading: "What this finding connects to",
+      chainIntro:
+        "Everything below was served by Headway — the blocks and routes come from the finding's own record of what it was about, frozen when it was raised, and the calculations are the runs that named this finding themselves. Nothing here is inferred.",
+      blocksHeading: "Blocks",
+      blockLine: (label: string, trips: string) =>
+        `Block ${label} — ${trips} trip${trips === "1" ? "" : "s"}`,
+      blockUnnamed: "Trips with no block in the feed",
+      blockWindow: (first: string, last: string) =>
+        `First departure ${first}; last departure ${last}.`,
+      routesHeading: "Routes",
+      routeLine: (name: string, mode: string) => `${name} — ${mode}`,
+      routeNotDrawn: "no line on this map",
+      routeModeUnknown: "mode not known",
+      calcsHeading: "Calculations that named this finding",
+      calcLine: (calc: string, version: string, metric: string) =>
+        `${calc} ${version} — ${metric}`,
+      calcOutcomeRefused:
+        "The calculation refused to produce this figure over this finding.",
+      calcOutcomePersisted:
+        "The calculation produced this figure and recorded this finding alongside it.",
+      calcPeriod: (start: string, end: string) =>
+        `Period ${start} up to (not including) ${end}.`,
+      calcsEmpty:
+        "No calculation run on record names this finding. That does not mean none did — this page reads the most recent runs only.",
+      ownerHeading: "Owner",
+      ownerNone:
+        "No owner yet. An open finding with no owner is nobody's job until someone takes it — that is what this list is for.",
+      ownerNamed: (owner: string) => `Owned by ${owner}.`,
+      recordsHeading: "Raw records behind this finding",
+      recordsNone:
+        "This finding records no source-record ids. Findings raised about a run as a whole often do not have any.",
+      recordsLoading: "Loading the raw-record ids…",
+      queueLink: "Work this finding in the data-quality queue",
+      relatedNote:
+        "The routes named above are lit on the map while this panel is open.",
+      subjectCapped:
+        "The finding's own record of what it covered is capped — it lists a sample of trips, and states the true count beside it. Both are shown exactly as served.",
+      unmatchedTrips: (count: string) =>
+        `${count} trip${count === "1" ? "" : "s"} in this finding could not be attributed to a block. Counted, never dropped.`,
+    },
   },
 
   /**

@@ -108,20 +108,62 @@ and `docs/images/handoff-0043/contrast-measurements.txt`.
 Light is the default because the ITS manager found the light map legible;
 the contrast-tuned dark map is the opt-in.
 
-### Looking at the styles yourself
+## The marks Headway draws on top
 
-There is a developer preview that draws one style over your own
-`region.pmtiles`, with no login and no API needed:
+The vehicle marks, the route lines and the flags for findings that need a
+person are Headway's own, and they are held to the same measured bar as the
+streets: **3:1 against the ground they sit on** (WCAG 2.1 SC 1.4.11), on
+both street styles, plus against every other surface the map can put
+underneath them and against each mark's own outline. Marks on the light map
+are dark with a light outline; on the dark map they are light with a dark
+outline. Run `cd web && npm run check:map-marks` to print the table;
+the recorded numbers are in
+`docs/images/handoff-0043/mark-contrast-measurements.txt`.
+
+**A mark's shape is the kind of service, and its colour separates modes of
+the same kind** — a filled circle for road services, a square for rail, a
+diamond for ferry, a bar for cable services, and a hollow ring for a vehicle
+whose mode we were not told. A red triangle means a data-quality finding
+needs a person; it is never a mode. Nothing on the map is signalled by
+colour alone: the vehicle list beside it names every vehicle's mode in
+words, and every flagged finding is a row in the "needs investigation" list.
+
+Those shapes are **letters from the map's own typeface**, not a sprite
+sheet. Headway vendors one font for map labels already, and its
+"Geometric Shapes" characters (●, ■, ◆, ▬, ○, ▲) are exactly the marks we
+need — so the overlay adds no image file, no new licence and no new
+download step. A test reads the shipped font file and fails the build if
+any of those characters ever stops being in it.
+
+**A vehicle's mode is not something the position feed reports.** It is
+looked up from the agency's own schedule data, through the route the feed
+named for that vehicle — so it is the *route's* mode. A vehicle with no
+route, or with a route this installation holds no schedule for, is drawn as
+the hollow ring and counted on screen. Headway never guesses a mode.
+
+**A finding has no location.** A finding is about a set of trips on a block,
+usually over a period that has already ended. Its flag is drawn *on the
+schematic line of a route the finding names*, so you can find the route —
+where it sits along that line means nothing, and the legend says so.
+
+### Looking at the styles and the marks yourself
+
+There are two developer previews that draw over your own `region.pmtiles`,
+with no login and no API needed:
 
 ```
 cd web && npm run dev
-# then open, substituting light or dark:
+# the street styles, substituting light or dark:
 #   http://localhost:5173/scripts/basemap-preview/index.html?style=dark&zoom=16
+# the marks, a flagged finding and the finding inspector:
+#   http://localhost:5173/scripts/overlay-preview/index.html?style=dark&zoom=14
 ```
 
-It imports the same style code the Live map imports, so what you see is
-what ships. It is a development tool only and is never part of the built
-artifact.
+Both import the same code the Live map imports — the same styles, the same
+mark palette, the same layers, and in the second one the real inspector
+panel — so what you see is what ships. The vehicles and the finding in the
+overlay preview are stand-in data, and the page says so on screen. Both are
+development tools only and are never part of the built artifact.
 
 ## The license credit (please do not remove it)
 

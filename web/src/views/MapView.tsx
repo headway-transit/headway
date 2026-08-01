@@ -10,9 +10,13 @@
  * NO EXTERNAL REQUESTS OF ANY KIND — including with the basemap (handoff
  * 0027). The style is inline; its only `glyphs` URL points at THIS
  * installation's own vendored font files (/basemap-fonts/, same origin),
- * and there is no `sprite`. When no basemap has been downloaded the map is
- * the styled water-tone canvas exactly as before, with zero symbol layers
- * and nothing to fetch. When an administrator has run the consented
+ * and there is still no `sprite` — handoff 0043's mode marks are drawn
+ * with Geometric-Shapes glyphs out of that same vendored font rather than
+ * with a sprite sheet, so the overlay adds no asset and no request that
+ * leaves this box (see src/map/marks.ts). Symbol layers therefore now do
+ * fetch glyph ranges even with no basemap downloaded — from
+ * /basemap-fonts/, an app-artifact path on this origin. When an
+ * administrator has run the consented
  * `install.sh --download-basemap`, streets appear from the SELF-HOSTED
  * /basemap/region.pmtiles archive (PMTiles read by same-origin byte-range
  * requests) under the schematic/stops/vehicle layers — attribution
@@ -37,17 +41,35 @@
  *   - the ops boundary: OpsBadge on the surface + ops_note verbatim;
  *   - caps/truncation notes render verbatim whenever the server sends one.
  *
- * Motion rules (handoff 0021): vehicle dots JUMP to each newly reported
- * position — for everyone. The feed reports ~every 30 s; gliding a dot
+ * Motion rules (handoff 0021): vehicle marks JUMP to each newly reported
+ * position — for everyone. The feed reports ~every 30 s; gliding a mark
  * between two reports would draw positions no vehicle ever reported
  * (interpolation), so nothing here tweens a position. The one camera
  * animation (centering on a vehicle picked from the list) is disabled
- * under prefers-reduced-motion (jump, not glide).
+ * under prefers-reduced-motion (jump, not glide). The one other moving
+ * thing on this surface is the attention pulse on flagged findings — a
+ * ring on the FRAME of at most a dozen marks, which prefers-reduced-motion
+ * collapses to a static ring (src/map/pulse.ts).
+ *
+ * Handoff 0043's overlay adds three things on top of the same sources:
+ *   - MODE-AWARE MARKS. `mode` is not a field the vehicle feed reports; it
+ *     is joined client-side from the agency's own schedule data through the
+ *     route the feed named (src/map/vehicles.ts). Shape and colour then
+ *     come from ONE data-driven expression per channel (src/map/marks.ts),
+ *     never from per-feature DOM markers.
+ *   - THE FLAGGED-FINDINGS LAYER. Open, blocking data-quality findings,
+ *     anchored to a route line they name — a finding has no location of its
+ *     own and this surface never invents one (src/map/findings.ts).
+ *   - THE RELATIONSHIP INSPECTOR. finding → block → route → calculation →
+ *     owner, in a react-aria panel, lighting the finding's routes on the
+ *     map through `feature-state`.
  *
  * Accessibility: the canvas is labeled and MapLibre's built-in keyboard
  * handler pans/zooms it, but the canvas is PRESENTATION — the readable
  * equivalents live beside it: the chip, the counts, the vehicle detail
- * panel, and the vehicle list table (capped, cap stated).
+ * panel, the vehicle list table (capped, cap stated, mode named in words),
+ * and the "needs investigation" list, which is the KEYBOARD route to every
+ * flagged finding and to the inspector.
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -81,11 +103,16 @@ setWorkerUrl(maplibreWorkerUrl);
 addProtocol("pmtiles", new PmtilesProtocol().tile);
 import {
   ApiError,
+  getDqIssue,
   getLatestVehicles,
   getRoutesGeojson,
   getStopsGeojson,
+  listCalcRuns,
+  listDqIssues,
 } from "../api/client";
 import type {
+  CalcRunRecord,
+  DqIssueSummary,
   OpsVehicle,
   OpsVehiclesLatest,
   RoutesCollection,
@@ -97,6 +124,44 @@ import { Skeleton } from "../components/Skeleton";
 import { copy } from "../copy";
 import { useSession } from "../auth/session";
 import { useTheme } from "../theme";
+// The handoff-0043 overlay: mode marks, the flagged-findings layer and the
+// relationship inspector. Every colour, glyph and expression comes from
+// these modules so the legend beside the map and the paint on the map are
+// literally the same values.
+import {
+  FINDING_GLYPH,
+  MARK_HALO,
+  TOKEN_MARK_COLORS,
+  modeColorExpression,
+  modeFilterOpacityExpression,
+  routeColorExpression,
+  routeOpacityExpression,
+  routeWidthExpression,
+  type MarkGround,
+} from "../map/marks";
+import {
+  FINDINGS_LABEL_LAYER,
+  FINDINGS_MARK_LAYER,
+  FINDINGS_PULSE_LAYER,
+  VEHICLE_MARK_LAYER,
+  overlayLayerSpecs,
+} from "../map/overlayLayers";
+import {
+  modeFilterOptions,
+  routeModeIndex,
+  vehiclesToGeojson,
+} from "../map/vehicles";
+import {
+  FLAG_CAP,
+  findingChain,
+  placeFindings,
+  type FindingPlacement,
+} from "../map/findings";
+import { PULSE_STATIC, pulseFrame } from "../map/pulse";
+import { ModeLegend } from "../map/ModeLegend";
+import { NeedsInvestigation } from "../map/NeedsInvestigation";
+import { RelationshipInspector } from "../map/RelationshipInspector";
+import "../map/overlay.css";
 
 /** One async slice: skeleton → verbatim error | data (house pattern). */
 type Load<T> =
@@ -237,20 +302,13 @@ function prefersReducedMotion(): boolean {
   );
 }
 
-/** Vehicles → GeoJSON for the map source. Positions verbatim. */
-function vehiclesToGeojson(vehicles: OpsVehicle[]): GeoJSON {
-  return {
-    type: "FeatureCollection",
-    features: vehicles.map((v) => ({
-      type: "Feature" as const,
-      geometry: {
-        type: "Point" as const,
-        coordinates: [v.longitude, v.latitude],
-      },
-      properties: { vehicle_id: v.vehicle_id },
-    })),
-  };
-}
+/** How many open blocking findings the map ASKS for. The drawn flags are
+ *  capped much lower (FLAG_CAP); everything fetched is in the list. */
+const FINDINGS_FETCH_LIMIT = 50;
+
+/** How many recent calculation runs are searched for the ones that named a
+ *  given finding. Stated in the inspector when none is found. */
+const CALC_RUN_LOOKBACK = 20;
 
 /** "HH:MM:SS UTC" of an ISO timestamp — a time label, never a figure. */
 function timeLabel(iso: string): string {
@@ -303,6 +361,38 @@ export function MapView() {
    *  newer response (house stale-response guard). */
   const fetchSeq = useRef(0);
 
+  // ---- handoff 0043: mode filter, flagged findings, inspector ----
+  /** The highlighted mode, or null for "all". Paint only — no re-fetch. */
+  const [selectedMode, setSelectedMode] = useState<string | null>(null);
+  const [findings, setFindings] = useState<Load<DqIssueSummary[]>>(LOADING);
+  const [calcRuns, setCalcRuns] = useState<CalcRunRecord[]>([]);
+  /** The finding the inspector is showing, and where it was opened from. */
+  const [selectedFindingId, setSelectedFindingId] = useState<string | null>(
+    null,
+  );
+  const [findingFromMap, setFindingFromMap] = useState(false);
+  /** Source-record ids for the open finding (GET /dq/issues/{id}) — the
+   *  provenance half of the panel; null until it lands. */
+  const [findingRecords, setFindingRecords] = useState<string[] | null>(null);
+  const [findingRecordsLoading, setFindingRecordsLoading] = useState(false);
+  /** Map elements currently lit by feature-state, so they can be un-lit.
+   *  Kept as refs rather than derived: what has to be TURNED OFF is the
+   *  previous selection, which no render still knows about. */
+  const litRoutes = useRef<string[]>([]);
+  const litFinding = useRef<string | null>(null);
+
+  /**
+   * WHICH GROUND THE MARKS SIT ON.
+   *
+   * Not the app theme. The overlay's contrast problem is with whatever is
+   * physically behind it: the chosen street style once tiles are drawing,
+   * and the app's own `--map-bg` canvas token when no basemap has been
+   * downloaded. That is the same reasoning the first half of this wave used
+   * to hand the background layer to the street style.
+   */
+  const markGround: MarkGround =
+    basemap === "present" ? basemapStyle : theme === "dark" ? "dark" : "light";
+
   // ---- the map itself ----
   useEffect(() => {
     if (!containerRef.current) return;
@@ -345,6 +435,9 @@ export function MapView() {
       map.addSource("routes", {
         type: "geojson",
         data: { type: "FeatureCollection", features: [] },
+        // The route's own id becomes the feature id, so the inspector can
+        // light a route with setFeatureState instead of re-sending data.
+        promoteId: "route_id",
       });
       map.addSource("stops", {
         type: "geojson",
@@ -354,56 +447,50 @@ export function MapView() {
         type: "geojson",
         data: { type: "FeatureCollection", features: [] },
       });
-      map.addLayer({
-        id: "routes-line",
-        type: "line",
-        source: "routes",
-        paint: { "line-color": c.route, "line-width": 1.5 },
+      map.addSource("findings", {
+        type: "geojson",
+        data: { type: "FeatureCollection", features: [] },
+        promoteId: "finding_key",
       });
-      map.addLayer({
-        id: "stops-dot",
-        type: "circle",
-        source: "stops",
-        paint: {
-          "circle-radius": 2,
-          "circle-color": c.stop,
-          "circle-opacity": 0.75,
-        },
-      });
-      map.addLayer({
-        id: "vehicles-dot",
-        type: "circle",
-        source: "vehicles",
-        paint: {
-          "circle-radius": 5,
-          "circle-color": c.vehicle,
-          "circle-stroke-width": 1.5,
-          "circle-stroke-color": c.vehicleRing,
-        },
-      });
-      map.addLayer({
-        id: "vehicles-selected",
-        type: "circle",
-        source: "vehicles",
-        filter: ["==", ["get", "vehicle_id"], ""],
-        paint: {
-          "circle-radius": 9,
-          "circle-color": "rgba(0,0,0,0)",
-          "circle-stroke-width": 2.5,
-          "circle-stroke-color": c.vehicle,
-        },
-      });
-      map.on("click", "vehicles-dot", (e: MapLayerMouseEvent) => {
+      // ONE definition of the overlay stack, shared with the developer
+      // preview page that produced the evidence screenshots (see
+      // src/map/overlayLayers.ts) — a screenshot cannot flatter paint the
+      // app does not draw. The ground-dependent colours are corrected by
+      // the repaint effect below the moment the real ground is known.
+      for (const spec of overlayLayerSpecs({
+        ground: "light",
+        routeColor: c.route,
+        stopColor: c.stop,
+      })) {
+        map.addLayer(spec);
+      }
+      map.on("click", VEHICLE_MARK_LAYER, (e: MapLayerMouseEvent) => {
         const f = e.features?.[0];
         const id = f?.properties?.vehicle_id;
         if (typeof id === "string") setSelectedId(id);
       });
-      map.on("mouseenter", "vehicles-dot", () => {
+      map.on("mouseenter", VEHICLE_MARK_LAYER, () => {
         map.getCanvas().style.cursor = "pointer";
       });
-      map.on("mouseleave", "vehicles-dot", () => {
+      map.on("mouseleave", VEHICLE_MARK_LAYER, () => {
         map.getCanvas().style.cursor = "";
       });
+      // A click on a flag opens the same panel the keyboard list opens.
+      for (const layer of [FINDINGS_MARK_LAYER, FINDINGS_PULSE_LAYER]) {
+        map.on("click", layer, (e: MapLayerMouseEvent) => {
+          const id = e.features?.[0]?.properties?.issue_id;
+          if (typeof id === "string") {
+            setFindingFromMap(true);
+            setSelectedFindingId(id);
+          }
+        });
+        map.on("mouseenter", layer, () => {
+          map.getCanvas().style.cursor = "pointer";
+        });
+        map.on("mouseleave", layer, () => {
+          map.getCanvas().style.cursor = "";
+        });
+      }
       map.getCanvas().setAttribute("aria-label", copy.map.canvasLabel);
       setMapReady(true);
     });
@@ -435,19 +522,58 @@ export function MapView() {
         : c.bg;
     map.setPaintProperty("background", "background-color", ground);
     if (map.getLayer("routes-line")) {
-      map.setPaintProperty("routes-line", "line-color", c.route);
+      map.setPaintProperty(
+        "routes-line",
+        "line-color",
+        routeColorExpression(c.route, markGround),
+      );
     }
     if (map.getLayer("stops-dot")) {
       map.setPaintProperty("stops-dot", "circle-color", c.stop);
     }
-    if (map.getLayer("vehicles-dot")) {
-      map.setPaintProperty("vehicles-dot", "circle-color", c.vehicle);
-      map.setPaintProperty("vehicles-dot", "circle-stroke-color", c.vehicleRing);
+    // The MARKS follow the GROUND, not the app theme — for exactly the
+    // reason the background does. Whether a mark needs to be dark with a
+    // light halo or light with a dark halo is decided by what is actually
+    // behind it: the chosen street style when tiles are drawing, the app's
+    // own canvas token when none is. Every colour used here is gated at
+    // 3:1 against BOTH grounds its palette can appear on and against its
+    // own halo (src/map/marks.ts, src/test/map-marks.test.ts).
+    if (map.getLayer(VEHICLE_MARK_LAYER)) {
+      map.setPaintProperty(
+        VEHICLE_MARK_LAYER,
+        "text-color",
+        modeColorExpression(markGround),
+      );
+      map.setPaintProperty(
+        VEHICLE_MARK_LAYER,
+        "text-halo-color",
+        MARK_HALO[markGround],
+      );
     }
     if (map.getLayer("vehicles-selected")) {
-      map.setPaintProperty("vehicles-selected", "circle-stroke-color", c.vehicle);
+      map.setPaintProperty(
+        "vehicles-selected",
+        "circle-stroke-color",
+        TOKEN_MARK_COLORS.signal[markGround],
+      );
     }
-  }, [theme, mapReady, basemap, basemapStyle]);
+    for (const layer of [
+      FINDINGS_PULSE_LAYER,
+      FINDINGS_MARK_LAYER,
+      FINDINGS_LABEL_LAYER,
+    ]) {
+      if (!map.getLayer(layer)) continue;
+      const isRing = layer === FINDINGS_PULSE_LAYER;
+      map.setPaintProperty(
+        layer,
+        isRing ? "circle-stroke-color" : "text-color",
+        TOKEN_MARK_COLORS.alert[markGround],
+      );
+      if (!isRing) {
+        map.setPaintProperty(layer, "text-halo-color", MARK_HALO[markGround]);
+      }
+    }
+  }, [theme, mapReady, basemap, basemapStyle, markGround]);
 
   // ---- the self-hosted basemap: detected, never assumed ----
   useEffect(() => {
@@ -561,12 +687,39 @@ export function MapView() {
     return () => window.clearInterval(timer);
   }, [windowSeconds, fetchVehicles]);
 
+  // ---- handoff 0043: the mode join (schedule data → the marks) ----
+  //
+  // Derived, not fetched: /geometry/routes is already on this page and it
+  // is the ONLY place a mode exists. Recomputed when either side changes.
+  const modeIndex = useMemo(
+    () => routeModeIndex(routes.state === "ready" ? routes.data : null),
+    [routes],
+  );
+  const vehicleGeojson = useMemo(
+    () =>
+      vehiclesToGeojson(
+        vehicles.state === "ready" ? vehicles.data.vehicles : [],
+        modeIndex,
+      ),
+    [vehicles, modeIndex],
+  );
+  const unresolvedTotal =
+    vehicleGeojson.unresolved["no-route-id"] +
+    vehicleGeojson.unresolved["route-not-held"];
+  const modeOptions = useMemo(
+    () => modeFilterOptions(modeIndex, unresolvedTotal),
+    [modeIndex, unresolvedTotal],
+  );
+
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady || vehicles.state !== "ready") return;
     const src = map.getSource("vehicles") as GeoJSONSource | undefined;
-    src?.setData(vehiclesToGeojson(vehicles.data.vehicles));
-  }, [mapReady, vehicles]);
+    // The WHOLE collection is replaced. Each mark therefore JUMPS to its
+    // newly observed position; there is no previous position to tween from
+    // and nothing here would tween it if there were.
+    src?.setData(vehicleGeojson.data);
+  }, [mapReady, vehicles, vehicleGeojson]);
 
   // Selection ring follows the selected vehicle.
   useEffect(() => {
@@ -578,6 +731,209 @@ export function MapView() {
       selectedId ?? "",
     ]);
   }, [mapReady, selectedId]);
+
+  // A mode that stops existing (a new routes response, a narrower window)
+  // must not leave the map dimmed against a filter nobody can see.
+  useEffect(() => {
+    if (selectedMode && !modeOptions.includes(selectedMode)) {
+      setSelectedMode(null);
+    }
+  }, [modeOptions, selectedMode]);
+
+  // ---- the mode highlight: paint only, never a re-fetch ----
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady) return;
+    if (map.getLayer("routes-line")) {
+      map.setPaintProperty(
+        "routes-line",
+        "line-width",
+        routeWidthExpression(selectedMode),
+      );
+      map.setPaintProperty(
+        "routes-line",
+        "line-opacity",
+        routeOpacityExpression(selectedMode),
+      );
+    }
+    if (map.getLayer(VEHICLE_MARK_LAYER)) {
+      map.setPaintProperty(
+        VEHICLE_MARK_LAYER,
+        "text-opacity",
+        modeFilterOpacityExpression(selectedMode),
+      );
+    }
+  }, [mapReady, selectedMode]);
+
+  // ---- flagged findings: fetched once, deliberately narrow ----
+  //
+  // status=open + severity=blocking. A pulsing mark only means anything
+  // while it is rare, and "open and blocking a figure" is the honest
+  // definition of an item that genuinely needs a person right now.
+  useEffect(() => {
+    let cancelled = false;
+    listDqIssues({
+      status: "open",
+      severity: "blocking",
+      limit: FINDINGS_FETCH_LIMIT,
+    })
+      .then((page) => {
+        if (!cancelled) setFindings({ state: "ready", data: page.issues });
+      })
+      .catch((err) => {
+        if (!cancelled) setFindings(toError(err));
+      });
+    // The calc runs are what turns "a finding" into "the calculation that
+    // named it". A failure here is not fatal: the panel says plainly that
+    // no run on record names the finding rather than inventing one.
+    listCalcRuns(CALC_RUN_LOOKBACK)
+      .then((runs) => {
+        if (!cancelled) setCalcRuns(runs);
+      })
+      .catch(() => {
+        if (!cancelled) setCalcRuns([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const placement: FindingPlacement = useMemo(
+    () =>
+      placeFindings(
+        findings.state === "ready" ? findings.data : [],
+        routes.state === "ready" ? routes.data : null,
+        FLAG_CAP,
+      ),
+    [findings, routes],
+  );
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady) return;
+    const src = map.getSource("findings") as GeoJSONSource | undefined;
+    src?.setData(placement.data);
+  }, [mapReady, placement]);
+
+  // ---- the attention pulse: a frame, a few features, reduced-motion safe ----
+  const flagCount = placement.placed.length;
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady || !map.getLayer(FINDINGS_PULSE_LAYER)) return;
+    const setRing = (frame: typeof PULSE_STATIC) => {
+      map.setPaintProperty(FINDINGS_PULSE_LAYER, "circle-radius", frame.radius);
+      map.setPaintProperty(
+        FINDINGS_PULSE_LAYER,
+        "circle-stroke-width",
+        frame.strokeWidth,
+      );
+      map.setPaintProperty(
+        FINDINGS_PULSE_LAYER,
+        "circle-stroke-opacity",
+        frame.strokeOpacity,
+      );
+    };
+    // Reduced motion: a STATIC ring at full strength. The ring never goes
+    // away — it is part of the mark, not the animation.
+    if (
+      flagCount === 0 ||
+      prefersReducedMotion() ||
+      typeof window.requestAnimationFrame !== "function"
+    ) {
+      setRing(PULSE_STATIC);
+      return;
+    }
+    let raf = 0;
+    const start =
+      typeof performance === "object" ? performance.now() : Date.now();
+    const tick = (now: number) => {
+      setRing(pulseFrame(now - start));
+      raf = window.requestAnimationFrame(tick);
+    };
+    raf = window.requestAnimationFrame(tick);
+    return () => {
+      window.cancelAnimationFrame(raf);
+      setRing(PULSE_STATIC);
+    };
+  }, [mapReady, flagCount]);
+
+  // ---- the relationship chain + the elements it lights on the map ----
+  const selectedFinding = useMemo(() => {
+    if (!selectedFindingId || findings.state !== "ready") return null;
+    return (
+      findings.data.find((i) => i.issue_id === selectedFindingId) ?? null
+    );
+  }, [selectedFindingId, findings]);
+
+  const chain = useMemo(
+    () =>
+      selectedFinding
+        ? findingChain(
+            selectedFinding,
+            routes.state === "ready" ? routes.data : null,
+            modeIndex,
+            calcRuns,
+          )
+        : null,
+    [selectedFinding, routes, modeIndex, calcRuns],
+  );
+
+  // The provenance half of the panel: the finding's own source-record ids,
+  // which only the detail endpoint carries.
+  useEffect(() => {
+    if (!selectedFindingId) {
+      setFindingRecords(null);
+      setFindingRecordsLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setFindingRecords(null);
+    setFindingRecordsLoading(true);
+    getDqIssue(selectedFindingId)
+      .then((detail) => {
+        if (cancelled) return;
+        setFindingRecords(detail.source_record_ids ?? []);
+        setFindingRecordsLoading(false);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setFindingRecords([]);
+        setFindingRecordsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedFindingId]);
+
+  // feature-state, not a re-render: the finding's routes light up in place.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady || typeof map.setFeatureState !== "function") return;
+    for (const routeId of litRoutes.current) {
+      map.setFeatureState(
+        { source: "routes", id: routeId },
+        { related: false },
+      );
+    }
+    const next = chain?.routes.filter((r) => r.drawn).map((r) => r.route_id) ?? [];
+    for (const routeId of next) {
+      map.setFeatureState({ source: "routes", id: routeId }, { related: true });
+    }
+    if (litFinding.current && litFinding.current !== selectedFindingId) {
+      map.setFeatureState(
+        { source: "findings", id: litFinding.current },
+        { selected: false },
+      );
+    }
+    if (selectedFindingId && map.getSource("findings")) {
+      map.setFeatureState(
+        { source: "findings", id: selectedFindingId },
+        { selected: true },
+      );
+    }
+    litRoutes.current = next;
+    litFinding.current = selectedFindingId;
+  }, [mapReady, chain, selectedFindingId]);
 
   const t = copy.map;
   const res = vehicles.state === "ready" ? vehicles.data : null;
@@ -624,6 +980,12 @@ export function MapView() {
     }
   };
 
+  /** Open a finding from the keyboard list (the accessible entry point). */
+  const selectFindingFromList = (issueId: string) => {
+    setFindingFromMap(false);
+    setSelectedFindingId((current) => (current === issueId ? null : issueId));
+  };
+
   const geometryEmpty =
     stops.state === "ready" &&
     routes.state === "ready" &&
@@ -631,6 +993,15 @@ export function MapView() {
     routes.data.features.length === 0;
 
   const listRows = res ? res.vehicles.slice(0, LIST_CAP) : [];
+  /** The vehicle list's Mode column — the readable equivalent of the
+   *  mark's shape and colour, in the agency's own words. */
+  const listMode = (vehicle: OpsVehicle): string => {
+    const mode = vehicle.route_id
+      ? modeIndex.byRoute.get(vehicle.route_id)
+      : undefined;
+    if (!mode) return t.marks.listUnknown;
+    return t.marks.modeLabels[mode] ?? mode;
+  };
 
   return (
     <>
@@ -691,6 +1062,45 @@ export function MapView() {
             ))}
           </div>
           <p className="chart-desc">{t.basemap.style.note}</p>
+        </>
+      )}
+
+      {/* ---- highlight one mode (handoff 0043, design point 6) ----
+              The same house filter-bar pattern: real <button>s in a
+              labeled group with aria-pressed. Pressing one repaints two
+              paint properties on data that is ALREADY on the map — no
+              request, no reload, and nothing removed from the map, the
+              counts or the list. The options are the modes this agency's
+              own routes carry; nothing here knows a mode name in advance. */}
+      {modeOptions.length > 0 && (
+        <>
+          <div
+            className="filter-bar"
+            role="group"
+            aria-label={t.modeFilter.label}
+          >
+            <span className="filter-bar-label">{t.modeFilter.label}:</span>
+            <button
+              type="button"
+              aria-pressed={selectedMode === null}
+              onClick={() => setSelectedMode(null)}
+            >
+              {t.modeFilter.all}
+            </button>
+            {modeOptions.map((mode) => (
+              <button
+                key={mode}
+                type="button"
+                aria-pressed={selectedMode === mode}
+                onClick={() =>
+                  setSelectedMode((current) => (current === mode ? null : mode))
+                }
+              >
+                {t.marks.modeLabels[mode] ?? mode}
+              </button>
+            ))}
+          </div>
+          <p className="chart-desc">{t.modeFilter.note}</p>
         </>
       )}
 
@@ -791,6 +1201,18 @@ export function MapView() {
         {basemap === "present" && (
           <p className="map-attribution">{t.basemap.attribution}</p>
         )}
+        {/* The relationship inspector sits OVER the canvas (design point
+            7). It is reachable two ways — a click on a flag, and the
+            "needs investigation" list below, which is the keyboard path. */}
+        {chain && (
+          <RelationshipInspector
+            chain={chain}
+            sourceRecordIds={findingRecords}
+            sourceRecordsLoading={findingRecordsLoading}
+            fromMap={findingFromMap}
+            onClose={() => setSelectedFindingId(null)}
+          />
+        )}
       </div>
 
       {/* ---- legend: the schematic honesty is VISIBLE ---- */}
@@ -815,7 +1237,21 @@ export function MapView() {
               {t.basemap.legendLine}
             </li>
           )}
+          {/* The flag key. ▲ is reserved for findings on this map and is
+              never a mode — the same character, the same colour as the
+              canvas draws, both taken from src/map/marks.ts. */}
+          <li>
+            <span
+              aria-hidden="true"
+              className="map-mode-glyph"
+              style={{ color: TOKEN_MARK_COLORS.alert[markGround] }}
+            >
+              {FINDING_GLYPH}
+            </span>
+            {t.findings.legendKey}
+          </li>
         </ul>
+        <p className="chart-desc">{t.findings.legendNote}</p>
         {routes.state === "ready" && (
           <p className="chart-desc">
             {t.legend.schematicIntro} {routes.data.geometry_note}
@@ -835,7 +1271,23 @@ export function MapView() {
             <p className="chart-desc">{t.basemap.legendLimit}</p>
           </>
         )}
+        {/* Mode marks: the same glyphs and the same colours the canvas is
+            drawing right now, for the ground it is drawing them on. */}
+        <ModeLegend
+          ground={markGround}
+          modes={modeOptions}
+          unresolved={vehicleGeojson.unresolved}
+        />
       </section>
+
+      {/* ---- the accessible entry point to every flag (design point 7) ---- */}
+      <NeedsInvestigation
+        placement={placement}
+        loading={findings.state === "loading"}
+        error={findings.state === "error" ? findings.message : null}
+        selectedIssueId={selectedFindingId}
+        onSelect={selectFindingFromList}
+      />
 
       {/* Quiet teaching line — certifying officials only, basemap absent:
           the one person who could act learns the installer command. */}
@@ -902,6 +1354,9 @@ export function MapView() {
                   <tr>
                     <th scope="col">{t.list.columns.vehicle}</th>
                     <th scope="col">{t.list.columns.route}</th>
+                    {/* The mark's shape and colour, in words — so nothing
+                        on this surface is signalled by colour alone. */}
+                    <th scope="col">{t.marks.listColumn}</th>
                     <th scope="col">{t.list.columns.age}</th>
                     <th scope="col">{t.list.columns.source}</th>
                   </tr>
@@ -930,6 +1385,7 @@ export function MapView() {
                           </>
                         )}
                       </td>
+                      <td>{listMode(v)}</td>
                       <td>{v.age_seconds}</td>
                       <td>{v.source}</td>
                     </tr>

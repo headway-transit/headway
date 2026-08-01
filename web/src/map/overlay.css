@@ -1,0 +1,194 @@
+/**
+ * Map overlay chrome: the relationship inspector, the "needs investigation"
+ * list, and the mode legend (handoff 0043, design points 4, 6 and 7).
+ *
+ * WHY THIS FILE EXISTS AT ALL
+ * ---------------------------
+ * `src/styles.css` is the shared design system and this wave does not touch
+ * it — the tokens are settled and a second track is editing that file in
+ * parallel. Everything below therefore CONSUMES the shipped tokens and adds
+ * no new ones: matte surfaces, hairline etching (no bevels, no elevation),
+ * the ONE non-semantic identity accent for "this is what you are pointing
+ * at", the CVD-safe semantic set for severity, and mono/tabular-nums for
+ * every id and timestamp. If a colour is not `var(--…)` here, it is
+ * deliberately not a colour at all.
+ *
+ * NOTHING HERE ANIMATES. The one moving thing on this surface is the
+ * attention ring on a flagged mark, which is drawn by MapLibre on the
+ * canvas and driven by a requestAnimationFrame loop in the view — gated on
+ * `prefers-reduced-motion`, which collapses it to a static ring, per the
+ * house rule that reduced motion means INSTANT and never "slower". A panel
+ * appearing over the map is an instant repaint, deliberately: it exists to
+ * explain a finding, and a reveal animation on a finding would be theatre.
+ */
+
+/* ---- the relationship inspector: a panel over the canvas ---- */
+
+.map-inspector {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-2);
+  bottom: var(--space-2);
+  width: min(24rem, calc(100% - var(--space-4)));
+  overflow-y: auto;
+  padding: var(--space-3);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  /* The identity accent as a hairline rail: "you are pointing at this".
+     Non-semantic on purpose — it never states a status. */
+  border-left: 3px solid var(--signal);
+  border-radius: var(--radius-2);
+  box-shadow: var(--shadow-2);
+  z-index: 2;
+}
+
+.map-inspector-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+
+.map-inspector-close {
+  flex: none;
+  white-space: nowrap;
+}
+
+.map-inspector h2 {
+  margin: 0;
+  font-size: var(--text-lg);
+}
+
+.map-inspector h3 {
+  margin: var(--space-3) 0 var(--space-1);
+  font-family: var(--font-display);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.map-inspector p,
+.map-inspector li {
+  font-size: var(--text-sm);
+}
+
+.map-inspector ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.map-inspector ul li {
+  padding: var(--space-1) 0;
+  /* Hairline etch between rows — separation by line, never by shadow. */
+  border-top: 1px solid var(--color-border);
+}
+
+.map-inspector ul li:first-child {
+  border-top: none;
+}
+
+.map-inspector-facts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px var(--space-2);
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-sm);
+}
+
+.map-inspector-facts dt {
+  color: var(--color-text-muted);
+}
+
+.map-inspector-facts dd {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Narrow viewports: the panel stops floating and becomes a block under the
+   map, so it never covers the thing it is describing. */
+@media (max-width: 40rem) {
+  .map-inspector {
+    position: static;
+    width: auto;
+    margin-top: var(--space-2);
+    box-shadow: none;
+  }
+}
+
+/* ---- the "needs investigation" list: the accessible entry point ---- */
+
+.map-flags {
+  margin-top: var(--space-3);
+}
+
+.map-flags ol {
+  margin: var(--space-2) 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.map-flag {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: var(--space-2);
+  text-align: left;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-2);
+}
+
+.map-flag[aria-pressed="true"] {
+  border-color: var(--signal);
+  background: var(--signal-soft);
+}
+
+.map-flag-title {
+  font-weight: 600;
+}
+
+.map-flag-meta {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+
+.map-flag-gap {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+
+/* ---- the mode legend ---- */
+
+.map-mode-legend ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-3);
+  margin: var(--space-2) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.map-mode-legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--text-sm);
+}
+
+/* The swatch glyph is the SAME character the canvas draws, in the same
+   colour — the legend and the map cannot drift apart. Its colour is set
+   inline from the shipped palette, because it depends on which ground the
+   marks are being drawn on. */
+.map-mode-glyph {
+  font-size: 1.05rem;
+  line-height: 1;
+}
