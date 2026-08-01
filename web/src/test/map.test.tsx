@@ -23,6 +23,8 @@ import {
 } from "./helpers";
 import type { RouteHandler } from "./helpers";
 import { copy } from "../copy";
+import { BASEMAP_STYLES } from "../map/basemapStyle.ts";
+import { contrastRatio } from "../map/contrast.ts";
 
 // ---- the maplibre-gl double (hoisted before the view imports it) ----
 vi.mock("maplibre-gl", () => {
@@ -33,8 +35,13 @@ vi.mock("maplibre-gl", () => {
      *  pmtiles source is only ever added in the present state). */
     sources: Record<string, unknown> = {};
     /** addLayer calls in order: {id, before} — pins that every basemap
-     *  street layer is inserted BELOW the schematic route lines. */
-    layerAdds: { id: string; before?: string }[] = [];
+     *  street layer is inserted BELOW the schematic route lines. The whole
+     *  spec is kept too, so the basemap-style wave (handoff 0043) can
+     *  assert the AUTHORED paint actually reaches the canvas. */
+    layerAdds: { id: string; before?: string; layer: LayerLike }[] = [];
+    /** setPaintProperty calls in order — the background ground color
+     *  follows the STREET style once tiles are drawing (handoff 0043). */
+    paintSets: { id: string; prop: string; value: unknown }[] = [];
     constructor() {
       fakeMaps.push(this);
     }
@@ -51,8 +58,8 @@ vi.mock("maplibre-gl", () => {
     addSource(id: string, spec: unknown) {
       this.sources[id] = spec;
     }
-    addLayer(layer: { id: string }, before?: string) {
-      this.layerAdds.push({ id: layer.id, before });
+    addLayer(layer: LayerLike, before?: string) {
+      this.layerAdds.push({ id: layer.id, before, layer });
     }
     removeLayer() {}
     getLayer() {
@@ -62,7 +69,9 @@ vi.mock("maplibre-gl", () => {
       if (id === "basemap" && !(id in this.sources)) return undefined;
       return { setData: vi.fn() };
     }
-    setPaintProperty() {}
+    setPaintProperty(id: string, prop: string, value: unknown) {
+      this.paintSets.push({ id, prop, value });
+    }
     setFilter() {}
     getCanvas() {
       return this.canvas;
@@ -78,9 +87,16 @@ vi.mock("maplibre-gl", () => {
   return { Map: FakeMap, setWorkerUrl: () => {}, addProtocol: () => {} };
 });
 const fakeMaps: FakeMapShape[] = [];
+interface LayerLike {
+  id: string;
+  type?: string;
+  paint?: Record<string, unknown>;
+  layout?: Record<string, unknown>;
+}
 interface FakeMapShape {
   sources: Record<string, unknown>;
-  layerAdds: { id: string; before?: string }[];
+  layerAdds: { id: string; before?: string; layer: LayerLike }[];
+  paintSets: { id: string; prop: string; value: unknown }[];
 }
 
 // ---- fixtures mirroring the live envelopes (handoff 0023 evidence) ----
@@ -652,6 +668,131 @@ describe("/map", () => {
     ).toHaveAttribute("aria-pressed", "true");
 
     window.localStorage.removeItem("headway-theme");
+    window.localStorage.removeItem("headway-basemap-style");
+  });
+
+  // ---- the two authored, contrast-tuned styles (handoff 0043) ----------
+
+  it("draws HEADWAY's OWN authored street styles, not the vendor flavors: the dark map puts LIGHT streets on a near-black ground and every label carries a raised halo", async () => {
+    window.localStorage.removeItem("headway-basemap-style");
+    signInAs("viewer");
+    mockApi({
+      ...geometryRoutes(),
+      "GET /ops/vehicles/latest": { status: 200, body: vehiclesLive },
+      ...basemapPresentRoutes,
+    });
+    renderApp("/map");
+    const user = userEvent.setup();
+    await screen.findByText(copy.map.basemap.attribution);
+    const map = fakeMaps[fakeMaps.length - 1];
+
+    const streetLayers = () =>
+      map.layerAdds.filter((l) => l.id.startsWith("basemap-"));
+
+    // Light is what came up (the ITS manager found it legible), and it is
+    // OURS: the ground and the road casings are the authored values.
+    /** The most recent add of a layer id — after a style swap that is the
+     *  layer the newly chosen style put on the canvas. */
+    const latest = (id: string) =>
+      [...streetLayers()].reverse().find((l) => l.id === id);
+
+    const lightGround = String(BASEMAP_STYLES.light.theme.earth);
+    expect(latest("basemap-earth")?.layer.paint?.["fill-color"]).toBe(
+      lightGround,
+    );
+
+    const beforeSwap = streetLayers().length;
+    await user.click(
+      screen.getByRole("button", { name: copy.map.basemap.style.dark }),
+    );
+    expect(streetLayers().length).toBeGreaterThan(beforeSwap);
+
+    const darkTheme = BASEMAP_STYLES.dark.theme as Record<string, string>;
+    expect(latest("basemap-earth")?.layer.paint?.["fill-color"]).toBe(
+      darkTheme.earth,
+    );
+
+    // The street network is LIGHTER than the ground it sits on — the whole
+    // point of the wave — and the separation is measured, never eyeballed.
+    expect(latest("basemap-roads_minor")).toBeDefined();
+    expect(
+      contrastRatio(darkTheme.minor_b, darkTheme.earth),
+    ).toBeGreaterThanOrEqual(3);
+    expect(
+      contrastRatio(darkTheme.roads_label_minor, darkTheme.earth),
+    ).toBeGreaterThanOrEqual(4.5);
+
+    // Every label layer that reached the canvas carries the raised halo.
+    const symbols = streetLayers().filter((l) => l.layer.type === "symbol");
+    expect(symbols.length).toBeGreaterThan(0);
+    for (const s of symbols) {
+      expect(Number(s.layer.paint?.["text-halo-width"])).toBeGreaterThan(1);
+      expect(s.layer.layout?.["text-font"]).toEqual(["Noto Sans Regular"]);
+    }
+
+    window.localStorage.removeItem("headway-basemap-style");
+  });
+
+  it("the ground under everything follows the STREET style, not the app theme: choosing the dark map repaints the canvas to its own near-black, so no pale halo survives around the extracted region", async () => {
+    window.localStorage.removeItem("headway-basemap-style");
+    signInAs("viewer");
+    mockApi({
+      ...geometryRoutes(),
+      "GET /ops/vehicles/latest": { status: 200, body: vehiclesLive },
+      ...basemapPresentRoutes,
+    });
+    renderApp("/map");
+    const user = userEvent.setup();
+    await screen.findByText(copy.map.basemap.attribution);
+    const map = fakeMaps[fakeMaps.length - 1];
+
+    const lastBackground = () =>
+      [...map.paintSets]
+        .reverse()
+        .find((p) => p.id === "background" && p.prop === "background-color")
+        ?.value;
+
+    expect(lastBackground()).toBe(BASEMAP_STYLES.light.theme.background);
+
+    await user.click(
+      screen.getByRole("button", { name: copy.map.basemap.style.dark }),
+    );
+    expect(lastBackground()).toBe(BASEMAP_STYLES.dark.theme.background);
+
+    window.localStorage.removeItem("headway-basemap-style");
+  });
+
+  it("names the street style in use and states the legibility promise in the legend — the ITS manager's report answered where people look", async () => {
+    window.localStorage.removeItem("headway-basemap-style");
+    signInAs("viewer");
+    mockApi({
+      ...geometryRoutes(),
+      "GET /ops/vehicles/latest": { status: 200, body: vehiclesLive },
+      ...basemapPresentRoutes,
+    });
+    renderApp("/map");
+    const user = userEvent.setup();
+    await screen.findByText(copy.map.basemap.attribution);
+
+    const legend = screen.getByRole("region", {
+      name: copy.map.legend.heading,
+    });
+    expect(legend).toHaveTextContent(
+      copy.map.basemap.legendStyleLine(BASEMAP_STYLES.light.name),
+    );
+    // The promise is stated in plain language with the real numbers.
+    expect(copy.map.basemap.legendStyleLine("x")).toContain("3:1");
+    expect(copy.map.basemap.legendStyleLine("x")).toContain("4.5:1");
+    expect(copy.map.basemap.style.note).toContain("3:1");
+
+    await user.click(
+      screen.getByRole("button", { name: copy.map.basemap.style.dark }),
+    );
+    expect(legend).toHaveTextContent(
+      copy.map.basemap.legendStyleLine(BASEMAP_STYLES.dark.name),
+    );
+    await expectNoAxeViolations();
+
     window.localStorage.removeItem("headway-basemap-style");
   });
 

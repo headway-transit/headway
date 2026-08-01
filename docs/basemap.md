@@ -60,6 +60,69 @@ choose "replace". Once or twice a year is plenty for most agencies.
 Headway will never do this for you in the background; the download happens
 only when you run the command.
 
+## The two street styles, and why the dark one is not just "darker"
+
+The Live map offers two street styles under a **Street style** control on
+the page: **Light** (the default) and **Dark**. The choice is yours, it is
+**separate from the light/dark theme of the rest of Headway**, and it is
+remembered in your browser. Switching it changes the streets only —
+nothing else on the page moves.
+
+This exists because of a real report. An ITS manager at a partner agency
+turned on a dark theme and told us that **streets and geographic features
+became hard to read**. That is what a naive dark map does: it paints roads
+dark grey on a dark ground, and the street network you are actually
+looking at disappears into it.
+
+**Headway's fix inverts the contrast rather than just darkening.** Both
+styles are drawn by Headway (`web/src/map/styles/headway-basemap-*.json`),
+not taken as-is from the map data, and they are opposites on purpose:
+
+- **Light** — a warm paper ground with every street given a **dark
+  outline**. The familiar look of a printed street map, except that the
+  outline is what makes the street visible, and it is measured.
+- **Dark** — a near-black ground with the street network drawn in **light
+  hairlines**, water raised in contrast, and a halo behind every street
+  and place name so it never dissolves into the base. On the dark map the
+  streets are the brightest thing on screen, which is also the honest
+  emphasis for an operations map: the network you are reasoning about
+  should dominate the frame.
+
+**Both styles are measured before release, not eyeballed.** Every road
+class, water, and every label is checked against the ground behind it,
+against the WCAG 2.1 bars — **3:1** for streets and water (SC 1.4.11,
+non-text contrast) and **4.5:1** for names (SC 1.4.3, text). The check
+runs in the test suite, so a color change that buries a street fails the
+build:
+
+```
+cd web && npm run check:map-contrast
+```
+
+The bar holds over **every** surface the map can put underneath a street —
+parks, woods, buildings, land cover, runways — not just the bare ground.
+The recorded numbers are in
+`docs/handoffs/0043-from-platform-to-frontend-control-room-map-on-the-osm-basemap.md`
+and `docs/images/handoff-0043/contrast-measurements.txt`.
+
+Light is the default because the ITS manager found the light map legible;
+the contrast-tuned dark map is the opt-in.
+
+### Looking at the styles yourself
+
+There is a developer preview that draws one style over your own
+`region.pmtiles`, with no login and no API needed:
+
+```
+cd web && npm run dev
+# then open, substituting light or dark:
+#   http://localhost:5173/scripts/basemap-preview/index.html?style=dark&zoom=16
+```
+
+It imports the same style code the Live map imports, so what you see is
+what ships. It is a development tool only and is never part of the built
+artifact.
+
 ## The license credit (please do not remove it)
 
 OpenStreetMap data is licensed under the **Open Database License (ODbL)**,
@@ -119,6 +182,9 @@ the extract on any machine that does have internet access:
 - **v0 limitation, stated in the legend too:** street and place names are
   drawn (one bundled typeface); point-of-interest icons are not included
   in this version.
+- **No third street style, and no automatic one.** The style follows your
+  choice, never the time of day or the app theme — a legibility setting
+  that changes itself is a legibility setting you cannot rely on.
 
 ## How it is served (for the technically curious)
 
