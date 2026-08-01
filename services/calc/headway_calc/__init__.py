@@ -120,6 +120,12 @@ from headway_calc.vrh import (
     compute_vrh_v0_2,
     compute_vrh_v0_3,
 )
+from headway_calc.vp import (
+    compute_vp_upt,
+    compute_vp_voms,
+    compute_vp_vrh,
+    compute_vp_vrm,
+)
 
 # NOTE: the runner (headway_calc.runner: run_period, RunReport) and the
 # MR-20 generator (headway_calc.mr20: build_mr20_package) are NOT
@@ -180,6 +186,10 @@ __all__ = [
     "compute_vrh_v0_1",
     "compute_vrh_v0_2",
     "compute_vrh_v0_3",
+    "compute_vp_upt",
+    "compute_vp_voms",
+    "compute_vp_vrh",
+    "compute_vp_vrm",
     "load_agency_timezones",
     "load_dr_trips",
     "load_operated_trip_ids",
