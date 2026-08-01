@@ -176,6 +176,7 @@ def test_insert_passenger_events_conflict_do_nothing_on_unique_key(
         "cd" * 32,
         None,  # vendor_trip_ref — NULL when no resolution ran (0036)
         None,  # trip_resolution — NULL when no resolution ran (0036)
+        None,  # revenue_classification — NULL when not classified (0040)
     )
     # No tenant_id column anywhere (ADR-0004).
     assert "tenant" not in sql.lower()

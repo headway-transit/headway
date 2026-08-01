@@ -411,6 +411,7 @@ def events_to_rows(events: list[PassengerEvent]) -> list[tuple]:
             e.source,
             e.source_record_id,
             e.mode,
+            e.revenue_classification,  # migration 0039 / handoff 0040
         )
         for e in ordered
     ]
@@ -587,6 +588,19 @@ class RecordingCursor:
                 # module chose: 8-tuples for the 0038 variant, 7-tuples for
                 # the pre-0038 one.
                 self._pending_all = list(conn.trip_label_rows)
+            elif "MIN(st.departure_seconds)" in sql:
+                # The revenue-window SELECT (handoff 0040) — names
+                # canonical.stop_times AND canonical.vehicle_positions, so it
+                # must be dispatched BEFORE the geometry/positions branches.
+                # A pre-migration-0019 database (no canonical.stop_times) is
+                # modeled by the missing flag (SQLSTATE 42P01). Empty by
+                # default: most tests carry no schedule, so no window is
+                # derived and every no-run boarding is held pending review.
+                if conn.stop_times_table_missing:
+                    raise FakeUndefinedTable(
+                        'relation "canonical.stop_times" does not exist'
+                    )
+                self._pending_all = list(conn.revenue_window_rows)
             elif "st.arrival_seconds" in sql:
                 # The ops schedule SELECT (handoff 0014) — names
                 # canonical.stop_times too, so this branch must come FIRST.
@@ -597,6 +611,16 @@ class RecordingCursor:
                 # come FIRST.
                 self._pending_all = list(conn.stop_time_rows)
             elif "canonical.passenger_events" in sql:
+                # A pre-migration-0039 database is modeled by the missing
+                # flag: the 0039 SELECT raises 42703 and the reader falls back
+                # to the classification-free SELECT (handoff 0040).
+                if (
+                    conn.revenue_classification_column_missing
+                    and "e.revenue_classification" in sql
+                ):
+                    raise FakeUndefinedColumn(
+                        "column e.revenue_classification does not exist"
+                    )
                 self._pending_all = list(conn.passenger_event_rows)
             elif "SELECT DISTINCT trip_id" in sql:
                 self._pending_all = list(conn.operated_trip_rows)
@@ -679,6 +703,7 @@ class RecordingConnection:
         dr_trip_rows: list[tuple] | None = None,
         ops_schedule_rows: list[tuple] | None = None,
         agency_timezone_rows: list[tuple] | None = None,
+        revenue_window_rows: list[tuple] | None = None,
         attestation_rows: list[tuple] | None = None,
         attestations_table_missing: bool = False,
         service_day_override_rows: list[tuple] | None = None,
@@ -688,7 +713,13 @@ class RecordingConnection:
         vehicle_label_column_missing: bool = False,
         identical_metric_value_rows: list[tuple] | None = None,
         block_labels_table_missing: bool = False,
+        revenue_classification_column_missing: bool = False,
+        stop_times_table_missing: bool = False,
     ):
+        self.revenue_classification_column_missing = (
+            revenue_classification_column_missing
+        )
+        self.stop_times_table_missing = stop_times_table_missing
         self.position_rows = position_rows or []
         # persist_result's identical-figure probe: rows served to the
         # SELECT metric_value_id dedupe query. Default empty — every
@@ -697,6 +728,10 @@ class RecordingConnection:
         # The ops slice (handoff 0014): schedule + agency timezone reads.
         self.ops_schedule_rows = ops_schedule_rows or []
         self.agency_timezone_rows = agency_timezone_rows or []
+        # Revenue-window bounds per service date (handoff 0040): (service_date,
+        # min departure seconds, max arrival seconds). Empty by default — no
+        # schedule, no window, so a no-run boarding is held pending review.
+        self.revenue_window_rows = revenue_window_rows or []
         self.passenger_event_rows = passenger_event_rows or []
         self.operated_trip_rows = operated_trip_rows or []
         # pmt_v0's geometry rows (handoff 0011, migration 0019).

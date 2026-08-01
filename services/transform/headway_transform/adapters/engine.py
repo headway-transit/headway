@@ -64,7 +64,15 @@ from .resolution import (
     TripResolver,
     resolution_findings,
 )
-from .spec import DR_CONTRACT_VALIDATOR, TARGET_DR, TARGET_TIDES, FieldDef, MappingSpec
+from .spec import (
+    ASSIGNED_CLASSIFICATION,
+    DR_CONTRACT_VALIDATOR,
+    TARGET_DR,
+    TARGET_TIDES,
+    UNASSIGNED_CLASSIFICATION,
+    FieldDef,
+    MappingSpec,
+)
 
 #: Exact distance conversion factors to statute miles. 1 international mile =
 #: 1609.344 m exactly (NIST SP 811 Appendix B — verify against the published
@@ -89,6 +97,10 @@ _TIDES_COLUMNS = (
     "vehicle_id",
     "trip_id_performed",
     "event_count",
+    # Handoff 0040: the assignment status carried on the one-row contract CSV
+    # so the tides_passenger_events normalizer stamps it onto the canonical
+    # row ('assigned' | 'unassigned'; absent = NULL, the pre-0040 rows).
+    "revenue_classification",
 )
 _DR_COLUMNS = (
     "dr_trip_id",
@@ -294,16 +306,24 @@ def _map_row(
     fields: tuple[FieldDef, ...],
     row: dict,
     problems: list[str],
+    drop_fields: frozenset[str] = frozenset(),
 ) -> dict[str, object]:
     """Map one kept vendor row to a typed contract record (may add problems).
 
     ``fields`` is the field set to apply: ``spec.fields`` for classic
     one-record specs, or an emission's merged effective fields under ``emit``
-    fan-out.
+    fan-out. ``drop_fields`` (handoff 0040) names target fields dropped for a
+    no-run row — a ghost boarding has no trip, stop or stop-sequence to map,
+    so those fields are left absent (NULL), never guessed. Dropping is atomic
+    with the ``revenue_classification`` stamp the caller injects: the two
+    together are what makes a no-run row a valid unassigned event instead of
+    a quarantine.
     """
     typed: dict[str, object] = {}
 
     for fd in fields:
+        if fd.target in drop_fields:
+            continue  # no-run row: this run-identity field is absent (handoff 0040)
         if fd.kind == "from":
             raw = (row.get(fd.source) or "").strip()
             if raw == "":
@@ -315,7 +335,7 @@ def _map_row(
             typed[fd.target] = fd.const
 
     for fd in fields:
-        if fd.kind != "derived":
+        if fd.kind != "derived" or fd.target in drop_fields:
             continue
         if fd.derived == "concat":
             parts = [(row.get(col) or "").strip() for col in fd.sources]
@@ -562,6 +582,25 @@ def run_adapter(
     filtered_by: dict[int, int] = {}
     # (emission index, predicate index) -> suppressed-emission count.
     suppressed_by: dict[tuple[int, int], int] = {}
+    # Handoff 0040: rows emitted as no-run 'unassigned' boardings (never
+    # filtered, never quarantined) — counted so the ~3.3% ghost share is
+    # visible at a glance, the aggregated info finding at the file's end.
+    unassigned_rows = 0
+
+    def _classification(row: dict) -> Optional[str]:
+        """The assignment status for one kept row (handoff 0040), or None.
+
+        None when the spec declares no ``unassigned`` block (pre-0040
+        behavior — revenue_classification left absent on every row). With the
+        block: 'unassigned' when ALL its ``when`` predicates hold (a no-run
+        row), else 'assigned' (a normal row explicitly marked as such — the
+        spec that classifies no-run rows also states the rest are assigned).
+        """
+        if spec.unassigned is None:
+            return None
+        if all(pred.keeps(row) for pred in spec.unassigned.when):
+            return UNASSIGNED_CLASSIFICATION
+        return ASSIGNED_CLASSIFICATION
 
     def _resolve(row: dict, record: dict) -> Optional[TripOutcome]:
         """Resolve ONE mapped vendor row's trip and stop, once."""
@@ -671,20 +710,49 @@ def run_adapter(
         if not kept:
             continue
 
+        # Handoff 0040: classify the row's assignment status before mapping.
+        # A no-run row is 'unassigned' — its run-identity fields are dropped
+        # and it does NOT resolve (there is no trip to resolve); a normal row
+        # is 'assigned'. None when the spec declares no unassigned block.
+        classification = _classification(row)
+        drop_fields = (
+            frozenset(spec.unassigned.drop_fields)
+            if classification == UNASSIGNED_CLASSIFICATION
+            and spec.unassigned is not None
+            else frozenset()
+        )
+        if classification == UNASSIGNED_CLASSIFICATION:
+            unassigned_rows += 1
+
+        def _stamp(record: dict) -> dict:
+            """Inject the assignment status onto a mapped record (handoff
+            0040), leaving the record untouched when the spec has no
+            unassigned block — the pre-0040 output is byte-identical."""
+            if classification is None:
+                return record
+            return {**record, "revenue_classification": classification}
+
         if not spec.emissions:
             # Classic path: exactly one contract record per kept row.
             problems: list[str] = []
-            typed = _map_row(spec, spec.fields, row, problems)
+            typed = _map_row(spec, spec.fields, row, problems, drop_fields)
             if problems:
                 _quarantine(index, problems)
                 continue
-            record = _json_record(typed)
+            record = _stamp(_json_record(typed))
             rows, edges, reject = _validate_record(spec, record, record_id, source)
             if reject is not None:
                 _quarantine(index, [reject])
                 continue
             result.mapped_count += 1
-            _accept(record, rows, edges, _resolve(row, record))
+            # A no-run row has no trip to resolve — resolution is skipped, so
+            # trip_id stays absent and no false 'unmatched' finding is raised.
+            outcome = (
+                None
+                if classification == UNASSIGNED_CLASSIFICATION
+                else _resolve(row, record)
+            )
+            _accept(record, rows, edges, outcome)
             continue
 
         # Fan-out (`emit`): zero or more records per kept row, one per
@@ -708,14 +776,14 @@ def run_adapter(
             all_suppressed = False
             emission_problems: list[str] = []
             typed = _map_row(
-                spec, emission.effective_fields, row, emission_problems
+                spec, emission.effective_fields, row, emission_problems, drop_fields
             )
             if emission_problems:
                 problems.extend(
                     f"emission {emission.name!r}: {p}" for p in emission_problems
                 )
                 continue
-            record = _json_record(typed)
+            record = _stamp(_json_record(typed))
             rows, edges, reject = _validate_record(spec, record, record_id, source)
             if reject is not None:
                 problems.append(f"emission {emission.name!r}: {reject}")
@@ -735,8 +803,14 @@ def run_adapter(
         result.mapped_count += 1
         # Resolution is per ROW, not per emission: a boarding and an
         # alighting recorded at the same stop visit are the same trip, and
-        # resolving twice could not disagree without being a bug.
-        outcome = _resolve(row, pending[0][0])
+        # resolving twice could not disagree without being a bug. A no-run
+        # ('unassigned') row has no trip to resolve — skip resolution so
+        # trip_id stays absent and no false 'unmatched' finding is raised.
+        outcome = (
+            None
+            if classification == UNASSIGNED_CLASSIFICATION
+            else _resolve(row, pending[0][0])
+        )
         for record, rows, edges in pending:
             _accept(record, rows, edges, outcome)
 
@@ -784,6 +858,40 @@ def run_adapter(
                     )
                     + f"): {flt.reason}. Declared exclusion, counted and "
                     "recorded — never a silent drop."
+                ),
+                source_record_ids=[record_id],
+            )
+        )
+
+    if unassigned_rows and spec.unassigned is not None:
+        # Handoff 0040: the no-run boardings are EMITTED, marked 'unassigned',
+        # never dropped — the ~3.3% ghost share the earlier quarantine lost.
+        # Aggregated (one finding per file, not per row) with the count so the
+        # share is visible at a glance; the calc library, not the transform,
+        # decides which of these are non-revenue prep and which are real
+        # catch-up riders.
+        result.findings.append(
+            DQFinding(
+                issue_type="adapter_unassigned_boardings_emitted",
+                severity=SEVERITY_INFO,
+                title=(
+                    f"Adapter {source} emitted {unassigned_rows} no-run "
+                    "boarding row(s) for revenue classification"
+                ),
+                description=(
+                    f"Record {record_id} (adapter {source}, spec "
+                    f"{spec.spec_sha12}): {unassigned_rows} of "
+                    f"{result.total_rows} row(s) carried no run assignment at "
+                    "all and were emitted as passenger events marked "
+                    f"revenue_classification 'unassigned' — {spec.unassigned.reason} "
+                    "These are NOT dropped and NOT silently counted: a vehicle "
+                    "not logged into a run is not in revenue service (2026 NTD "
+                    "Policy Manual p. 128), so the calc library excludes the "
+                    "non-revenue prep/pull-in boardings from Unlinked "
+                    "Passenger Trips and routes the genuinely ambiguous "
+                    "mid-service ones to a human — never the transform, which "
+                    "records the assignment status only, never the reported "
+                    "number."
                 ),
                 source_record_ids=[record_id],
             )

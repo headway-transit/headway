@@ -168,7 +168,7 @@ def test_clean_period_persists_telemetry_metrics_and_refuses_upt_pmt(clean_rows)
     )
     assert vrm.calc_version == "0.2.0"
     assert vrh.calc_version == "0.4.0"
-    assert upt.calc_version == "0.2.0"
+    assert upt.calc_version == "0.3.0"  # handoff 0040: revenue classification
     assert pmt.calc_version == "0.2.0"
     # Golden expected values (tests/golden/vrm_vrh_v0/expected.json; the
     # no-block fallback reproduces the 0.2.0 VRH value exactly). No
@@ -537,7 +537,7 @@ def test_run_report_json_is_parseable_and_complete(clean_rows):
     assert parsed["metrics"][1]["detail"] == VRH_CLEAN_DETAIL
     assert parsed["metrics"][1]["info_count"] == 2
     # upt/pmt refused (no count data): no value, no detail, one blocking id.
-    assert parsed["metrics"][2]["calc_version"] == "0.2.0"
+    assert parsed["metrics"][2]["calc_version"] == "0.3.0"  # handoff 0040
     assert parsed["metrics"][2]["unit"] == "unlinked_passenger_trips"
     assert parsed["metrics"][2]["value"] is None
     assert parsed["metrics"][2]["persisted"] is False
@@ -1143,3 +1143,59 @@ def test_cli_refuses_without_database_url(monkeypatch):
 def test_cli_requires_both_period_flags():
     with pytest.raises(SystemExit):
         cli_main(["--period-start", "2026-06-01"])
+
+
+def test_no_run_boardings_classified_through_runner(clean_rows):
+    """Handoff 0040 end-to-end: a no-run boarding OUTSIDE the schedule-derived
+    revenue window is excluded from UPT as non-revenue, the split lands in the
+    persisted detail, and the missing-trip factor is untouched (the ghost's
+    trip_id is None, so it never enters the denominator)."""
+    from datetime import datetime, timezone
+
+    from conftest import events_to_rows
+    from headway_calc.types import PassengerEvent
+
+    svc = date(2026, 1, 15)
+
+    def ev(pid, hour, trip_id, count, classification=None):
+        return PassengerEvent(
+            event_timestamp=datetime(2026, 1, 15, hour, tzinfo=timezone.utc),
+            service_date=svc,
+            passenger_event_id=pid,
+            vehicle_id="veh-101",
+            trip_id=trip_id,
+            trip_stop_sequence=None if trip_id is None else 1,
+            event_type="Passenger boarded",
+            event_count=count,
+            source="tides",
+            source_record_id=f"rec-{pid}",
+            revenue_classification=classification,
+        )
+
+    events = [
+        ev("a1", 12, "trip-A", 5),  # assigned, in-service -> revenue
+        ev("g1", 4, None, 3, "unassigned"),  # pre-service ghost -> excluded
+    ]
+    conn = RecordingConnection(
+        position_rows=clean_rows,
+        passenger_event_rows=events_to_rows(events),
+        operated_trip_rows=[("trip-A",)],
+        agency_timezone_rows=[("UTC",)],
+        # revenue window 08:00–20:00 UTC on the service date (seconds since
+        # local midnight): the pre-service ghost at 04:00 falls OUTSIDE.
+        revenue_window_rows=[(svc, 8 * 3600, 20 * 3600)],
+    )
+    report = run_period(conn, PERIOD_START, PERIOD_END)
+
+    upt = report.outcomes[2]
+    assert upt.calc_version == "0.3.0"
+    assert upt.persisted and upt.value == "5"  # only the assigned boarding
+    split = upt.detail["revenue_classification"]
+    assert split["revenue_boardings"] == 5
+    assert split["excluded_non_revenue_boardings"] == 3
+    assert split["pending_review_boardings"] == 0
+    # double-count guard: one operated trip, zero missing (a1 has events),
+    # so factor 1 — the ghost never inflated operated/missing.
+    assert upt.detail["operated_trips"] == 1
+    assert upt.detail["missing_trips"] == 0
+    assert upt.detail["factor_applied"] == "1.000000"

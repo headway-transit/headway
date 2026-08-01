@@ -51,8 +51,9 @@ randomness. Time comes exclusively from the input events.
 from __future__ import annotations
 
 import dataclasses
+from datetime import date
 from decimal import ROUND_HALF_EVEN, Decimal
-from typing import Iterable
+from typing import Iterable, Mapping
 
 from headway_calc.attestation import (
     P146_ATTESTATION_BASIS,
@@ -60,6 +61,12 @@ from headway_calc.attestation import (
     governing_attestation,
 )
 from headway_calc._vocabulary import short_id
+from headway_calc.revenue_window import (
+    INSIDE_WINDOW,
+    NO_WINDOW,
+    OUTSIDE_WINDOW,
+    RevenueWindow,
+)
 from headway_calc.types import (
     SEVERITY_BLOCKING,
     SEVERITY_INFO,
@@ -73,14 +80,35 @@ from headway_calc.types import (
 )
 
 CALC_NAME = "upt_v0"
-#: 0.2.0 (handoff 0019): the >2% path accepts a statistician attestation
-#: context — WITH a recorded, unrevoked, in-scope attestation the figure is
-#: factored up per the p. 146 sentence ("agencies must have a qualified
-#: statistician approve the factoring method") and carries the attestation's
-#: provenance permanently; WITHOUT one, the refusal is byte-for-byte 0.1.0's
-#: (regression-pinned). 0.1.0 is RETAINED runnable as compute_upt_v0_1_0
-#: (the sscls convention — shipped versions stay reproducible).
-CALC_VERSION = "0.2.0"
+#: 0.3.0 (handoff 0040): revenue classification of no-run boardings. A
+#: passenger event may carry an assignment status
+#: (canonical.passenger_events.revenue_classification, migration 0039):
+#: 'unassigned' — a no-run "ghost" boarding a vehicle fired while moving with
+#: the APC on but not logged into a run — is a vehicle NOT in revenue service
+#: (2026 NTD Policy Manual p. 128), so it is NOT an unlinked passenger trip.
+#: 0.3.0 EXCLUDES the auto-classified non-revenue ones from UPT and HOLDS the
+#: ambiguous mid-service ones OUT of the figure pending human review (the
+#: exclude-until-classified default), reporting the split
+#: (revenue / excluded-non-revenue / pending-review) in the detail. A feed
+#: that never sets revenue_classification (every first-party TIDES feed, every
+#: pre-0040 row) computes BYTE-FOR-BYTE as 0.2.0: the trip-assignment proxy is
+#: unchanged (trip_id present = revenue counted; trip_id NULL = excluded), no
+#: split keys appear unless a classified event exists, and the missing-trip
+#: factor is untouched. 0.2.0 is RETAINED runnable as compute_upt_v0_2_0 and
+#: 0.1.0 as compute_upt_v0_1_0 (the sscls convention — shipped versions stay
+#: reproducible).
+CALC_VERSION = "0.3.0"
+
+#: The transform's assignment status (migration 0039). 'unassigned' is the
+#: no-run ghost boarding; 'assigned' resolved to a run; None (the pre-0040
+#: default) means no status was recorded and the trip-assignment proxy governs.
+UNASSIGNED = "unassigned"
+
+#: The revenue VERDICT upt_v0 derives for a no-run boarding (the calc owns the
+#: number, not the transform). Recorded in the detail split and the finding.
+VERDICT_REVENUE = "revenue"
+VERDICT_EXCLUDED_NON_REVENUE = "excluded_non_revenue"
+VERDICT_PENDING_REVIEW = "pending_review"
 #: 'boardings' would be ambiguous against the counted base; the persisted unit
 #: names the NTD measure itself.
 UNIT = "unlinked_passenger_trips"
@@ -194,6 +222,103 @@ def _null_count_warning(event: PassengerEvent) -> Finding:
     )
 
 
+def _no_run_warning(event: PassengerEvent, verdict: str, reason: str) -> Finding:
+    """ONE warning per no-run boarding — excluded or held pending (handoff
+    0040). No trip subject (a no-run boarding has, by definition, no trip);
+    the raw record is cited so the later human-in-the-loop wave can find it.
+    """
+    excluded = verdict == VERDICT_EXCLUDED_NON_REVENUE
+    return Finding(
+        issue_type=(
+            "boarding_excluded_non_revenue"
+            if excluded
+            else "boarding_pending_revenue_review"
+        ),
+        severity=SEVERITY_WARNING,
+        title=(
+            f"No-run boarding {short_id(event.passenger_event_id)} "
+            + (
+                "excluded as non-revenue (prep / pull-in)"
+                if excluded
+                else "held pending revenue review"
+            )
+            + f" — vehicle {short_id(event.vehicle_id)}, "
+            f"{event.event_timestamp.isoformat()}"
+        ),
+        description=(
+            f"Passenger event {event.passenger_event_id!r} (vehicle_id="
+            f"{event.vehicle_id!r}, {event.event_timestamp.isoformat()}, "
+            f"count={event.event_count}) carried NO run assignment "
+            "(revenue_classification 'unassigned'): "
+            + reason
+            + ". "
+            + (
+                "It is EXCLUDED from Unlinked Passenger Trips (a vehicle not "
+                "in revenue service is not carrying passengers) and recorded "
+                "in the metric detail's revenue split — never dropped, never "
+                "silently counted."
+                if excluded
+                else "It is HELD OUT of the reported figure until a human "
+                "classifies it revenue or non-revenue (the exclude-until-"
+                "classified default), so a boarding of unknown revenue status "
+                "cannot silently inflate or deflate a certified number. It is "
+                "recorded in the metric detail's revenue split and routed to "
+                "the review queue by the later human-in-the-loop wave."
+            )
+        ),
+        source_record_ids=(event.source_record_id,),
+    )
+
+
+def _classify_no_run(
+    event: PassengerEvent,
+    revenue_windows: Mapping[date, RevenueWindow],
+) -> tuple[str, str]:
+    """Auto-classify one no-run ('unassigned') boarding — (verdict, reason).
+
+    The revenue verdict is the CALC's, derived from the transform's
+    assignment status (the row already resolved to no run) corroborated by
+    the schedule-derived revenue window (handoff 0040 design points 3–4):
+
+    - OUTSIDE the day's revenue window (before the first scheduled departure
+      or after the last scheduled arrival) — prep / pull-out / pull-in, a
+      vehicle not in revenue service (p. 128): suggested NON-REVENUE, excluded
+      from UPT with the reason recorded;
+    - INSIDE the window (mid-service) — genuinely ambiguous: it fits neither
+      prep nor detour and could be a real catch-up bus dispatched without a
+      formal trip assignment (design point 7). Held PENDING human review — the
+      conservative exclude-until-classified default — never silently counted
+      and never silently excluded;
+    - NO window derivable for the date (no schedule, no agency timezone) —
+      the corroborating signal is absent, so the boarding is held PENDING
+      review rather than guessed either way.
+    """
+    window = revenue_windows.get(event.service_date)
+    placement = NO_WINDOW if window is None else window.classify(event.event_timestamp)
+    if placement == OUTSIDE_WINDOW:
+        return (
+            VERDICT_EXCLUDED_NON_REVENUE,
+            "no run assignment and outside the day's revenue-service window "
+            "(before the first scheduled departure or after the last "
+            "scheduled arrival) — prep / pull-out / pull-in, a vehicle not in "
+            "revenue service (2026 NTD Policy Manual p. 128)",
+        )
+    if placement == INSIDE_WINDOW:
+        return (
+            VERDICT_PENDING_REVIEW,
+            "no run assignment but WITHIN the day's revenue-service window — "
+            "ambiguous (could be a catch-up bus dispatched without a formal "
+            "trip assignment); held pending human review, never counted or "
+            "excluded silently",
+        )
+    return (
+        VERDICT_PENDING_REVIEW,
+        "no run assignment and no revenue-service window could be derived for "
+        "this service date (no schedule or no agency timezone) — held pending "
+        "human review rather than guessed",
+    )
+
+
 def compute_upt(
     events: Iterable[PassengerEvent],
     operated_trip_ids: Iterable[str],
@@ -201,8 +326,34 @@ def compute_upt(
     missing_trip_threshold: Decimal = MISSING_TRIP_THRESHOLD,
     imbalance_threshold: Decimal = IMBALANCE_THRESHOLD,
     attestations: Iterable[AttestationContext] = (),
+    revenue_windows: Mapping[date, RevenueWindow] | None = None,
 ) -> CalcResult:
-    """Compute upt_v0 (version 0.2.0) — Unlinked Passenger Trips.
+    """Compute upt_v0 (version 0.3.0) — Unlinked Passenger Trips.
+
+    Revenue classification of no-run boardings (handoff 0040, design points
+    3–5). An event whose ``revenue_classification`` (migration 0039) is
+    ``'unassigned'`` is a no-run "ghost" boarding — a vehicle fired the APC
+    while moving with no run assignment at all (prep / pull-out / pull-in, or
+    rarely a catch-up bus dispatched without a trip). A vehicle not logged
+    into a run is NOT in revenue service (p. 128), so such a boarding is NOT
+    an unlinked passenger trip. Each is auto-classified against the
+    schedule-derived revenue window (``revenue_windows``, keyed by service
+    date — a CORROBORATING signal; the primary discriminator is the no-run
+    assignment itself):
+
+    - outside the window → suggested NON-REVENUE, EXCLUDED from UPT, reason
+      recorded;
+    - inside the window (or no window derivable) → PENDING human review, held
+      OUT of the figure (the conservative exclude-until-classified default).
+
+    Every no-run boarding is COUNTED INTO THE SPLIT (revenue / excluded-non-
+    revenue / pending-review) in the detail and cited by ONE warning — never
+    dropped and never silently counted. The double-count guard is structural:
+    a no-run boarding has ``trip_id`` None, so it contributes to neither the
+    counted UPT base nor the operated/missing-trip denominators — the p. 146
+    missing-trip factor is untouched (an excluded boarding can never inflate
+    or deflate it). A feed that sets no ``revenue_classification`` computes
+    BYTE-FOR-BYTE as 0.2.0.
 
     Base count (p. 143: "the number of boardings on public transportation
     vehicles"): the sum of ``event_count`` over events whose ``event_type``
@@ -276,11 +427,27 @@ def compute_upt(
     """
     missing_trip_threshold = Decimal(str(missing_trip_threshold))
     imbalance_threshold = Decimal(str(imbalance_threshold))
+    revenue_windows = revenue_windows or {}
     ordered = _sorted_events(events)
     operated = sorted(set(operated_trip_ids))
 
     warnings: list[Finding] = []
     infos: list[Finding] = []
+
+    # --- revenue classification of no-run boardings (handoff 0040) -----------
+    # A boarding marked 'unassigned' (migration 0039) is a no-run ghost the
+    # vehicle fired while not logged into a run — NOT in revenue service
+    # (p. 128), so NOT a UPT. Auto-classify each against the schedule-derived
+    # revenue window: outside → excluded non-revenue; inside/no-window →
+    # pending human review (exclude-until-classified default). These
+    # boardings are COUNTED INTO THE SPLIT and cited by ONE warning — never
+    # dropped, never silently counted. Their trip_id is None, so they touch
+    # neither the counted base nor the missing-trip denominators below (the
+    # double-count guard is structural, not a subtraction).
+    excluded_non_revenue_boardings = 0
+    pending_review_boardings = 0
+    excluded_record_ids: dict[str, None] = {}
+    pending_record_ids: dict[str, None] = {}
 
     # --- base count (p. 143) + lineage + null-count warnings ----------------
     counted_boardings = 0
@@ -293,6 +460,26 @@ def compute_upt(
         if event.trip_id is not None:
             trips_with_any_event.add(event.trip_id)
         if event.trip_id is None:
+            # No-run boarding: classify it into the revenue split rather than
+            # simply skipping it (the pre-0040 trip-assignment proxy). Only
+            # BOARDING events with an explicit 'unassigned' status and a
+            # non-NULL count carry a boarding to classify; a NULL count is
+            # warned exactly as an assigned NULL count would be.
+            if (
+                event.revenue_classification == UNASSIGNED
+                and event.event_type == BOARDING_EVENT_TYPE
+            ):
+                if event.event_count is None:
+                    null_count_warnings.append(_null_count_warning(event))
+                else:
+                    verdict, reason = _classify_no_run(event, revenue_windows)
+                    if verdict == VERDICT_EXCLUDED_NON_REVENUE:
+                        excluded_non_revenue_boardings += event.event_count
+                        excluded_record_ids.setdefault(event.source_record_id, None)
+                    else:  # VERDICT_PENDING_REVIEW
+                        pending_review_boardings += event.event_count
+                        pending_record_ids.setdefault(event.source_record_id, None)
+                    warnings.append(_no_run_warning(event, verdict, reason))
             continue  # revenue-service proxy: unassigned events not counted
         if event.event_type == BOARDING_EVENT_TYPE:
             if event.event_count is None:
@@ -435,6 +622,42 @@ def compute_upt(
                     "recorded in the metric value's detail."
                 ),
                 source_record_ids=tuple(simulated_record_ids),
+            )
+        )
+
+    # --- pending-review summary (handoff 0040) -------------------------------
+    # When any no-run boarding is held pending human review, ONE info finding
+    # states the count and the exclude-until-classified default so the
+    # certification layer (Backend) knows the reported figure holds these OUT
+    # until classified — a boarding of unknown revenue status never silently
+    # inflates or deflates a certified number. The per-boarding warnings above
+    # carry the individual records; this is the roll-up.
+    if pending_review_boardings:
+        infos.append(
+            Finding(
+                issue_type="boardings_pending_revenue_review",
+                severity=SEVERITY_INFO,
+                title=(
+                    f"{pending_review_boardings} boarding(s) held pending "
+                    "revenue review — excluded until classified"
+                ),
+                description=(
+                    f"{pending_review_boardings} no-run boarding(s) across "
+                    f"{len(pending_record_ids)} record(s) fell WITHIN the "
+                    "day's revenue-service window (or no window was derivable) "
+                    "and are genuinely ambiguous — they could be non-revenue "
+                    "prep or a real catch-up bus dispatched without a formal "
+                    "trip assignment (2026 NTD Policy Manual p. 128 / handoff "
+                    "0040). They are HELD OUT of the reported figure under the "
+                    "exclude-until-classified default until a human classifies "
+                    "them (the later human-in-the-loop wave), so a certified "
+                    "Unlinked Passenger Trips figure never counts a boarding of "
+                    "unknown revenue status. The split is in the metric "
+                    "detail's revenue_classification block; each boarding's "
+                    "record is cited by its own 'boarding_pending_revenue_"
+                    "review' warning."
+                ),
+                source_record_ids=tuple(pending_record_ids),
             )
         )
 
@@ -624,6 +847,8 @@ def compute_upt(
         missing_trip_threshold=missing_trip_threshold,
         imbalance_threshold=imbalance_threshold,
         attestation=attestation_provenance,
+        excluded_non_revenue_boardings=excluded_non_revenue_boardings,
+        pending_review_boardings=pending_review_boardings,
     )
 
     return CalcResult(
@@ -639,6 +864,56 @@ def compute_upt(
     )
 
 
+def _without_classification(
+    events: Iterable[PassengerEvent],
+) -> list[PassengerEvent]:
+    """Events with revenue_classification cleared — the pre-0040 view.
+
+    The retained 0.1.0/0.2.0 versions predate migration 0039; they must
+    recompute BYTE-FOR-BYTE regardless of what a caller passes, so any
+    assignment status on the input is stripped and the events are read purely
+    through the trip-assignment proxy exactly as those versions always did.
+    (A historical recompute normally passes pre-0040 events where the field
+    is already None, so this is a belt-and-braces guarantee, not a rewrite of
+    history.)
+    """
+    return [
+        e if e.revenue_classification is None
+        else dataclasses.replace(e, revenue_classification=None)
+        for e in events
+    ]
+
+
+def compute_upt_v0_2_0(
+    events: Iterable[PassengerEvent],
+    operated_trip_ids: Iterable[str],
+    *,
+    missing_trip_threshold: Decimal = MISSING_TRIP_THRESHOLD,
+    imbalance_threshold: Decimal = IMBALANCE_THRESHOLD,
+    attestations: Iterable[AttestationContext] = (),
+) -> CalcResult:
+    """upt_v0 0.2.0, RETAINED runnable (the sscls convention — shipped
+    versions stay reproducible; handoff 0040).
+
+    0.2.0 predates revenue classification: it is compute_upt with no
+    revenue_windows and every input's assignment status stripped, so the
+    no-run split never appears and the output (values, findings, detail JSON)
+    is byte-identical to 0.2.0's — the 0.3.0 change is strictly additive (the
+    revenue_classification detail block and the no-run findings appear only
+    when a classified boarding exists, which cannot happen here). Pinned by
+    tests/test_upt.py.
+    """
+    result = compute_upt(
+        _without_classification(events),
+        operated_trip_ids,
+        missing_trip_threshold=missing_trip_threshold,
+        imbalance_threshold=imbalance_threshold,
+        attestations=attestations,
+        revenue_windows=None,
+    )
+    return dataclasses.replace(result, calc_version="0.2.0")
+
+
 def compute_upt_v0_1_0(
     events: Iterable[PassengerEvent],
     operated_trip_ids: Iterable[str],
@@ -649,18 +924,19 @@ def compute_upt_v0_1_0(
     """upt_v0 0.1.0, RETAINED runnable (the sscls convention — shipped
     versions stay reproducible; handoff 0019).
 
-    0.1.0 predates statistician attestations: it is exactly compute_upt
-    with no attestation context — every output (values, findings, detail
-    JSON) is byte-identical, because the 0.2.0 change is strictly additive
-    (the attestation detail key is emitted only when an attestation
-    governed, which can never happen here). Pinned by
-    tests/test_upt_attestation.py.
+    0.1.0 predates statistician attestations AND revenue classification: it
+    is compute_upt with no attestation context, no revenue windows, and every
+    input's assignment status stripped — every output is byte-identical,
+    because both later changes are strictly additive (the attestation and
+    revenue_classification detail keys are emitted only when they apply, which
+    can never happen here). Pinned by tests/test_upt_attestation.py.
     """
     result = compute_upt(
-        events,
+        _without_classification(events),
         operated_trip_ids,
         missing_trip_threshold=missing_trip_threshold,
         imbalance_threshold=imbalance_threshold,
         attestations=(),
+        revenue_windows=None,
     )
     return dataclasses.replace(result, calc_version="0.1.0")
