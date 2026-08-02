@@ -33,6 +33,7 @@ preserved end to end; floating point never touches a figure).
 | GET | `/certifications/intent` | any signed-in role | The fixed ESIGN-style intent statement the ceremony renders and the honest-scope statement printed on the certificate (installation key = integrity + attribution within this system, NOT PKI non-repudiation; per-certifier WebAuthn keys are the documented v1). |
 | GET | `/certifications/{id}` | any signed-in role | The certificate view: signature block (typed name/title, fingerprint, signature), the stored canonical document (raw signed text + parsed object), and a LIVE verification result. |
 | GET | `/certifications/{id}/verify` | any signed-in role | Re-verifies the STORED document bytes against the STORED signature under the installation key AND checks the document is bound to this very row (certification_id + covered figure ids). Verdicts: `verified` / `failed` (LOUD — treat as tampered) / `unsigned_legacy` / `key_mismatch` (rotated key — honestly inconclusive, not proof of tampering). |
+| GET | `/certifications/{id}/evidence` | any signed-in role | **The evidence bundle** (handoff 0047) — the downloadable, self-describing file an auditor takes away: the certification's signed bytes + signature block + server verdict; every covered figure verbatim (exact NUMERIC as a string) with its receipt object and a `matches_signed_document` check; every figure's lineage walk (the SAME `routers.metrics.lineage_tree` the explain endpoint serves); every raw-record leaf's label, digest and sensitivity class; a `withheld` list; a `gaps` list; and a manifest with `bundle_sha256`. **Role-sensitive** — withholding is evaluated for the calling account (`authz.may_read_sensitivity`), so an auditor's copy names the rider-location records it does not carry. Labels and digests only: no bulk byte re-verification. Audited `evidence_bundle_generated`. See the section below. |
 | POST | `/attestations` | `certifying_official` only | Record a statistician's p. 146 factoring approval (migration 0029, append-only): name, credentials summary, method, external document reference, scope (ONE metric `upt`/`pmt`, fnmatch scope pattern, half-open date range). From the next calc run, a covered >2% missing-data share factors up under it and the figure carries the attestation provenance permanently. Audited. Role choice documented in `routers/attestations.py` (smallest honest fit). |
 | GET | `/attestations` (+ `/{id}`) | any signed-in role | Attestations (filter `metric`, `include_revoked=false`); revoked rows serve by default — revocation is history, not deletion. |
 | POST | `/attestations/{id}/revoke` | `certifying_official` only | Revoke (never delete): sets revoked_at/by/reason once — the migration-0029 trigger enforces exactly that shape. Figures already factored keep their provenance; FUTURE runs stop factoring under it. Audited. |
@@ -766,3 +767,98 @@ this router only ever SELECTs. No re-parsing, no editing, no re-ingestion.
 The decoder set is GTFS-Realtime + text/CSV; everything else states its type
 and hands over bytes. Bulk verification of a whole figure's evidence chain is
 the natural v1 (recorded in the handoff), not v0.
+
+## The evidence bundle (handoff 0047, design point 5)
+
+`GET /certifications/{id}/evidence` — `routers/evidence.py`.
+
+Everything else in this API answers a question while you are looking at the
+screen. This is the one surface that produces a document an auditor carries
+out of the building, reads next year, and shows to someone who has never heard
+of Headway. So it is self-describing: it states what it is, who it was
+generated for, what it contains, what it deliberately does not, and how to
+check nobody edited it after download.
+
+### What is in it
+
+| Section | Contents |
+| --- | --- |
+| `certification` | The signed bytes verbatim (`canonical_document`), the parsed document, the signature block, and the server-computed `verification` verdict — the same `verify_certification_row` the certificate screen shows, never a second opinion. |
+| `figures[]` | Every covered figure as the calculation library persisted it: `value` is the exact NUMERIC **as a string** (floating point never touches a reported figure), plus the receipt object served WHOLE (including its own `receipt_sha256` key, so a reader needs no field list to re-hash it), plus `signed_receipt_sha256` / `matches_signed_document`. |
+| `figures[].lineage` | The provenance tree from `routers.metrics.lineage_tree` — literally the walk `GET /metrics/values/{id}/lineage` serves, extracted so the bundle and "explain this number" cannot disagree. A test asserts the two payloads are equal. |
+| `raw_records[]` | Every leaf's id (which IS the SHA-256 of its bytes), its label, and its sensitivity classification. `contents_included` is always `false` and says so as a field. |
+| `withheld[]` | Everything left out because of content sensitivity, with Headway's own refusal **verbatim**. |
+| `gaps[]` | Everything that could not be produced (a different list — see below). |
+| `manifest` | Every artifact with its SHA-256, plus `bundle_sha256` over the whole document. |
+
+### Scope: labels and digests, never bulk bytes
+
+Handoff 0047's open question 1, decided. A raw record's id **is** the SHA-256
+of its bytes, so the manifest already carries every digest without re-reading
+anything. Re-reading them would need the batched broker read handoff 0035 left
+unbuilt, and past the broker's retention window most realtime leaves answer
+`410 not_retained` anyway — a bundle that stalled for minutes and then reported
+"unverifiable" for most of its own contents would be worse than one honest
+about its scope. Per-record verification stays the auditor's own deliberate
+action: `POST /raw/records/{id}/verify`, which handoff 0047 made reachable by
+the `auditor` role precisely so this is possible.
+
+`MAX_RAW_RECORD_LABELS` (5,000) bounds the LABEL list only — a single VRH
+figure can bottom out in 1,138 leaves. Every leaf id is in the lineage walk
+regardless, and when the cap bites the bundle adds a `raw_record_labels_capped`
+gap naming the exact number omitted and the endpoint to fetch them from.
+
+### The bundle is role-sensitive, and says so
+
+Content sensitivity is evaluated for the **calling account** through
+`authz.may_read_sensitivity`, which puts an `auditor` at *viewer* breadth on
+purpose (migration 0028). So two accounts asking for the same certification
+legitimately get different `withheld` lists — a data steward's copy carries the
+demand-response record's label with `readable_by_this_account: true`, an
+auditor's copy carries the same label plus a `withheld` entry with the refusal
+in full. `generated_for` records which account it was made for, so a reader
+handed the file can never mistake *withheld from that account* for *not in
+Headway*.
+
+### `withheld` and `gaps` are two lists, never one
+
+- **`withheld`** — left out ON PURPOSE, by the sensitivity rule, quoting the
+  server's refusal verbatim.
+- **`gaps`** — could NOT be produced: `covered_figure_missing`,
+  `lineage_unavailable`, `raw_record_not_in_index`,
+  `figure_changed_since_signing`, `raw_record_labels_capped`.
+
+Collapsing them would let a privacy decision read as a data defect, or a data
+defect read as a privacy decision. Either misreading produces a wrong finding
+against an agency that did nothing wrong.
+
+### How `bundle_sha256` is computed (reproduce it yourself)
+
+A hash nobody can recompute is decoration. The recipe is printed on the bundle
+(`manifest.bundle_sha256_recipe`, `manifest.canonicalization`,
+`manifest.excluded_field`) and is exactly three steps:
+
+1. Take the whole JSON document.
+2. **Delete** the single field `manifest.bundle_sha256` — delete the field
+   itself, do not blank it and do not set it to `null`. (It cannot cover
+   itself.)
+3. Serialize what is left with
+   `json.dumps(bundle, sort_keys=True, separators=(',', ':'), ensure_ascii=True, allow_nan=False).encode('utf-8')`
+   and take the lowercase-hex SHA-256 of those bytes.
+
+That is `signing.canonical_bytes` — the same canonicalization the certification
+signature itself uses, so an auditor who learned it once knows it here. It is
+deterministic (keys sorted at every level, no whitespace, non-ASCII escaped), so
+the order your JSON library read the fields in does not matter. Every figure is
+a JSON string rather than a number, so no decimal rounding can change the bytes
+you hash. `tests/test_evidence_bundle.py` recomputes it from the parsed response
+body — all an auditor will have — and asserts that one edited digit, or a
+deleted `withheld` list, breaks the seal.
+
+### Audit
+
+Generating a bundle writes an append-only `evidence_bundle_generated` row:
+actor, certification id, the counts, the **ids and classifications** of what was
+withheld, the verification verdict, and the bundle's own hash. Never the
+withheld content, never the figures — the record of a refusal must not become a
+copy of the thing refused.

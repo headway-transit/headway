@@ -27,7 +27,7 @@
  * this component only explains the refusal it was given.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import {
   ApiError,
   downloadRawRecord,
@@ -90,6 +90,8 @@ export function RawRecordInspector({ recordId }: { recordId: string }) {
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
+  /** Ties the refused control to the server's refusal (see below). */
+  const withheldId = useId();
 
   useEffect(() => {
     let cancelled = false;
@@ -127,6 +129,10 @@ export function RawRecordInspector({ recordId }: { recordId: string }) {
   }
 
   async function onTogglePreview() {
+    // Withheld: the control is aria-disabled, so the click still arrives
+    // here and is refused, exactly as the server would refuse it. Asking
+    // anyway would trade the stated reason for a raw 403.
+    if (label && !label.sensitivity.preview_allowed) return;
     if (previewOpen) {
       setPreviewOpen(false);
       return;
@@ -217,11 +223,21 @@ export function RawRecordInspector({ recordId }: { recordId: string }) {
         <button type="button" onClick={onVerify} disabled={verifying}>
           {verifying ? c.verifying : c.verify}
         </button>
+        {/* WITHHELD IS NOT ABSENT (handoff 0047, design point 3).
+            aria-disabled, never the native attribute: `disabled` takes the
+            control out of the tab order, so a keyboard or screen-reader
+            reviewer sweeping the actions never meets it and is never told
+            why the contents are closed — they meet a silence, and a silence
+            gets written down as missing data. Focusable, described by the
+            server's own refusal, and the handler refuses the click. */}
         <button
           type="button"
           onClick={onTogglePreview}
           aria-expanded={previewOpen}
-          disabled={!label.sensitivity.preview_allowed}
+          aria-disabled={!label.sensitivity.preview_allowed || undefined}
+          aria-describedby={
+            label.sensitivity.preview_allowed ? undefined : withheldId
+          }
         >
           {previewOpen ? c.hideInspect : c.inspect}
         </button>
@@ -233,10 +249,15 @@ export function RawRecordInspector({ recordId }: { recordId: string }) {
       </div>
 
       {!label.sensitivity.preview_allowed && (
-        /* Withheld, and the reason is the server's own words. The record's
-           label and its integrity check stay available: the chain of custody
-           is never broken, only the window is closed. */
-        <div className="banner raw-record-withheld">
+        /* Withheld, and the reason is the server's own words, VERBATIM. The
+           record's label and its integrity check stay available: the chain
+           of custody is never broken, only the window is closed.
+
+           This block is what stands between a reviewer and a false finding.
+           A blank where contents should be reads as MISSING DATA — a finding
+           against an agency that did nothing wrong — so the absence is
+           always drawn, named and explained. */
+        <div className="banner raw-record-withheld" id={withheldId}>
           <p>
             <strong>{c.withheldHeading}</strong> — {label.sensitivity.label}
           </p>

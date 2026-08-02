@@ -117,6 +117,16 @@ _SELECT_RECORD = (
     f"SELECT {raw_payloads.RECORD_COLUMNS} FROM raw.records WHERE record_id = %s"
 )
 
+#: The same columns for MANY ids in one round trip. The evidence bundle
+#: (handoff 0047) labels every raw-record leaf under a certification, and a
+#: single VRH figure can bottom out in over a thousand of them — one point
+#: query per leaf would make the bundle's cost a function of the pipeline's
+#: fan-out rather than of the certification.
+_SELECT_RECORDS_BY_IDS = (
+    f"SELECT {raw_payloads.RECORD_COLUMNS} FROM raw.records "
+    "WHERE record_id = ANY(%s) ORDER BY record_id"
+)
+
 _SELECT_OPEN_ISSUE = (
     "SELECT issue_id FROM dq.issues WHERE issue_type = %s "
     "AND status <> 'resolved' AND %s = ANY(source_record_ids) LIMIT 1"
@@ -257,6 +267,22 @@ def _load(db, record_id: str) -> RawRecord:
             ),
         )
     return record_from_row(row)
+
+
+def load_records(db, record_ids) -> dict[str, RawRecord]:
+    """Every named raw record that EXISTS, keyed by id, in one query.
+
+    Ids with no row are simply absent from the result — deliberately, so the
+    caller can tell "the lineage graph names a record this installation does
+    not have" (a finding) from "the record is here". Nothing is invented for
+    a missing id.
+    """
+    ids = sorted({str(i) for i in record_ids})
+    if not ids:
+        return {}
+    rows = db.execute(_SELECT_RECORDS_BY_IDS, (ids,)).fetchall()
+    records = [record_from_row(r) for r in rows]
+    return {r.record_id: r for r in records}
 
 
 def _reader(request: Request):

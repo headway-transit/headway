@@ -171,17 +171,19 @@ cheap, and because a data-dense reviewing surface is exactly where they pay:
 
 ## Open Questions
 
-1. **Is the evidence bundle handoff 0035's "bulk verification" wearing a
-   different hat?** 0035 left "verify this figure's whole evidence chain"
-   unbuilt and noted it needs a batched broker read and a progress model on a
-   1,138-leaf VRH figure. The bundle needs the same walk. Decide whether this
-   wave builds that engine or scopes the bundle to labels-and-digests only.
-2. **Should verifying raise a DQ issue on the agency's board when an *auditor*
-   is the one who found the mismatch?** Recommendation: yes, unchanged — a
-   blocking issue is the correct outcome regardless of who found it, and
-   routing it differently would hide it from the people who must act. Flagged
-   because it is the one place this wave lets an auditor's action appear in an
-   agency workflow.
+1. **DECIDED 2026-08-02 — the bundle is labels-and-digests only.** It does not
+   re-read bytes. A raw record's id *is* the SHA-256 of its bytes, so the
+   manifest carries every digest without touching the broker or the object
+   store. Re-reading a 1,138-leaf VRH figure needs the batched read that
+   handoff 0035 left unbuilt, and past the retention window most leaves return
+   `410 not_retained` regardless. Per-record verification stays the auditor's
+   own action, which as of this wave actually works.
+2. **DECIDED 2026-08-02 — a mismatch raises a blocking DQ issue whoever finds
+   it.** Including an auditor. It is the correct outcome regardless of who
+   pressed the button, and routing an auditor's finding somewhere quieter
+   would hide it from the people who have to act on it. Recorded because it is
+   the one place this wave lets an auditor's action surface in an agency
+   workflow — deliberately, not incidentally.
 3. **One auditor role or two?** 0045 left this open (internal self-audit vs
    external reviewer). `/review` is designed for the external reader; confirm
    before an agency's own staff are given the role as a convenience.

@@ -91,6 +91,35 @@ function atLeast(session: Session | null, minimum: string): boolean {
   return rank !== undefined && rank >= ROLE_RANK[minimum];
 }
 
+/**
+ * Is this a role that only ever READS the record? Deliberately NOT a rank
+ * question: `atLeast` denies every read-only role by construction, so asking
+ * it "is this an auditor?" can only ever answer no. Membership of
+ * READ_ONLY_ROLES is the honest test, and it stays correct for the next
+ * read-only role someone puts beside the ladder rather than on it.
+ *
+ * UX only, like everything else here. It decides which room a reader lands
+ * in and which links they are offered — never what the server allows.
+ */
+export function canReviewOnly(session: Session | null): boolean {
+  return session !== null && READ_ONLY_ROLES.has(session.role);
+}
+
+/**
+ * Where a role lands: after signing in (local or single sign-on) and when
+ * "/" is opened directly. ONE definition, read by all three call sites, so
+ * they cannot drift apart and leave a role landing in two different rooms
+ * depending on how it signed in.
+ *
+ * /today answers "what should I do now?" — a control room for people who
+ * act. A reader's question is "what was filed, and does it hold up?", which
+ * is a different surface (handoff 0047), so a read-only role lands on
+ * /review. Every other role is untouched.
+ */
+export function landingPathFor(session: Session | null): string {
+  return canReviewOnly(session) ? "/review" : "/today";
+}
+
 /** Mirrors the API: resolving a DQ issue requires data_steward or above. */
 export function canResolveDqIssues(session: Session | null): boolean {
   return atLeast(session, "data_steward");

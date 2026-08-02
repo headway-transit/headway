@@ -976,6 +976,27 @@ class FakeConn:
             )
 
         # -- raw-record inspector (handoff 0035) ----------------------------
+        # The BATCHED read first (handoff 0047's evidence bundle labels every
+        # leaf under a certification in one round trip). It shares a prefix
+        # with the single-record query below and is told apart by ANY(%s),
+        # exactly as the two statements differ in raw_records.py.
+        if (
+            q.startswith("SELECT record_id, source, connector, connector_version")
+            and "ANY(%s)" in q
+        ):
+            wanted = {str(i) for i in params[0]}
+            rows = [
+                (
+                    r["record_id"], r["source"], r["connector"],
+                    r["connector_version"], r["content_type"],
+                    r["payload_encoding"], r["payload_ref"], r["fetched_at"],
+                    r["landed_at"], r["parse_status"], r["parse_error"],
+                )
+                for r in sorted(self.raw_records, key=lambda r: r["record_id"])
+                if r["record_id"] in wanted
+            ]
+            return FakeCursor(rows)
+
         if q.startswith("SELECT record_id, source, connector, connector_version"):
             rows = [
                 (
