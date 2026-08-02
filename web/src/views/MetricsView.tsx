@@ -127,7 +127,9 @@ export function MetricsView() {
                   <th scope="col">{copy.metrics.columns.metric}</th>
                   <th scope="col">{copy.metrics.columns.unit}</th>
                   <th scope="col">{copy.metrics.columns.period}</th>
-                  <th scope="col">{copy.metrics.columns.value}</th>
+                  <th scope="col" className="numeric">
+                    {copy.metrics.columns.value}
+                  </th>
                   <th scope="col">{copy.metrics.columns.calc}</th>
                   <th scope="col">{copy.metrics.columns.status}</th>
                   <th scope="col">{copy.metrics.columns.details}</th>
@@ -172,8 +174,10 @@ export function MetricsView() {
                         <td>{unitLabel(v.unit)}</td>
                         <td>{periodLabel(v)}</td>
                         {/* The figure, verbatim as the API served it. Never
-                            parsed, rounded, or reformatted client-side. */}
-                        <td className="figure">{v.value}</td>
+                            parsed, rounded, or reformatted client-side.
+                            `numeric` = nothing in this cell but the number,
+                            so the column aligns on the ones place. */}
+                        <td className="figure numeric">{v.value}</td>
                         <td>
                           {v.calc_name} {v.calc_version}
                           {isPreVerification(v) && (

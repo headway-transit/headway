@@ -146,16 +146,30 @@ Binding conditions:
   `/users/{name}`, and bare-handle availability must be treated as a weak signal:
   a qualified org name (`headway-transit`, not `headway`) has always been the
   actual pattern, and compound org names are plentiful.
-- **Run the trademark search for RouteSight in the relevant classes before any
-  public use.** This is the gate on everything below it.
-- Write the mechanical rename checklist — repository and org, Docker image
-  names, `services/*` and `headway_api`/`headway_calc` package names, the
-  Python client on PyPI, the Bluesky handle, README badges, `docs/announce/`,
-  and the installer's user-facing strings — so the work is a list rather than a
-  discovery exercise.
-- **Register the domains before the name is used anywhere public.**
-  `routesight.com` is held by a reseller; `.io` and `.co` are unregistered as
-  of 2026-08-02 and will not stay that way once the name is spoken in public.
+- **Screen run 2026-08-02 — see `docs/naming/2026-08-02-routesight-trademark-screen.md`.**
+  Result: the exact mark **ROUTESIGHT was registered and is dead** (Reg. 5106160,
+  Wizzan Mobility LLC, Cl. 9, cancelled 2023-06-30 for §8 non-filing,
+  un-revivable). No live identical mark; EU/UK/CA/Madrid all clear. Two
+  consequences for this ADR: the USPTO has already accepted ROUTESIGHT as
+  registrable *for software*, which answers the "leans descriptive" worry
+  recorded above; and the residual common-law abandonment presumption matures
+  around **February 2027**.
+- **The paid knockout + clearance search is still the gate on everything
+  below.** It must cover **ROUTESIGHT, ROUTESITE and ROUTECITE** (phonetic
+  equivalents under DuPont factor 1) in **Cl. 9/35/42**, and counsel should be
+  briefed to analyse **ENSIGHT+ (Reg. 5780201, Cl. 42 — routing and fleet
+  tracking)** first. Screening is still not clearance.
+- Mechanical rename checklist written — `docs/naming/rename-checklist.md`. Its
+  sharpest finding: **`headway_adherence_v0` must never be renamed.** It is a
+  shipped calc name persisted in `metric_value` rows, so renaming it breaks the
+  retained-runnable guarantee. "Headway" the transit term stays in the product
+  permanently; only "Headway" the brand goes.
+- **Register the domains before the name is used anywhere public.** WHOIS,
+  2026-08-02: `routesight.com` is held by HugeDomains (created 2005), and
+  `.io`, `.org`, `.net`, `.ai` are unregistered. **Correction to the earlier
+  note here: `.co` was NOT verified** — that registry's WHOIS server is
+  unreachable from the machine this was run on, along with `.app` and `.dev`.
+  Unverified is not available.
 - Plan the announcement. The old name is in published Bluesky threads that
   cannot be silently rewritten; the rename gets a plainly-worded post saying
   what changed and why, not a quiet edit.

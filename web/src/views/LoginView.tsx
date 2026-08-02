@@ -8,7 +8,7 @@ import {
   startSsoLogin,
   type SsoStatus,
 } from "../api/client";
-import { isKnownRole, setSession } from "../auth/session";
+import { isKnownRole, landingPathFor, setSession } from "../auth/session";
 import {
   forgetBrowserToken,
   rememberBrowserToken,
@@ -97,14 +97,17 @@ export function LoginView() {
         setError(copy.login.unknownRole(response.role));
         return;
       }
-      setSession({
+      const session = {
         token: response.access_token,
         username: response.username,
         role: response.role,
-      });
+      };
+      setSession(session);
       const from = (location.state as { from?: string } | null)?.from;
-      // /today is the post-login landing (handoff 0021, design point 1).
-      navigate(from ?? "/today", { replace: true });
+      // /today is the post-login landing (handoff 0021, design point 1) for
+      // every role that acts; a read-only role lands on /review instead
+      // (handoff 0047). The page someone was sent here from still wins.
+      navigate(from ?? landingPathFor(session), { replace: true });
     } catch (err) {
       // API messages are plain-language by design: show them verbatim.
       setError(err instanceof ApiError ? err.message : String(err));

@@ -49,6 +49,11 @@ export const copy = {
     data_steward: "data steward",
     report_preparer: "report preparer",
     certifying_official: "certifying official",
+    // Named explicitly rather than left to the `?? session.role` fallback in
+    // Layout.tsx. "auditor" happens to read correctly as a bare enum string;
+    // the next role added might not, and would reach a user looking like
+    // `certifying_official` (handoff 0047).
+    auditor: "auditor",
   } as Record<string, string>,
 
   nav: {
@@ -72,6 +77,10 @@ export const copy = {
     attestations: "Attestations",
     certifications: "Certifications",
     certify: "Certify",
+    /** The reviewer's own room (handoff 0047): shown to read-only roles,
+     *  who land there instead of /today. Any signed-in role may open it —
+     *  it is composed entirely of reads the API already allows everyone. */
+    review: "Review",
     /** The admin hub (handoff 0025): certifying official only (UX; the API
      *  enforces the role on every admin call). */
     admin: "Admin",
@@ -701,6 +710,117 @@ export const copy = {
     coversLine: (count: string) =>
       `Covers ${count} figure${count === "1" ? "" : "s"}.`,
     viewCertificate: (id: string) => `Open certificate ${id}`,
+  },
+
+  /**
+   * THE REVIEW SURFACE (/review — handoff 0047).
+   *
+   * Where a read-only role lands instead of /today. The control room asks
+   * "what should I do now?"; a reviewer asks a different question — "what
+   * was filed, and does it hold up?" — so this room is a WORKLIST OF
+   * CERTIFICATIONS and nothing else. No queue, no tallies waiting to be
+   * cleared, nothing asking to be acted on: a reviewer has no work to clear
+   * in someone else's system, and a screen that implies otherwise teaches
+   * them to distrust it.
+   *
+   * Three things are said out loud here that a reader would otherwise have
+   * to discover by hitting a wall: that their own reading is recorded, what
+   * this account cannot open and why, and that a withheld record is drawn as
+   * withheld rather than left blank.
+   */
+  review: {
+    heading: "Review",
+    intro:
+      "Every certification this agency has made, in the order Headway recorded them. A certification is the moment a named person put their name to a set of figures, so it is where a review starts. Open one to see the figures it covers, each figure's receipt, and the trail from any figure back to the raw records it was built from.",
+    loading: "Reading the certifications on record…",
+    loadErrorLead: "Headway could not load the certifications. The server said:",
+    /** No records is a fact about a young installation, not a gap. */
+    empty:
+      "No certifications are on record yet. When a certifying official signs a set of figures, the record appears here and stays permanently.",
+
+    tableLabel: "Certifications on record",
+    tableCaption:
+      "Certifications on record, oldest first — the order Headway serves them in, unchanged.",
+    columns: {
+      certification: "Certification",
+      period: "Period covered",
+      signer: "Signed by",
+      signedAt: "Signed at",
+      figures: "Figures covered",
+      verification: "Signature check",
+    },
+    rowLink: (id: string) => `Certification ${id}`,
+    signerLine: (name: string, title: string) => `${name}, ${title}`,
+    /** A record with no typed name says so rather than showing a blank. */
+    signerAccountOnly: (username: string) =>
+      `The account ${username} — no typed name on this record.`,
+
+    /** Period and verdict both arrive with the certificate itself. */
+    detailChecking: "Reading this certificate…",
+    periodUnknown:
+      "Not recorded. This certification predates the signed document that carries each figure's period.",
+    /** The certificate itself could not be read — said, never left blank,
+     *  and worded apart from the signature verdict beside it. */
+    periodUnavailable: "Could not be read",
+    /** A signed document that lists no figures: an anomaly, not history. */
+    periodNoFigures: "The signed document lists no figures.",
+    /** The four verdicts the server can return, plus the honest fifth: the
+     *  check could not be made at all, which is never shown as a pass. */
+    verdictLabels: {
+      verified: "Signature verified",
+      failed: "SIGNATURE CHECK FAILED",
+      key_mismatch: "Cannot be checked with the current key",
+      unsigned_legacy: "No digital signature",
+    } as Record<string, string>,
+    verdictUnknown: "Unrecognised result",
+    verdictUnavailable: "Could not be checked",
+    verdictNote:
+      "Every result in the signature-check column is the server's own. Headway re-reads each stored certificate and re-checks its signature while this page loads; nothing here is worked out in your browser.",
+
+    /** The reader is told they are recorded — plainly, once, on entry. */
+    recordHeading: "You are on the record here",
+    recordBody:
+      "Headway records reading, not only changing. Every time the audit trail is read, Headway writes down who read it, which filters they used and how many entries came back — never the entries themselves. Those notes cannot be edited or deleted by anyone, including an administrator.",
+    recordWhy:
+      "This protects you as much as the agency: the care you took is on the record too.",
+    recordNoWrites:
+      "This account cannot change what it is reviewing. Headway refuses changes from it at the server, not merely on this screen.",
+    /**
+     * The ONE exception, named here rather than discovered. The rule above is
+     * no longer absolute — handoff 0047 opened a single route to this role —
+     * and an unstated exception is precisely the shape of contradiction this
+     * surface was built to remove.
+     */
+    recordVerify:
+      "There is one deliberate exception, and it is the reason this account exists: you may ask Headway to re-read a raw record's stored bytes and re-check its fingerprint. Doing so alters nothing under review. It records that you checked, and — if the bytes no longer match what was received — raises a data-quality finding for the agency to answer. That finding is the most valuable thing a review can produce, so it goes on the record where the people who must act on it will see it, under your name.",
+
+    /** What this account cannot open, said here instead of in a 403. */
+    scopeHeading: "What this account cannot open",
+    scopeIntro:
+      "Three parts of Headway are limited to the certifying official. This is not a gap in the record — it is the line between reviewing the figures and running the installation:",
+    scopeItems: [
+      "The list of Headway accounts and the role each one has.",
+      "Single sign-on settings — how the agency connects Headway to its identity provider.",
+      "Machine keys — the credentials other systems use to send data into Headway.",
+    ],
+    scopeAsk:
+      "If your review needs any of these, ask the agency's certifying official. Headway refuses the whole page rather than showing a partial version of it.",
+    /** The withholding rule, stated before a reader meets it in the wild. */
+    scopeWithheldHeading: "Withheld contents are marked, never blank",
+    scopeWithheld:
+      "Raw records that carry rider pickup and dropoff addresses stay closed to every role below data steward, this one included — a paratransit trip record can disclose a rider's home and their disability status. Where that applies, the record shows the reason in place of its contents. A withheld record is never drawn as an empty one, because an empty one reads as missing data.",
+
+    /** Orientation, not a call to action: where the rest of it lives. */
+    moreHeading: "Where the rest of the record is",
+    moreCalcRuns:
+      "Which calculation produced a figure, which version of it ran, and what it refused to compute",
+    moreCalcRunsLink: "Calculation runs",
+    moreDq:
+      "Every data-quality finding Headway has raised — open, resolved, and closed under a statistician attestation",
+    moreDqLink: "Data quality",
+    moreMetrics:
+      "Every computed figure, each with its receipt and its trail back to raw records",
+    moreMetricsLink: "Metrics",
   },
 
   /**

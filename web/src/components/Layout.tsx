@@ -47,12 +47,7 @@ import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { brandingLogoUrl } from "../api/client";
 import { loadBranding, useBranding } from "../branding";
 import { copy } from "../copy";
-import {
-  canCertify,
-  canComputeFigures,
-  clearSession,
-  useSession,
-} from "../auth/session";
+import { canCertify, canReviewOnly, clearSession, useSession } from "../auth/session";
 import { initTheme, setTheme, useTheme } from "../theme";
 import { clearToasts } from "../toasts";
 import { startTour } from "../tour";
@@ -68,6 +63,7 @@ import { TourOverlay } from "./Tour";
  */
 const CONTEXTS: { path: string; label: string }[] = [
   { path: "/today", label: copy.nav.today },
+  { path: "/review", label: copy.nav.review },
   { path: "/map", label: copy.nav.map },
   { path: "/dashboard", label: copy.nav.dashboard },
   { path: "/metrics", label: copy.nav.metrics },
@@ -274,6 +270,17 @@ export function Layout() {
             {session && (
               <>
                 {/* The rooms people live in stay direct links. */}
+                {/* A read-only role's home comes first, because it IS their
+                    home (handoff 0047): they land here, not in the control
+                    room. Offered to readers only — that is UX, never
+                    security: /review is composed of reads the API already
+                    grants every signed-in account, and any role that opens
+                    it directly gets the page. */}
+                {canReviewOnly(session) && (
+                  <li>
+                    <NavLink to="/review">{copy.nav.review}</NavLink>
+                  </li>
+                )}
                 <li>
                   <NavLink to="/today">{copy.nav.today}</NavLink>
                 </li>
@@ -359,15 +366,19 @@ export function Layout() {
                       copy.shell.groups.tools,
                     )}
                   >
-                    {/* The calculations room (handoff 0026): linked for the
-                        roles the API lets start a run — UX only, never
-                        security. Viewers can still read /calc-runs when
-                        routed there. */}
-                    {canComputeFigures(session) && (
-                      <li>
-                        <NavLink to="/calc-runs">{copy.nav.calcRuns}</NavLink>
-                      </li>
-                    )}
+                    {/* The calculations room (handoff 0026). Linked for
+                        EVERY signed-in role since handoff 0047: the link
+                        used to be gated on canComputeFigures, but GET
+                        /calc/runs is require_authenticated, so the nav was
+                        hiding a surface the API grants — and which
+                        calculation version produced a figure, and what a run
+                        refused to compute, is evidence. A reader who cannot
+                        find it has to be told the URL. The write controls
+                        INSIDE the page stay gated exactly as they were (UX
+                        only; the API enforces data_steward+ on POST). */}
+                    <li>
+                      <NavLink to="/calc-runs">{copy.nav.calcRuns}</NavLink>
+                    </li>
                     {/* The revenue review queue (handoff 0040): boardings
                         held out of the ridership figure until a person says
                         what they were. */}

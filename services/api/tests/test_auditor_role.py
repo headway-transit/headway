@@ -26,6 +26,10 @@ import pytest
 
 from conftest import UTC, add_auditor, auth_header
 from headway_api import authz
+from headway_api.auth import (
+    _READ_ONLY_ROLE_WRITE_ALLOWLIST,
+    _is_allowlisted_write,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -247,13 +251,14 @@ def test_auditor_cannot_write_anywhere(client, fake_db, method, path, body):
     assert "change nothing" in r.json()["detail"]
 
 
-def test_auditor_is_refused_the_read_shaped_posts_too(client, fake_db):
-    """`/sandbox/preview` computes a what-if and `/raw/records/{id}/verify`
-    raises a data-quality finding on a mismatch. Both are POSTs, both are
-    outside "reads everything, changes nothing", and refusing by METHOD with
-    no allow-list is what makes that guarantee hold without maintenance."""
+def test_auditor_is_refused_the_read_shaped_post_that_is_not_verification(
+    client, fake_db
+):
+    """`/sandbox/preview` computes a what-if. That is not part of reviewing
+    what already exists, so it stays refused even though it changes no stored
+    figure — the exception in `_READ_ONLY_ROLE_WRITE_ALLOWLIST` is about
+    verification specifically, not about POSTs that feel read-shaped."""
     add_auditor(fake_db)
-    headers = auth_header(fake_db, "audra")
     preview = client.post(
         "/sandbox/preview",
         json={
@@ -261,11 +266,49 @@ def test_auditor_is_refused_the_read_shaped_posts_too(client, fake_db):
             "period_end": "2026-07-01",
             "proposed": {"gap_threshold_seconds": "90"},
         },
-        headers=headers,
+        headers=auth_header(fake_db, "audra"),
     )
     assert preview.status_code == 403
-    verify = client.post("/raw/records/abc/verify", headers=headers)
-    assert verify.status_code == 403
+
+
+def test_auditor_may_verify_a_raw_record(client, fake_db):
+    """Handoff 0047. An auditor MAY run the integrity check.
+
+    The write guard exists so an auditor's account cannot alter what the
+    auditor is reviewing; re-hashing stored bytes alters nothing under
+    review. Refusing it also made `raw_payloads._refusal` a lie — it tells
+    the reader, in writing, that they "can still see this record's label and
+    prove its bytes are unaltered".
+
+    The record id here does not exist, so this asserts the request got PAST
+    the role gate, which is the whole claim. A 403 would mean it did not.
+    """
+    add_auditor(fake_db)
+    verify = client.post(
+        "/raw/records/abc/verify", headers=auth_header(fake_db, "audra")
+    )
+    assert verify.status_code != 403, verify.text
+    assert "change nothing" not in verify.text
+
+
+def test_the_read_only_write_allowlist_stays_exactly_one_route():
+    """The exception is narrow, and stays narrow.
+
+    Pinning the COUNT is the point: it means a second entry cannot ride along
+    in a rebase. Anyone adding one has to change this number deliberately,
+    which puts the argument in front of a reviewer.
+    """
+    assert len(_READ_ONLY_ROLE_WRITE_ALLOWLIST) == 1
+    assert _is_allowlisted_write("POST", "/raw/records/abc123/verify")
+
+    # …and it does not widen: not other methods, not other routes, and not
+    # by matching a prefix or a suffix of some longer path.
+    assert not _is_allowlisted_write("DELETE", "/raw/records/abc123/verify")
+    assert not _is_allowlisted_write("POST", "/sandbox/preview")
+    assert not _is_allowlisted_write("POST", "/raw/records/abc123")
+    assert not _is_allowlisted_write("POST", "/raw/records/a/b/verify")
+    assert not _is_allowlisted_write("POST", "/raw/records/abc/verify/more")
+    assert not _is_allowlisted_write("POST", "/x/raw/records/abc/verify")
 
 
 # ---------------------------------------------------------------------------
@@ -366,6 +409,7 @@ def test_an_auditor_is_refused_every_unsafe_route_this_app_has(client, app, fake
     add_auditor(fake_db)
     headers = auth_header(fake_db, "audra")
     offenders = []
+    allowed = []
     for method, path in _unsafe_routes(app):
         concrete = re.sub(
             r"\{([^}]+)\}",
@@ -374,10 +418,21 @@ def test_an_auditor_is_refused_every_unsafe_route_this_app_has(client, app, fake
             ),
             path,
         )
+        # The one documented exception is skipped using the SAME predicate
+        # the choke point uses, never a second list — a hand-copied exclusion
+        # here would let the sweep and the guard drift apart silently.
+        if _is_allowlisted_write(method, concrete):
+            allowed.append((method, path))
+            continue
         response = client.request(method, concrete, headers=headers)
         if response.status_code != 403:
             offenders.append((method, path, response.status_code, response.text[:120]))
     assert not offenders, offenders
+
+    # The exception is EXERCISED by this sweep, not merely declared next to
+    # it. If the verify route is ever renamed, the allow-list regex stops
+    # matching, this list empties, and the failure names the drift.
+    assert allowed == [("POST", "/raw/records/{record_id}/verify")], allowed
 
 
 def test_auditor_write_refusal_is_403_not_404_and_never_leaks_the_path(

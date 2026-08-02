@@ -754,6 +754,23 @@ td.figure {
   font-variant-numeric: tabular-nums;
   font-weight: 600;
 }
+/* A column of BARE figures stacks on the ones place. tabular-nums gives
+   every digit the same WIDTH, which is only half the job: left-aligned,
+   987.25 and 12,003.75 still land their decimal points in different
+   columns, and reading a column of VRM DOWN the page is precisely the
+   comparison an auditor makes. The header travels with its column — a
+   left-aligned label over right-aligned figures reads as a mistake.
+
+   Deliberately NOT folded into `.figure`. A `.figure` cell may hold a
+   figure PLUS a badge (SandboxView pairs the value with an estimate tag),
+   or an entire phrase — DqView's trip column renders "1,204 trips". Right
+   -aligning those aligns the WORDS and scatters the digits, which is worse
+   than leaving them alone. `.numeric` is the narrower claim: this cell is
+   nothing but the number. */
+th.numeric,
+td.numeric {
+  text-align: right;
+}
 
 .tag {
   display: inline-block;
@@ -3377,11 +3394,16 @@ button.figure-button {
   border-radius: var(--radius-1);
   overflow-x: auto;
 }
-.admin-section {
+/* The review room's panels are the same object as an admin room's — a card
+   with a heading and prose — so they share the rule rather than growing a
+   second one that drifts (handoff 0047). */
+.admin-section,
+.review-panel {
   padding: var(--space-3);
   margin: var(--space-3) 0;
 }
-.admin-section h2 {
+.admin-section h2,
+.review-panel h2 {
   margin-top: 0;
 }
 /* Shared muted hint for the admin rooms (the export-control precedent). */
@@ -4136,6 +4158,57 @@ button.figure-button {
 .page-summary {
   margin: 0 0 var(--space-2);
   color: var(--color-text);
+}
+
+/* ---- the review room (/review — handoff 0047) -------------------------- */
+
+/* The signature-check column. Each tag reuses an EXISTING AA-verified token
+   pair (scripts/check-contrast.mjs already checks every one of them) — no
+   new colour enters the system here — and every tag ships its verdict in
+   WORDS, so the column reads the same to someone who perceives no colour at
+   all and survives a monochrome print-out.
+
+   They are named for the verdict rather than reusing .certified/.revoked,
+   because "this signature verified" and "this certification is signed" are
+   different claims, and a stylesheet that conflates them teaches the next
+   person to conflate them too. */
+.tag.verdict-verified {
+  background: var(--color-success-bg);
+  color: var(--color-success-text);
+}
+.tag.verdict-failed {
+  background: var(--color-danger-bg);
+  color: var(--color-danger-text);
+  border: 1px solid var(--color-danger-text);
+}
+/* Honestly inconclusive — a rotated key, or a check that could not be made.
+   Warning tokens, never the danger pair: "could not be checked" is not
+   "failed", and a reviewer must not write down the wrong one. */
+.tag.verdict-inconclusive {
+  background: var(--color-warning-bg);
+  color: var(--color-warning-text);
+}
+/* A pre-signature record: an honest gap, so the neutral surface — the same
+   treatment .tag.uncertified gives it in the certifications index. */
+.tag.verdict-unsigned {
+  background: var(--color-surface);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+}
+
+/* The server's verdict message rides under its tag at full strength. It is
+   deliberately NOT .field-hint: a failure explained in muted small print is
+   a failure the eye skips. */
+.review-verdict-message {
+  margin: var(--space-1) 0 0;
+  max-width: 34rem;
+}
+
+/* A certification covering more than one period lists them; one period is
+   plain text. Never a min/max range — that would state a span nobody signed. */
+.review-periods {
+  margin: 0;
+  padding-left: 1.1rem;
 }
 
 /* Page-level alerts and the below-the-hero sections on the full-bleed map

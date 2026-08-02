@@ -943,6 +943,49 @@
         }
       }
     },
+    "/certifications/{certification_id}/evidence": {
+      "get": {
+        "tags": [
+          "certification"
+        ],
+        "summary": "Downloadable evidence bundle for one certification",
+        "description": "A self-describing evidence bundle for one certification.\n\nOpen to any signed-in role. The bundle is ROLE-SENSITIVE: content\nsensitivity is evaluated for the calling account through\n``authz.may_read_sensitivity``, so an auditor \u2014 who reads at viewer\nbreadth on purpose (migration 0028) \u2014 receives a bundle whose ``withheld``\nlist names the rider-location records it does not carry, with Headway's\nrefusal in full. Nothing withheld appears anywhere else in the response.\n\nGenerating a bundle is audited. Nothing in this endpoint changes a figure,\na certification, or a raw record.",
+        "operationId": "certification_evidence_certifications__certification_id__evidence_get",
+        "parameters": [
+          {
+            "name": "certification_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Certification Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvidenceBundle"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/attestations": {
       "post": {
         "tags": [
@@ -5627,6 +5670,41 @@
         "title": "BrandingResponse",
         "description": "What the app shell needs to brand itself. Colors here have already\npassed the WCAG AA contrast guardrail at write time."
       },
+      "BundleGap": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "what": {
+            "type": "string",
+            "title": "What"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "what",
+          "detail"
+        ],
+        "title": "BundleGap",
+        "description": "Something that could NOT be produced. A defect or an absence \u2014 never a\nwithholding, which is a different list."
+      },
       "CalcRunCreated": {
         "properties": {
           "run_id": {
@@ -6045,6 +6123,117 @@
         ],
         "title": "CertificationCertificate",
         "description": "The full certificate view (the frontend's certificate screen):\nthe stored canonical document (raw signed text + parsed object), the\nsignature, and a live verification result."
+      },
+      "CertificationEvidence": {
+        "properties": {
+          "certification_id": {
+            "type": "string",
+            "title": "Certification Id"
+          },
+          "certified_by": {
+            "type": "string",
+            "title": "Certified By"
+          },
+          "certified_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Certified At"
+          },
+          "attestation": {
+            "type": "string",
+            "title": "Attestation"
+          },
+          "signed": {
+            "type": "boolean",
+            "title": "Signed"
+          },
+          "algorithm": {
+            "type": "string",
+            "title": "Algorithm",
+            "default": "ed25519"
+          },
+          "key_fingerprint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key Fingerprint"
+          },
+          "signer_full_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Signer Full Name"
+          },
+          "signer_title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Signer Title"
+          },
+          "canonical_document": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Canonical Document"
+          },
+          "signature": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Signature"
+          },
+          "document": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Document"
+          },
+          "verification": {
+            "$ref": "#/components/schemas/VerificationResult"
+          }
+        },
+        "type": "object",
+        "required": [
+          "certification_id",
+          "certified_by",
+          "certified_at",
+          "attestation",
+          "signed",
+          "verification"
+        ],
+        "title": "CertificationEvidence",
+        "description": "The certification itself: signature block, signed bytes, live verdict."
       },
       "CertificationRecord": {
         "properties": {
@@ -7714,6 +7903,324 @@
         ],
         "title": "EstimateResponse"
       },
+      "EvidenceBundle": {
+        "properties": {
+          "bundle_type": {
+            "type": "string",
+            "title": "Bundle Type",
+            "default": "headway-evidence-bundle"
+          },
+          "bundle_version": {
+            "type": "integer",
+            "title": "Bundle Version",
+            "default": 1
+          },
+          "generated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Generated At"
+          },
+          "generated_for": {
+            "$ref": "#/components/schemas/GeneratedFor"
+          },
+          "scope_note": {
+            "type": "string",
+            "title": "Scope Note",
+            "default": "This bundle carries labels and digests, not stored payload bytes. Every raw source record's id IS the SHA-256 of the bytes Headway received, so the manifest already proves what each record contained without copying it here. To have Headway re-read a record's stored bytes and re-compute that hash in front of you, use POST /raw/records/{record_id}/verify on the record you care about \u2014 an auditor account may do this. Records whose bytes rode inline on the message broker may answer that the broker no longer retains them: that is a retention setting on this installation, not a failed check and not a missing record."
+          },
+          "withholding_note": {
+            "type": "string",
+            "title": "Withholding Note",
+            "default": "The 'withheld' list names everything left out of this bundle because of content sensitivity, with Headway's own reason in full. It is not an error and it is not a data gap \u2014 those are listed separately under 'gaps'. Withholding depends on the account this bundle was generated for, named above: another account may receive the same certification with a shorter or longer withheld list, and that is correct."
+          },
+          "certification": {
+            "$ref": "#/components/schemas/CertificationEvidence"
+          },
+          "figures": {
+            "items": {
+              "$ref": "#/components/schemas/FigureEvidence"
+            },
+            "type": "array",
+            "title": "Figures"
+          },
+          "raw_records": {
+            "items": {
+              "$ref": "#/components/schemas/RawRecordEvidence"
+            },
+            "type": "array",
+            "title": "Raw Records"
+          },
+          "withheld": {
+            "items": {
+              "$ref": "#/components/schemas/WithheldItem"
+            },
+            "type": "array",
+            "title": "Withheld"
+          },
+          "gaps": {
+            "items": {
+              "$ref": "#/components/schemas/BundleGap"
+            },
+            "type": "array",
+            "title": "Gaps"
+          },
+          "manifest": {
+            "$ref": "#/components/schemas/Manifest"
+          }
+        },
+        "type": "object",
+        "required": [
+          "generated_at",
+          "generated_for",
+          "certification",
+          "figures",
+          "raw_records",
+          "withheld",
+          "gaps",
+          "manifest"
+        ],
+        "title": "EvidenceBundle"
+      },
+      "EvidenceSensitivity": {
+        "properties": {
+          "classification": {
+            "type": "string",
+            "title": "Classification"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "minimum_role": {
+            "type": "string",
+            "title": "Minimum Role"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason"
+          },
+          "readable_by_this_account": {
+            "type": "boolean",
+            "title": "Readable By This Account"
+          },
+          "refusal": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Refusal"
+          }
+        },
+        "type": "object",
+        "required": [
+          "classification",
+          "label",
+          "minimum_role",
+          "reason",
+          "readable_by_this_account"
+        ],
+        "title": "EvidenceSensitivity"
+      },
+      "FigureEvidence": {
+        "properties": {
+          "metric_value_id": {
+            "type": "string",
+            "title": "Metric Value Id"
+          },
+          "metric": {
+            "type": "string",
+            "title": "Metric"
+          },
+          "unit": {
+            "type": "string",
+            "title": "Unit"
+          },
+          "period_start": {
+            "type": "string",
+            "format": "date",
+            "title": "Period Start"
+          },
+          "period_end": {
+            "type": "string",
+            "format": "date",
+            "title": "Period End"
+          },
+          "scope": {
+            "type": "string",
+            "title": "Scope"
+          },
+          "value": {
+            "type": "string",
+            "title": "Value"
+          },
+          "calc_name": {
+            "type": "string",
+            "title": "Calc Name"
+          },
+          "calc_version": {
+            "type": "string",
+            "title": "Calc Version"
+          },
+          "category": {
+            "type": "string",
+            "title": "Category"
+          },
+          "detail": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Detail",
+            "default": {}
+          },
+          "receipt": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Receipt"
+          },
+          "receipt_sha256": {
+            "type": "string",
+            "title": "Receipt Sha256"
+          },
+          "signed_receipt_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Signed Receipt Sha256"
+          },
+          "matches_signed_document": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Matches Signed Document"
+          },
+          "lineage": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LineageNode"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "lineage_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lineage Sha256"
+          },
+          "lineage_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lineage Error"
+          },
+          "raw_record_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Raw Record Ids",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "metric_value_id",
+          "metric",
+          "unit",
+          "period_start",
+          "period_end",
+          "scope",
+          "value",
+          "calc_name",
+          "calc_version",
+          "category",
+          "receipt",
+          "receipt_sha256"
+        ],
+        "title": "FigureEvidence",
+        "description": "One covered figure, verbatim as the calculation library stored it.\n\n``receipt`` is the figure's receipt object exactly as the certification\nsignature covers it \u2014 served whole, including its own ``receipt_sha256``\nkey, so a reader can re-canonicalize and re-hash it without being told\nwhich fields to pick. The flat fields beside it are the same values again,\nnamed, so a spreadsheet or a UI does not have to reach into the receipt."
+      },
+      "GeneratedFor": {
+        "properties": {
+          "username": {
+            "type": "string",
+            "title": "Username"
+          },
+          "role": {
+            "type": "string",
+            "title": "Role"
+          },
+          "role_label": {
+            "type": "string",
+            "title": "Role Label"
+          },
+          "authenticated_via": {
+            "type": "string",
+            "title": "Authenticated Via"
+          },
+          "idp_issuer": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Idp Issuer"
+          },
+          "idp_subject": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Idp Subject"
+          },
+          "note": {
+            "type": "string",
+            "title": "Note"
+          }
+        },
+        "type": "object",
+        "required": [
+          "username",
+          "role",
+          "role_label",
+          "authenticated_via",
+          "note"
+        ],
+        "title": "GeneratedFor",
+        "description": "Who this bundle was produced for. On the bundle because withholding\ndepends on it \u2014 an unattributed bundle cannot be read safely."
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -8228,6 +8735,90 @@
           "audit_event_id"
         ],
         "title": "LogoUploadResponse"
+      },
+      "Manifest": {
+        "properties": {
+          "artifact_count": {
+            "type": "integer",
+            "title": "Artifact Count"
+          },
+          "artifacts": {
+            "items": {
+              "$ref": "#/components/schemas/ManifestEntry"
+            },
+            "type": "array",
+            "title": "Artifacts"
+          },
+          "withheld_count": {
+            "type": "integer",
+            "title": "Withheld Count"
+          },
+          "gap_count": {
+            "type": "integer",
+            "title": "Gap Count"
+          },
+          "canonicalization": {
+            "type": "string",
+            "title": "Canonicalization",
+            "default": "json.dumps(bundle, sort_keys=True, separators=(',', ':'), ensure_ascii=True, allow_nan=False).encode('utf-8')"
+          },
+          "excluded_field": {
+            "type": "string",
+            "title": "Excluded Field",
+            "default": "manifest.bundle_sha256"
+          },
+          "bundle_sha256_recipe": {
+            "type": "string",
+            "title": "Bundle Sha256 Recipe",
+            "default": "To check this bundle has not been edited since Headway produced it: take this whole JSON document, delete the single field manifest.bundle_sha256 (delete the field itself \u2014 do not blank it, do not replace it with null), serialize what is left with json.dumps(bundle, sort_keys=True, separators=(',', ':'), ensure_ascii=True, allow_nan=False).encode('utf-8'), and take the SHA-256 of those bytes as lowercase hex. It must equal manifest.bundle_sha256. That serialization is deterministic \u2014 object keys sorted at every level, no whitespace, every non-ASCII character escaped \u2014 so it does not matter what order your JSON library read the fields in, and it is the same recipe Headway uses for the certification signature itself (services/api/headway_api/signing.py). Every figure in this bundle is a JSON string, never a number, so no decimal rounding can change the bytes you hash."
+          },
+          "bundle_sha256": {
+            "type": "string",
+            "title": "Bundle Sha256"
+          }
+        },
+        "type": "object",
+        "required": [
+          "artifact_count",
+          "artifacts",
+          "withheld_count",
+          "gap_count",
+          "bundle_sha256"
+        ],
+        "title": "Manifest"
+      },
+      "ManifestEntry": {
+        "properties": {
+          "artifact": {
+            "type": "string",
+            "title": "Artifact"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "location": {
+            "type": "string",
+            "title": "Location"
+          },
+          "sha256": {
+            "type": "string",
+            "title": "Sha256"
+          },
+          "digest_of": {
+            "type": "string",
+            "title": "Digest Of"
+          }
+        },
+        "type": "object",
+        "required": [
+          "artifact",
+          "kind",
+          "location",
+          "sha256",
+          "digest_of"
+        ],
+        "title": "ManifestEntry"
       },
       "MeasurementCreate": {
         "properties": {
@@ -9686,6 +10277,91 @@
           "audit_event_id"
         ],
         "title": "PutServiceDayOverrideResponse"
+      },
+      "RawRecordEvidence": {
+        "properties": {
+          "record_id": {
+            "type": "string",
+            "title": "Record Id"
+          },
+          "content_address": {
+            "$ref": "#/components/schemas/ContentAddress"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "connector": {
+            "type": "string",
+            "title": "Connector"
+          },
+          "connector_version": {
+            "type": "string",
+            "title": "Connector Version"
+          },
+          "content_type": {
+            "type": "string",
+            "title": "Content Type"
+          },
+          "payload_encoding": {
+            "type": "string",
+            "title": "Payload Encoding"
+          },
+          "fetched_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Fetched At"
+          },
+          "landed_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Landed At"
+          },
+          "parse_status": {
+            "type": "string",
+            "title": "Parse Status"
+          },
+          "parse_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parse Error"
+          },
+          "sensitivity": {
+            "$ref": "#/components/schemas/EvidenceSensitivity"
+          },
+          "contents_included": {
+            "type": "boolean",
+            "title": "Contents Included",
+            "default": false
+          },
+          "contents_note": {
+            "type": "string",
+            "title": "Contents Note",
+            "default": "The stored bytes of this record are not copied into this bundle. Its id is their SHA-256, so the id is the proof of what they were."
+          }
+        },
+        "type": "object",
+        "required": [
+          "record_id",
+          "content_address",
+          "source",
+          "connector",
+          "connector_version",
+          "content_type",
+          "payload_encoding",
+          "fetched_at",
+          "landed_at",
+          "parse_status",
+          "sensitivity"
+        ],
+        "title": "RawRecordEvidence",
+        "description": "One raw-record leaf: the label on the evidence bag, and its seal."
       },
       "RawRecordLabel": {
         "properties": {
@@ -11993,6 +12669,45 @@
         ],
         "title": "VerificationVerdict",
         "description": "The result of re-reading the bytes and re-computing their hash.\n\n``result`` is the whole answer in one word and the HTTP status agrees\nwith it: match is 200, mismatch is 409, and an unreadable payload is\n404/410/503 by reason. A caller that only checks the status code cannot\nmistake a failure for a pass."
+      },
+      "WithheldItem": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "what": {
+            "type": "string",
+            "title": "What"
+          },
+          "classification": {
+            "type": "string",
+            "title": "Classification"
+          },
+          "minimum_role": {
+            "type": "string",
+            "title": "Minimum Role"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "id",
+          "what",
+          "classification",
+          "minimum_role",
+          "reason"
+        ],
+        "title": "WithheldItem",
+        "description": "Something left out ON PURPOSE, by the content-sensitivity rule."
       }
     }
   }

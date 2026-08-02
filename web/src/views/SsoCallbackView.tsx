@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { ApiError, finishSsoLogin } from "../api/client";
-import { isKnownRole, setSession } from "../auth/session";
+import { isKnownRole, landingPathFor, setSession } from "../auth/session";
 import { takeBrowserToken } from "../auth/sso";
 import { copy } from "../copy";
 
@@ -98,16 +98,19 @@ export function SsoCallbackView() {
           refuse(copy.login.unknownRole(response.role));
           return;
         }
-        setSession({
+        const session = {
           token: response.access_token,
           username: response.username,
           role: response.role,
-        });
-        // /today is the post-login landing (handoff 0021, design point 1).
-        // The `from` a local sign-in honors cannot survive a full-page hop
-        // out to the provider and back, so a federated sign-in always lands
-        // on the briefing.
-        navigate("/today", { replace: true });
+        };
+        setSession(session);
+        // /today is the post-login landing (handoff 0021, design point 1)
+        // for every role that acts; a read-only role lands on /review
+        // instead (handoff 0047) — the same choice a local sign-in makes,
+        // read from the same place. The `from` a local sign-in honors
+        // cannot survive a full-page hop out to the provider and back, so a
+        // federated sign-in always lands on the role's own room.
+        navigate(landingPathFor(session), { replace: true });
       } catch (err) {
         // API messages are plain-language by design and are shown verbatim.
         // For a federated failure that message is the same sentence every

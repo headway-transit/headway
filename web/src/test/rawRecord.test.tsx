@@ -453,11 +453,11 @@ describe("raw-record inspector (handoff 0035)", () => {
 
   it("a withheld payload explains itself and still offers the integrity check", async () => {
     signInAs("viewer");
-    mockLineageWith({
+    const calls = mockLineageWith({
       [`GET ${RAW_PATH}`]: { status: 200, body: withheldLabel },
     });
     renderApp("/metrics/mv-vrm-1/lineage");
-    await openTextViewLeaf();
+    const user = await openTextViewLeaf();
 
     expect(await screen.findByText("Contents withheld")).toBeInTheDocument();
     expect(
@@ -467,7 +467,20 @@ describe("raw-record inspector (handoff 0035)", () => {
     expect(
       screen.getByRole("button", { name: "Verify integrity" }),
     ).toBeEnabled();
-    expect(screen.getByRole("button", { name: "Look inside" })).toBeDisabled();
+    // aria-disabled, NOT the native attribute (handoff 0047, design point
+    // 3): the control stays in the tab order and carries the server's own
+    // refusal as its description, so a keyboard or screen-reader reviewer
+    // meets the withholding instead of a silence they would record as
+    // missing data. The click is refused rather than swallowed — nothing is
+    // asked of the server.
+    const inspect = screen.getByRole("button", { name: "Look inside" });
+    expect(inspect).toHaveAttribute("aria-disabled", "true");
+    expect(inspect).toHaveAccessibleDescription(
+      /rider home and destination addresses/,
+    );
+    await user.click(inspect);
+    expect(inspect).toHaveAttribute("aria-expanded", "false");
+    expect(calls.some((c) => c.path === `${RAW_PATH}/payload`)).toBe(false);
     expect(
       screen.queryByRole("button", { name: "Download the exact bytes" }),
     ).not.toBeInTheDocument();

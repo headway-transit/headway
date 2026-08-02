@@ -673,8 +673,12 @@ function Worksheet({
             <tr>
               <th scope="col">{ws.columns.position}</th>
               <th scope="col">{ws.columns.unit}</th>
-              <th scope="col">{ws.columns.upt}</th>
-              <th scope="col">{ws.columns.pmt}</th>
+              <th scope="col" className="numeric">
+                {ws.columns.upt}
+              </th>
+              <th scope="col" className="numeric">
+                {ws.columns.pmt}
+              </th>
               <th scope="col">{ws.columns.recorded}</th>
             </tr>
           </thead>
@@ -687,12 +691,12 @@ function Worksheet({
                   <td>{unitId}</td>
                   {/* Observed figures verbatim; unmeasured cells are left
                       blank for the checker's pencil. */}
-                  <td className="figure">
+                  <td className="figure numeric">
                     {measurement !== undefined
                       ? String(measurement.observed_upt)
                       : ""}
                   </td>
-                  <td className="figure">
+                  <td className="figure numeric">
                     {measurement !== undefined ? measurement.observed_pmt : ""}
                   </td>
                   <td>

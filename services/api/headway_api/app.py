@@ -23,6 +23,7 @@ from .routers import (
     calc_runs,
     certify,
     dq,
+    evidence,
     geometry,
     history,
     ingest,
@@ -194,6 +195,7 @@ def create_app(
     app.include_router(ops.router)
     app.include_router(geometry.router)
     app.include_router(certify.router)
+    app.include_router(evidence.router)
     app.include_router(attestations.router)
     app.include_router(dq.router)
     app.include_router(machine_keys.router)
