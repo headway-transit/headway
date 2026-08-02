@@ -293,6 +293,71 @@ def test_auditor_may_verify_a_raw_record(client, fake_db):
     assert "change nothing" not in verify.text
 
 
+@pytest.mark.parametrize(
+    "smuggled",
+    [
+        # A percent-encoded separator. If %2F survived to request.url.path as
+        # a literal, "..%2F..%2Fsandbox" would be ONE segment with no slash in
+        # it, `[^/]+` would match, and the allowlist would wave through a path
+        # the router resolves somewhere else entirely.
+        "/raw/records/..%2F..%2Fsandbox/verify",
+        "/raw/records/foo%2Fbar/verify",
+        # Dot-dot traversal, unencoded.
+        "/raw/records/../../sandbox/verify",
+        # fullmatch, not search: a trailing slash is a different path.
+        "/raw/records/abc/verify/",
+    ],
+)
+def test_the_allowlist_cannot_be_reached_by_a_smuggled_separator(
+    client, fake_db, smuggled
+):
+    """The allowlist and the ROUTER must resolve the same path.
+
+    This is the sharpest edge in the codebase: one regex is the only thing
+    between a read-only role and every write in the API. It is safe because
+    percent-decoding happens in the ASGI server BEFORE `scope["path"]` is
+    set, so `_is_allowlisted_write` and the router see identical strings and
+    a smuggled separator becomes a real `/` that `[^/]+` refuses.
+
+    That is a property of the server, not of our code — nothing in this repo
+    would fail if it changed, and a split view (guard sees one path, router
+    dispatches another) is exactly how single-route allowlists get bypassed
+    in the wild. So it is pinned here.
+
+    Vectors below came from an external adversarial review, 2026-08-02.
+    """
+    add_auditor(fake_db)
+    response = client.post(smuggled, headers=auth_header(fake_db, "audra"))
+    # 403 (role gate) or 404 (no such route) — never 2xx, and never the 405
+    # that would mean the path resolved to a real endpoint past the guard.
+    assert response.status_code in (403, 404), (
+        f"{smuggled} resolved to {response.status_code}: {response.text}"
+    )
+
+
+def test_the_allowlist_matcher_assumes_an_ALREADY_DECODED_path():
+    """The hazard, pinned as a hazard rather than hidden.
+
+    Handed a percent-ENCODED path, the matcher says yes: "..%2F..%2Fsandbox"
+    contains no literal `/`, so `[^/]+` is satisfied. The guard is therefore
+    only sound because its one caller passes `request.url.path`, which the
+    ASGI server has already decoded.
+
+    This test exists so that fact is impossible to lose. Anyone who "fixes" a
+    proxy-prefix problem by feeding this function `scope["raw_path"]`, an
+    `X-Forwarded-Uri`/`X-Original-URL` header, or any other undecoded string
+    opens a bypass to every write in the API — and this assertion, and its
+    name, is what should stop them in review.
+
+    It asserts the DANGEROUS behaviour on purpose. If a future change makes
+    the matcher decode-aware, delete this test rather than inverting it, and
+    say so in the commit.
+    """
+    assert _is_allowlisted_write("POST", "/raw/records/..%2F..%2Fsandbox/verify")
+    # Decoded — which is what the caller actually passes — it is refused.
+    assert not _is_allowlisted_write("POST", "/raw/records/../../sandbox/verify")
+
+
 def test_the_read_only_write_allowlist_stays_exactly_one_route():
     """The exception is narrow, and stays narrow.
 
