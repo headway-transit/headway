@@ -692,6 +692,48 @@ class TestSensitivity:
         assert response.status_code == 403
         assert "vendor export" in response.json()["detail"]
 
+    def test_a_withheld_records_parse_error_is_withheld_with_its_contents(
+        self, client, fake_db, fake_store
+    ):
+        """`parse_error` is CONTENT, and travels with the payload.
+
+        Migration 0028 withholds this column from the analyst SQL role and
+        states why in its own header — parser output "can quote fragments of
+        a malformed payload verbatim … content, not metadata". The API had no
+        matching rule, so the column unreadable over psql was served over
+        HTTP to every signed-in role for a record whose payload is withheld.
+        Found by external review, 2026-08-02.
+
+        The coordinates below are synthetic and are exactly what must NOT
+        come back. No writer produces an error like this today — every header
+        check reports missing column names from a constant — but nothing
+        enforces that across the Go and Python connectors, so the guarantee
+        is made here, at the read side, where it holds regardless.
+        """
+        record = seed_dr(fake_db, fake_store)
+        leaky = "row 2 rejected: dr-1,45.6231,-122.6765,45.5122,-122.6587"
+        for row in fake_db.raw_records:
+            if row["record_id"] == record["record_id"]:
+                row["parse_status"] = "malformed"
+                row["parse_error"] = leaky
+
+        withheld = client.get(
+            f"/raw/records/{record['record_id']}",
+            headers=auth_header(fake_db, "vera"),
+        ).json()
+        assert "45.6231" not in json.dumps(withheld)
+        assert withheld["parse_error"] == raw_payloads.PARSE_ERROR_WITHHELD
+        # The FACT of malformation is not withheld — only the free text. A
+        # hidden reason must not make a broken record look healthy.
+        assert withheld["parse_status"] == "malformed"
+
+        # A steward may open the contents, so the message comes with them.
+        allowed = client.get(
+            f"/raw/records/{record['record_id']}",
+            headers=auth_header(fake_db, "stella"),
+        ).json()
+        assert allowed["parse_error"] == leaky
+
     def test_the_label_states_the_rule_and_whether_this_caller_may_look(
         self, client, fake_db, fake_store
     ):

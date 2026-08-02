@@ -321,6 +321,48 @@ def test_withheld_record_is_named_with_its_reason_and_its_payload_is_absent(
         assert fragment not in body, fragment
 
 
+def test_a_withheld_records_parse_error_never_leaves_in_the_bundle(
+    client, fake_db, fake_store, certified
+):
+    """The bundle is the copy that leaves the building, so a leak here is a
+    leak that outlives the session.
+
+    The test above seeds the restricted record with `parse_error=None`, which
+    is exactly why the gap survived review: it searched the response for the
+    PAYLOAD fixture, and the payload was never the only place content could
+    appear. Parser output can quote the row it failed on, which migration
+    0028 already treats as content rather than as a label.
+    """
+    add_auditor(fake_db)
+    _, certification_id = certified
+    leaky = "row 2 rejected: dr-1,45.6231,-122.6765,45.5122,-122.6587"
+    for row in fake_db.raw_records:
+        if row["record_id"] == DR_RECORD_ID:
+            row["parse_status"] = "malformed"
+            row["parse_error"] = leaky
+
+    r = client.get(
+        f"/certifications/{certification_id}/evidence",
+        headers=auth_header(fake_db, "audra"),
+    )
+    assert r.status_code == 200
+    for fragment in ("45.6231", "-122.6765", "45.5122", "-122.6587"):
+        assert fragment not in r.text, fragment
+
+    dr = {x["record_id"]: x for x in r.json()["raw_records"]}[DR_RECORD_ID]
+    assert dr["parse_error"] == raw_payloads.PARSE_ERROR_WITHHELD
+    assert dr["parse_status"] == "malformed"
+
+    # A steward may open the contents, so the parser's own words come too —
+    # the rule is "withheld with the payload", not "deleted for everyone".
+    steward = client.get(
+        f"/certifications/{certification_id}/evidence",
+        headers=auth_header(fake_db, "stella"),
+    ).json()
+    dr_steward = {x["record_id"]: x for x in steward["raw_records"]}[DR_RECORD_ID]
+    assert dr_steward["parse_error"] == leaky
+
+
 def test_the_bundle_is_role_sensitive_and_says_who_it_was_made_for(
     client, fake_db, certified
 ):

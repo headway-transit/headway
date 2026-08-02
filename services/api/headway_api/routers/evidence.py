@@ -648,7 +648,11 @@ def certification_evidence(
                 fetched_at=raw.fetched_at,
                 landed_at=raw.landed_at,
                 parse_status=raw.parse_status,
-                parse_error=raw.parse_error,
+                # Content, not metadata (migration 0028's own words), so it
+                # travels with the payload it describes and not with the label.
+                parse_error=raw_payloads.visible_parse_error(
+                    raw.parse_error, readable=readable
+                ),
                 sensitivity=EvidenceSensitivity(
                     classification=sensitivity.classification,
                     label=sensitivity.label,
