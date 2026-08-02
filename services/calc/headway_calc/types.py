@@ -917,6 +917,19 @@ class UptDetail:
     excluded_non_revenue_boardings: int = 0
     pending_review_boardings: int = 0
     pending_review_policy: str = "exclude_until_classified"
+    # --- human classifications (upt_v0 0.4.0, handoff 0040 review sub-wave) -
+    # The judgment calls that shaped this figure. A no-run boarding 0.3.0
+    # would have held PENDING is counted (or excluded) here because a named
+    # person decided it, and wrote down why. Both are boarding counts;
+    # ``human_classifications`` is the receipt itself — one entry per
+    # decision, carrying who, when, and the justification note VERBATIM, so
+    # "explain this number" shows the reasoning instead of asserting the
+    # correction. Frozen into the detail at compute time: the receipt
+    # describes what the figure was computed FROM, so re-reading the review
+    # table years later can never change what a persisted figure says.
+    human_revenue_boardings: int = 0
+    human_non_revenue_boardings: int = 0
+    human_classifications: tuple[dict, ...] = ()
 
     def to_dict(self) -> dict:
         detail = {
@@ -937,13 +950,29 @@ class UptDetail:
         # The revenue split appears only when a no-run boarding was
         # classified — every pre-0040 (all-assigned) run's detail stays
         # byte-for-byte upt_v0 0.2.0's.
-        if self.excluded_non_revenue_boardings or self.pending_review_boardings:
-            detail["revenue_classification"] = {
+        if (
+            self.excluded_non_revenue_boardings
+            or self.pending_review_boardings
+            or self.human_revenue_boardings
+            or self.human_non_revenue_boardings
+        ):
+            split = {
                 "revenue_boardings": self.total_boardings_counted,
                 "excluded_non_revenue_boardings": self.excluded_non_revenue_boardings,
                 "pending_review_boardings": self.pending_review_boardings,
                 "pending_review_policy": self.pending_review_policy,
             }
+            # Appended only when a human actually decided something, so a run
+            # with no classifications stays byte-for-byte upt_v0 0.3.0's.
+            if self.human_classifications:
+                split["human_revenue_boardings"] = self.human_revenue_boardings
+                split["human_non_revenue_boardings"] = (
+                    self.human_non_revenue_boardings
+                )
+                split["human_classifications"] = [
+                    dict(c) for c in self.human_classifications
+                ]
+            detail["revenue_classification"] = split
         return detail
 
 
@@ -1499,6 +1528,58 @@ class VpTelematicsDetail:
 
 
 @dataclass(frozen=True)
+class BoardingReviewItem:
+    """One boarding the calculation could not decide, handed to a human
+    (handoff 0040, the review sub-wave).
+
+    A no-run boarding INSIDE the day's revenue-service window is genuinely
+    ambiguous: it is either non-revenue prep, or an extra bus dispatch
+    running real riders without a formal trip assignment. No rule in the NTD
+    manual separates those, so the calculation refuses to guess, holds the
+    boarding OUT of the figure, and emits this — the structured fact an
+    analyst decides on, and the calculation's own words for why it could not.
+
+    The calculation stays PURE: it emits these, it does not write them. The
+    runner persists them into dq.boarding_revenue_reviews at the same point
+    it persists findings, and never overwrites a decision a human already
+    made there.
+    """
+
+    passenger_event_id: str
+    source_record_id: str
+    service_date: date
+    event_timestamp: datetime
+    #: The feed's own vehicle identifier; None when the feed carried none —
+    #: absent stays absent, never a placeholder.
+    vehicle_id: str | None
+    event_count: int
+    #: Always 'pending_review'. The calculation's position, stated rather
+    #: than inferred: it declined to guess.
+    suggested_verdict: str
+    suggested_reason: str
+
+
+@dataclass(frozen=True)
+class HumanBoardingVerdict:
+    """One recorded human decision about one held boarding — the input side
+    of the review loop (handoff 0040).
+
+    ``justification`` is never blank: the database refuses a verdict without
+    a reason, so a verdict that reaches the calculation always carries the
+    words that defend it. The calculation copies those words into the
+    figure's detail verbatim; it never summarises, paraphrases, or ranks
+    them.
+    """
+
+    passenger_event_id: str
+    #: 'revenue' (count it) or 'non_revenue' (exclude it).
+    verdict: str
+    justification: str
+    classified_by: str
+    classified_at: datetime
+
+
+@dataclass(frozen=True)
 class CalcResult:
     """The output of one calculation run.
 
@@ -1542,6 +1623,14 @@ class CalcResult:
         | VpTelematicsDetail
         | None
     ) = None
+    #: Rows a HUMAN must decide before this figure can be completed (handoff
+    #: 0040). Empty for every calculation that has nothing to ask — which is
+    #: all of them but upt_v0, and upt_v0 too whenever every boarding
+    #: resolved to a run. The runner persists these into the review queue;
+    #: they are NOT part of the figure and never become one, which is the
+    #: whole point: the boardings they name are held OUT of the value above
+    #: until somebody says, in writing, what they were.
+    review_items: tuple[BoardingReviewItem, ...] = ()
 
     def __post_init__(self) -> None:
         if self.blocking_issues and self.value is not None:

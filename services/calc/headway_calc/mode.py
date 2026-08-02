@@ -209,6 +209,7 @@ def compute_upt_by_mode(
         Callable[[str], tuple[AttestationContext, ...]] | None
     ) = None,
     revenue_windows=None,
+    boarding_reviews=None,
 ) -> dict[str, CalcResult]:
     """upt_v0 0.2.0 per mode bucket: the UNCHANGED compute_upt over each
     mode's events, with that mode's operated-trip denominator derived from
@@ -246,8 +247,11 @@ def compute_upt_by_mode(
                 else attestations_for_scope(scope_for_mode(bucket))
             ),
             # The revenue window is keyed by service date, not mode — the
-            # same map applies to every mode subset (handoff 0040).
+            # same map applies to every mode subset (handoff 0040). So are
+            # the human classifications: a decision is about one boarding,
+            # and that boarding lands in exactly one mode bucket.
             revenue_windows=revenue_windows,
+            boarding_reviews=boarding_reviews,
         )
     return results
 

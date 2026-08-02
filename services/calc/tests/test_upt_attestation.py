@@ -82,7 +82,7 @@ OPERATED = [f"trip-{i}" for i in range(1, 11)]
 def test_without_attestation_refusal_is_byte_for_byte_0_1_0():
     new = compute_upt(EVENTS, OPERATED)
     old = compute_upt_v0_1_0(EVENTS, OPERATED)
-    assert new.calc_version == "0.3.0"
+    assert new.calc_version == "0.4.0"
     assert old.calc_version == "0.1.0"
     # Everything except the version string is byte-identical — the 0.2.0 and
     # 0.3.0 changes are strictly additive (no classified boardings here).
@@ -103,7 +103,7 @@ def test_with_attestation_factors_up_with_provenance_and_info_finding():
     # 10 counted × 10/(10−9) = 100 boardings.
     assert result.value == Decimal("100")
     assert result.blocking_issues == ()
-    assert result.calc_version == "0.3.0"
+    assert result.calc_version == "0.4.0"
     detail = result.detail.to_dict()
     assert detail["factor_applied"] == "10.000000"
     assert detail["missing_share"] == "0.9000"

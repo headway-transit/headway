@@ -266,6 +266,83 @@ export function derivationLines(detail: Detail | undefined): string[] {
   return lines;
 }
 
+/**
+ * One human judgment call recorded inside a figure's detail (handoff 0040):
+ * a boarding the calculation refused to guess about, and the decision a
+ * named person made about it. Frozen into the figure at the moment it was
+ * computed — this is the receipt, so it must read the same forever.
+ *
+ * Fields the UI does not recognise are ignored here but still reach the
+ * generic detail list, so nothing a future calc version adds is hidden.
+ */
+export interface HumanClassification {
+  passenger_event_id: string;
+  vehicle_id: string | null;
+  event_timestamp: string;
+  event_count: string;
+  /** "revenue" (counted) or "non_revenue" (excluded). */
+  verdict: string;
+  /** The analyst's own words. Shown verbatim, never summarised. */
+  justification: string;
+  classified_by: string;
+  classified_at: string;
+}
+
+/** The revenue split a upt figure carries when any boarding was off-run. */
+export interface RevenueSplit {
+  revenueBoardings: string;
+  excludedNonRevenueBoardings: string;
+  pendingReviewBoardings: string;
+  humanRevenueBoardings: string;
+  humanNonRevenueBoardings: string;
+  classifications: HumanClassification[];
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+/**
+ * The revenue-classification block of a upt figure's detail, or null when
+ * the figure had no off-run boardings at all (the ordinary case — and the
+ * reason the block is absent rather than a row of zeroes).
+ */
+export function revenueSplit(detail: Detail | undefined): RevenueSplit | null {
+  const block = asRecord(detail?.revenue_classification);
+  if (block === null) return null;
+  const s = detailValueToString;
+  const raw = Array.isArray(block.human_classifications)
+    ? (block.human_classifications as unknown[])
+    : [];
+  const classifications: HumanClassification[] = [];
+  for (const entry of raw) {
+    const e = asRecord(entry);
+    if (e === null) continue;
+    classifications.push({
+      passenger_event_id: s(e.passenger_event_id),
+      vehicle_id: e.vehicle_id === null || e.vehicle_id === undefined
+        ? null
+        : s(e.vehicle_id),
+      event_timestamp: s(e.event_timestamp),
+      event_count: s(e.event_count),
+      verdict: s(e.verdict),
+      justification: s(e.justification),
+      classified_by: s(e.classified_by),
+      classified_at: s(e.classified_at),
+    });
+  }
+  return {
+    revenueBoardings: s(block.revenue_boardings ?? "0"),
+    excludedNonRevenueBoardings: s(block.excluded_non_revenue_boardings ?? "0"),
+    pendingReviewBoardings: s(block.pending_review_boardings ?? "0"),
+    humanRevenueBoardings: s(block.human_revenue_boardings ?? "0"),
+    humanNonRevenueBoardings: s(block.human_non_revenue_boardings ?? "0"),
+    classifications,
+  };
+}
+
 /** All detail entries as plain-language sentences, in display order. */
 export function detailLines(detail: Detail): string[] {
   const lines: string[] = [];
@@ -329,6 +406,40 @@ export function detailLines(detail: Detail): string[] {
       .join(", ");
     lines.push(copy.detail.sourceMix(parts));
     consumed.add("source_mix");
+  }
+
+  // The off-run boarding split (handoff 0040): what was counted, what was
+  // left out, what is still waiting on a person — and, when somebody has
+  // decided, the judgment calls themselves. Rendered in full by the receipt;
+  // these sentences cover every other surface that lists detail.
+  const split = revenueSplit(detail);
+  if (split !== null) {
+    consumed.add("revenue_classification");
+    if (split.excludedNonRevenueBoardings !== "0") {
+      lines.push(
+        copy.revenueReview.receipt.autoExcludedLine(
+          split.excludedNonRevenueBoardings,
+        ),
+      );
+    }
+    if (split.humanRevenueBoardings !== "0") {
+      lines.push(
+        copy.revenueReview.receipt.countedLine(split.humanRevenueBoardings),
+      );
+    }
+    if (split.humanNonRevenueBoardings !== "0") {
+      lines.push(
+        copy.revenueReview.receipt.excludedLine(
+          split.humanNonRevenueBoardings,
+        ),
+      );
+    }
+    if (split.pendingReviewBoardings !== "0") {
+      lines.push(
+        copy.revenueReview.receipt.heldLine(split.pendingReviewBoardings),
+      );
+      lines.push(copy.revenueReview.receipt.policyLine);
+    }
   }
 
   // The passage-derivation accounting (ops figures, handoff 0014): the

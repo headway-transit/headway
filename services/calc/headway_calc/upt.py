@@ -72,8 +72,10 @@ from headway_calc.types import (
     SEVERITY_INFO,
     SEVERITY_WARNING,
     SUBJECT_TRIPS,
+    BoardingReviewItem,
     CalcResult,
     Finding,
+    HumanBoardingVerdict,
     PassengerEvent,
     SubjectRef,
     UptDetail,
@@ -97,7 +99,18 @@ CALC_NAME = "upt_v0"
 #: factor is untouched. 0.2.0 is RETAINED runnable as compute_upt_v0_2_0 and
 #: 0.1.0 as compute_upt_v0_1_0 (the sscls convention — shipped versions stay
 #: reproducible).
-CALC_VERSION = "0.3.0"
+#:
+#: 0.4.0 (handoff 0040, the review sub-wave) CLOSES THE LOOP. 0.3.0 could hold
+#: an ambiguous boarding pending forever, because nothing could ever answer
+#: it: there was no way for a human to say what it was. Now there is
+#: (dq.boarding_revenue_reviews), and 0.4.0 reads those answers back. A no-run
+#: boarding a named person classified 'revenue' is COUNTED; one classified
+#: 'non_revenue' is EXCLUDED; anything still undecided is held exactly as
+#: 0.3.0 held it. Each decision's justification note, author and timestamp are
+#: copied verbatim into the detail, so the figure carries the reasoning that
+#: defends it. A run with no recorded decisions computes BYTE-FOR-BYTE as
+#: 0.3.0, which is retained runnable as compute_upt_v0_3_0.
+CALC_VERSION = "0.4.0"
 
 #: The transform's assignment status (migration 0039). 'unassigned' is the
 #: no-run ghost boarding; 'assigned' resolved to a run; None (the pre-0040
@@ -263,10 +276,88 @@ def _no_run_warning(event: PassengerEvent, verdict: str, reason: str) -> Finding
                 "classified default), so a boarding of unknown revenue status "
                 "cannot silently inflate or deflate a certified number. It is "
                 "recorded in the metric detail's revenue split and routed to "
-                "the review queue by the later human-in-the-loop wave."
+                "the revenue review queue, where a data steward classifies "
+                "it and writes down why. The figure changes only when the "
+                "calculation is re-run after that decision."
             )
         ),
         source_record_ids=(event.source_record_id,),
+    )
+
+
+def _human_verdict_info(
+    event: PassengerEvent, decision: HumanBoardingVerdict
+) -> Finding:
+    """ONE info finding per human-classified no-run boarding (handoff 0040,
+    review sub-wave).
+
+    INFO, not warning: nothing here is unresolved. A person with a name looked
+    at this boarding, decided what it was, and wrote down why — which is the
+    outcome the pending warning was asking for. The finding exists so the
+    decision is visible in the data-quality trail beside the boardings still
+    waiting, and so the reason travels with the evidence rather than only with
+    the figure.
+
+    The justification is quoted VERBATIM. The calculation never summarises,
+    paraphrases or grades a human's reasoning; it carries it.
+    """
+    counted = decision.verdict == "revenue"
+    return Finding(
+        issue_type="boarding_classified_by_review",
+        severity=SEVERITY_INFO,
+        title=(
+            f"No-run boarding {short_id(event.passenger_event_id)} classified "
+            + ("REVENUE" if counted else "NON-REVENUE")
+            + f" by {decision.classified_by} — vehicle "
+            f"{short_id(event.vehicle_id)}, "
+            f"{event.event_timestamp.isoformat()}"
+        ),
+        description=(
+            f"Passenger event {event.passenger_event_id!r} (vehicle_id="
+            f"{event.vehicle_id!r}, {event.event_timestamp.isoformat()}, "
+            f"count={event.event_count}) carried no run assignment and was "
+            f"held pending review. "
+            f"{decision.classified_by} classified it "
+            + (
+                "REVENUE on "
+                if counted
+                else "NON-REVENUE on "
+            )
+            + f"{decision.classified_at.isoformat()}, with this "
+            f"justification: “{decision.justification}” "
+            + (
+                "Its boardings are COUNTED in Unlinked Passenger Trips on "
+                "this run."
+                if counted
+                else "Its boardings are EXCLUDED from Unlinked Passenger "
+                "Trips on this run (a vehicle not in revenue service is not "
+                "carrying passengers, 2026 NTD Policy Manual p. 128)."
+            )
+            + " The decision, its author and its reason are recorded in the "
+            "metric detail so the correction can be defended rather than "
+            "asserted."
+        ),
+        source_record_ids=(event.source_record_id,),
+    )
+
+
+def _review_item(event: PassengerEvent, reason: str) -> BoardingReviewItem:
+    """The structured hand-off of ONE undecided boarding to a person.
+
+    Everything a reviewer needs to decide, and nothing the calculation had to
+    invent to produce it: the boarding's own identity and time, the vehicle
+    the feed named, how many boardings are at stake, and the calculation's own
+    words for why it refused to guess.
+    """
+    return BoardingReviewItem(
+        passenger_event_id=event.passenger_event_id,
+        source_record_id=event.source_record_id,
+        service_date=event.service_date,
+        event_timestamp=event.event_timestamp,
+        vehicle_id=event.vehicle_id,
+        event_count=event.event_count,
+        suggested_verdict=VERDICT_PENDING_REVIEW,
+        suggested_reason=reason,
     )
 
 
@@ -327,8 +418,24 @@ def compute_upt(
     imbalance_threshold: Decimal = IMBALANCE_THRESHOLD,
     attestations: Iterable[AttestationContext] = (),
     revenue_windows: Mapping[date, RevenueWindow] | None = None,
+    boarding_reviews: Mapping[str, HumanBoardingVerdict] | None = None,
 ) -> CalcResult:
-    """Compute upt_v0 (version 0.3.0) — Unlinked Passenger Trips.
+    """Compute upt_v0 (version 0.4.0) — Unlinked Passenger Trips.
+
+    Human classifications (0.4.0, handoff 0040 review sub-wave).
+    ``boarding_reviews`` maps ``passenger_event_id`` to the decision a named
+    person recorded in the revenue review queue. A held no-run boarding with a
+    recorded decision is no longer held: 'revenue' COUNTS it, 'non_revenue'
+    EXCLUDES it, and either way the person, the timestamp and the
+    justification note travel verbatim into the detail and into one info
+    finding — the receipt that makes the correction defensible instead of
+    asserted. A human-counted boarding is added to the figure AFTER the
+    p. 146 missing-trip factor-up and never inside it: the factor exists to
+    account for trips whose data is missing, and a no-run boarding is not a
+    trip, so multiplying a human-confirmed count by it would invent riders
+    nobody observed. Boardings still undecided are held exactly as 0.3.0 held
+    them, and are emitted as ``review_items`` for the queue. With no recorded
+    decisions the result is byte-for-byte 0.3.0's.
 
     Revenue classification of no-run boardings (handoff 0040, design points
     3–5). An event whose ``revenue_classification`` (migration 0039) is
@@ -444,10 +551,21 @@ def compute_upt(
     # dropped, never silently counted. Their trip_id is None, so they touch
     # neither the counted base nor the missing-trip denominators below (the
     # double-count guard is structural, not a subtraction).
+    #
+    # 0.4.0: before the window is consulted at all, a boarding a NAMED PERSON
+    # already decided in the revenue review queue takes their answer — the
+    # human is the higher authority here by construction, because the only
+    # boardings that reach the queue are the ones the schedule could not
+    # settle. Their note travels into the figure's detail verbatim.
     excluded_non_revenue_boardings = 0
     pending_review_boardings = 0
+    human_revenue_boardings = 0
+    human_non_revenue_boardings = 0
+    human_classifications: list[dict] = []
+    review_items: list[BoardingReviewItem] = []
     excluded_record_ids: dict[str, None] = {}
     pending_record_ids: dict[str, None] = {}
+    reviews = boarding_reviews or {}
 
     # --- base count (p. 143) + lineage + null-count warnings ----------------
     counted_boardings = 0
@@ -473,13 +591,53 @@ def compute_upt(
                     null_count_warnings.append(_null_count_warning(event))
                 else:
                     verdict, reason = _classify_no_run(event, revenue_windows)
-                    if verdict == VERDICT_EXCLUDED_NON_REVENUE:
+                    decision = (
+                        reviews.get(event.passenger_event_id)
+                        if verdict == VERDICT_PENDING_REVIEW
+                        else None
+                    )
+                    if decision is not None:
+                        # A person answered this one. Their words, their name,
+                        # their timestamp — carried, never paraphrased.
+                        human_classifications.append(
+                            {
+                                "passenger_event_id": event.passenger_event_id,
+                                "source_record_id": event.source_record_id,
+                                "service_date": event.service_date.isoformat(),
+                                "event_timestamp": (
+                                    event.event_timestamp.isoformat()
+                                ),
+                                "vehicle_id": event.vehicle_id,
+                                "event_count": event.event_count,
+                                "verdict": decision.verdict,
+                                "justification": decision.justification,
+                                "classified_by": decision.classified_by,
+                                "classified_at": (
+                                    decision.classified_at.isoformat()
+                                ),
+                            }
+                        )
+                        if decision.verdict == "revenue":
+                            human_revenue_boardings += event.event_count
+                            # It IS in the figure, so its raw record IS
+                            # lineage — the walk from the number back to the
+                            # bytes must include the boardings a human added.
+                            input_ids.setdefault(event.source_record_id, None)
+                        else:
+                            human_non_revenue_boardings += event.event_count
+                            excluded_record_ids.setdefault(
+                                event.source_record_id, None
+                            )
+                        infos.append(_human_verdict_info(event, decision))
+                    elif verdict == VERDICT_EXCLUDED_NON_REVENUE:
                         excluded_non_revenue_boardings += event.event_count
                         excluded_record_ids.setdefault(event.source_record_id, None)
-                    else:  # VERDICT_PENDING_REVIEW
+                        warnings.append(_no_run_warning(event, verdict, reason))
+                    else:  # VERDICT_PENDING_REVIEW, still undecided
                         pending_review_boardings += event.event_count
                         pending_record_ids.setdefault(event.source_record_id, None)
-                    warnings.append(_no_run_warning(event, verdict, reason))
+                        review_items.append(_review_item(event, reason))
+                        warnings.append(_no_run_warning(event, verdict, reason))
             continue  # revenue-service proxy: unassigned events not counted
         if event.event_type == BOARDING_EVENT_TYPE:
             if event.event_count is None:
@@ -649,10 +807,13 @@ def compute_upt(
                     "prep or a real catch-up bus dispatched without a formal "
                     "trip assignment (2026 NTD Policy Manual p. 128 / handoff "
                     "0040). They are HELD OUT of the reported figure under the "
-                    "exclude-until-classified default until a human classifies "
-                    "them (the later human-in-the-loop wave), so a certified "
+                    "exclude-until-classified default until a data steward "
+                    "classifies them in the revenue review queue and writes "
+                    "down why, so a certified "
                     "Unlinked Passenger Trips figure never counts a boarding of "
-                    "unknown revenue status. The split is in the metric "
+                    "unknown revenue status. Classifying them does not change "
+                    "this figure: it changes what the NEXT run computes. The "
+                    "split is in the metric "
                     "detail's revenue_classification block; each boarding's "
                     "record is cited by its own 'boarding_pending_revenue_"
                     "review' warning."
@@ -836,6 +997,17 @@ def compute_upt(
             _FACTOR_QUANTUM, rounding=ROUND_HALF_EVEN
         )
 
+    # Human-counted boardings join the figure AFTER the p. 146 factor-up and
+    # never inside it (0.4.0). The factor accounts for TRIPS whose APC data is
+    # missing; a no-run boarding is not a trip and was never in the operated
+    # denominator, so scaling a human-confirmed head count by it would invent
+    # riders nobody observed. Added to a refused (None) figure? No — a blocked
+    # run stays blocked: a human decision does not cure a p. 146 refusal.
+    if value is not None and human_revenue_boardings:
+        value = (value + Decimal(human_revenue_boardings)).quantize(
+            _UPT_QUANTUM, rounding=ROUND_HALF_EVEN
+        )
+
     detail = UptDetail(
         total_boardings_counted=counted_boardings,
         operated_trips=operated_count,
@@ -849,6 +1021,9 @@ def compute_upt(
         attestation=attestation_provenance,
         excluded_non_revenue_boardings=excluded_non_revenue_boardings,
         pending_review_boardings=pending_review_boardings,
+        human_revenue_boardings=human_revenue_boardings,
+        human_non_revenue_boardings=human_non_revenue_boardings,
+        human_classifications=tuple(human_classifications),
     )
 
     return CalcResult(
@@ -861,7 +1036,40 @@ def compute_upt(
         warnings=tuple(warnings),
         infos=tuple(infos),
         detail=detail,
+        review_items=tuple(review_items),
     )
+
+
+def compute_upt_v0_3_0(
+    events: Iterable[PassengerEvent],
+    operated_trip_ids: Iterable[str],
+    *,
+    missing_trip_threshold: Decimal = MISSING_TRIP_THRESHOLD,
+    imbalance_threshold: Decimal = IMBALANCE_THRESHOLD,
+    attestations: Iterable[AttestationContext] = (),
+    revenue_windows: Mapping[date, RevenueWindow] | None = None,
+) -> CalcResult:
+    """upt_v0 0.3.0, RETAINED runnable (the sscls convention — shipped
+    versions stay reproducible; handoff 0040).
+
+    0.3.0 predates the review queue: it is compute_upt with NO recorded human
+    decisions, so every ambiguous no-run boarding is held pending exactly as
+    0.3.0 held it and the output (value, findings, detail JSON) is
+    byte-identical to 0.3.0's — the 0.4.0 change is strictly additive (the
+    human keys appear in the detail only when somebody classified something,
+    which cannot happen here). Recomputing a figure certified under 0.3.0
+    therefore reproduces it exactly, whatever has been decided since.
+    """
+    result = compute_upt(
+        events,
+        operated_trip_ids,
+        missing_trip_threshold=missing_trip_threshold,
+        imbalance_threshold=imbalance_threshold,
+        attestations=attestations,
+        revenue_windows=revenue_windows,
+        boarding_reviews=None,
+    )
+    return dataclasses.replace(result, calc_version="0.3.0")
 
 
 def _without_classification(

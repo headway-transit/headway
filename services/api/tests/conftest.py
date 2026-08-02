@@ -119,6 +119,10 @@ class FakeConn:
         self.canonical_routes: dict[str, dict] = {}
         self.canonical_trips: dict[str, dict] = {}
         self.stop_times: list[dict] = []
+        # Revenue review queue (handoff 0040 / migration 0040): no-run
+        # boardings the calculation held out of the figure pending a human
+        # decision, keyed by passenger_event_id.
+        self.boarding_reviews: dict[str, dict] = {}
         self._next_classification_id = 1
         self._next_event_id = 1
         self.executed: list[tuple[str, tuple]] = []
@@ -145,6 +149,7 @@ class FakeConn:
                 self.attestations,
                 self.service_day_overrides,
                 self.calc_runs,
+                self.boarding_reviews,
                 self._next_classification_id,
                 self._next_event_id,
             )
@@ -169,6 +174,7 @@ class FakeConn:
                 self.attestations,
                 self.service_day_overrides,
                 self.calc_runs,
+                self.boarding_reviews,
                 self._next_classification_id,
                 self._next_event_id,
             ) = snapshot
@@ -578,6 +584,137 @@ class FakeConn:
                 return queue_columns
 
             return FakeCursor([_row(r) for r in rows])
+
+        # -- revenue review queue (handoff 0040 / migration 0040) ------------
+        # Registered BEFORE the generic dq.issues resolve handler below: the
+        # review router closes a boarding's finding with a two-parameter
+        # UPDATE whose prefix would otherwise be swallowed by the
+        # three-parameter DQ one.
+        if q.startswith(
+            "UPDATE dq.issues SET status = 'resolved', resolved_at = now(), "
+            "resolution = %s WHERE issue_id"
+        ):
+            resolution, issue_id = params
+            issue = self.dq_issues.get(str(issue_id))
+            if issue is None or issue["status"] not in ("open", "owned"):
+                return FakeCursor([])
+            issue["status"] = "resolved"
+            issue["resolved_at"] = dt.datetime.now(UTC)
+            issue["resolution"] = resolution
+            return FakeCursor([])
+
+        if q.startswith(
+            "SELECT issue_id FROM dq.issues WHERE issue_type = %s "
+            "AND status IN ('open', 'owned') AND %s = ANY(source_record_ids)"
+        ):
+            issue_type, record_id = params
+            rows = sorted(
+                (
+                    i
+                    for i in self.dq_issues.values()
+                    if i["issue_type"] == issue_type
+                    and i["status"] in ("open", "owned")
+                    and record_id in (i["source_record_ids"] or [])
+                ),
+                key=lambda i: (i["created_at"], str(i["issue_id"])),
+            )
+            return FakeCursor([(r["issue_id"],) for r in rows[:1]])
+
+        if q.startswith("SELECT count(*) FROM dq.boarding_revenue_reviews"):
+            pending_only = "WHERE verdict IS NULL" in q
+            rows = [
+                r
+                for r in self.boarding_reviews.values()
+                if (r["verdict"] is None) == pending_only
+            ]
+            return FakeCursor([(len(rows),)])
+
+        if q.startswith(
+            "SELECT verdict, count(*), coalesce(sum(event_count), 0) "
+            "FROM dq.boarding_revenue_reviews"
+        ):
+            grouped: dict = {}
+            for r in self.boarding_reviews.values():
+                bucket = grouped.setdefault(r["verdict"], [0, 0])
+                bucket[0] += 1
+                bucket[1] += r["event_count"]
+            return FakeCursor(
+                [(v, c, s) for v, (c, s) in grouped.items()]
+            )
+
+        if q.startswith("SELECT passenger_event_id, source_record_id"):
+            def _review_row(r):
+                return (
+                    r["passenger_event_id"], r["source_record_id"],
+                    r["service_date"], r["event_timestamp"], r["vehicle_id"],
+                    r["event_count"], r["suggested_verdict"],
+                    r["suggested_reason"], r["calc_name"], r["calc_version"],
+                    r["period_start"], r["period_end"], r["first_seen_at"],
+                    r["verdict"], r["justification"], r["classified_by"],
+                    r["classified_at"], r["dq_issue_id"],
+                )
+
+            if "WHERE passenger_event_id = %s" in q:
+                r = self.boarding_reviews.get(str(params[0]))
+                return FakeCursor([_review_row(r)] if r else [])
+            pending_only = "WHERE verdict IS NULL" in q
+            rows = [
+                r
+                for r in self.boarding_reviews.values()
+                if (r["verdict"] is None) == pending_only
+            ]
+            rows.sort(
+                key=lambda r: (r["event_timestamp"], r["passenger_event_id"])
+            )
+            rest = list(params)
+            if "(event_timestamp, passenger_event_id) > (%s, %s)" in q:
+                after_ts, after_id = rest[0], rest[1]
+                rows = [
+                    r
+                    for r in rows
+                    if (r["event_timestamp"], r["passenger_event_id"])
+                    > (after_ts, after_id)
+                ]
+                rest = rest[2:]
+            limit = rest[0]
+            return FakeCursor([_review_row(r) for r in rows[:limit]])
+
+        if q.startswith("UPDATE dq.boarding_revenue_reviews SET verdict"):
+            verdict, justification, actor, dq_issue_id, event_id = params
+            r = self.boarding_reviews.get(str(event_id))
+            if r is None or r["verdict"] is not None:
+                return FakeCursor([])
+            r["verdict"] = verdict
+            r["justification"] = justification
+            r["classified_by"] = actor
+            r["classified_at"] = dt.datetime.now(UTC)
+            r["dq_issue_id"] = dq_issue_id
+            return FakeCursor([(r["classified_at"],)])
+
+        if q.startswith(
+            "SELECT metric_value_id, period_start, period_end, scope "
+            "FROM computed.metric_values"
+        ):
+            metric, on_date, _same = params
+            rows = sorted(
+                (
+                    v
+                    for v in self.metric_values.values()
+                    if v["metric"] == metric
+                    and v["certification_status"] == "certified"
+                    and v["period_start"] <= on_date < v["period_end"]
+                ),
+                key=lambda v: v["period_start"],
+            )
+            return FakeCursor(
+                [
+                    (
+                        v["metric_value_id"], v["period_start"],
+                        v["period_end"], v["scope"],
+                    )
+                    for v in rows[:1]
+                ]
+            )
 
         if q.startswith("UPDATE dq.issues SET status = 'resolved'"):
             resolution, resolution_minutes, issue_id = params
@@ -1623,6 +1760,43 @@ class FakeConn:
         issue.update(overrides)
         self.dq_issues[issue["issue_id"]] = issue
         return issue
+
+    # -- revenue review queue seeder (handoff 0040 / migration 0040) --------
+    def add_boarding_review(self, **overrides):
+        """Seed one dq.boarding_revenue_reviews row — a no-run boarding the
+        calculation held out of the figure pending a human decision.
+
+        Pending by default (all four human columns NULL), because pending IS
+        the queue: a classified row is what a test creates deliberately.
+        """
+        review = {
+            "passenger_event_id": f"pe-{uuid.uuid4()}",
+            "source_record_id": "c" * 64,
+            "service_date": dt.date(2026, 7, 9),
+            "event_timestamp": dt.datetime(2026, 7, 9, 15, 12, tzinfo=UTC),
+            "vehicle_id": "3684",
+            "event_count": 4,
+            "suggested_verdict": "pending_review",
+            "suggested_reason": (
+                "no run assignment but WITHIN the day's revenue-service "
+                "window — ambiguous (could be a catch-up bus dispatched "
+                "without a formal trip assignment); held pending human "
+                "review, never counted or excluded silently"
+            ),
+            "calc_name": "upt_v0",
+            "calc_version": "0.4.0",
+            "period_start": dt.date(2026, 7, 1),
+            "period_end": dt.date(2026, 8, 1),
+            "first_seen_at": dt.datetime(2026, 7, 15, 9, 0, tzinfo=UTC),
+            "verdict": None,
+            "justification": None,
+            "classified_by": None,
+            "classified_at": None,
+            "dq_issue_id": None,
+        }
+        review.update(overrides)
+        self.boarding_reviews[review["passenger_event_id"]] = review
+        return review
 
     # -- Map wave seeders (handoff 0023) ------------------------------------
     def add_vehicle_position(self, **overrides):

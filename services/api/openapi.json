@@ -2759,6 +2759,196 @@
         }
       }
     },
+    "/revenue-review/boardings": {
+      "get": {
+        "tags": [
+          "revenue-review"
+        ],
+        "summary": "List Boardings",
+        "description": "One bounded page of the revenue review queue.\n\nDefault ``status=pending`` \u2014 the work. ``status=classified`` reads the\ndecision history, which is also the receipt trail behind every corrected\nfigure, so it stays readable forever. Pages are keyset-walked on\n(event_timestamp, passenger_event_id) ascending: the primary key breaks\nevery tie, so a boarding can neither be skipped nor served twice while a\ncalculation run flags new ones behind the reader.",
+        "operationId": "list_boardings_revenue_review_boardings_get",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "pending",
+              "title": "Status"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoardingReviewPage"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/revenue-review/boardings/counts": {
+      "get": {
+        "tags": [
+          "revenue-review"
+        ],
+        "summary": "Count Boardings",
+        "description": "The queue-wide tally: how many boardings are held, and how many a human\nhas already ruled in or out. Counted by the database over exactly the rows\nthe list serves \u2014 registered before the ``{passenger_event_id}`` route so\nthe literal path wins.",
+        "operationId": "count_boardings_revenue_review_boardings_counts_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoardingReviewCounts"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/revenue-review/boardings/{passenger_event_id}": {
+      "get": {
+        "tags": [
+          "revenue-review"
+        ],
+        "summary": "Get Boarding",
+        "description": "One boarding by id \u2014 the deep-link target, so a finding or a receipt\ncan point straight at the boarding it concerns.",
+        "operationId": "get_boarding_revenue_review_boardings__passenger_event_id__get",
+        "parameters": [
+          {
+            "name": "passenger_event_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Passenger Event Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoardingReview"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/revenue-review/boardings/{passenger_event_id}/classify": {
+      "post": {
+        "tags": [
+          "revenue-review"
+        ],
+        "summary": "Classify Boarding",
+        "description": "Record one human decision about one held boarding, with its reason.\n\nData-steward-grade, exactly like resolving a data-quality issue \u2014 this IS\na data-quality resolution, it just happens to change what the next figure\ncounts. The verdict, the note, the person and the time are written\ntogether, the boarding's open finding is closed in the same transaction,\nand the audit event commits with them or not at all.\n\nRefuses loudly and specifically:\n\n- **404** \u2014 no such boarding in the queue.\n- **409** \u2014 already classified. A decision is not re-decided in place; the\n  trail must stay honest about who said what and when.\n- **409** \u2014 the boarding falls inside an already-CERTIFIED Unlinked\n  Passenger Trips period. A certification attests to a number; recording a\n  change that would move that number on the next run would leave the\n  attestation describing a figure nobody computed.\n- **422** \u2014 a blank justification. There is no note-free path.",
+        "operationId": "classify_boarding_revenue_review_boardings__passenger_event_id__classify_post",
+        "parameters": [
+          {
+            "name": "passenger_event_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Passenger Event Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClassifyRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClassifyResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/branding/logo": {
       "get": {
         "tags": [
@@ -4625,6 +4815,241 @@
         ],
         "title": "AttestationRevoked"
       },
+      "BoardingReview": {
+        "properties": {
+          "passenger_event_id": {
+            "type": "string",
+            "title": "Passenger Event Id"
+          },
+          "source_record_id": {
+            "type": "string",
+            "title": "Source Record Id"
+          },
+          "service_date": {
+            "type": "string",
+            "format": "date",
+            "title": "Service Date"
+          },
+          "event_timestamp": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Event Timestamp"
+          },
+          "vehicle_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vehicle Id"
+          },
+          "event_count": {
+            "type": "integer",
+            "title": "Event Count"
+          },
+          "suggested_verdict": {
+            "type": "string",
+            "title": "Suggested Verdict"
+          },
+          "suggested_reason": {
+            "type": "string",
+            "title": "Suggested Reason"
+          },
+          "calc_name": {
+            "type": "string",
+            "title": "Calc Name"
+          },
+          "calc_version": {
+            "type": "string",
+            "title": "Calc Version"
+          },
+          "period_start": {
+            "type": "string",
+            "format": "date",
+            "title": "Period Start"
+          },
+          "period_end": {
+            "type": "string",
+            "format": "date",
+            "title": "Period End"
+          },
+          "first_seen_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "First Seen At"
+          },
+          "verdict": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verdict"
+          },
+          "justification": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Justification"
+          },
+          "classified_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Classified By"
+          },
+          "classified_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Classified At"
+          },
+          "dq_issue_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dq Issue Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "passenger_event_id",
+          "source_record_id",
+          "service_date",
+          "event_timestamp",
+          "vehicle_id",
+          "event_count",
+          "suggested_verdict",
+          "suggested_reason",
+          "calc_name",
+          "calc_version",
+          "period_start",
+          "period_end",
+          "first_seen_at",
+          "verdict",
+          "justification",
+          "classified_by",
+          "classified_at",
+          "dq_issue_id"
+        ],
+        "title": "BoardingReview",
+        "description": "One boarding awaiting a decision \u2014 or the record of the decision made.\n\nEverything here was frozen when the calculation flagged the boarding, so\nthe row reads the same years later even if the feed is re-ingested or the\nvehicle is renumbered. Nothing is re-derived at read time and no label is\ninvented: an absent vehicle is served as null, not as \"unknown\"."
+      },
+      "BoardingReviewCounts": {
+        "properties": {
+          "pending": {
+            "type": "integer",
+            "title": "Pending"
+          },
+          "pending_boardings": {
+            "type": "integer",
+            "title": "Pending Boardings"
+          },
+          "classified": {
+            "type": "integer",
+            "title": "Classified"
+          },
+          "classified_revenue": {
+            "type": "integer",
+            "title": "Classified Revenue"
+          },
+          "classified_non_revenue": {
+            "type": "integer",
+            "title": "Classified Non Revenue"
+          },
+          "classified_revenue_boardings": {
+            "type": "integer",
+            "title": "Classified Revenue Boardings"
+          },
+          "classified_non_revenue_boardings": {
+            "type": "integer",
+            "title": "Classified Non Revenue Boardings"
+          }
+        },
+        "type": "object",
+        "required": [
+          "pending",
+          "pending_boardings",
+          "classified",
+          "classified_revenue",
+          "classified_non_revenue",
+          "classified_revenue_boardings",
+          "classified_non_revenue_boardings"
+        ],
+        "title": "BoardingReviewCounts",
+        "description": "The queue-wide tally, counted by the database over exactly the rows the\nlist serves \u2014 so a card can never disagree with the table below it."
+      },
+      "BoardingReviewPage": {
+        "properties": {
+          "boardings": {
+            "items": {
+              "$ref": "#/components/schemas/BoardingReview"
+            },
+            "type": "array",
+            "title": "Boardings"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          },
+          "has_more": {
+            "type": "boolean",
+            "title": "Has More"
+          }
+        },
+        "type": "object",
+        "required": [
+          "boardings",
+          "total",
+          "limit",
+          "next_cursor",
+          "has_more"
+        ],
+        "title": "BoardingReviewPage",
+        "description": "One page of the queue, plus the truth about the rest of it."
+      },
       "Body_upload_logo_branding_logo_post": {
         "properties": {
           "file": {
@@ -5370,6 +5795,82 @@
           "classifier_version"
         ],
         "title": "ClassificationResult"
+      },
+      "ClassifyRequest": {
+        "properties": {
+          "verdict": {
+            "type": "string",
+            "title": "Verdict"
+          },
+          "justification": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Justification"
+          }
+        },
+        "type": "object",
+        "required": [
+          "verdict",
+          "justification"
+        ],
+        "title": "ClassifyRequest",
+        "description": "A verdict and the reason for it. The reason is not optional."
+      },
+      "ClassifyResponse": {
+        "properties": {
+          "passenger_event_id": {
+            "type": "string",
+            "title": "Passenger Event Id"
+          },
+          "verdict": {
+            "type": "string",
+            "title": "Verdict"
+          },
+          "justification": {
+            "type": "string",
+            "title": "Justification"
+          },
+          "classified_by": {
+            "type": "string",
+            "title": "Classified By"
+          },
+          "classified_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Classified At"
+          },
+          "dq_issue_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dq Issue Id"
+          },
+          "audit_event_id": {
+            "type": "integer",
+            "title": "Audit Event Id"
+          },
+          "recompute_required": {
+            "type": "boolean",
+            "title": "Recompute Required",
+            "default": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "passenger_event_id",
+          "verdict",
+          "justification",
+          "classified_by",
+          "classified_at",
+          "dq_issue_id",
+          "audit_event_id"
+        ],
+        "title": "ClassifyResponse"
       },
       "Comparand": {
         "properties": {

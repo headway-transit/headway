@@ -57,6 +57,10 @@ from decimal import Decimal
 from headway_calc._blocks import LAYOVER_MAX_SECONDS
 from headway_calc._grouping import COVERAGE_THRESHOLD, GAP_THRESHOLD_SECONDS
 from headway_calc.attestation import applicable_attestations
+from headway_calc.boarding_reviews import (
+    load_boarding_reviews,
+    persist_review_items,
+)
 from headway_calc.dq import route_findings
 from headway_calc.dr import (
     compute_dr_pmt,
@@ -191,6 +195,7 @@ def _fleet_results(
     period_start: date,
     period_end: date,
     revenue_windows=None,
+    boarding_reviews=None,
 ) -> tuple[CalcResult, ...]:
     """The four fleet-wide results, with the empty-input guard applied.
 
@@ -224,6 +229,7 @@ def _fleet_results(
             imbalance_threshold=imbal_threshold,
             attestations=attestations_for("upt", SCOPE_AGENCY),
             revenue_windows=revenue_windows,
+            boarding_reviews=boarding_reviews,
         )
         if have_count_inputs
         else _no_data_refusal(
@@ -636,6 +642,13 @@ def run_period(
         load_revenue_window_seconds(conn, period_start, period_end),
         agency_timezones[0] if len(agency_timezones) == 1 else None,
     )
+    # Human revenue classifications (handoff 0040, review sub-wave): the
+    # decisions data stewards recorded in dq.boarding_revenue_reviews for
+    # boardings an earlier run over this period could not decide. THIS re-run
+    # is what lets a held boarding finally count (or finally be excluded) —
+    # the loop the review queue closes. No decisions (or a pre-0040 database)
+    # means every ambiguous boarding stays held, exactly as 0.3.0 held it.
+    boarding_reviews = load_boarding_reviews(conn, period_start, period_end)
     # Statistician attestations (handoff 0019): unrevoked cert.attestations
     # rows covering the run period; each scoped upt/pmt computation receives
     # ONLY the attestations matching its metric AND scope AND period (the
@@ -662,6 +675,7 @@ def run_period(
         period_start,
         period_end,
         revenue_windows,
+        boarding_reviews,
     )
 
     # Scoped result list: the fleet-wide ('agency') results first — unchanged
@@ -695,6 +709,7 @@ def run_period(
                     "upt", scope
                 ),
                 revenue_windows=revenue_windows,
+                boarding_reviews=boarding_reviews,
             ),
             compute_pmt_by_mode(
                 passenger_events,
@@ -774,6 +789,24 @@ def run_period(
                 issue_ids[n_infos : n_infos + n_warnings]
             )
             blocking_ids_by_key[key] = tuple(issue_ids[n_infos + n_warnings :])
+        # The review queue rides WITH the findings, in the fail-loudly-first
+        # transaction and for the same reason (handoff 0040). A boarding the
+        # calculation held out of a figure and could not hand to anybody is
+        # the dead end this wave exists to close, so the hand-over must be
+        # durable no matter what happens to the value phase below. The UPSERT
+        # is idempotent and refuses to touch a row a human already answered,
+        # so the same boarding appearing under both the fleet and its mode
+        # scope lands exactly once.
+        if result.review_items:
+            persist_review_items(
+                conn,
+                list(result.review_items),
+                calc_name=result.calc_name,
+                calc_version=result.calc_version,
+                period_start=period_start,
+                period_end=period_end,
+            )
+            routed_any = True
     run_info_ids: tuple[str, ...] = ()
     if run_finding is not None:
         run_info_ids = tuple(
@@ -1699,9 +1732,13 @@ def preview_period(
     # run's would be a lie. Loading them is a SELECT: the no-writes
     # guarantee stands.
     attestations = load_attestations(conn, period_start, period_end)
-    # Revenue windows resolved exactly as a real run (handoff 0040) — a
-    # preview whose no-run classification differed from the next real run's
-    # would be a lie. All SELECTs: the no-writes guarantee stands.
+    # Revenue windows AND recorded human classifications resolved exactly as
+    # a real run (handoff 0040) — a preview that ignored a decision an
+    # analyst already made would show a figure the next real run would not
+    # produce. All SELECTs: the no-writes guarantee stands, and a preview
+    # never WRITES to the review queue (previewing is not a run; it must not
+    # put work in anybody's queue).
+    boarding_reviews = load_boarding_reviews(conn, period_start, period_end)
     agency_timezones = load_agency_timezones(conn)
     revenue_windows = build_windows(
         load_revenue_window_seconds(conn, period_start, period_end),
@@ -1744,6 +1781,7 @@ def preview_period(
             period_start,
             period_end,
             revenue_windows,
+            boarding_reviews,
         )
         variant_reports.append(
             PreviewVariantReport(

@@ -64,6 +64,10 @@ export const copy = {
     safety: "Safety & security",
     sampling: "PMT sampling",
     dq: "Data quality",
+    /** The revenue review queue (handoff 0040): every signed-in role can
+     *  read it; classifying is data-steward-grade (UX only — the API
+     *  enforces the role on the classify call). */
+    revenueReview: "Boardings to review",
     sandbox: "Settings sandbox",
     attestations: "Attestations",
     certifications: "Certifications",
@@ -979,6 +983,156 @@ export const copy = {
       cancel: "Cancel",
       success: (title: string) =>
         `“${title}” is closed as attested. The resolution names the attestation permanently.`,
+    },
+  },
+
+  /**
+   * The revenue review queue (handoff 0040): the boardings Headway refused to
+   * guess about, and the note an analyst writes when they decide one.
+   *
+   * Written for someone who runs a transit agency, not a database. No
+   * sentence here says "unassigned", "no-run", "revenue_classification" or
+   * "passenger event" — it says what happened on a bus and what it means for
+   * a number the agency has to report. The two things every screen must make
+   * unmissable: nothing here is counted until somebody decides it, and
+   * deciding it does not change any figure until the figures are worked out
+   * again.
+   */
+  revenueReview: {
+    heading: "Boardings to review",
+    intro:
+      "These riders were counted by a bus while nobody was logged into a run. That usually means staff getting on during prep or clean-up, which is not public ridership — but it can also mean an extra bus sent out to catch up a late route, carrying real riders. Headway will not guess between the two, so it is holding these out of your ridership figure until you say which they are.",
+    /** The inviting empty state — the queue being empty is GOOD news. */
+    empty: {
+      heading: "Nothing is waiting on you",
+      body: "Every boarding Headway could not work out on its own has been decided. Your ridership figure is not holding anything back for review.",
+      hint: "If a future day has boardings recorded off-run, they will appear here after the figures are worked out for that period.",
+    },
+    /** The header cards. Rows and boardings are different numbers. */
+    cards: {
+      pending: "Waiting on a decision",
+      pendingBoardings: "Riders held out of the figure",
+      classified: "Decided so far",
+      classifiedRevenue: "Ruled real ridership",
+      classifiedNonRevenue: "Ruled not ridership",
+    },
+    cardsScope: (rows: string) =>
+      `Counted across the whole queue (${rows}), not just this page.`,
+    /** The two tabs. */
+    filterPending: "Waiting on a decision",
+    filterClassified: "Already decided",
+    filterLabel: "Which boardings to show",
+    showingRange: (from: string, to: string, total: string) =>
+      `Showing ${from}–${to} of ${total}.`,
+    pageNext: "Next page",
+    pagePrevious: "Previous page",
+    pageNavLabel: "Review queue pages",
+    pageLoading: "Loading the next page…",
+    loadFailed:
+      "The review queue could not be loaded. Nothing was changed.",
+    retry: "Try again",
+
+    /** One row's heading and facts. */
+    rowHeading: (vehicle: string, when: string) =>
+      `${vehicle} — ${when}`,
+    vehicleLabel: (vehicle: string) => `Vehicle ${vehicle}`,
+    vehicleUnknown: "Vehicle not recorded",
+    ridersLabel: "Riders counted",
+    ridersValue: (count: string) =>
+      count === "1" ? "1 rider" : `${count} riders`,
+    serviceDayLabel: "Service day",
+    recordedAtLabel: "Recorded at",
+    routeLabel: "Route and run",
+    routeNone:
+      "None — that is exactly why this boarding is here. The bus was not logged into a run, so there is no route, no trip and no stop on this record.",
+    whyLabel: "Why Headway could not decide",
+    suggestionLabel: "Headway's own reading",
+    suggestionPending:
+      "No suggestion. Headway will not guess this one — the federal manual has no rule that tells prep apart from a catch-up bus, so only a person who knows what dispatch did that day can say.",
+    heldNote:
+      "Held out of the ridership figure while it waits. It is not counted, and it is not thrown away.",
+    flaggedByLabel: "Flagged by",
+    flaggedByValue: (calc: string, version: string, when: string) =>
+      `${calc} ${version}, first flagged ${when}`,
+    periodLabel: "Reporting period",
+    technicalToggle: "Show the record identifiers",
+    technicalIntro:
+      "The identifiers below are the provenance — they are what an auditor follows back to the original file. You do not need them to make the decision.",
+    technicalEventLabel: "Boarding record",
+    technicalSourceLabel: "Original source record",
+
+    /** The decision form. */
+    decideButton: (vehicle: string, when: string) =>
+      `Decide: ${vehicle}, ${when}`,
+    decideHeading: "What were these riders?",
+    verdictLabel: "Your decision",
+    verdictRevenue: "Real ridership — count them",
+    verdictRevenueHint:
+      "Choose this when the bus was carrying the public, even though it was not logged into a run — an extra bus sent to recover a late route is the usual case.",
+    verdictNonRevenue: "Not ridership — leave them out",
+    verdictNonRevenueHint:
+      "Choose this when the count was staff, maintenance, prep or clean-up, a bus running empty to reposition, or a counter that misfired.",
+    verdictRequired: "Choose one of the two decisions before saving.",
+    justificationLabel: "Why (required)",
+    justificationHint:
+      "Write what you checked and what you found, in your own words. This becomes part of the figure's receipt: it is what lets the agency defend the correction in a federal review instead of just asserting it. Example: “Extra bus sent at 15:10 to recover the route after the 14:40 ran late; dispatch confirms these are real riders.”",
+    justificationRequired:
+      "Write down why. A decision with no reason cannot be defended later, so Headway will not record one.",
+    submit: "Record this decision",
+    cancel: "Cancel",
+    /** Said at the moment of deciding, not buried in a footnote. */
+    recomputeWarning:
+      "Saving this records your decision. It does not change any figure that has already been worked out — the ridership number moves the next time the figures are worked out for a period that includes this day.",
+    recomputeLink: "Go and work the figures out again",
+    success: (vehicle: string) =>
+      `Decision recorded for ${vehicle}. The ridership figure will reflect it the next time the figures are worked out.`,
+    failed: "The decision was not recorded. Nothing was changed.",
+
+    /** The decided rows (the history, and the receipt trail). */
+    decidedRevenue: "Ruled real ridership",
+    decidedNonRevenue: "Ruled not ridership",
+    decidedByLabel: "Decided by",
+    decidedByValue: (who: string, when: string) => `${who}, ${when}`,
+    decidedWhyLabel: "Reason given",
+    decidedFindingLabel: "Data-quality finding closed",
+    decidedFindingNone:
+      "No open data-quality finding was found for this boarding, so none was closed.",
+    /** Shown on the "already decided" tab so nobody expects a live figure. */
+    decidedRecomputeNote:
+      "These decisions apply to figures worked out after they were made. A figure computed earlier still shows what it showed then — that is on purpose, so a number never changes quietly under a signature.",
+    /** The refusal a certified period earns, restated for the list. */
+    certifiedRefusalHint:
+      "If a boarding falls inside a period somebody has already certified, Headway will refuse the decision and say so. A certified number keeps meaning what it meant when it was signed.",
+
+    /**
+     * The receipt side (handoff 0040, design point 2). A corrected ridership
+     * figure has to be DEFENSIBLE, and a correction is only defensible if
+     * you can see who made each judgment call, when, and why. These strings
+     * put the human decisions inside "explain this number".
+     */
+    receipt: {
+      heading: "Judgment calls behind this number",
+      intro:
+        "Some boardings were recorded while no bus was logged into a run, and Headway could not tell prep activity from real riders. It did not guess. A person decided each one and wrote down why, and that is recorded here permanently.",
+      countedLine: (riders: string) =>
+        `${riders} counted into this figure because a person ruled they were real ridership.`,
+      excludedLine: (riders: string) =>
+        `${riders} left out of this figure because a person ruled they were not ridership.`,
+      heldLine: (riders: string) =>
+        `${riders} still waiting on a decision, and held OUT of this figure until somebody makes one.`,
+      autoExcludedLine: (riders: string) =>
+        `${riders} left out automatically: recorded outside the hours the schedule says this service ran, which is prep, pull-out or pull-in rather than ridership.`,
+      policyLine:
+        "Headway's rule while a boarding is undecided: leave it out. A boarding nobody has classified must never quietly inflate or deflate a number an agency signs for.",
+      verdictRevenue: "Counted as ridership",
+      verdictNonRevenue: "Not ridership",
+      entrySummary: (vehicle: string, when: string, riders: string) =>
+        `${vehicle}, ${when} — ${riders}`,
+      decidedBy: (who: string, when: string) => `Decided by ${who}, ${when}`,
+      /** No paraphrase, ever: the analyst's words are the evidence. */
+      reasonLabel: "In their words",
+      frozenNote:
+        "These decisions were read when this figure was worked out and were written into it. Decisions made since then apply to the next time the figures are worked out, not to this one — so a number never changes quietly under a signature.",
     },
   },
 
