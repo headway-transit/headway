@@ -90,5 +90,15 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     setupFiles: ["./src/test/setup.ts"],
+    /**
+     * Worker cap (handoff 0044). The suite is 44 files of full-app renders
+     * plus axe. Run unbounded it saturates every core, and the
+     * timing-sensitive assertions — a `findBy*` window, a call expected to
+     * be recorded by the time an await resolves — start failing at random:
+     * a different test each run, every one of them green in isolation.
+     * Capping the pool trades some wall-clock for a deterministic suite,
+     * which is the trade a green gate exists to make.
+     */
+    maxWorkers: 4,
   },
 });

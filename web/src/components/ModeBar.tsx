@@ -29,6 +29,7 @@ import {
   SelectValue,
 } from "react-aria-components";
 import { copy } from "../copy";
+import { Disclosure } from "./Disclosure";
 import {
   AGENCY_SCOPE,
   MODE_SEGMENT_MAX,
@@ -55,7 +56,6 @@ export function ModeBar({ options, scope, onScope }: ModeBarProps) {
 
   return (
     <section aria-label={t.rowLabel} className="mode-bar">
-      <p className="chart-desc">{t.intro}</p>
       <div className="chart-filters">
         {useDropdown ? (
           <Select
@@ -102,16 +102,24 @@ export function ModeBar({ options, scope, onScope }: ModeBarProps) {
           </div>
         )}
       </div>
-      {/* The scope receipt: what the rows below were filtered on, verbatim. */}
+      {/* HANDOFF 0044, OUTPUT 5 — what stays visible here, and why.
+          The scope receipt, "this is not a total this page added up", and
+          "only modes that already have figures are listed" are ADMISSIONS:
+          each states what these figures are NOT. None of them may fold.
+          Only `intro` — an explanation of how the control behaves — moves
+          into the disclosure, verbatim and unshortened. */}
       <p className="mode-scope-receipt">
         <span className="mono">{t.scopeReceipt(selected.scope)}</span>
       </p>
-      <p className="chart-desc">
+      <p className="admission">
         {isAgencyScope(scope)
           ? t.agencyNote
           : t.selectedNote(selected.label, selected.scope)}
       </p>
-      <p className="chart-desc">{t.dataDrivenNote}</p>
+      <p className="admission">{t.dataDrivenNote}</p>
+      <Disclosure label={copy.disclosure.how}>
+        <p>{t.intro}</p>
+      </Disclosure>
     </section>
   );
 }

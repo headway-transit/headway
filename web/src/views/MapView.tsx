@@ -118,7 +118,9 @@ import type {
   RoutesCollection,
   StopsCollection,
 } from "../api/types";
+import { Disclosure } from "../components/Disclosure";
 import { OpsBadge } from "../components/OpsBadge";
+import { ProvenanceTerminal } from "../components/ProvenanceTerminal";
 import { SimulatedBadge } from "../components/SimulatedBadge";
 import { Skeleton } from "../components/Skeleton";
 import { copy } from "../copy";
@@ -365,6 +367,9 @@ export function MapView() {
   /** The highlighted mode, or null for "all". Paint only — no re-fetch. */
   const [selectedMode, setSelectedMode] = useState<string | null>(null);
   const [findings, setFindings] = useState<Load<DqIssueSummary[]>>(LOADING);
+  /** The SERVER's count of open blocking findings across the whole queue —
+   *  never the length of the page this view happened to load. */
+  const [findingsTotal, setFindingsTotal] = useState<number | null>(null);
   const [calcRuns, setCalcRuns] = useState<CalcRunRecord[]>([]);
   /** The finding the inspector is showing, and where it was opened from. */
   const [selectedFindingId, setSelectedFindingId] = useState<string | null>(
@@ -778,7 +783,9 @@ export function MapView() {
       limit: FINDINGS_FETCH_LIMIT,
     })
       .then((page) => {
-        if (!cancelled) setFindings({ state: "ready", data: page.issues });
+        if (cancelled) return;
+        setFindings({ state: "ready", data: page.issues });
+        setFindingsTotal(page.total);
       })
       .catch((err) => {
         if (!cancelled) setFindings(toError(err));
@@ -1003,218 +1010,342 @@ export function MapView() {
     return t.marks.modeLabels[mode] ?? mode;
   };
 
+  /** Workflow/feature counts for the readout — display formatting only. */
+  const readoutCount = (value: number) => value.toLocaleString("en-US");
+
   return (
     <>
-      <h1>{t.heading}</h1>
-      <p>{t.intro}</p>
-      {/* Ops boundary ON the surface (handoff 0014 precedent): the badge +
-          the server's own boundary statement, verbatim. */}
-      <p className="stat-flags">
-        <OpsBadge />
-      </p>
-      {res && <p className="chart-desc">{res.ops_note}</p>}
+      {/* Load failures render VERBATIM, never animated (house rule), and
+          ABOVE the shell so a failure is never something you scroll to. */}
+      {(vehicles.state === "error" ||
+        stops.state === "error" ||
+        routes.state === "error" ||
+        basemap === "unusable") && (
+        <div className="map-alerts">
+          {vehicles.state === "error" && (
+            <div role="alert" className="alert">
+              {vehicles.message}
+            </div>
+          )}
+          {stops.state === "error" && (
+            <div role="alert" className="alert">
+              {stops.message}
+            </div>
+          )}
+          {routes.state === "error" && (
+            <div role="alert" className="alert">
+              {routes.message}
+            </div>
+          )}
+          {/* Fail loudly: a basemap file that answered wrong is SAID, not
+              silently skipped (the canvas still works without it). */}
+          {basemap === "unusable" && (
+            <div role="alert" className="alert">
+              {t.basemap.unusable}
+            </div>
+          )}
+        </div>
+      )}
 
-      {/* ---- the staleness window ---- */}
-      <div
-        className="filter-bar"
-        role="group"
-        aria-label={t.window.label}
-      >
-        <span className="filter-bar-label">{t.window.label}:</span>
-        {WINDOW_OPTIONS.map((opt) => (
-          <button
-            key={opt.seconds}
-            type="button"
-            aria-pressed={windowSeconds === opt.seconds}
-            onClick={() => setWindowSeconds(opt.seconds)}
-          >
-            {opt.label}
-          </button>
-        ))}
-      </div>
-      <p className="chart-desc">{t.window.note}</p>
+      {/* ================= the shell: hero + persistent rail =================
+          Handoff 0044, output 2. The canvas used to sit below a screen of
+          paragraphs, with "needs investigation" below THAT. Same components,
+          composed: the canvas is the hero and the worklist is the first
+          thing in the rail beside it. */}
+      <div className="map-shell">
+        <section className="map-hero" aria-label={t.heading}>
+          {/* ---- the compact control strip (was three stacked filter bars
+                  with a paragraph under each) ---- */}
+          <div className="map-toolbar" role="group" aria-label={t.controls.label}>
+            <div className="filter-bar seg" role="group" aria-label={t.window.label}>
+              <span className="filter-bar-label">{t.window.label}:</span>
+              {WINDOW_OPTIONS.map((opt) => (
+                <button
+                  key={opt.seconds}
+                  type="button"
+                  aria-pressed={windowSeconds === opt.seconds}
+                  onClick={() => setWindowSeconds(opt.seconds)}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
 
-      {/* ---- street style: the user's own choice, not the app theme.
-              Real <button>s in a labeled group with aria-pressed — the
-              house filter-bar pattern, reachable and operable from the
-              keyboard, and the same control whichever app theme or
-              audience lens is active. Switching repaints tiles only. ---- */}
-      {basemap === "present" && (
-        <>
-          <div
-            className="filter-bar"
-            role="group"
-            aria-label={t.basemap.style.label}
-          >
-            <span className="filter-bar-label">{t.basemap.style.label}:</span>
-            {(["light", "dark"] as BasemapStyle[]).map((style) => (
+            {/* Street style: the user's own choice, not the app theme.
+                Real <button>s in a labeled group with aria-pressed — the
+                house filter-bar pattern, reachable and operable from the
+                keyboard. Switching repaints tiles only. */}
+            {basemap === "present" && (
+              <div
+                className="filter-bar seg"
+                role="group"
+                aria-label={t.basemap.style.label}
+              >
+                <span className="filter-bar-label">
+                  {t.basemap.style.label}:
+                </span>
+                {(["light", "dark"] as BasemapStyle[]).map((style) => (
+                  <button
+                    key={style}
+                    type="button"
+                    aria-pressed={basemapStyle === style}
+                    onClick={() => {
+                      setBasemapStyle(style);
+                      persistBasemapStyle(style);
+                    }}
+                  >
+                    {t.basemap.style[style]}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* Highlight one mode (handoff 0043, design point 6). Pressing
+                one repaints two paint properties on data that is ALREADY on
+                the map — no request, no reload, and nothing removed from the
+                map, the counts or the list. The options are the modes this
+                agency's own routes carry. */}
+            {modeOptions.length > 0 && (
+              <div
+                className="filter-bar seg"
+                role="group"
+                aria-label={t.modeFilter.label}
+              >
+                <span className="filter-bar-label">{t.modeFilter.label}:</span>
+                <button
+                  type="button"
+                  aria-pressed={selectedMode === null}
+                  onClick={() => setSelectedMode(null)}
+                >
+                  {t.modeFilter.all}
+                </button>
+                {modeOptions.map((mode) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    aria-pressed={selectedMode === mode}
+                    onClick={() =>
+                      setSelectedMode((current) =>
+                        current === mode ? null : mode,
+                      )
+                    }
+                  >
+                    {t.marks.modeLabels[mode] ?? mode}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* ---- the honesty chip row ---- */}
+            <div className="map-status">
+              {vehicles.state === "loading" && (
+                <span className="chip">{t.chip.checking}</span>
+              )}
+              {chip && (
+                <span className={`chip map-chip ${chip.tone}`}>{chip.text}</span>
+              )}
               <button
-                key={style}
                 type="button"
-                aria-pressed={basemapStyle === style}
+                aria-busy={polling}
                 onClick={() => {
-                  setBasemapStyle(style);
-                  persistBasemapStyle(style);
+                  if (!polling) fetchVehicles(windowSeconds);
                 }}
               >
-                {t.basemap.style[style]}
+                {polling ? t.refreshing : t.refresh}
               </button>
-            ))}
-          </div>
-          <p className="chart-desc">{t.basemap.style.note}</p>
-        </>
-      )}
+              {lastCheckedAt && (
+                <span className="map-last-checked" role="status">
+                  {t.lastChecked(
+                    lastCheckedAt.toLocaleTimeString("en-US", {
+                      hour12: false,
+                    }),
+                  )}
+                </span>
+              )}
+            </div>
 
-      {/* ---- highlight one mode (handoff 0043, design point 6) ----
-              The same house filter-bar pattern: real <button>s in a
-              labeled group with aria-pressed. Pressing one repaints two
-              paint properties on data that is ALREADY on the map — no
-              request, no reload, and nothing removed from the map, the
-              counts or the list. The options are the modes this agency's
-              own routes carry; nothing here knows a mode name in advance. */}
-      {modeOptions.length > 0 && (
-        <>
-          <div
-            className="filter-bar"
-            role="group"
-            aria-label={t.modeFilter.label}
-          >
-            <span className="filter-bar-label">{t.modeFilter.label}:</span>
-            <button
-              type="button"
-              aria-pressed={selectedMode === null}
-              onClick={() => setSelectedMode(null)}
-            >
-              {t.modeFilter.all}
-            </button>
-            {modeOptions.map((mode) => (
-              <button
-                key={mode}
-                type="button"
-                aria-pressed={selectedMode === mode}
-                onClick={() =>
-                  setSelectedMode((current) => (current === mode ? null : mode))
+            {/* The cadence stays VISIBLE — how old what you are looking at
+                can be is not an explanation, it is a caveat. */}
+            <p className="admission">{t.pollNote}</p>
+
+            {/* HANDOFF 0044, OUTPUT 5 — RELOCATED, NEVER DELETED. Every
+                explanation that used to sit as a gray paragraph under a
+                control is here, VERBATIM and unshortened. Nothing that
+                states a limitation, a refusal or a caveat is in here: those
+                are outside, on screen, always. */}
+            <Disclosure label={t.controls.explain}>
+              <p>{t.intro}</p>
+              <p>{t.window.note}</p>
+              {basemap === "present" && <p>{t.basemap.style.note}</p>}
+              {modeOptions.length > 0 && <p>{t.modeFilter.note}</p>}
+            </Disclosure>
+          </div>
+
+          {/* ---- the canvas (presentation; equivalents beside it) ---- */}
+          <div className="map-canvas-wrap">
+            <div
+              ref={containerRef}
+              className="map-canvas"
+              role="application"
+              aria-label={t.canvasLabel}
+              data-testid="map-canvas"
+            />
+            <div className="hero-cap">
+              <p className="eyebrow">{t.eyebrow}</p>
+              <h1>{t.heading}</h1>
+            </div>
+            {/* The one-line summary that ALWAYS shows (the full text of it
+                is in the disclosure above, not instead of it). */}
+            <p className="hero-honesty">{t.summary}</p>
+            {/* ODbL attribution — visible ON the map whenever street tiles
+                render. Non-negotiable (handoff 0027); solid token surface so
+                the credit is readable over any imagery, both themes. */}
+            {basemap === "present" && (
+              <p className="map-attribution">{t.basemap.attribution}</p>
+            )}
+            {/* The relationship inspector sits OVER the canvas (design point
+                7). It is reachable two ways — a click on a flag, and the
+                "needs investigation" list in the rail, which is the keyboard
+                path. Its slide-over behaviour is untouched. */}
+            {chain && (
+              <RelationshipInspector
+                chain={chain}
+                sourceRecordIds={findingRecords}
+                sourceRecordsLoading={findingRecordsLoading}
+                fromMap={findingFromMap}
+                onClose={() => setSelectedFindingId(null)}
+              />
+            )}
+          </div>
+        </section>
+
+        {/* ---- the persistent rail ---- */}
+        <aside className="rail" aria-label={t.rail.label}>
+          {/* Whatever the server said about this data, verbatim, at the TOP
+              of the rail: an admission a reader has to scroll to is an
+              admission that did not happen. */}
+          {(res?.note ||
+            (res && res.vehicle_count === 0) ||
+            (res?.truncated && res.note === null) ||
+            (stops.state === "ready" && stops.data.note) ||
+            (routes.state === "ready" && routes.data.note) ||
+            geometryEmpty ||
+            stops.state === "loading" ||
+            routes.state === "loading") && (
+            <div className="rail-notices" aria-label={t.rail.noticesLabel}>
+              {/* The server's own staleness/emptiness note, verbatim. */}
+              {res?.note && <p className="banner">{res.note}</p>}
+              {res && res.vehicle_count === 0 && (
+                <p className="chart-desc">{t.empty.vehiclesAction}</p>
+              )}
+              {/* Cap honesty: any truncation note renders verbatim. */}
+              {res?.truncated && res.note === null && (
+                <p className="banner">{t.truncatedIntro}</p>
+              )}
+              {stops.state === "ready" && stops.data.note && (
+                <p className="banner">{stops.data.note}</p>
+              )}
+              {routes.state === "ready" && routes.data.note && (
+                <p className="banner">{routes.data.note}</p>
+              )}
+              {/* Teaching empty state: nothing to draw at all. */}
+              {geometryEmpty && (
+                <>
+                  <p>{t.empty.geometry}</p>
+                  <p>{t.empty.geometryAction}</p>
+                </>
+              )}
+              {(stops.state === "loading" || routes.state === "loading") && (
+                <Skeleton variant="lines" count={2} label={t.loading} />
+              )}
+            </div>
+          )}
+
+          {/* 1. The accessible entry point to every flag (design point 7) —
+                 MOVED, not rebuilt: the same component, now the first thing
+                 in the rail instead of a section below the canvas. */}
+          <NeedsInvestigation
+            placement={placement}
+            loading={findings.state === "loading"}
+            error={findings.state === "error" ? findings.message : null}
+            selectedIssueId={selectedFindingId}
+            onSelect={selectFindingFromList}
+          />
+
+          {/* 2. The fleet readout: counts the SERVER stated, mono and flat.
+                 No figure here carries a glow or a status colour — an
+                 attention rail goes on the card frame only. */}
+          <section className="rail-section" aria-label={t.rail.readoutHeading}>
+            <h2>{t.rail.readoutHeading}</h2>
+            <ul className="readout">
+              <li>
+                <p className="readout-label">{t.rail.vehicles}</p>
+                <p className="readout-figure">
+                  {res ? readoutCount(res.vehicle_count) : t.rail.pending}
+                  <span className="readout-unit">
+                    {res ? t.rail.vehiclesUnit : t.rail.pendingNote}
+                  </span>
+                </p>
+                {/* The count in a sentence — the readable equivalent of the
+                    big figure, and the string this surface has always
+                    stated. */}
+                {res && (
+                  <p className="readout-receipt map-count">
+                    {t.vehiclesCount(readoutCount(res.vehicle_count))}
+                  </p>
+                )}
+                <p className="readout-receipt">
+                  {t.rail.windowReceipt(
+                    WINDOW_OPTIONS.find((o) => o.seconds === windowSeconds)
+                      ?.label ?? String(windowSeconds),
+                  )}
+                </p>
+              </li>
+              <li
+                data-attention={
+                  findingsTotal !== null && findingsTotal > 0
+                    ? "alert"
+                    : undefined
                 }
               >
-                {t.marks.modeLabels[mode] ?? mode}
-              </button>
-            ))}
-          </div>
-          <p className="chart-desc">{t.modeFilter.note}</p>
-        </>
-      )}
+                <p className="readout-label">{t.rail.findings}</p>
+                <p className="readout-figure">
+                  {findingsTotal === null
+                    ? t.rail.pending
+                    : readoutCount(findingsTotal)}
+                  <span className="readout-unit">
+                    {findingsTotal === null
+                      ? t.rail.pendingNote
+                      : t.rail.findingsUnit}
+                  </span>
+                </p>
+                <p className="readout-receipt">{t.rail.findingsReceipt}</p>
+              </li>
+              <li>
+                <p className="readout-label">{t.rail.modes}</p>
+                <p className="readout-figure">
+                  {readoutCount(modeOptions.length)}
+                  <span className="readout-unit">{t.rail.modesUnit}</span>
+                </p>
+                <p className="readout-receipt">{t.rail.modesReceipt}</p>
+              </li>
+            </ul>
+            {/* The ops boundary stays ON the surface (handoff 0014
+                precedent): the badge + the server's own boundary statement,
+                verbatim. A boundary is an admission — it never folds. */}
+            <p className="stat-flags">
+              <OpsBadge />
+            </p>
+            {res && <p className="admission">{res.ops_note}</p>}
+          </section>
 
-      {/* ---- the honesty chip row ---- */}
-      <div className="map-status">
-        {vehicles.state === "loading" && (
-          <span className="chip">{t.chip.checking}</span>
-        )}
-        {chip && (
-          <span className={`chip map-chip ${chip.tone}`}>{chip.text}</span>
-        )}
-        {res && (
-          <span className="map-count">
-            {t.vehiclesCount(res.vehicle_count.toLocaleString("en-US"))}
-          </span>
-        )}
-        <button
-          type="button"
-          aria-busy={polling}
-          onClick={() => {
-            if (!polling) fetchVehicles(windowSeconds);
-          }}
-        >
-          {polling ? t.refreshing : t.refresh}
-        </button>
-        {lastCheckedAt && (
-          <span className="map-last-checked" role="status">
-            {t.lastChecked(
-              lastCheckedAt.toLocaleTimeString("en-US", { hour12: false }),
-            )}
-          </span>
-        )}
-      </div>
-      <p className="chart-desc">{t.pollNote}</p>
-      {/* Load failures render VERBATIM, never animated (house rule). */}
-      {vehicles.state === "error" && (
-        <div role="alert" className="alert">
-          {vehicles.message}
-        </div>
-      )}
-      {stops.state === "error" && (
-        <div role="alert" className="alert">
-          {stops.message}
-        </div>
-      )}
-      {routes.state === "error" && (
-        <div role="alert" className="alert">
-          {routes.message}
-        </div>
-      )}
-      {/* Fail loudly: a basemap file that answered wrong is SAID, not
-          silently skipped (the canvas still works without it). */}
-      {basemap === "unusable" && (
-        <div role="alert" className="alert">
-          {t.basemap.unusable}
-        </div>
-      )}
-      {/* The server's own staleness/emptiness note, verbatim. */}
-      {res?.note && <p className="banner">{res.note}</p>}
-      {res && res.vehicle_count === 0 && (
-        <p className="chart-desc">{t.empty.vehiclesAction}</p>
-      )}
-      {/* Cap honesty: any truncation note renders verbatim. */}
-      {res?.truncated && res.note === null && (
-        <p className="banner">{t.truncatedIntro}</p>
-      )}
-      {stops.state === "ready" && stops.data.note && (
-        <p className="banner">{stops.data.note}</p>
-      )}
-      {routes.state === "ready" && routes.data.note && (
-        <p className="banner">{routes.data.note}</p>
-      )}
-
-      {/* ---- teaching empty state: nothing to draw at all ---- */}
-      {geometryEmpty && (
-        <div className="card today-card">
-          <p>{t.empty.geometry}</p>
-          <p>{t.empty.geometryAction}</p>
-        </div>
-      )}
-
-      {(stops.state === "loading" || routes.state === "loading") && (
-        <Skeleton variant="lines" count={2} label={t.loading} />
-      )}
-
-      {/* ---- the canvas (presentation; equivalents beside it) ---- */}
-      <div className="map-canvas-wrap">
-        <div
-          ref={containerRef}
-          className="map-canvas"
-          role="application"
-          aria-label={t.canvasLabel}
-          data-testid="map-canvas"
-        />
-        {/* ODbL attribution — visible ON the map whenever street tiles
-            render. Non-negotiable (handoff 0027); solid token surface so
-            the credit is readable over any imagery, both themes. */}
-        {basemap === "present" && (
-          <p className="map-attribution">{t.basemap.attribution}</p>
-        )}
-        {/* The relationship inspector sits OVER the canvas (design point
-            7). It is reachable two ways — a click on a flag, and the
-            "needs investigation" list below, which is the keyboard path. */}
-        {chain && (
-          <RelationshipInspector
-            chain={chain}
-            sourceRecordIds={findingRecords}
-            sourceRecordsLoading={findingRecordsLoading}
-            fromMap={findingFromMap}
-            onClose={() => setSelectedFindingId(null)}
-          />
-        )}
+          {/* 3. The provenance terminal (handoff 0044, output 4). */}
+          <ProvenanceTerminal />
+        </aside>
       </div>
 
+      {/* ================= below the hero ================= */}
+      <div className="map-below">
       {/* ---- legend: the schematic honesty is VISIBLE ---- */}
       <section aria-label={t.legend.heading} className="map-legend">
         <h2>{t.legend.heading}</h2>
@@ -1279,15 +1410,6 @@ export function MapView() {
           unresolved={vehicleGeojson.unresolved}
         />
       </section>
-
-      {/* ---- the accessible entry point to every flag (design point 7) ---- */}
-      <NeedsInvestigation
-        placement={placement}
-        loading={findings.state === "loading"}
-        error={findings.state === "error" ? findings.message : null}
-        selectedIssueId={selectedFindingId}
-        onSelect={selectFindingFromList}
-      />
 
       {/* Quiet teaching line — certifying officials only, basemap absent:
           the one person who could act learns the installer command. */}
@@ -1396,6 +1518,7 @@ export function MapView() {
           )}
         </section>
       )}
+      </div>
     </>
   );
 }

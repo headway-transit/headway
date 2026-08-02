@@ -147,9 +147,13 @@ describe("/certify (certification cockpit)", () => {
       screen.queryByRole("button", { name: SIGN_BUTTON }),
     ).not.toBeInTheDocument();
     expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
-    // No certify-related fetch happened; the only call is the app shell's
-    // unauthenticated GET /branding (handoff 0008 pillar C).
-    expect(calls.filter((c) => c.path !== "/branding")).toHaveLength(0);
+    // No certify-related fetch happened. The only calls are the app
+    // shell's own: the unauthenticated GET /branding (handoff 0008 pillar
+    // C) and the command bar's "as computed" run stamp, which reads the
+    // newest calculation run on every surface (handoff 0044, output 1).
+    expect(
+      calls.filter((c) => c.path !== "/branding" && c.path !== "/calc/runs"),
+    ).toHaveLength(0);
 
     await expectNoAxeViolations();
   });

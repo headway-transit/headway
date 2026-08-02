@@ -82,9 +82,18 @@ describe("/certifications (the index room)", () => {
       }),
     ).toHaveAttribute("href", "/certifications/cert-7");
 
-    // The nav links the room beside Certify's territory — for EVERY
-    // signed-in role (a viewer here), like the API's any-role GET.
+    // The nav links the room — for EVERY signed-in role (a viewer here),
+    // like the API's any-role GET. Since handoff 0044 the long nav tail
+    // lives in named groups, so the link is one disclosure deep: it is a
+    // real link, GENUINELY hidden until its group is opened (never merely
+    // invisible while still sitting in the tab order).
     const nav = screen.getByRole("navigation", { name: "Main" });
+    expect(
+      within(nav).queryByRole("link", { name: "Certifications" }),
+    ).not.toBeInTheDocument();
+    await userEvent.click(
+      within(nav).getByRole("button", { name: /^Records/ }),
+    );
     expect(
       within(nav).getByRole("link", { name: "Certifications" }),
     ).toHaveAttribute("href", "/certifications");

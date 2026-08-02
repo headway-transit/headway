@@ -20,6 +20,7 @@ import {
 } from "./helpers";
 import { pushToast } from "../toasts";
 import { lineageTree, vrmValue } from "./fixtures";
+import { copy } from "../copy";
 
 const themedBranding = {
   display_name: "Metro Transit",
@@ -150,5 +151,158 @@ describe("shell (handoff 0017)", () => {
     const root = document.documentElement;
     expect(root.style.getPropertyValue("--chrome-header-bg")).toBe("");
     expect(root.getAttribute("data-chrome")).toBeNull();
+  });
+});
+
+/**
+ * THE COMMAND BAR (handoff 0044, output 1).
+ *
+ * The shell used to spend two wrapping rows on seventeen links. What
+ * replaced it must stay as reachable as what it replaced, so these pin the
+ * things a "denser nav" is most likely to quietly cost: the run stamp being
+ * REAL, the tail links being genuinely hidden (never invisible-but-focusable),
+ * Escape returning focus to its trigger, and the whole bar staying in a
+ * sensible keyboard order.
+ */
+describe("the command bar (handoff 0044)", () => {
+  const runRecord = {
+    run_id: "run-9",
+    requested_by: "maria.ops",
+    requested_at: "2026-08-02T05:58:00Z",
+    period_start: "2026-07-01",
+    period_end: "2026-08-01",
+    status: "succeeded",
+    started_at: "2026-08-02T05:58:02Z",
+    finished_at: "2026-08-02T05:59:41Z",
+    runner_pid: 41,
+    duration_seconds: 99,
+    stale: false,
+    stale_note: null,
+    stdout_tail: null,
+    summary: { persisted_count: 3, blocked_count: 0, metrics: [] },
+  };
+
+  it("stamps the REAL last calculation run, and names the room you are in", async () => {
+    signInAs("viewer");
+    mockApi({
+      "GET /metrics/values": { status: 200, body: [vrmValue] },
+      "GET /calc/runs": { status: 200, body: [runRecord] },
+    });
+    renderApp("/metrics");
+    await screen.findByRole("heading", { name: "Computed metric values" });
+
+    const banner = screen.getByRole("banner");
+    // The stamp is the SERVER's timestamp, verbatim, with the run's status.
+    expect(
+      await within(banner).findByText(
+        `${runRecord.finished_at} · succeeded`,
+      ),
+    ).toBeInTheDocument();
+    expect(within(banner).getByText(copy.shell.stamp.label)).toBeInTheDocument();
+    // The room you are in, named in the bar (the nav link of the same name
+    // also lives in the banner, so the context slot is found by class).
+    const context = banner.querySelector(".command-context");
+    expect(context).toHaveTextContent(copy.nav.metrics);
+  });
+
+  it("says so when no run is on record — never a comforting blank", async () => {
+    signInAs("viewer");
+    mockApi({
+      "GET /metrics/values": { status: 200, body: [vrmValue] },
+      "GET /calc/runs": { status: 200, body: [] },
+    });
+    renderApp("/metrics");
+    await screen.findByRole("heading", { name: "Computed metric values" });
+    expect(
+      await screen.findByText(copy.shell.stamp.none),
+    ).toBeInTheDocument();
+  });
+
+  it("says so when the run record cannot be read", async () => {
+    signInAs("viewer");
+    mockApi({
+      "GET /metrics/values": { status: 200, body: [vrmValue] },
+      "GET /calc/runs": { status: 500, body: { detail: "unavailable" } },
+    });
+    renderApp("/metrics");
+    await screen.findByRole("heading", { name: "Computed metric values" });
+    expect(
+      await screen.findByText(copy.shell.stamp.unavailable),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps the nav to ONE row: the tail sits in named groups whose links are genuinely hidden until opened, and Escape returns focus to the trigger", async () => {
+    signInAs("viewer");
+    mockApi({ "GET /metrics/values": { status: 200, body: [vrmValue] } });
+    const user = userEvent.setup();
+    renderApp("/metrics");
+    await screen.findByRole("heading", { name: "Computed metric values" });
+
+    const nav = screen.getByRole("navigation", { name: "Main" });
+    // The rooms people live in stay direct links.
+    for (const label of [
+      copy.nav.today,
+      copy.nav.map,
+      copy.nav.dashboard,
+      copy.nav.metrics,
+      copy.nav.dq,
+      copy.nav.publicData,
+    ]) {
+      expect(within(nav).getByRole("link", { name: label })).toBeVisible();
+    }
+
+    // The tail is behind named groups, and CLOSED means gone from the
+    // accessibility tree — not merely invisible while still tabbable.
+    const trigger = within(nav).getByRole("button", { name: /^Reports/ });
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+    expect(
+      within(nav).queryByRole("link", { name: copy.nav.reports }),
+    ).not.toBeInTheDocument();
+    const panel = document.getElementById(
+      trigger.getAttribute("aria-controls") ?? "",
+    );
+    expect(panel).toHaveAttribute("hidden");
+
+    await user.click(trigger);
+    expect(trigger).toHaveAttribute("aria-expanded", "true");
+    expect(
+      within(nav).getByRole("link", { name: copy.nav.reports }),
+    ).toHaveAttribute("href", "/reports/monthly");
+    expect(
+      within(nav).getByRole("link", { name: copy.nav.sampling }),
+    ).toBeVisible();
+
+    // Escape closes it and hands focus back to the control that opened it.
+    trigger.focus();
+    await user.keyboard("{Escape}");
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+    expect(trigger).toHaveFocus();
+
+    await expectNoAxeViolations();
+  });
+
+  it("keeps the keyboard order the shell always had: skip link, then the bar, then the nav row, then the page", async () => {
+    signInAs("viewer");
+    mockApi({ "GET /metrics/values": { status: 200, body: [vrmValue] } });
+    const user = userEvent.setup();
+    renderApp("/metrics");
+    await screen.findByRole("heading", { name: "Computed metric values" });
+
+    await user.tab();
+    expect(
+      screen.getByRole("link", { name: copy.skipToContent }),
+    ).toHaveFocus();
+    await user.tab();
+    expect(
+      screen.getByRole("button", { name: copy.today.takeTourLink }),
+    ).toHaveFocus();
+    await user.tab();
+    expect(
+      screen.getByRole("button", { name: copy.theme.switchToDark }),
+    ).toHaveFocus();
+    await user.tab();
+    expect(screen.getByRole("button", { name: copy.signOut })).toHaveFocus();
+    await user.tab();
+    expect(screen.getByRole("link", { name: copy.nav.today })).toHaveFocus();
   });
 });

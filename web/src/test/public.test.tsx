@@ -367,8 +367,14 @@ describe("/public (certified open data)", () => {
         name: "Public data: certified figures",
       }),
     ).toBeInTheDocument();
-    // Even with a session, the public endpoint gets no bearer token.
-    expect(calls[0].headers["Authorization"]).toBeUndefined();
+    // Even with a session, the public endpoint gets no bearer token. The
+    // call is found BY PATH: since handoff 0044 the command bar also reads
+    // the calculation-run record for its "as computed" stamp, so the
+    // public request is no longer guaranteed to be the first one made.
+    const publicCall = calls.find(
+      (c) => c.path === "/public/metrics/certified",
+    );
+    expect(publicCall?.headers["Authorization"]).toBeUndefined();
 
     const nav = screen.getByRole("navigation", { name: "Main" });
     expect(

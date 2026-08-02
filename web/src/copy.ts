@@ -80,6 +80,142 @@ export const copy = {
     signIn: "Sign in",
   },
 
+  /**
+   * THE CONTROL-ROOM SHELL (handoff 0044, outputs 1 and 5).
+   *
+   * A compact command bar — brand, agency, the room you are in, and an "as
+   * computed" run stamp — over ONE dense navigation row. The long tail of
+   * rooms sits in named groups rather than in a command palette: the
+   * handoff's open question weighed a palette against grouped menus for an
+   * audience one week into Linux, and grouped menus won on discoverability.
+   *
+   * Every group is a real disclosure button (aria-expanded + aria-controls)
+   * over a list of ordinary links, so the keyboard path is the same one
+   * everything else in this app uses.
+   */
+  shell: {
+    /** The room you are in, named in the bar (screen-reader prefix only —
+     *  sighted users read the page's own h1). */
+    contextLabel: "Current page",
+    /** Named groups for the navigation tail. */
+    groups: {
+      reports: "Reports",
+      records: "Records",
+      tools: "Tools",
+    } as Record<string, string>,
+    groupHint: (group: string) => `${group} pages`,
+    groupCurrentHint: (group: string) =>
+      `${group} pages, and the page you are on is in this group`,
+    /**
+     * The "as computed" stamp: the newest calculation run on record, read
+     * from GET /calc-runs. It is a STAMP, never a figure — it says when
+     * this installation last computed, and says plainly when it cannot
+     * tell rather than showing a comforting blank.
+     */
+    stamp: {
+      label: "As computed",
+      checking: "reading the run record…",
+      /** No run has ever been recorded on this installation. */
+      none: "no calculation run on record",
+      /** A run is queued or running right now. */
+      inProgress: "a calculation run is in progress",
+      /** The run record could not be read — said, never hidden. */
+      unavailable: "run record unavailable",
+      /** Accessible description of the whole stamp. */
+      describe: (state: string) => `Last calculation run: ${state}`,
+      statusLabels: {
+        succeeded: "succeeded",
+        refused: "refused",
+        failed: "failed",
+        running: "running",
+        queued: "queued",
+      } as Record<string, string>,
+    },
+  },
+
+  /**
+   * Progressive disclosure (handoff 0044, output 5).
+   *
+   * The rule this app follows: an EXPLANATION may fold away behind a
+   * closed-by-default disclosure — it is never shortened when it moves —
+   * but an ADMISSION never folds. A refusal, a held or excluded count, a
+   * cap, a staleness warning, a scope receipt, an "operations metrics are
+   * not an NTD reported figure" boundary: those stay on screen at all
+   * times, whatever is open or closed.
+   */
+  disclosure: {
+    what: "What this shows",
+    how: "How this works",
+    /** Screen-reader suffix so the control's purpose is never ambiguous. */
+    expandHint: (label: string) => `${label} — full explanation`,
+  },
+
+  /**
+   * THE PROVENANCE TERMINAL (handoff 0044, output 4).
+   *
+   * A dense, monospace stream of what this installation actually did.
+   * EVERY ROW IS A REAL RECORDED EVENT, read from endpoints that already
+   * exist: GET /calc-runs (runs and their per-figure outcomes) and
+   * GET /dq/issues (findings raised). Nothing here is synthesised, and no
+   * decorative tick is ever emitted to make the panel look busy — when
+   * there is nothing on record the panel says so.
+   *
+   * A row says WHAT HAPPENED. It never says a figure is good or bad: a
+   * computed figure carries the neutral rail, and the semantic ok/watch/
+   * alert set is used only where the platform itself assigned a severity.
+   */
+  terminal: {
+    heading: "Provenance terminal",
+    live: "Live",
+    /** The cadence, labelled (handoff 0044 open question: v0 POLLS the
+     *  existing endpoints and says how often, rather than adding a
+     *  streaming surface before the composition is proven). */
+    cadence: (seconds: string) =>
+      `Polls the calculation-run and data-quality records every ${seconds} seconds.`,
+    sources: "Every line is an event Headway recorded — a calculation run, a figure computed or refused, or a finding raised. Nothing on this panel is generated to fill space.",
+    loading: "Reading the event record…",
+    /** The honest empty state: no invented activity, ever. */
+    empty:
+      "No events on record yet. Headway would rather show an empty stream than invent activity — the first calculation run or data-quality finding appears here.",
+    error: (message: string) =>
+      `The event record could not be read: ${message}`,
+    /** Row tags — the word carries the meaning; the rail only echoes it. */
+    tags: {
+      computed: "COMPUTED",
+      refused: "REFUSED",
+      raised: "RAISED",
+      failed: "FAILED",
+      running: "RUNNING",
+      queued: "QUEUED",
+      stale: "STALE",
+    } as Record<string, string>,
+    /** Row messages. Ids and figures are the server's strings, verbatim. */
+    rows: {
+      figureComputed: (metric: string, scope: string, value: string) =>
+        `${metric} · ${scope} · ${value}`,
+      figureRefused: (metric: string, scope: string, blocking: string) =>
+        `${metric} · ${scope} · refused over ${blocking} blocking finding${blocking === "1" ? "" : "s"}`,
+      runFinished: (period: string, persisted: string, refused: string) =>
+        `run ${period} · ${persisted} computed, ${refused} refused`,
+      runFailed: (period: string, error: string) =>
+        `run ${period} · ${error}`,
+      runOpen: (period: string) => `run ${period}`,
+      runStale: (period: string) =>
+        `run ${period} · state unknown past the staleness bound`,
+      findingRaised: (severity: string, title: string) =>
+        `${severity} · ${title}`,
+    },
+    /** Column headers for the readable table equivalent of the stream. */
+    columns: {
+      time: "Time",
+      event: "Event",
+      kind: "Kind",
+    },
+    /** The stream is capped so the panel stays readable — cap stated. */
+    cap: (cap: string) =>
+      `The newest ${cap} events are shown. Older events stay on their own pages: the calculation runs room and the data-quality queue.`,
+  },
+
   theme: {
     /** The label names the action (what pressing it switches TO). */
     switchToDark: "Switch to dark theme",
@@ -1705,8 +1841,18 @@ export const copy = {
    */
   dashboard: {
     heading: "Dashboard",
+    /** Handoff 0044: the always-visible one-liner. `intro` below moves,
+     *  VERBATIM and unshortened, into the "What this shows" disclosure. */
+    summary:
+      "Figures shown exactly as computed — the charts scale the picture, never the figures.",
     intro:
       "The agency's computed figures at a glance. Every number here is shown exactly as the calculation service computed it — the charts scale the picture, never the figures.",
+    /** Handoff 0044: the compact control strip that replaces three stacked
+     *  paragraph-wrapped blocks above the figures. */
+    controls: {
+      label: "Figure controls",
+      explain: "How these controls work",
+    },
     /** Teaching empty state (handoff 0021 #4): warm + the first action —
      *  since handoff 0026, the Compute figures room, not a CLI line. */
     empty:
@@ -2113,8 +2259,43 @@ export const copy = {
    */
   map: {
     heading: "Live map",
+    /** Handoff 0044: the always-visible one-liner. `intro` below moves,
+     *  VERBATIM and unshortened, into the "What this shows" disclosure. */
+    summary:
+      "Positions observed, never interpolated. Nothing on this page is fetched from outside this installation.",
+    /** The eyebrow over the hero — what this canvas is. */
+    eyebrow: "Network",
     intro:
       "Your system, drawn from your own data: every stop and route from the agency's schedule, and each vehicle's last reported position. Nothing on this page comes from an outside map service — no tiles, no external fonts, and no request ever leaves this installation.",
+    /** Handoff 0044: the compact control strip in the map chrome. */
+    controls: {
+      label: "Map controls",
+      /** Named so the disclosure holding the control explanations reads as
+       *  being about the controls, not about the figures. */
+      explain: "How these controls work",
+    },
+    /** Handoff 0044: the persistent rail beside the canvas. */
+    rail: {
+      label: "Map readout",
+      noticesLabel: "What the server said about this data",
+      readoutHeading: "Fleet readout",
+      /** Readout cards — counts of what is on this canvas right now. Each
+       *  is the server's own count, shown verbatim, never a figure this
+       *  page derived. */
+      vehicles: "Vehicles reporting",
+      vehiclesUnit: "with a position",
+      findings: "Open blocking findings",
+      findingsUnit: "need a person",
+      modes: "Modes on this map",
+      modesUnit: "from schedule data",
+      /** Every readout card states the window or scope it counted over. */
+      windowReceipt: (label: string) => `Window: ${label}`,
+      findingsReceipt: "Scope: open, blocking, whole queue",
+      modesReceipt: "Joined from this agency's own routes",
+      /** No number yet — said, never drawn as a zero. */
+      pending: "—",
+      pendingNote: "Not read yet",
+    },
     /** The canvas' accessible name; the readable equivalents (chip, counts,
      *  vehicle list) live outside the canvas. */
     canvasLabel:
