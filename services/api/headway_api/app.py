@@ -13,7 +13,7 @@ from dataclasses import dataclass
 
 from fastapi import FastAPI
 
-from . import __version__, auth, webhooks
+from . import __version__, auth, client_identity, webhooks
 from .db import lifespan
 from .machine_auth import FailureAuditThrottle, RateLimiter
 from .routers import (
@@ -58,9 +58,35 @@ class Settings:
     # connection to the identity provider, so an unlimited /auth/oidc/start is
     # a way to spend this box's request workers — and the worker that cannot
     # be spent is the one serving local login, the break-glass path. A person
-    # signs in once or twice a day; 30 a minute is generous even for a whole
-    # agency arriving behind one reverse-proxy address.
+    # signs in once or twice a day, so 30 a minute is generous per person.
+    # (It used to say "generous even for a whole agency arriving behind one
+    # reverse-proxy address" — which was sizing around an identity bug.
+    # ``trusted_proxies`` below is the actual fix: raising a shared allowance
+    # never stopped one caller from spending all of it.)
     sso_requests_per_minute: int = 30
+    # Per SIGNED-IN ACCOUNT, across every authenticated endpoint, enforced at
+    # the auth choke point. Until now the only rate limits in this API covered
+    # machine keys and the two unauthenticated surfaces; a signed-in human
+    # session — including an ``auditor``, an account deliberately handed to
+    # someone outside the agency — could issue requests as fast as the box
+    # would answer. Sized for a UI, not a person: one screen can fire dozens of
+    # requests (the review worklist issues one per row), so this must be high
+    # enough that nobody meets it by working, and low enough that a script
+    # cannot use one account as a load generator.
+    human_requests_per_minute: int = 600
+    # Per signed-in account, for the evidence bundle ALONE. Its own bucket
+    # because its cost is measured rather than assumed: 142 MB of peak
+    # allocation and 4.3 seconds for one capped bundle
+    # (tests/bench_evidence_cost.py). At the blanket limit above, one account
+    # could ask for 600 of those a minute. Ten is more than an auditor who
+    # actually reads them will ever need.
+    evidence_bundle_requests_per_minute: int = 10
+    #: Addresses/CIDRs whose ``X-Forwarded-For`` this installation believes
+    #: (see client_identity). EMPTY means trust nothing and use the peer
+    #: address — unspoofable, and correct for a directly exposed API. Set
+    #: HEADWAY_TRUSTED_PROXIES on any deployment with a reverse proxy in
+    #: front, or every caller shares one bucket.
+    trusted_proxies: tuple[str, ...] = ()
 
 
 class MissingSessionSecret(RuntimeError):
@@ -76,7 +102,49 @@ def settings_from_env() -> Settings:
             "would let anyone forge a certifying official's session."
         )
     ttl = int(os.environ.get("HEADWAY_TOKEN_TTL_SECONDS", str(auth.DEFAULT_TOKEN_TTL_SECONDS)))
-    return Settings(session_secret=secret, token_ttl_seconds=ttl)
+    # Validated here so a typo refuses at startup (InvalidTrustedProxy) rather
+    # than silently leaving every caller in one bucket.
+    trusted = client_identity.parse_trusted_proxies(
+        os.environ.get("HEADWAY_TRUSTED_PROXIES")
+    )
+    return Settings(
+        session_secret=secret,
+        token_ttl_seconds=ttl,
+        trusted_proxies=trusted,
+        human_requests_per_minute=_positive_int_env(
+            "HEADWAY_HUMAN_REQUESTS_PER_MINUTE",
+            Settings.human_requests_per_minute,
+        ),
+        evidence_bundle_requests_per_minute=_positive_int_env(
+            "HEADWAY_EVIDENCE_BUNDLE_REQUESTS_PER_MINUTE",
+            Settings.evidence_bundle_requests_per_minute,
+        ),
+    )
+
+
+def _positive_int_env(name: str, default: int) -> int:
+    """A tunable limit from the environment, refusing nonsense at startup.
+
+    Zero is ALLOWED and means "refuse everything" — a legitimate way to close
+    a surface without a code change. Negative and non-numeric are not: they
+    would be silently coerced into something the operator did not ask for.
+    """
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise ValueError(
+            f"{name} is {raw!r}, which is not a whole number. Headway refuses "
+            f"to start rather than guess a rate limit."
+        ) from exc
+    if value < 0:
+        raise ValueError(
+            f"{name} is {value}, which is not a number of requests. Use 0 to "
+            f"refuse every request to that surface, or a positive number."
+        )
+    return value
 
 
 def create_app(
@@ -145,8 +213,25 @@ def create_app(
     # None = built on first use from app.state.object_store + KAFKA_BROKERS
     # (routers/raw_records.py); tests inject a fake reader.
     app.state.raw_payload_reader = raw_payload_reader
+    # Compiled once, here, rather than per request — and read through
+    # ``getattr`` at the call sites, so a bare test app that builds no state
+    # still behaves exactly as it did before trusted proxies existed.
+    app.state.trusted_proxy_networks = client_identity.networks(
+        app.state.settings.trusted_proxies
+    )
     app.state.machine_rate_limiter = RateLimiter(
         app.state.settings.machine_requests_per_minute
+    )
+    # Per SIGNED-IN ACCOUNT, enforced at the auth choke point so no
+    # authenticated endpoint can be added outside it. Its own instance: a
+    # machine key flooding ingest must not spend a person's allowance.
+    app.state.human_rate_limiter = RateLimiter(
+        app.state.settings.human_requests_per_minute
+    )
+    # The evidence bundle's own, much tighter bucket — the one endpoint whose
+    # per-request cost has been measured rather than assumed.
+    app.state.evidence_rate_limiter = RateLimiter(
+        app.state.settings.evidence_bundle_requests_per_minute
     )
     # Coalesce repeated auth/scope FAILURE audit writes so rejected requests
     # (which never reach the in-body rate limiter) cannot amplify into

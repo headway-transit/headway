@@ -49,6 +49,7 @@ from pydantic import BaseModel, Field
 from .. import oidc as oidc_lib
 from .. import secrets_at_rest
 from ..audit import write_event
+from ..client_identity import client_address
 from ..auth import Identity, issue_token, new_session_id
 from ..authz import ROLE_LABELS, require_certifying_official, role_label
 from ..db import get_db
@@ -314,7 +315,7 @@ def _limit_sso(request: Request) -> None:
     limiter = getattr(request.app.state, "sso_rate_limiter", None)
     if limiter is None:
         return
-    enforce_rate_limit(limiter, request.client.host if request.client else "unknown")
+    enforce_rate_limit(limiter, client_address(request))
 
 
 def _throttle_gate(request: Request, reason: str) -> Optional[int]:
@@ -331,7 +332,7 @@ def _throttle_gate(request: Request, reason: str) -> Optional[int]:
     throttle = getattr(request.app.state, "login_audit_throttle", None)
     if throttle is None:
         return 0
-    bucket = request.client.host if request.client else "unknown"
+    bucket = client_address(request)
     return throttle.on_failure(bucket, reason)
 
 

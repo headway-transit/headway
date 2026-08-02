@@ -273,6 +273,25 @@ def decode_token(token: str, *, secret: str) -> Identity:
     )
 
 
+def _enforce_human_rate_limit(request: Request, identity: "Identity") -> None:
+    """Bound how fast ONE signed-in account can drive this installation.
+
+    Absent limiter → no limit, matching how every other control in this API
+    tolerates a bare test app that builds no state (``machine_rate_limiter``,
+    ``login_audit_throttle``): fixtures that predate a control must exercise
+    the logic under test, not fail on the control.
+
+    Imported lazily to keep ``auth`` free of a machine_auth import cycle —
+    machine_auth already imports Identity from here.
+    """
+    limiter = getattr(request.app.state, "human_rate_limiter", None)
+    if limiter is None:
+        return
+    from .machine_auth import enforce_rate_limit
+
+    enforce_rate_limit(limiter, identity.username)
+
+
 def get_current_identity(request: Request) -> Identity:
     """FastAPI dependency: the verified caller. 401 when absent/invalid.
 
@@ -298,6 +317,13 @@ def get_current_identity(request: Request) -> Identity:
         )
     settings = request.app.state.settings
     identity = decode_token(token.strip(), secret=settings.session_secret)
+    # PER ACCOUNT, not per address: a signed-in caller has a name, and a name
+    # is the thing worth bounding. Keying on the address instead would merge
+    # everyone behind one office router into a single allowance and let one
+    # account multiply itself across addresses. Placed here, at the one choke
+    # point every authenticated endpoint resolves through, so an endpoint
+    # added later cannot be added outside it.
+    _enforce_human_rate_limit(request, identity)
     method = request.method.upper()
     if (
         identity.role in _NO_WRITE_ROLES
