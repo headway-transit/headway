@@ -49,6 +49,11 @@ export const copy = {
     data_steward: "data steward",
     report_preparer: "report preparer",
     certifying_official: "certifying official",
+    // Named explicitly rather than left to the `?? session.role` fallback in
+    // Layout.tsx. "auditor" happens to read correctly as a bare enum string;
+    // the next role added might not, and would reach a user looking like
+    // `certifying_official` (handoff 0047).
+    auditor: "auditor",
   } as Record<string, string>,
 
   nav: {

@@ -754,6 +754,23 @@ td.figure {
   font-variant-numeric: tabular-nums;
   font-weight: 600;
 }
+/* A column of BARE figures stacks on the ones place. tabular-nums gives
+   every digit the same WIDTH, which is only half the job: left-aligned,
+   987.25 and 12,003.75 still land their decimal points in different
+   columns, and reading a column of VRM DOWN the page is precisely the
+   comparison an auditor makes. The header travels with its column — a
+   left-aligned label over right-aligned figures reads as a mistake.
+
+   Deliberately NOT folded into `.figure`. A `.figure` cell may hold a
+   figure PLUS a badge (SandboxView pairs the value with an estimate tag),
+   or an entire phrase — DqView's trip column renders "1,204 trips". Right
+   -aligning those aligns the WORDS and scatters the digits, which is worse
+   than leaving them alone. `.numeric` is the narrower claim: this cell is
+   nothing but the number. */
+th.numeric,
+td.numeric {
+  text-align: right;
+}
 
 .tag {
   display: inline-block;

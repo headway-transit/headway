@@ -59,10 +59,16 @@ function splitMotion(css: string): { motion: string; rest: string } {
 
 /** Every declaration block whose selector mentions `needle`. */
 function blocksFor(css: string, needle: string): string[] {
+  // Strip comments FIRST. The rule-matching regex below treats everything
+  // between `}` and `{` as the selector, so a `/* … */` note sitting above
+  // a rule gets swallowed into it — and this file's CSS is commented
+  // heavily, by design. Without this, a comment that merely NAMES a class
+  // makes every test here match on prose instead of on CSS.
+  const source = css.replace(/\/\*[\s\S]*?\*\//g, "");
   const out: string[] = [];
   const re = /([^{}]+)\{([^{}]*)\}/g;
   let m: RegExpExecArray | null;
-  while ((m = re.exec(css)) !== null) {
+  while ((m = re.exec(source)) !== null) {
     if (m[1].includes(needle)) out.push(m[2]);
   }
   return out;
@@ -124,6 +130,23 @@ describe("design tokens (handoff 0041)", () => {
     expect(blocksFor(CSS, ".figure").join("\n")).toMatch(
       /font-variant-numeric:\s*tabular-nums/,
     );
+  });
+
+  it("right-aligns BARE numeric columns, and only those (handoff 0047)", () => {
+    // tabular-nums equalises digit WIDTH; alignment is the other half. A
+    // column of VRM read DOWN the page has to stack on the ones place.
+    expect(blocksFor(CSS, ".numeric").join("\n")).toMatch(
+      /text-align:\s*right/,
+    );
+
+    // …and the alignment is deliberately NOT folded into `.figure`. A
+    // `.figure` cell may carry a figure PLUS a badge, or a whole phrase —
+    // DqView renders "1,204 trips" — and right-aligning those aligns the
+    // WORDS while scattering the digits. If someone moves `text-align:
+    // right` onto `.figure` to save a class, this fails and says why.
+    for (const block of blocksFor(CSS, ".figure")) {
+      expect(block).not.toMatch(/text-align:\s*right/);
+    }
   });
 });
 

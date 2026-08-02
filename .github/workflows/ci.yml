@@ -313,6 +313,17 @@ jobs:
         if: steps.guard.outputs.present == 'true'
         working-directory: web
         run: npm run lint
+      # The palette's WCAG 2.1 AA guarantee, enforced rather than asserted.
+      # Every token pair in styles.css carries its contrast ratio in a
+      # comment; those comments are a claim, and this is the check that the
+      # claim is still true. It shipped 2026-07-09 and was never once run by
+      # CI until now, which is exactly how a checked palette decays into a
+      # remembered one. jsdom cannot compute contrast, so this is NOT
+      # covered by the vitest suite below.
+      - name: contrast (WCAG AA token pairs)
+        if: steps.guard.outputs.present == 'true'
+        working-directory: web
+        run: npm run check:contrast
       - name: build
         if: steps.guard.outputs.present == 'true'
         working-directory: web

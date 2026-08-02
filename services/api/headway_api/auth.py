@@ -35,6 +35,7 @@ expiry (30 minutes by default).
 from __future__ import annotations
 
 import datetime as dt
+import re
 import secrets
 from dataclasses import dataclass
 
@@ -68,6 +69,41 @@ _NO_WRITE_ROLES = frozenset({"auditor"})
 
 #: HTTP methods that cannot change state. Everything else is a write.
 _SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+
+#: The ONLY state-changing routes a read-only role may still call. Deny-by-
+#: default still holds: a route absent from this tuple is refused, so a new
+#: endpoint cannot fall outside the guard by being forgotten — it can only be
+#: let out deliberately. ``test_auditor_role`` pins the membership COUNT, so
+#: adding an entry has to survive a review rather than ride along in a rebase.
+#:
+#: ``POST /raw/records/{id}/verify`` re-reads the stored bytes and compares
+#: their SHA-256 against the content address they are filed under. The write
+#: guard exists so that an auditor's account cannot alter WHAT THE AUDITOR IS
+#: REVIEWING — and verification alters nothing under review. Its side effects
+#: are an audit event and, on a mismatch, a blocking data-quality finding:
+#: both are records of an observation, never edits to the thing observed.
+#:
+#: An auditor who finds that stored bytes no longer match their content
+#: address has produced the most valuable finding this system is capable of.
+#: ``raw_payloads.py`` already promises them, in writing, that they "can
+#: still see this record's label and prove its bytes are unaltered"; refusing
+#: this POST made that promise false, for the one role whose whole job is
+#: verification (handoff 0047).
+#:
+#: ``/sandbox/preview`` is deliberately NOT here. Computing a what-if is not
+#: part of reviewing what already exists.
+_READ_ONLY_ROLE_WRITE_ALLOWLIST: tuple[tuple[str, re.Pattern[str]], ...] = (
+    # Path params never contain "/", so this cannot widen past the one route.
+    ("POST", re.compile(r"/raw/records/[^/]+/verify")),
+)
+
+
+def _is_allowlisted_write(method: str, path: str) -> bool:
+    """True only for a route this module names explicitly. Default is False."""
+    return any(
+        method == allowed_method and pattern.fullmatch(path) is not None
+        for allowed_method, pattern in _READ_ONLY_ROLE_WRITE_ALLOWLIST
+    )
 
 # bcrypt only reads the first 72 bytes of a password; longer input must be
 # rejected loudly, never silently truncated.
@@ -243,12 +279,15 @@ def get_current_identity(request: Request) -> Identity:
     THE READ-ONLY-ROLE CHOKE POINT. Every authenticated endpoint in this API
     resolves its caller here, so this is the one place that can refuse a
     write for a read-only role and be certain nothing routes around it. An
-    ``auditor`` may issue GET/HEAD/OPTIONS and nothing else — including the
-    two read-SHAPED POSTs this API has (``/sandbox/preview``, which computes
-    a what-if, and ``/raw/records/{id}/verify``, which raises a data-quality
-    finding on a mismatch). Both are outside "reads everything, changes
-    nothing", and refusing by method with no allow-list is deny-by-default
-    that a future endpoint cannot fall outside of.
+    ``auditor`` may issue GET/HEAD/OPTIONS, and beyond that only the routes
+    named in ``_READ_ONLY_ROLE_WRITE_ALLOWLIST``.
+
+    Handoff 0046 shipped this with NO allow-list, reasoning that refusing
+    purely by method is deny-by-default that a future endpoint cannot fall
+    outside of. That reasoning is sound and mostly survives: the allow-list
+    is closed, its membership is pinned by a test, and ``/sandbox/preview``
+    is still refused. What it got wrong was the integrity check — see the
+    allow-list above, and handoff 0047 for the argument.
     """
     header = request.headers.get("Authorization", "")
     scheme, _, token = header.partition(" ")
@@ -259,9 +298,13 @@ def get_current_identity(request: Request) -> Identity:
         )
     settings = request.app.state.settings
     identity = decode_token(token.strip(), secret=settings.session_secret)
+    method = request.method.upper()
     if (
         identity.role in _NO_WRITE_ROLES
-        and request.method.upper() not in _SAFE_METHODS
+        and method not in _SAFE_METHODS
+        # No root_path is configured on this app, so url.path is the route
+        # path as written in the routers.
+        and not _is_allowlisted_write(method, request.url.path)
     ):
         raise HTTPException(
             status_code=403,
