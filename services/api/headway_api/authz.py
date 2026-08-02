@@ -34,11 +34,26 @@ if-statement a future wave has to remember:
    is written, without its author knowing this role exists.
 2. **No unsafe HTTP method**, refused at the single authentication choke
    point (``auth.get_current_identity``). Every state-changing endpoint in
-   this API — present and future — passes through it.
+   this API — present and future — passes through it. Handoff 0047 added
+   exactly ONE exception, as a named route allowlist rather than a loosening
+   of the rule: an auditor may ``POST`` a raw record's ``/verify``, which
+   alters nothing under review. See ``auth._READ_ONLY_ROLE_WRITE_ALLOWLIST``,
+   whose single membership is pinned by a test.
 3. **Viewer breadth for content sensitivity** (``may_read_sensitivity``).
-   Migration 0028 withholds demand-response rider coordinates because a
-   paratransit pickup point is a rider's home address. That withholding is
-   NOT waived for an auditor. Rider privacy is not an auditor exception.
+   Demand-response rider coordinates are withheld because a paratransit
+   pickup point is a rider's home address, and an ADA trip record discloses
+   disability status by existing. That withholding is NOT waived for an
+   auditor. Rider privacy is not an auditor exception.
+
+   TWO LAYERS, TWO BOUNDARIES — do not confuse them. This one is the API's:
+   ``raw_payloads.classify`` marks the record restricted at
+   ``RESTRICTED_MINIMUM_ROLE`` (``data_steward``), and an auditor evaluated at
+   viewer breadth is refused. Migration 0028 is the *separate* SQL-layer rule
+   for the ``headway_readonly`` analyst role — column-level ``GRANT`` on
+   ``raw.records`` metadata and on ``canonical.dr_trips`` without the
+   coordinates — which defends direct psql access, not this API. They encode
+   the same privacy decision at different boundaries and are maintained
+   independently, so a change to one is not a change to the other.
 
 Every denial is a 403 with a plain-language message a transit operations
 manager can read.

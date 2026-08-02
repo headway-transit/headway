@@ -8,9 +8,13 @@ The role itself is modelled well and enforced in three independent places: it
 sits off `ROLE_RANK` entirely (`authz.py:55-64`), so rank arithmetic fails it by
 construction; every unsafe HTTP method is refused at the single authentication
 choke point (`auth.py:262-276`); and content sensitivity evaluates an auditor at
-*viewer* breadth (`authz.py:71-73`), so migration 0028's rider-location
-withholding is not waived for them. That is the correct shape and this wave does
-not touch it.
+*viewer* breadth (`authz.py:71-73`), so rider-location withholding is not waived
+for them. That is the correct shape and this wave does not touch it.
+
+The withholding lives in `raw_payloads.classify` + `RESTRICTED_MINIMUM_ROLE`
+(`data_steward`). It is **not** migration 0028 — that is the parallel SQL-layer
+rule for the `headway_readonly` analyst role, and conflating the two hides the
+fact that they are maintained separately.
 
 What is missing is everything above the API. An auditor signs in and lands on
 `/today` — the operations control room, a queue of things to do, built for
@@ -97,7 +101,8 @@ this wave routes *into* it rather than rebuilding it.
 
 ### 3. A withheld field is drawn as withheld, never as absent
 
-Migration 0028 is not waived for auditors, on purpose, and that decision stands.
+Rider-location withholding is not waived for auditors, on purpose, and that
+decision stands.
 But an auditor who sees a blank where a coordinate should be will record it as
 **missing data** — a false finding against an agency that did nothing wrong.
 

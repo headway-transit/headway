@@ -12,8 +12,10 @@ masked by another:
 
 1. ``auditor`` is off the rank ladder, so ``require_at_least`` fails it.
 2. Unsafe HTTP methods are refused at the authentication choke point.
-3. Content sensitivity is evaluated at VIEWER breadth — migration 0028's
-   rider-location withholding is not waived for an auditor.
+3. Content sensitivity is evaluated at VIEWER breadth — rider-location
+   withholding (``raw_payloads.RESTRICTED_MINIMUM_ROLE``) is not waived for
+   an auditor. That is the API's rule; migration 0028 is the separate
+   SQL-layer rule for the ``headway_readonly`` analyst role.
 """
 
 from __future__ import annotations
@@ -474,10 +476,11 @@ def test_auditor_cannot_certify_even_though_it_reads_certifications(client, fake
 
 
 def test_auditor_does_not_see_withheld_rider_locations(client, fake_db):
-    """Migration 0028 withholds demand-response coordinates because a
-    paratransit pickup point is a rider's home address, and the mere
-    existence of an ADA trip record discloses disability status. Breadth of
-    audit does not outrank that."""
+    """Demand-response coordinates are withheld because a paratransit pickup
+    point is a rider's home address, and the mere existence of an ADA trip
+    record discloses disability status. Breadth of audit does not outrank
+    that. (The API rule is ``raw_payloads.classify``; migration 0028 is the
+    analyst SQL role's parallel column-level grant.)"""
     add_auditor(fake_db)
     record = fake_db.add_raw_record(
         connector="headway-dr", payload_ref="raw/dr/2026-06-01/trips.csv"

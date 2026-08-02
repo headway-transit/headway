@@ -69,7 +69,7 @@ this wave.
 ### 4. The `auditor` role
 
 A role that can **read everything and change nothing**: figures, receipts,
-lineage, raw records (subject to the existing sensitivity rules — migration 0028
+lineage, raw records (subject to the existing sensitivity rules — rider-location
 withholding still applies, and an auditor is not an exception to rider privacy),
 DQ findings, certifications, and the audit trail itself. It cannot compute,
 classify, resolve, certify, or configure.
@@ -246,11 +246,27 @@ enforcement points, none of which a future wave has to remember:
    and `/raw/records/{id}/verify`, which raises a DQ finding). Refusing by
    method with **no allow-list** is what makes the guarantee hold without
    maintenance.
+
+   *Superseded in part by handoff 0047:* `/raw/records/{id}/verify` is now
+   reachable by an auditor. The reasoning above was considered, not
+   accidental — 0047 overrode it because the product was telling auditors
+   they could prove bytes unaltered while refusing the click. `/sandbox/preview`
+   remains refused. The allowlist has exactly one member and a test pins that.
 3. **Viewer breadth for content sensitivity** (`authz.may_read_sensitivity`,
    replacing a raw `ROLE_RANK[...]` index in `raw_records.py` that would have
-   raised `KeyError` for an off-ladder role). **Migration 0028's rider-location
-   withholding is NOT waived** — an auditor cannot open demand-response
-   payloads. Rider privacy is not an auditor exception.
+   raised `KeyError` for an off-ladder role). **Rider-location withholding is
+   NOT waived** — an auditor cannot open demand-response payloads. Rider
+   privacy is not an auditor exception.
+
+   *Correction, 2026-08-02:* earlier drafts of this section credited this to
+   "migration 0028". That names the wrong layer. The API's withholding is
+   `raw_payloads.classify` + `RESTRICTED_MINIMUM_ROLE` (`data_steward`),
+   enforced by `may_read_sensitivity`. **Migration 0028 is the separate
+   SQL-layer rule** for the `headway_readonly` analyst role (column-level
+   `GRANT` on `raw.records` metadata, and on `canonical.dr_trips` without the
+   coordinates), which defends direct psql access. Same privacy decision, two
+   boundaries, maintained independently — whether they still agree is an open
+   question worth testing, not an assumption.
 
 The frontend mirrors the same axis in `web/src/auth/session.ts`, so the UI
 hides exactly what the API refuses.

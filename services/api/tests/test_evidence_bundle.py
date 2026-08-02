@@ -282,9 +282,10 @@ def test_a_bundle_for_a_certification_that_does_not_exist_says_so_plainly(
 def test_withheld_record_is_named_with_its_reason_and_its_payload_is_absent(
     client, fake_db, fake_store, certified
 ):
-    """Migration 0028 is not waived for an auditor: a paratransit pickup point
-    is a rider's home address, and an ADA trip record discloses disability
-    status by existing. So the bundle names the record, carries its label and
+    """Rider-location withholding is not waived for an auditor: a paratransit
+    pickup point is a rider's home address, and an ADA trip record discloses
+    disability status by existing. So the bundle names the record, carries
+    its label and
     its digest — exactly what raw_payloads promises the reader — and carries
     none of its bytes."""
     add_auditor(fake_db)
