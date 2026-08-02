@@ -465,7 +465,11 @@ def require_human_session_or_machine_scope(scope: str):
             )
             return identity
         try:
-            return get_current_identity(request)
+            # ``db`` passed explicitly: this is a direct call, not FastAPI
+            # resolving the dependency, so the default Depends() marker would
+            # arrive as-is. The human path re-reads the account per request
+            # (auth._live_account), which needs a real connection.
+            return get_current_identity(request, db)
         except HTTPException:
             raise _DUAL_AUTH_401
 

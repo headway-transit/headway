@@ -37,7 +37,7 @@ from __future__ import annotations
 import datetime as dt
 import re
 import secrets
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import bcrypt
 import jwt
@@ -273,6 +273,79 @@ def decode_token(token: str, *, secret: str) -> Identity:
     )
 
 
+#: The account as it is RIGHT NOW, not as it was when the token was minted.
+#: Keyed on username because that is how every account change in this API is
+#: addressed (``routers/users.py`` updates role, activation and password by
+#: username, and nothing renames one).
+_SELECT_LIVE_ACCOUNT = "SELECT role, is_active FROM auth.users WHERE username = %s"
+
+_ACCOUNT_GONE = HTTPException(
+    status_code=401,
+    detail=(
+        "The account this session belongs to no longer exists. Please sign in "
+        "again."
+    ),
+)
+
+_ACCOUNT_DEACTIVATED = HTTPException(
+    status_code=401,
+    detail=(
+        "This account has been deactivated, so the session it was using has "
+        "ended. If you believe this is a mistake, ask your Headway "
+        "administrator."
+    ),
+)
+
+
+def _live_account(db, identity: "Identity") -> "Identity":
+    """Re-read role and activation from the database on EVERY request.
+
+    THE WINDOW THIS CLOSES (handoff 0046, "still open"). A session token is a
+    signed snapshot of an account taken at sign-in, and nothing downstream ever
+    looked at the account again. So for the token's whole lifetime — thirty
+    minutes by default:
+
+    - **Deactivating an account did not end its session.** ``is_active`` was
+      read once, at login (see ``login`` below). Revoking access to someone who
+      has just left, or to an outside auditor whose engagement ended, appeared
+      to work and did not.
+    - **A demotion did not take effect.** Handoff 0046 disclosed this in the
+      response body and left it open; the token kept its old role.
+    - A promotion did not take effect either, which is only an annoyance, but
+      it has the same cause.
+
+    Reading the account per request is what makes all three immediate. The cost
+    is one indexed lookup on a request that is already going to the database —
+    every authenticated router in this API takes ``db`` — and correctness about
+    who someone is now is not a place to trade accuracy for a round trip.
+
+    THE DATABASE IS AUTHORITATIVE. When the stored role differs from the token's
+    the stored one is used, rather than refusing the request: a demotion should
+    narrow what someone can do, not log them out mid-form. The browser may
+    briefly offer an action the server will now refuse — a stale menu, and the
+    refusal that follows is the correct one.
+    """
+    row = db.execute(_SELECT_LIVE_ACCOUNT, (identity.username,)).fetchone()
+    if row is None:
+        raise _ACCOUNT_GONE
+    role, is_active = row[0], row[1]
+    if not is_active:
+        raise _ACCOUNT_DEACTIVATED
+    if role not in VALID_ROLES:
+        # A role this build does not know about is not a role to guess at.
+        raise HTTPException(
+            status_code=401,
+            detail=(
+                "This account's role is not one this version of Headway "
+                "recognizes, so the session cannot be trusted. Ask your "
+                "Headway administrator to check the account."
+            ),
+        )
+    if role == identity.role:
+        return identity
+    return replace(identity, role=role)
+
+
 def _enforce_human_rate_limit(request: Request, identity: "Identity") -> None:
     """Bound how fast ONE signed-in account can drive this installation.
 
@@ -292,7 +365,7 @@ def _enforce_human_rate_limit(request: Request, identity: "Identity") -> None:
     enforce_rate_limit(limiter, identity.username)
 
 
-def get_current_identity(request: Request) -> Identity:
+def get_current_identity(request: Request, db=Depends(get_db)) -> Identity:
     """FastAPI dependency: the verified caller. 401 when absent/invalid.
 
     THE READ-ONLY-ROLE CHOKE POINT. Every authenticated endpoint in this API
@@ -317,6 +390,9 @@ def get_current_identity(request: Request) -> Identity:
         )
     settings = request.app.state.settings
     identity = decode_token(token.strip(), secret=settings.session_secret)
+    # The token says who this WAS at sign-in. The database says who they are
+    # now — and that is the answer every check below uses.
+    identity = _live_account(db, identity)
     # PER ACCOUNT, not per address: a signed-in caller has a name, and a name
     # is the thing worth bounding. Keying on the address instead would merge
     # everyone behind one office router into a single allowance and let one

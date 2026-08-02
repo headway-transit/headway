@@ -20,11 +20,12 @@ Rules, all enforced here and pinned by test:
 - LOCKOUT FAIL-SAFE: deactivating or demoting the LAST active certifying
   official is refused (409, plain language). An agency must never be able
   to lock itself out of certification and user management from the UI.
-- Deactivation refuses NEW sign-ins immediately (auth.py — with the same
-  generic 401 as a wrong password, never an enumeration oracle). A session
-  the user already holds expires on its own within the token lifetime;
-  the deactivate response says so in plain language rather than implying
-  an instant cutoff.
+- Deactivation and role changes take effect ON THE NEXT REQUEST, including
+  for a session the person already holds. ``auth._live_account`` re-reads
+  role and activation from auth.users on every authenticated request, so
+  the token is no longer a thirty-minute snapshot that outlives the account
+  it describes. New sign-ins are refused with the same generic 401 as a
+  wrong password, never an enumeration oracle.
 - Passwords set here are admin-performed resets. Self-service reset needs
   email infrastructure Headway does not have yet (recorded follow-up,
   handoff 0025 honest scope).
@@ -96,8 +97,8 @@ class ChangeRoleRequest(BaseModel):
 class ChangeRoleResponse(BaseModel):
     username: str
     role: str
-    #: Plain-language honesty: a session the user already holds keeps its
-    #: old role until the token expires.
+    #: Plain-language honesty: the change applies to a session the person
+    #: already holds, on their very next request.
     note: str | None = None
     audit_event_id: int
 
@@ -345,9 +346,6 @@ def deactivate_user(
         action_clause="Deactivating this account",
     )
 
-    ttl_minutes = max(
-        1, request.app.state.settings.token_ttl_seconds // 60
-    )
     with db.transaction():
         db.execute(_UPDATE_ACTIVE, (False, username)).fetchone()
         audit_event_id = write_event(
@@ -362,10 +360,10 @@ def deactivate_user(
         username=username,
         is_active=False,
         note=(
-            f"New sign-ins for '{username}' are refused from now on. If "
-            f"this person is signed in right now, that session ends on its "
-            f"own within {ttl_minutes} minutes (when their current session "
-            f"token expires)."
+            f"'{username}' can no longer use Headway. If this person is "
+            f"signed in right now, their session ends the moment they do "
+            f"anything else — they do not keep working until a token "
+            f"expires. New sign-ins are refused too."
         ),
         audit_event_id=audit_event_id,
     )
@@ -457,15 +455,16 @@ def change_role(
                 "new_role": body.role,
             },
         )
-    ttl_minutes = max(1, request.app.state.settings.token_ttl_seconds // 60)
     return ChangeRoleResponse(
         username=username,
         role=body.role,
         note=(
-            f"'{username}' is a {ROLE_LABELS[body.role]} from their next "
-            f"sign-in. If this person is signed in right now, their current "
-            f"session keeps the {ROLE_LABELS[old_role]} role for up to "
-            f"{ttl_minutes} minutes (until their session token expires)."
+            f"'{username}' is a {ROLE_LABELS[body.role]} from now on, not "
+            f"from their next sign-in. If this person is signed in right "
+            f"now, the change applies to their very next action; they do "
+            f"not keep the {ROLE_LABELS[old_role]} role until a token "
+            f"expires. Their screen may still show the old menu until they "
+            f"reload."
         ),
         audit_event_id=audit_event_id,
     )
