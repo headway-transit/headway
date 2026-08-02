@@ -22,17 +22,17 @@ What makes it different is one design decision applied everywhere: **radical pro
 
 ## See it
 
-| The Receipt — regulation inside the number | The certification cockpit |
+| The dashboard — every figure exactly as computed | The live map — your own streets, your own data |
 | --- | --- |
-| ![A demand-response VRH figure opened into its receipt: mode and type-of-service badges, the simulated-data flag, the data-completeness detail, and the FTA taxi revenue rule quoted verbatim with its page citation](docs/images/receipt.png) | ![The certify screen for one month: each figure as a full receipt with its own consent checkbox — ticking a figure means you read its receipt and intend to put your name on it](docs/images/certify.png) |
+| ![Dashboard in dark theme: a Mode selector reading "All modes (agency)" with the figure scope stated beneath it, audience-lens and trend-grouping controls, and the latest certified VRM and VRH figures in monospace with sparklines, Certified badges and a "How this number was made" link on each. The Unlinked Passenger Trips card says "No certified figure yet" rather than showing a zero](docs/images/dashboard.png) | ![The live map on the dark street style: bright roads on a near-black ground, hundreds of vehicle marks shaped and coloured by mode over a self-hosted OpenStreetMap basemap, red triangles marking open blocking data-quality findings, and a live status line with the vehicle count. Controls above it switch street style and highlight a single mode](docs/images/map.png) |
 
-| Dashboards (colorblind-validated palettes) | The lineage walk |
+| Boardings to review — where a person decides | How this number was made |
 | --- | --- |
-| ![Dashboard with VRM/VRH small multiples, coverage-over-time with threshold line, open data-quality issues, and the operations section: on-time performance and headway adherence cards, each badged as an operations metric that is never an NTD reported figure](docs/images/dashboard.png) | ![The lineage walk from a certified figure through the exact calculation version that ran to its raw records, with breadcrumbs back to the metrics table](docs/images/lineage.png) |
+| ![The revenue review queue: one boarding waiting on a decision, showing the vehicle, service day, rider count, and that the bus was not logged into a run — so there is no route, trip or stop on the record. Under "Headway's own reading" it says it will not guess this one, because the federal manual has no rule that tells prep apart from a catch-up bus; only a person who knows what dispatch did that day can say. A banner states the boarding is held out of the ridership figure while it waits: not counted, and not thrown away](docs/images/review-queue.png) | ![The lineage walk for one reported figure: three linked columns running from the reported figure, through the exact calculation version that produced it, to the raw records Headway received — 326 of them, as a link. The page states that nothing on it is recalculated; it is the recorded history](docs/images/lineage.png) |
 
-| The what-if sandbox | Version & period comparison |
+| The certification cockpit | The data-quality queue |
 | --- | --- |
-| ![The settings sandbox after a completed on-time-performance window preview: a modeling-preview-changes-nothing banner, today's audited settings beside the proposed values, and the figure under each with the exact difference](docs/images/sandbox.png) | ![The compare surface: the same VRH calculation across two periods side by side with the exact delta against the baseline, and a detail matrix where a missing figure is stated as missing, never invented](docs/images/compare.png) |
+| ![The certify screen for one month: each figure presented as a full receipt with its own consent checkbox — ticking a figure means you have read its receipt and intend to put your name on it](docs/images/certify.png) | ![The data-quality queue: open findings written as sentences an operator can act on, each carrying the subject it is about — the route, block or vehicle in the agency's own vocabulary rather than an internal identifier](docs/images/data-quality.png) |
 
 ## Quickstart
 
