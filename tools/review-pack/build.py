@@ -35,10 +35,10 @@ DEFAULT_CONSTRAINTS = ".claude/roles/_SHARED_CONSTRAINTS.md"
 # Design-intent defaults match the surfaces written into the template. Change
 # these (via --intent) whenever you change the template's "What to attack".
 DEFAULT_INTENT = [
-    "docs/handoffs/0036-*.md",
-    "docs/handoffs/0039-*.md",
+    "docs/handoffs/0046-*.md",
+    "docs/handoffs/0047-*.md",
+    "docs/adr/0011-*.md",
     "docs/adr/0012-*.md",
-    "docs/adr/0013-*.md",
 ]
 
 

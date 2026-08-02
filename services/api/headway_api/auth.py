@@ -302,8 +302,17 @@ def get_current_identity(request: Request) -> Identity:
     if (
         identity.role in _NO_WRITE_ROLES
         and method not in _SAFE_METHODS
-        # No root_path is configured on this app, so url.path is the route
-        # path as written in the routers.
+        # `request.url.path`, and NOTHING ELSE. Two properties make it the
+        # only safe argument, and both are load-bearing:
+        #   1. It is ALREADY PERCENT-DECODED by the ASGI server, so a
+        #      smuggled `%2F` is a real `/` by the time it arrives and
+        #      `[^/]+` refuses it. Hand this matcher an undecoded string —
+        #      scope["raw_path"], an X-Forwarded-Uri header — and
+        #      "..%2F..%2Fsandbox" is one slash-free segment that MATCHES,
+        #      opening every write in the API to a read-only role. Pinned by
+        #      test_the_allowlist_matcher_assumes_an_ALREADY_DECODED_path.
+        #   2. No root_path is configured on this app, so it is the route
+        #      path exactly as written in the routers.
         and not _is_allowlisted_write(method, request.url.path)
     ):
         raise HTTPException(
