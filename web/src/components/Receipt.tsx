@@ -34,6 +34,7 @@ import {
   isOps,
   isPreVerification,
   isSimulated,
+  revenueSplit,
 } from "../detail";
 import type { Detail } from "../detail";
 import { detailValueToString, ratioToPercentString } from "../format";
@@ -172,6 +173,16 @@ export function Receipt({ value }: ReceiptProps) {
   // is rendered by the labeled exception callout below, so the generic
   // detail list omits the key (never both).
   const attested = attestationReference(detail);
+
+  // The human judgment calls inside this number (handoff 0040): boardings
+  // recorded while no bus was logged into a run, which the calculation
+  // refused to guess about and a person decided. Rendered in full below, so
+  // "explain this number" shows WHO decided and WHY — the difference between
+  // a correction that can be defended in a federal review and one that is
+  // merely asserted.
+  const split = revenueSplit(detail);
+  const judgments = split?.classifications ?? [];
+
   const generalDetail: Detail = attested
     ? Object.fromEntries(
         Object.entries(detail).filter(([key]) => key !== "attestation"),
@@ -320,6 +331,58 @@ export function Receipt({ value }: ReceiptProps) {
             <Link to="/attestations">
               {copy.receipt.attested.detailsLink(attested.id)}
             </Link>
+          </p>
+        </div>
+      )}
+
+      {/* The judgment calls (handoff 0040). Shown whenever a person had to
+          decide what an off-run boarding was — with their words verbatim,
+          because their words ARE the evidence. Frozen at compute time, and
+          the note under them says so: a decision made since applies to the
+          next run, never retroactively to this signed number. */}
+      {judgments.length > 0 && (
+        <div className="receipt-judgments">
+          <h2>{copy.revenueReview.receipt.heading}</h2>
+          <p>{copy.revenueReview.receipt.intro}</p>
+          <ul className="judgment-list">
+            {judgments.map((judgment) => (
+              <li key={judgment.passenger_event_id}>
+                <p>
+                  <strong>
+                    {judgment.verdict === "revenue"
+                      ? copy.revenueReview.receipt.verdictRevenue
+                      : copy.revenueReview.receipt.verdictNonRevenue}
+                  </strong>{" "}
+                  <span className="figure">
+                    {copy.revenueReview.receipt.entrySummary(
+                      judgment.vehicle_id === null
+                        ? copy.revenueReview.vehicleUnknown
+                        : copy.revenueReview.vehicleLabel(judgment.vehicle_id),
+                      judgment.event_timestamp,
+                      copy.revenueReview.ridersValue(judgment.event_count),
+                    )}
+                  </span>
+                </p>
+                <p className="figure">
+                  {copy.revenueReview.receipt.decidedBy(
+                    judgment.classified_by,
+                    judgment.classified_at,
+                  )}
+                </p>
+                <p>
+                  <span className="judgment-reason-label">
+                    {copy.revenueReview.receipt.reasonLabel}:
+                  </span>{" "}
+                  {judgment.justification}
+                </p>
+              </li>
+            ))}
+          </ul>
+          <p className="field-hint">
+            {copy.revenueReview.receipt.frozenNote}
+          </p>
+          <p>
+            <Link to="/revenue-review">{copy.nav.revenueReview}</Link>
           </p>
         </div>
       )}

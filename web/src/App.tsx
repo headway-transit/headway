@@ -23,6 +23,7 @@ import { CertifyView } from "./views/CertifyView";
 import { CompareView } from "./views/CompareView";
 import { DashboardView } from "./views/DashboardView";
 import { DqView } from "./views/DqView";
+import { RevenueReviewView } from "./views/RevenueReviewView";
 import { LineageView } from "./views/LineageView";
 import { LoginView } from "./views/LoginView";
 import { MetricsView } from "./views/MetricsView";
@@ -117,6 +118,11 @@ export function AppRoutes() {
               only — the API enforces the role on every sampling write). */}
           <Route path="/sampling" element={<SamplingView />} />
           <Route path="/dq" element={<DqView />} />
+          {/* The revenue review queue (handoff 0040): the boardings
+              Headway held out of the ridership figure because it
+              refused to guess what they were. Readable by every
+              signed-in role; the decision inside is role-gated. */}
+          <Route path="/revenue-review" element={<RevenueReviewView />} />
           {/* Settings sandbox (handoff 0017 #6): a what-if PREVIEW surface
               that changes nothing — any signed-in role may model; the API
               enforces whatever role the preview run requires. */}

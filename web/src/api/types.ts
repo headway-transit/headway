@@ -1887,3 +1887,93 @@ export interface ValidationErrorItem {
 export interface ErrorEnvelope {
   detail?: string | ValidationErrorItem[];
 }
+
+// ---- revenue review queue (handoff 0040) ----
+
+/**
+ * One no-run boarding the calculation could not decide, waiting on a person
+ * — or the record of the decision they made.
+ *
+ * Everything here was frozen when the calculation flagged the boarding, so a
+ * row reads the same years later even if the feed is re-ingested. Absent
+ * facts stay absent: `vehicle_id` is null when the feed carried none, never
+ * a placeholder.
+ */
+export interface BoardingReview {
+  passenger_event_id: string;
+  /** The raw record this boarding was normalized from — the walk back. */
+  source_record_id: string;
+  /** ISO date */
+  service_date: string;
+  /** ISO date-time */
+  event_timestamp: string;
+  vehicle_id: string | null;
+  /** How many boardings this one event recorded. */
+  event_count: number;
+  /** Always "pending_review": Headway declined to guess, and says so. */
+  suggested_verdict: string;
+  /** The calculation's own words for why it could not decide. */
+  suggested_reason: string;
+  calc_name: string;
+  calc_version: string;
+  /** ISO date */
+  period_start: string;
+  /** ISO date */
+  period_end: string;
+  /** ISO date-time */
+  first_seen_at: string;
+  /** null while pending; "revenue" or "non_revenue" once decided. */
+  verdict: string | null;
+  /** The analyst's reason, verbatim. Never present without a verdict. */
+  justification: string | null;
+  classified_by: string | null;
+  /** ISO date-time */
+  classified_at: string | null;
+  /** The data-quality finding the classification closed, when one was open. */
+  dq_issue_id: string | null;
+}
+
+export interface BoardingReviewPage {
+  boardings: BoardingReview[];
+  /** Rows matching the same filter across the WHOLE queue, never the page. */
+  total: number;
+  limit: number;
+  /** Pass back as `cursor` for the next page; null on the last page. */
+  next_cursor: string | null;
+  has_more: boolean;
+}
+
+/**
+ * Queue-wide tallies. Rows and BOARDINGS are different numbers and both are
+ * told: one row can hold four boardings, and it is the boardings that are
+ * missing from the figure.
+ */
+export interface BoardingReviewCounts {
+  pending: number;
+  pending_boardings: number;
+  classified: number;
+  classified_revenue: number;
+  classified_non_revenue: number;
+  classified_revenue_boardings: number;
+  classified_non_revenue_boardings: number;
+}
+
+export interface ClassifyBoardingRequest {
+  /** "revenue" or "non_revenue". */
+  verdict: string;
+  /** Required, never blank — the reason the correction can be defended. */
+  justification: string;
+}
+
+export interface ClassifyBoardingResponse {
+  passenger_event_id: string;
+  verdict: string;
+  justification: string;
+  classified_by: string;
+  /** ISO date-time */
+  classified_at: string;
+  dq_issue_id: string | null;
+  audit_event_id: number;
+  /** Always true: the figure moves only when the calculation is re-run. */
+  recompute_required: boolean;
+}

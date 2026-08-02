@@ -294,3 +294,214 @@ Modified — calc: `headway_calc/upt.py`, `headway_calc/types.py`,
 `REGULATORY_TRACKER.md`, `tests/conftest.py`, `tests/test_reader.py`,
 `tests/test_runner.py`, `tests/test_runner_per_mode.py`,
 `tests/test_golden_mode.py`, `tests/test_upt_attestation.py`.
+
+## Outputs — evidence (Backend + Frontend engineer, 2026-08-01) — THE REVIEW QUEUE
+
+**Scope delivered:** design points 4 + 5's missing half — the human-in-the-loop
+**review queue** and the loop it closes. The 2026-07-31 wave EMITTED pending
+boardings and held them out of the figure; nothing could answer them, so they
+were held forever and the figure could never be completed. That dead end is
+now closed end to end: the calculation hands undecided boardings to a queue, a
+data steward classifies each one **and must write down why**, and the next run
+reads the decision back and carries the person, the timestamp and their words
+verbatim into the figure's receipt.
+
+SCOPED OUT and untouched: the detour-flag contract field (still deferred, as
+in the 0.3.0 evidence), the reconciliation report (open question), and
+anything on the map (Track D's lane).
+
+### What shipped, by layer
+
+1. **Migration 0040 — `dq.boarding_revenue_reviews`.** One row per boarding
+   the calculation held PENDING, carrying the frozen context a reviewer
+   decides on (service date, timestamp, vehicle, boarding count, the
+   calculation's own reason, which calc version flagged it and over which
+   period) and the slot the decision goes into. **The justification note is
+   required by the schema, not merely by the form**: `CHECK
+   boarding_review_decision_complete` moves verdict/justification/author/time
+   together, and `CHECK boarding_review_justification_not_blank` rejects a
+   whitespace-only note. "Classified with no reason" is not a state this
+   database can hold. Partial indexes serve the two reads (pending queue by
+   `(event_timestamp, passenger_event_id)`; classified history by
+   `(service_date, …)`), so the queue pages by keyset at scale exactly as the
+   DQ queue does (handoff 0030).
+
+2. **Calc — upt_v0 0.4.0 closes the loop.** `compute_upt` gains
+   `boarding_reviews` (passenger_event_id → recorded verdict). A held boarding
+   with a decision is counted ('revenue', its raw record entering lineage) or
+   excluded ('non_revenue', cited by its finding), with ONE info finding
+   `boarding_classified_by_review` quoting the justification verbatim; the
+   detail's `revenue_classification` block gains `human_revenue_boardings`,
+   `human_non_revenue_boardings` and `human_classifications` (who, when, why,
+   per decision), **frozen at compute time**. Undecided boardings are held
+   exactly as 0.3.0 held them and are emitted as `CalcResult.review_items`,
+   which the runner UPSERTs into the queue inside the fail-loudly-FIRST
+   findings transaction — a boarding held out of a figure with nobody able to
+   release it is the failure this wave exists to prevent, so the hand-over is
+   durable no matter what happens to the value phase. New pure module
+   `headway_calc/boarding_reviews.py` owns both ends (persist + load).
+   **0.3.0 retained runnable as `compute_upt_v0_3_0`**, byte-for-byte, so a
+   figure certified under 0.3.0 recomputes identically whatever has been
+   decided since.
+
+   Three arithmetic/honesty decisions, each pinned by test:
+   - **Human-counted boardings are added AFTER the p. 146 factor-up, never
+     multiplied by it.** The factor accounts for TRIPS whose APC data is
+     missing; a no-run boarding is not a trip and never entered the operated
+     denominator, so scaling a human-confirmed head count by it would report
+     riders nobody observed (worked example in the test: 100 × 50/49 → 102,
+     +100 human = **202**; multiplying would give 204).
+   - **The double-count guard is untouched** — `operated_trips`,
+     `trips_with_events`, `missing_trips`, `missing_share` and
+     `factor_applied` are byte-identical with and without decisions.
+   - **A blocked run stays blocked.** A classification is not a statistician's
+     approval; it does not cure the p. 146 refusal.
+
+3. **API — `services/api/headway_api/routers/revenue_review.py`.**
+   `GET /revenue-review/boardings` (keyset cursor, `status=pending|classified`,
+   default 50, hard cap 200, whole-queue `total`),
+   `GET /revenue-review/boardings/counts` (rows AND boardings — the number
+   actually missing from the figure is not the number of rows),
+   `GET /revenue-review/boardings/{id}`, and
+   `POST /revenue-review/boardings/{id}/classify`. Built on the DQ resolution
+   workflow's patterns and wired INTO it: classifying closes the boarding's
+   open `boarding_pending_revenue_review` finding in the same transaction with
+   a resolution text built server-side from the decision, so the two trails
+   can never tell different stories.
+
+4. **Authz + audit.** Reading is `require_authenticated`; classifying is
+   `require_at_least("data_steward")` — the same bar as resolving a DQ issue,
+   because this IS a DQ resolution that happens to change what the next figure
+   counts. Every classification writes `audit.events` action
+   `boarding_revenue_classify` **inside the same transaction**, and the
+   justification is IN the audit detail (an auditor reading `audit.events`
+   alone can see why, without joining anywhere), alongside
+   `figure_recomputed: false` so nobody later reads the event as the moment a
+   number changed.
+
+5. **Refusals, all without a bypass.**
+   - Blank or missing note → 422 with an example of a real one. No
+     "classify anyway".
+   - Already classified → 409 naming who decided and when.
+   - Unknown verdict → 422 that names the safe answer: leave it in the queue,
+     where undecided already means excluded.
+   - **Certified period → 409.** If the boarding's service date falls inside a
+     period whose UPT figure is already certified, Headway refuses outright:
+     somebody signed their name to that number and it must keep meaning what
+     it meant. Re-opening and re-certifying is a deliberate certifying-official
+     act. Nothing is written on any refusal (transaction rolls back).
+
+6. **UI — `web/src/views/RevenueReviewView.tsx`, route `/revenue-review`, nav
+   "Boardings to review".** Written for a transit operations manager: no
+   sentence on the screen says "unassigned", "revenue_classification" or
+   "passenger event" — it says *"These riders were counted by a bus while
+   nobody was logged into a run."* Each row shows the vehicle by its fleet
+   number, the riders at stake, the service day, the calculation's own reason,
+   and — deliberately — **"No suggestion. Headway will not guess this one"**
+   rather than a nudge. "Route and run: None — that is exactly why this
+   boarding is here" turns an empty field into the explanation. The decision is
+   two labelled radios with plain-language guidance plus a **required** note,
+   and the recompute warning sits AT the moment of deciding with a link
+   straight to Compute figures. Empty state is inviting ("Nothing is waiting on
+   you"). Server-side keyset paging; the header cards are the server's
+   whole-queue counts and say so.
+
+7. **The receipt (design point 2).** `web/src/detail.ts` gains
+   `revenueSplit()`; `web/src/components/Receipt.tsx` renders **"Judgment calls
+   behind this number"** — per decision, the verdict, the vehicle and time, who
+   decided and when, and their justification **verbatim** — followed by the
+   honest note that these were read when the figure was computed and that later
+   decisions apply to the next run. Every other surface that lists detail gets
+   plain sentences for the split (auto-excluded, human-counted, human-excluded,
+   still-held + the exclude-until-classified policy).
+
+### Test totals (captured, not inferred)
+
+- api: `cd services/api && python -m pytest -q` → **520 passed** (was 498;
+  +22 in `tests/test_revenue_review.py`).
+- calc: `cd services/calc && python -m pytest -q` → **679 passed** (was 660;
+  +19 in `tests/test_boarding_review_loop.py`; five existing `0.3.0` version
+  assertions updated to `0.4.0`).
+- web: `cd web && npm test` → **352 passed / 42 files** (was 337; +15 in
+  `src/test/revenueReview.test.tsx`, including three receipt tests). Every new
+  view test runs the axe gate.
+- web: `npm run build` → clean (tsc -b + vite build).
+- migrations static: `python -m pytest -q db/test_migrations_static.py` →
+  **30 passed**.
+- `services/api/openapi.json` regenerated: 75 paths, +4 for this router.
+
+### Live verification (real Postgres/TimescaleDB on this box, 2026-08-01)
+
+Not a fake connection — the compose stack's `headway-timescaledb-1`, which was
+at migration 0039.
+
+- **Migration 0040 applied** to the live database; table, both partial indexes,
+  the FK to `dq.issues` and all four CHECKs present (`\d` output captured).
+- **The schema refuses a reasonless decision, live:** a verdict with a
+  whitespace note → `boarding_review_justification_not_blank`; a verdict with
+  no note at all → `boarding_review_decision_complete`. Both rejected by
+  Postgres, not by application code.
+- **Calc round trip, live:** `persist_review_items` wrote a pending row;
+  re-running UPSERTed it (idempotent); `load_boarding_reviews` returned `{}`
+  while undecided and the full `HumanBoardingVerdict` after a decision; and
+  **re-running after the decision wrote 0 rows and left the human verdict
+  untouched** — the UPSERT's own `WHERE verdict IS NULL` proven against real
+  SQL.
+- **API against the live database** (uvicorn on :8099): pending queue, counts,
+  classify (200, audit row written), second attempt (409 naming the first
+  decider), blank note (422), viewer POST (403) with viewer GET still 200, and
+  the **certified-period refusal (409)** exercised by inserting a certified
+  `upt` metric value covering the boarding's service date — after which
+  `verdict` was still NULL and no audit row existed. The temporary certified
+  figure was deleted afterwards.
+- **Audit row, read back from `audit.events`:** actor `rev.steward`, action
+  `boarding_revenue_classify`, subject `dq.boarding_revenue_reviews` /
+  `live-pe-3684-1510`, detail carrying the verdict, the full justification,
+  the suggested verdict, the vehicle, the count, the source record,
+  `classified_by_role: data_steward` and `figure_recomputed: false`.
+- **End-to-end through the browser** against that live API: signed in as a
+  data steward, opened /revenue-review, filled the decision form, saved, and
+  watched the row move from "Waiting on a decision" to "Decided so far" with
+  the note attributed — screenshots below.
+
+### Screenshots (`docs/images/handoff-0040/`, live data, light + dark)
+
+- `review-queue-light.png` / `review-queue-dark.png` — the queue.
+- `decide-form-light.png` / `decide-form-dark.png` — the decision, with the
+  required note and the recompute warning in place.
+- `justification-required-light.png` — the note refusing to be skipped.
+- `decided-light.png` / `decided-dark.png` — decided boardings with who, when
+  and why, and the toast confirming the figure moves on the next run.
+- `receipt-judgments-light.png` / `receipt-judgments-dark.png` — "Judgment
+  calls behind this number" inside "explain this number", above the verbatim
+  FTA quote.
+
+### NTD tracker
+
+`services/calc/REGULATORY_TRACKER.md` gains the upt_v0 **0.4.0** row and the
+"Verified — revenue classification of boardings" section is updated to record
+that the review queue closes the pending path. **No new regulatory claim is
+made**: the manual still says nothing about telling prep from a catch-up bus,
+and Headway still does not infer it — it records who decided, when, and on
+what grounds.
+
+### Deferred / noted
+
+- **Detour-flag surfacing** stays deferred (needs a
+  `canonical.passenger_events` contract field), exactly as in the 0.3.0
+  evidence.
+- **Reviewer qualifications** are not modelled. Headway gates at data-steward
+  and records the role in the audit event; it claims nothing beyond that. If
+  the receiving form ever needs a stated reviewer competency (the p. 146
+  statistician precedent), that is a new decision, not an inference from this
+  wave.
+- **No CSS was added.** `web/src/styles.css` was deliberately not touched
+  (Track D's settled tokens). The queue consumes existing classes (`.card`,
+  `.issue-list`, `.summary-cards`, `.dq-chips`, `.dq-pager`, `.dq-showing`,
+  `.banner`, `.alert`, `.field-hint`, `.figure`). Two container hooks
+  (`.receipt-judgments`, `.judgment-list`) carry no styles today and inherit
+  base element styling; if the design owner wants them treated, that is a
+  styles.css change for whoever owns that file.
+- **A boarding whose finding predates this wave** cannot be classified: it has
+  no queue row. Re-running the calculation over the period raises it again and
+  puts it in the queue — stated rather than silently worked around.

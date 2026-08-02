@@ -32,6 +32,7 @@ from .routers import (
     public,
     raw_records,
     reports,
+    revenue_review,
     safety,
     sampling,
     sandbox,
@@ -175,6 +176,7 @@ def create_app(
     app.include_router(reports.router)
     app.include_router(public.router)
     app.include_router(raw_records.router)
+    app.include_router(revenue_review.router)
     app.include_router(branding.router)
     app.include_router(safety.router)
     app.include_router(sampling.router)

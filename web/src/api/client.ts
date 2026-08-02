@@ -19,6 +19,9 @@ import type {
   AttestationRequest,
   AttestationRevokeRequest,
   AttestationRevoked,
+  BoardingReview,
+  BoardingReviewCounts,
+  BoardingReviewPage,
   Branding,
   CalcRunCreated,
   CalcRunRecord,
@@ -33,6 +36,8 @@ import type {
   CertificationResponse,
   VerificationResult,
   CompareResponse,
+  ClassifyBoardingRequest,
+  ClassifyBoardingResponse,
   DqIssue,
   DqIssueCounts,
   DqIssuePage,
@@ -1245,5 +1250,74 @@ export function downloadRawRecord(recordId: string): Promise<ExportDownload> {
   return requestExport(
     `/raw/records/${encodeURIComponent(recordId)}/download`,
     recordId,
+  );
+}
+
+// ---- revenue review queue (handoff 0040) ----
+
+/**
+ * GET /revenue-review/boardings — one BOUNDED page of the boardings the
+ * calculation held out of Unlinked Passenger Trips because it could not tell
+ * prep from real riders.
+ *
+ * Paged on the server by keyset cursor, like the data-quality queue and for
+ * the same reason: a queue that grows with the feed must never arrive as one
+ * response, and a page must never skip or repeat a boarding while a
+ * calculation run flags more behind the reader.
+ */
+export function listBoardingReviews(params?: {
+  status?: string;
+  limit?: number;
+  cursor?: string;
+}): Promise<BoardingReviewPage> {
+  const query = new URLSearchParams();
+  if (params?.status) query.set("status", params.status);
+  if (params?.limit !== undefined) query.set("limit", String(params.limit));
+  if (params?.cursor) query.set("cursor", params.cursor);
+  const qs = query.toString();
+  return request<BoardingReviewPage>(
+    "GET",
+    `/revenue-review/boardings${qs ? `?${qs}` : ""}`,
+  );
+}
+
+/**
+ * GET /revenue-review/boardings/counts — the whole-queue tally. The ONLY
+ * source of a queue-wide number: no screen counts the rows it happens to
+ * have loaded.
+ */
+export function getBoardingReviewCounts(): Promise<BoardingReviewCounts> {
+  return request<BoardingReviewCounts>(
+    "GET",
+    "/revenue-review/boardings/counts",
+  );
+}
+
+/** GET /revenue-review/boardings/{id} — one boarding, the deep-link target. */
+export function getBoardingReview(
+  passengerEventId: string,
+): Promise<BoardingReview> {
+  return request<BoardingReview>(
+    "GET",
+    `/revenue-review/boardings/${encodeURIComponent(passengerEventId)}`,
+  );
+}
+
+/**
+ * POST /revenue-review/boardings/{id}/classify — record one decision and the
+ * reason for it. The reason is required by the API and by the database; this
+ * client never sends a blank one, and the form never offers that path.
+ *
+ * The response does not mean a figure changed. It means a decision was
+ * recorded; the figure moves when the calculation is next run.
+ */
+export function classifyBoarding(
+  passengerEventId: string,
+  body: ClassifyBoardingRequest,
+): Promise<ClassifyBoardingResponse> {
+  return request<ClassifyBoardingResponse>(
+    "POST",
+    `/revenue-review/boardings/${encodeURIComponent(passengerEventId)}/classify`,
+    body,
   );
 }

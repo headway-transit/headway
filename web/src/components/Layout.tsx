@@ -179,6 +179,15 @@ export function Layout() {
                 <li>
                   <NavLink to="/dq">{copy.nav.dq}</NavLink>
                 </li>
+                {/* The revenue review queue (handoff 0040): boardings held
+                    out of the ridership figure until a person says what they
+                    were. Beside Data quality — it IS a data-quality queue,
+                    it just happens to change what the next figure counts. */}
+                <li>
+                  <NavLink to="/revenue-review">
+                    {copy.nav.revenueReview}
+                  </NavLink>
+                </li>
                 <li>
                   <NavLink to="/sandbox">{copy.nav.sandbox}</NavLink>
                 </li>
