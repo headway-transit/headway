@@ -123,6 +123,11 @@ class FakeConn:
         # boardings the calculation held out of the figure pending a human
         # decision, keyed by passenger_event_id.
         self.boarding_reviews: dict[str, dict] = {}
+        # Single sign-on (handoff 0046 / migration 0043): the one provider
+        # row, the claim->role grants, and in-flight authorization requests.
+        self.oidc_provider: dict | None = None
+        self.oidc_role_mappings: dict[str, dict] = {}
+        self.oidc_login_states: dict[str, dict] = {}
         self._next_classification_id = 1
         self._next_event_id = 1
         self.executed: list[tuple[str, tuple]] = []
@@ -150,6 +155,9 @@ class FakeConn:
                 self.service_day_overrides,
                 self.calc_runs,
                 self.boarding_reviews,
+                self.oidc_provider,
+                self.oidc_role_mappings,
+                self.oidc_login_states,
                 self._next_classification_id,
                 self._next_event_id,
             )
@@ -175,6 +183,9 @@ class FakeConn:
                 self.service_day_overrides,
                 self.calc_runs,
                 self.boarding_reviews,
+                self.oidc_provider,
+                self.oidc_role_mappings,
+                self.oidc_login_states,
                 self._next_classification_id,
                 self._next_event_id,
             ) = snapshot
@@ -228,16 +239,18 @@ class FakeConn:
                 ]
             )
 
-        if q.startswith("INSERT INTO auth.users"):
+        # The LOCAL-account insert specifically; the federated insert names a
+        # different column list and is handled with the rest of single sign-on.
+        if q.startswith("INSERT INTO auth.users (username, password_hash, role)"):
             username, password_hash, role = params
             # Honest model of the ON CONFLICT (username) DO NOTHING clause:
             # an existing username returns NO row.
             if username in self.users:
                 return FakeCursor([])
-            # The migration-0009/0032 CHECK + defaults, modeled honestly.
+            # The migration-0009/0032/0042 CHECK + defaults, modeled honestly.
             assert role in (
                 "viewer", "data_steward", "report_preparer",
-                "certifying_official",
+                "certifying_official", "auditor",
             )
             u = {
                 "user_id": str(uuid.uuid4()),
@@ -245,6 +258,10 @@ class FakeConn:
                 "password_hash": password_hash,
                 "role": role,
                 "is_active": True,
+                "auth_source": "local",
+                "idp_issuer": None,
+                "idp_subject": None,
+                "last_login_at": None,
                 "created_at": dt.datetime.now(UTC),
             }
             self.users[username] = u
@@ -266,7 +283,9 @@ class FakeConn:
             u["is_active"] = bool(is_active)
             return FakeCursor([(u["user_id"],)])
 
-        if q.startswith("UPDATE auth.users SET role"):
+        # The admin Users API updates by USERNAME; the federated role sync
+        # updates by user_id and is handled with the rest of single sign-on.
+        if q.startswith("UPDATE auth.users SET role = %s WHERE username"):
             role, username = params
             u = self.users.get(username)
             if u is None:
@@ -525,6 +544,195 @@ class FakeConn:
                     self.metric_values[i]["certification_status"] = "certified"
                     n += 1
             return FakeCursor([], rowcount=n)
+
+
+        # ---- single sign-on (handoff 0046 / migration 0043) ----------------
+        # Modelled at the same fidelity as the real schema: the provider row
+        # is a singleton, claim_value is UNIQUE (so a duplicate INSERT
+        # returns no row), and consuming a login state is a CONDITIONAL
+        # UPDATE that exactly one caller can win.
+
+        if q.startswith("SELECT discovery_url, client_id, client_secret_encrypted"):
+            p_ = self.oidc_provider
+            if p_ is None:
+                return FakeCursor([])
+            return FakeCursor([(
+                p_["discovery_url"], p_["client_id"],
+                p_["client_secret_encrypted"], p_["redirect_uri"],
+                p_["groups_claim"], p_["username_claim"],
+                p_["clock_skew_seconds"], p_["ca_bundle_path"],
+                p_["button_label"], p_["is_enabled"],
+                p_["updated_by"], p_["updated_at"],
+            )])
+
+        if q.startswith("INSERT INTO auth.oidc_provider"):
+            (discovery_url, client_id, secret, redirect_uri, groups_claim,
+             username_claim, skew, ca_bundle, button_label, is_enabled,
+             updated_by) = params
+            now = dt.datetime.now(UTC)
+            self.oidc_provider = {
+                "discovery_url": discovery_url,
+                "client_id": client_id,
+                "client_secret_encrypted": secret,
+                "redirect_uri": redirect_uri,
+                "groups_claim": groups_claim,
+                "username_claim": username_claim,
+                "clock_skew_seconds": skew,
+                "ca_bundle_path": ca_bundle,
+                "button_label": button_label,
+                "is_enabled": is_enabled,
+                "updated_by": updated_by,
+                "updated_at": now,
+            }
+            return FakeCursor([(now,)])
+
+        if q.startswith("SELECT mapping_id, claim_value, headway_role"):
+            rows = sorted(
+                self.oidc_role_mappings.values(), key=lambda m: m["claim_value"]
+            )
+            return FakeCursor([
+                (m["mapping_id"], m["claim_value"], m["headway_role"],
+                 m["note"], m["created_by"], m["created_at"])
+                for m in rows
+            ])
+
+        if q.startswith("INSERT INTO auth.oidc_role_mappings"):
+            claim_value, headway_role, note, created_by = params
+            # migration 0043's CHECK: the IdP can never be given the
+            # certifying_official role, at the database level too.
+            assert headway_role in (
+                "viewer", "data_steward", "report_preparer", "auditor"
+            ), "migration 0043 CHECK would reject this role"
+            if any(
+                m["claim_value"] == claim_value
+                for m in self.oidc_role_mappings.values()
+            ):
+                return FakeCursor([])  # ON CONFLICT (claim_value) DO NOTHING
+            mapping_id = str(uuid.uuid4())
+            created_at = dt.datetime.now(UTC)
+            self.oidc_role_mappings[mapping_id] = {
+                "mapping_id": mapping_id,
+                "claim_value": claim_value,
+                "headway_role": headway_role,
+                "note": note,
+                "created_by": created_by,
+                "created_at": created_at,
+            }
+            return FakeCursor([(mapping_id, created_at)])
+
+        if q.startswith("DELETE FROM auth.oidc_role_mappings"):
+            m = self.oidc_role_mappings.pop(params[0], None)
+            if m is None:
+                return FakeCursor([])
+            return FakeCursor([(m["claim_value"], m["headway_role"])])
+
+        if q.startswith("INSERT INTO auth.oidc_login_states"):
+            state, nonce, verifier, binding, redirect_uri, expires_at = params
+            self.oidc_login_states[state] = {
+                "state": state,
+                "nonce": nonce,
+                "code_verifier": verifier,
+                "browser_binding": binding,
+                "redirect_uri": redirect_uri,
+                "expires_at": expires_at,
+                "consumed_at": None,
+            }
+            return FakeCursor([])
+
+        if q.startswith("UPDATE auth.oidc_login_states SET consumed_at"):
+            row = self.oidc_login_states.get(params[0])
+            now = dt.datetime.now(UTC)
+            # The WHERE clause verbatim: unknown, already consumed, or
+            # expired all return NO row, so the caller cannot tell them apart.
+            if row is None or row["consumed_at"] is not None or row["expires_at"] <= now:
+                return FakeCursor([])
+            row["consumed_at"] = now
+            return FakeCursor([(
+                row["nonce"], row["code_verifier"], row["browser_binding"],
+                row["redirect_uri"],
+            )])
+
+        if q.startswith("DELETE FROM auth.oidc_login_states WHERE expires_at"):
+            now = dt.datetime.now(UTC)
+            stale = [k for k, v in self.oidc_login_states.items()
+                     if v["expires_at"] < now]
+            for k in stale:
+                del self.oidc_login_states[k]
+            return FakeCursor([], rowcount=len(stale))
+
+        if q.startswith("SELECT user_id, username, role, is_active FROM auth.users WHERE idp_issuer"):
+            issuer, subject = params
+            for u in self.users.values():
+                if u.get("idp_issuer") == issuer and u.get("idp_subject") == subject:
+                    return FakeCursor([(
+                        u["user_id"], u["username"], u["role"], u["is_active"]
+                    )])
+            return FakeCursor([])
+
+        if q.startswith("SELECT user_id, role, is_active, auth_source FROM auth.users"):
+            u = self.users.get(params[0])
+            if u is None:
+                return FakeCursor([])
+            return FakeCursor([(
+                u["user_id"], u["role"], u["is_active"], u["auth_source"]
+            )])
+
+        if q.startswith("INSERT INTO auth.users (username, role, auth_source"):
+            username, role, issuer, subject = params
+            assert role in (
+                "viewer", "data_steward", "report_preparer", "auditor"
+            ), "the IdP may not grant this role"
+            if username in self.users:
+                return FakeCursor([])  # ON CONFLICT (username) DO NOTHING
+            u = {
+                "user_id": str(uuid.uuid4()),
+                "username": username,
+                "password_hash": None,  # migration 0043: federated = no password
+                "role": role,
+                "is_active": True,
+                "auth_source": "oidc",
+                "idp_issuer": issuer,
+                "idp_subject": subject,
+                "last_login_at": None,
+                "created_at": dt.datetime.now(UTC),
+            }
+            self.users[username] = u
+            return FakeCursor([(u["user_id"],)])
+
+        if q.startswith("UPDATE auth.users SET role = %s WHERE user_id"):
+            role, user_id = params
+            for u in self.users.values():
+                if u["user_id"] == user_id:
+                    u["role"] = role
+                    return FakeCursor([(u["username"],)])
+            return FakeCursor([])
+
+        if q.startswith("UPDATE auth.users SET last_login_at"):
+            for u in self.users.values():
+                if u["user_id"] == params[0]:
+                    u["last_login_at"] = dt.datetime.now(UTC)
+                    return FakeCursor([], rowcount=1)
+            return FakeCursor([], rowcount=0)
+
+        # ---- the audit trail, read back (handoff 0046, the auditor role) ---
+        if q.startswith("SELECT event_id, at, actor, action, subject_kind"):
+            rows = sorted(
+                self.audit_events, key=lambda e: e["event_id"], reverse=True
+            )
+            i = 0
+            for column in ("actor", "action", "subject_kind", "subject_id"):
+                if f"{column} = %s" in q:
+                    rows = [e for e in rows if e[column] == params[i]]
+                    i += 1
+            if "event_id < %s" in q:
+                rows = [e for e in rows if e["event_id"] < params[i]]
+                i += 1
+            rows = rows[: params[i]]  # LIMIT
+            return FakeCursor([
+                (e["event_id"], e["at"], e["actor"], e["action"],
+                 e["subject_kind"], e["subject_id"], e["detail"])
+                for e in rows
+            ])
 
         if q.startswith("INSERT INTO audit.events"):
             actor, action, subject_kind, subject_id, detail = params
@@ -1691,16 +1899,36 @@ class FakeConn:
         return rows
 
     # -- seeding helpers ----------------------------------------------------
-    def add_user(self, username, role, *, is_active=True, password_hash=None):
+    def add_user(self, username, role, *, is_active=True, password_hash=None,
+                 auth_source="local", idp_issuer=None, idp_subject=None):
+        """Seed one account.
+
+        Migration 0043's CHECK is modelled honestly: a federated account has
+        NO password hash and MUST carry both IdP identifiers; a local account
+        has a hash and neither. A test that gets this wrong fails here rather
+        than passing against a fake that is more permissive than Postgres.
+        """
+        if auth_source == "oidc":
+            assert password_hash is None
+            assert idp_issuer and idp_subject
+            stored_hash = None
+        else:
+            stored_hash = password_hash or _HASHES[username]
+            assert idp_issuer is None and idp_subject is None
         self.users[username] = {
             "user_id": str(uuid.uuid4()),
             "username": username,
-            "password_hash": password_hash or _HASHES[username],
+            "password_hash": stored_hash,
             "role": role,
             "is_active": is_active,
+            "auth_source": auth_source,
+            "idp_issuer": idp_issuer,
+            "idp_subject": idp_subject,
+            "last_login_at": None,
             "created_at": dt.datetime(2026, 7, 1, 8, 0, tzinfo=UTC)
             + dt.timedelta(minutes=len(self.users)),
         }
+        return self.users[username]
 
     def add_metric_value(self, **overrides):
         mv = {
@@ -2267,6 +2495,244 @@ class FakeWebhookSender:
         return 200
 
 
+
+# ---------------------------------------------------------------------------
+# A fake identity provider with REAL cryptography (handoff 0046)
+# ---------------------------------------------------------------------------
+#
+# The point of this fake is that almost nothing about it is fake. It holds
+# real RSA keys, publishes a real JWKS, and mints real RS256-signed ID
+# tokens, so every assertion about signature verification, algorithm
+# allow-listing and key rotation exercises the production verifier rather
+# than a stub that agrees with it. What is faked is only the transport: no
+# socket is opened.
+#
+# Its token endpoint verifies PKCE for real (S256 over the stored challenge)
+# and checks the client credentials, so a test that breaks PKCE or the client
+# secret fails HERE, the way a provider would fail it.
+
+_RSA_KEYS: dict[str, object] = {}
+
+
+def _rsa_key(name: str):
+    """RSA keys are expensive to generate; make each one once per session."""
+    from cryptography.hazmat.primitives.asymmetric import rsa
+
+    if name not in _RSA_KEYS:
+        _RSA_KEYS[name] = rsa.generate_private_key(
+            public_exponent=65537, key_size=2048
+        )
+    return _RSA_KEYS[name]
+
+
+def _jwk_from_rsa(private_key, kid: str) -> dict:
+    import base64 as _b64
+
+    numbers = private_key.public_key().public_numbers()
+
+    def b64u(value: int) -> str:
+        raw = value.to_bytes((value.bit_length() + 7) // 8, "big")
+        return _b64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+    return {
+        "kty": "RSA",
+        "use": "sig",
+        "alg": "RS256",
+        "kid": kid,
+        "n": b64u(numbers.n),
+        "e": b64u(numbers.e),
+    }
+
+
+class FakeIdentityProvider:
+    """A standards-shaped OIDC provider: discovery, JWKS, token endpoint."""
+
+    def __init__(
+        self,
+        issuer="https://idp.example.gov/realms/agency",
+        client_id="headway-api",
+        client_secret="provider-issued-client-secret",
+    ):
+        self.issuer = issuer
+        self.client_id = client_id
+        self.client_secret = client_secret
+        self.discovery_url = issuer + "/.well-known/openid-configuration"
+        self.jwks_uri = issuer + "/protocol/openid-connect/certs"
+        self.token_endpoint = issuer + "/protocol/openid-connect/token"
+        self.authorization_endpoint = issuer + "/protocol/openid-connect/auth"
+        self.signing_kid = "key-2026-a"
+        self._published_kids = [self.signing_kid]
+        self.codes: dict[str, dict] = {}
+        self.token_calls: list[dict] = []
+        self.jwks_fetches = 0
+        self.discovery_fetches = 0
+        #: Set to a JSON error body to make the token endpoint refuse.
+        self.token_error: tuple[int, dict] | None = None
+
+    # -- keys ------------------------------------------------------------
+    def rotate_signing_key(self, kid="key-2026-b", *, publish=True):
+        """Start signing with a NEW key. When ``publish`` is true the new key
+        is added to the JWKS, which is exactly what a provider does — and
+        what a relying party with a pinned key cannot survive."""
+        self.signing_kid = kid
+        if publish and kid not in self._published_kids:
+            self._published_kids.append(kid)
+
+    def jwks(self) -> dict:
+        self.jwks_fetches += 1
+        return {
+            "keys": [_jwk_from_rsa(_rsa_key(kid), kid) for kid in self._published_kids]
+        }
+
+    def discovery(self) -> dict:
+        self.discovery_fetches += 1
+        return {
+            "issuer": self.issuer,
+            "authorization_endpoint": self.authorization_endpoint,
+            "token_endpoint": self.token_endpoint,
+            "jwks_uri": self.jwks_uri,
+            "code_challenge_methods_supported": ["S256", "plain"],
+            "token_endpoint_auth_methods_supported": [
+                "client_secret_basic", "client_secret_post"
+            ],
+            "id_token_signing_alg_values_supported": ["RS256"],
+        }
+
+    # -- the browser hop, without a browser --------------------------------
+    def authorize(self, authorization_url: str) -> str:
+        """Play the part of the user consenting. Records the nonce and the
+        PKCE challenge exactly as a provider would, and returns the code."""
+        from urllib.parse import parse_qs, urlparse
+
+        params = parse_qs(urlparse(authorization_url).query)
+        assert params["response_type"] == ["code"], "implicit flow must never be used"
+        assert params["code_challenge_method"] == ["S256"]
+        code = "code-" + uuid.uuid4().hex
+        self.codes[code] = {
+            "nonce": params["nonce"][0],
+            "code_challenge": params["code_challenge"][0],
+            "redirect_uri": params["redirect_uri"][0],
+            "used": False,
+        }
+        return code
+
+    # -- ID tokens ---------------------------------------------------------
+    def id_token(self, *, sub="idp-subject-0001", nonce, username="sso.steward",
+                 groups=("transit-data-stewards",), kid=None, **overrides) -> str:
+        import jwt as _jwt
+
+        now = dt.datetime.now(UTC)
+        claims = {
+            "iss": self.issuer,
+            "sub": sub,
+            "aud": self.client_id,
+            "exp": int((now + dt.timedelta(minutes=5)).timestamp()),
+            "iat": int(now.timestamp()),
+            "nonce": nonce,
+            "preferred_username": username,
+            "email": f"{username}@example.gov",
+            "groups": list(groups),
+        }
+        claims.update(overrides)
+        claims = {k: v for k, v in claims.items() if v is not _ABSENT}
+        kid = kid or self.signing_kid
+        alg = overrides.pop("_alg", "RS256")
+        return _jwt.encode(
+            claims, _rsa_key(kid), algorithm=alg, headers={"kid": kid}
+        )
+
+    def token_response(self, code: str, code_verifier: str) -> dict:
+        record = self.codes[code]
+        # PKCE, verified for real.
+        import base64 as _b64
+        import hashlib as _hashlib
+
+        expected = _b64.urlsafe_b64encode(
+            _hashlib.sha256(code_verifier.encode("ascii")).digest()
+        ).decode("ascii").rstrip("=")
+        assert expected == record["code_challenge"], "PKCE verifier did not match"
+        record["used"] = True
+        return {
+            "access_token": "provider-access-token",
+            "token_type": "Bearer",
+            "id_token": self.id_token(nonce=record["nonce"], **record.get("claims", {})),
+        }
+
+
+class _Absent:
+    def __repr__(self):
+        return "<absent>"
+
+
+#: Pass as a claim value to OMIT that claim entirely (as opposed to setting
+#: it to null, which is a different test).
+_ABSENT = _Absent()
+ABSENT = _ABSENT
+
+
+class FakeOidcHttp:
+    """The transport seam. Serves the fake provider's documents; refuses any
+    other address the way the real client would."""
+
+    def __init__(self, idp: FakeIdentityProvider, ca_bundle_path=None):
+        self.idp = idp
+        self.ca_bundle_path = ca_bundle_path
+        self.requested: list[str] = []
+
+    def get_json(self, url: str) -> dict:
+        from headway_api.oidc import OidcConfigurationError
+
+        self.requested.append(url)
+        if url == self.idp.discovery_url:
+            return self.idp.discovery()
+        if url == self.idp.jwks_uri:
+            return self.idp.jwks()
+        raise OidcConfigurationError(
+            f"Headway could not reach {url} (ConnectError). Check that the "
+            f"Headway server can reach your identity provider."
+        )
+
+    def _check_client(self, data, auth):
+        secret = None
+        if auth is not None:
+            client_id, secret = auth
+        else:
+            client_id = data.get("client_id")
+            secret = data.get("client_secret")
+        if client_id != self.idp.client_id or secret != self.idp.client_secret:
+            return {"error": "invalid_client"}
+        return None
+
+    def post_form(self, url: str, data: dict, *, auth=None) -> dict:
+        from headway_api.oidc import OidcError
+
+        self.requested.append(url)
+        self.idp.token_calls.append({"data": dict(data), "auth": auth})
+        if self.idp.token_error is not None:
+            status, body = self.idp.token_error
+            raise OidcError(
+                f"token endpoint refused the code exchange: HTTP {status} "
+                f"{body.get('error', 'unknown_error')}"
+            )
+        bad = self._check_client(data, auth)
+        if bad is not None:
+            raise OidcError("token endpoint refused the code exchange: HTTP 401 invalid_client")
+        record = self.idp.codes.get(data.get("code"))
+        if record is None or record["used"]:
+            raise OidcError("token endpoint refused the code exchange: HTTP 400 invalid_grant")
+        return self.idp.token_response(data["code"], data["code_verifier"])
+
+    def post_form_probe(self, url: str, data: dict, *, auth=None):
+        self.requested.append(url)
+        self.idp.token_calls.append({"data": dict(data), "auth": auth, "probe": True})
+        bad = self._check_client(data, auth)
+        if bad is not None:
+            return 401, bad
+        # A made-up code, refused after the credentials were accepted —
+        # exactly what the admin test action reads as a pass.
+        return 400, {"error": "invalid_grant"}
+
+
 @pytest.fixture
 def fake_db():
     db = FakeConn()
@@ -2333,7 +2799,7 @@ def fake_payload_reader(fake_store, fake_envelope_stream):
 
 @pytest.fixture
 def app(fake_db, settings, fake_store, fake_producer, fake_webhook_sender,
-        test_signer, fake_calc_launcher, fake_payload_reader):
+        test_signer, fake_calc_launcher, fake_payload_reader, oidc_metadata):
     application = create_app(
         settings=settings,
         db=fake_db,
@@ -2342,7 +2808,11 @@ def app(fake_db, settings, fake_store, fake_producer, fake_webhook_sender,
         webhook_sender=fake_webhook_sender,
         calc_run_launcher=fake_calc_launcher,
         raw_payload_reader=fake_payload_reader,
+        oidc_metadata=oidc_metadata,
     )
+    # The at-rest encryption key for configuration secrets (handoff 0046),
+    # injected like every other external seam.
+    application.state.secret_key = TEST_SECRET_ENCRYPTION_KEY
     # The installation signing key (handoff 0019), injected like every other
     # external seam — signing.get_signer serves this cached instance.
     application.state.signer = test_signer
@@ -2353,6 +2823,100 @@ def app(fake_db, settings, fake_store, fake_producer, fake_webhook_sender,
 def client(app):
     with TestClient(app) as c:
         yield c
+
+
+
+@pytest.fixture
+def fake_idp():
+    """A standards-shaped identity provider with real RSA keys."""
+    return FakeIdentityProvider()
+
+
+@pytest.fixture
+def fake_oidc_http(fake_idp):
+    return FakeOidcHttp(fake_idp)
+
+
+@pytest.fixture
+def oidc_metadata(fake_idp, fake_oidc_http):
+    """The REAL discovery/JWKS cache over a fake transport: caching, TTLs,
+    rotation-on-unknown-kid and the refresh rate limit are all production
+    code paths in every test that touches sign-in."""
+    from headway_api.oidc import ProviderMetadata
+
+    return ProviderMetadata(http_factory=lambda ca: fake_oidc_http)
+
+
+#: Deterministic AES-256 key for the at-rest encryption of configuration
+#: secrets — NEVER a production key.
+TEST_SECRET_ENCRYPTION_KEY = bytes.fromhex("cd" * 32)
+
+
+def configure_sso(db: FakeConn, idp: FakeIdentityProvider, *, enabled=True,
+                  client_secret=None, groups_claim="groups",
+                  clock_skew_seconds=120, ca_bundle_path=None):
+    """Seed a provider configuration, with the client secret encrypted at
+    rest by the production code path."""
+    from headway_api import secrets_at_rest
+
+    secret = idp.client_secret if client_secret is None else client_secret
+    db.oidc_provider = {
+        "discovery_url": idp.discovery_url,
+        "client_id": idp.client_id,
+        "client_secret_encrypted": (
+            secrets_at_rest.encrypt(
+                secret,
+                associated_data=secrets_at_rest.AD_OIDC_CLIENT_SECRET,
+                key=TEST_SECRET_ENCRYPTION_KEY,
+            )
+            if secret
+            else None
+        ),
+        "redirect_uri": "https://headway.example.gov/auth/callback",
+        "groups_claim": groups_claim,
+        "username_claim": "preferred_username",
+        "clock_skew_seconds": clock_skew_seconds,
+        "ca_bundle_path": ca_bundle_path,
+        "button_label": "Sign in with County SSO",
+        "is_enabled": enabled,
+        "updated_by": "cora",
+        "updated_at": dt.datetime(2026, 8, 1, 9, 0, tzinfo=UTC),
+    }
+
+
+def map_claim(db: FakeConn, claim_value: str, role: str, *, created_by="cora"):
+    mapping_id = str(uuid.uuid4())
+    db.oidc_role_mappings[mapping_id] = {
+        "mapping_id": mapping_id,
+        "claim_value": claim_value,
+        "headway_role": role,
+        "note": None,
+        "created_by": created_by,
+        "created_at": dt.datetime(2026, 8, 1, 9, 0, tzinfo=UTC),
+    }
+    return mapping_id
+
+
+def sso_sign_in(client, idp: FakeIdentityProvider, **id_token_claims):
+    """Drive a whole authorization-code + PKCE sign-in through the API.
+
+    Returns the callback response. ``id_token_claims`` are applied to the ID
+    token the provider mints, so a test can bend exactly one thing (a wrong
+    audience, a stale nonce, an unmapped group) and leave the rest genuine.
+    """
+    started = client.post("/auth/oidc/start")
+    assert started.status_code == 200, started.text
+    body = started.json()
+    code = idp.authorize(body["authorization_url"])
+    idp.codes[code]["claims"] = id_token_claims
+    return client.post(
+        "/auth/oidc/callback",
+        json={
+            "code": code,
+            "state": body["state"],
+            "browser_token": body["browser_token"],
+        },
+    )
 
 
 def token_for(db: FakeConn, username: str, *, ttl_seconds: int = 600) -> str:
@@ -2368,6 +2932,13 @@ def token_for(db: FakeConn, username: str, *, ttl_seconds: int = 600) -> str:
 
 def auth_header(db: FakeConn, username: str, **kwargs) -> dict:
     return {"Authorization": f"Bearer {token_for(db, username, **kwargs)}"}
+
+
+def add_auditor(db: FakeConn, username: str = "audra"):
+    """Seed an auditor account (handoff 0046). It gets a real bcrypt hash so
+    it is an ordinary LOCAL account in every respect but its role — the
+    read-only behaviour must come from the role, never from how it signs in."""
+    return db.add_user(username, "auditor", password_hash=_HASHES["vera"])
 
 
 def machine_header(full_key: str) -> dict:

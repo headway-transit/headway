@@ -18,6 +18,7 @@ from .db import lifespan
 from .machine_auth import FailureAuditThrottle, RateLimiter
 from .routers import (
     attestations,
+    audit_trail,
     branding,
     calc_runs,
     certify,
@@ -28,6 +29,7 @@ from .routers import (
     machine_keys,
     machine_read,
     metrics,
+    oidc as oidc_router,
     ops,
     public,
     raw_records,
@@ -50,6 +52,14 @@ class Settings:
     # key for ingest, per client IP for the public open-data endpoint.
     machine_requests_per_minute: int = 60
     public_requests_per_minute: int = 60
+    # Per client IP for the UNAUTHENTICATED single-sign-on surface. Lower than
+    # the others on purpose: starting a sign-in makes Headway open an outbound
+    # connection to the identity provider, so an unlimited /auth/oidc/start is
+    # a way to spend this box's request workers — and the worker that cannot
+    # be spent is the one serving local login, the break-glass path. A person
+    # signs in once or twice a day; 30 a minute is generous even for a whole
+    # agency arriving behind one reverse-proxy address.
+    sso_requests_per_minute: int = 30
 
 
 class MissingSessionSecret(RuntimeError):
@@ -77,6 +87,7 @@ def create_app(
     webhook_sender=None,
     calc_run_launcher=None,
     raw_payload_reader=None,
+    oidc_metadata=None,
 ) -> FastAPI:
     """Build the API.
 
@@ -110,9 +121,11 @@ def create_app(
             "This API never computes a reported figure; it serves what the "
             "calculation library produced, joined to its provenance. "
             "Reported values are JSON strings (exact NUMERIC, never float). "
-            "Auth: local accounts (ADR-0011); the native OIDC relying party "
-            "is the next increment behind the same {sub, username, role} "
-            "claim set."
+            "Auth: local accounts AND a native OIDC relying party "
+            "(ADR-0011), both producing the same {sub, username, role} claim "
+            "set. Local accounts are never disabled by single sign-on — an "
+            "IdP outage, an air-gapped box, or a misconfigured provider all "
+            "leave the local path working."
         ),
         lifespan=lifespan,
     )
@@ -138,8 +151,23 @@ def create_app(
     # (which never reach the in-body rate limiter) cannot amplify into
     # unbounded audit.events INSERTs — adversarial-review finding F1.
     app.state.machine_audit_throttle = FailureAuditThrottle()
+    # The same coalescing for the UNAUTHENTICATED single-sign-on surface
+    # (handoff 0046). Separate instance so a flood of forged OIDC callbacks
+    # cannot suppress the audit record of a genuine machine-key failure, and
+    # vice versa — one attacker must not be able to blind the trail to
+    # another.
+    app.state.login_audit_throttle = FailureAuditThrottle()
+    # Discovery/JWKS cache, shared across requests so key rotation is handled
+    # once per process rather than per sign-in. Tests inject a fake.
+    app.state.oidc_metadata = oidc_metadata
     app.state.public_rate_limiter = RateLimiter(
         app.state.settings.public_requests_per_minute
+    )
+    # Its own bucket, for the same reason login_audit_throttle is its own
+    # instance: a flood against single sign-on must not exhaust the budget
+    # that serves the public transparency endpoint, or the reverse.
+    app.state.sso_rate_limiter = RateLimiter(
+        app.state.settings.sso_requests_per_minute
     )
     # CORS: off by default (production serves web same-origin / behind a
     # reverse proxy). Set HEADWAY_CORS_ORIGINS to a comma-separated origin
@@ -183,4 +211,6 @@ def create_app(
     app.include_router(sandbox.router)
     app.include_router(users.router)
     app.include_router(sources.router)
+    app.include_router(oidc_router.router)
+    app.include_router(audit_trail.router)
     return app

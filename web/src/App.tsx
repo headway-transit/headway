@@ -32,6 +32,7 @@ import { PublicDataView } from "./views/PublicDataView";
 import { SafetyView } from "./views/SafetyView";
 import { SamplingView } from "./views/SamplingView";
 import { SandboxView } from "./views/SandboxView";
+import { SsoCallbackView } from "./views/SsoCallbackView";
 import { TodayView } from "./views/TodayView";
 import { Skeleton } from "./components/Skeleton";
 import { copy } from "./copy";
@@ -78,6 +79,12 @@ export function AppRoutes() {
   return (
     <Routes>
       <Route path="/login" element={<LoginView />} />
+      {/* Where the identity provider sends the browser back (handoff 0046,
+          docs/single-sign-on.md). Unauthenticated by necessity — turning the
+          provider's answer into a session is the whole job of this route —
+          and outside the Layout shell exactly like /login, because there is
+          no nav to draw for someone who is not signed in yet. */}
+      <Route path="/auth/callback" element={<SsoCallbackView />} />
       <Route element={<Layout />}>
         {/* UNAUTHENTICATED by design: certified figures are public record. */}
         <Route path="/public" element={<PublicDataView />} />

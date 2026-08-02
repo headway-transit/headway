@@ -114,6 +114,40 @@ const DEFAULT_ROUTES: Record<string, RouteHandler> = {
     },
   },
   "GET /calc/runs": { status: 200, body: [] },
+  // The admin hub reads the single-sign-on state on mount (handoff 0046) so
+  // its status line is the LIVE state rather than a claim. Defaults: nothing
+  // configured and no group mappings — the state a fresh installation is in,
+  // and the one the pre-existing admin tests assume.
+  "GET /auth/oidc/config": {
+    status: 200,
+    body: {
+      configured: false,
+      discovery_url: null,
+      client_id: null,
+      client_secret_set: false,
+      redirect_uri: null,
+      groups_claim: "groups",
+      username_claim: "preferred_username",
+      clock_skew_seconds: 120,
+      ca_bundle_path: null,
+      button_label: "Sign in with single sign-on",
+      is_enabled: false,
+      updated_by: null,
+      updated_at: null,
+      secret_storage_available: true,
+      disabled_by_environment: false,
+    },
+  },
+  "GET /auth/oidc/mappings": { status: 200, body: [] },
+  // The SIGN-IN screen asks whether to offer a single-sign-on button
+  // (handoff 0046). Default: off — a fresh installation, and the state every
+  // pre-existing login test assumes. The sign-in tests override it, and the
+  // local form must render identically whatever this call does (or does not)
+  // answer.
+  "GET /auth/oidc/status": {
+    status: 200,
+    body: { enabled: false, button_label: "" },
+  },
   // The dashboard fetches its sparkline history on every mount (handoff
   // 0024 #2); the default is an EMPTY series (no trend rendered), so the
   // many pre-existing dashboard tests keep exercising exactly what they

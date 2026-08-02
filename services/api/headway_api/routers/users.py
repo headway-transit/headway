@@ -170,8 +170,9 @@ def _validate_role(role: str) -> None:
             status_code=422,
             detail=(
                 f"'{role}' is not a role Headway knows. The roles are: "
-                f"viewer, data_steward, report_preparer, and "
-                f"certifying_official."
+                f"viewer, data_steward, report_preparer, "
+                f"certifying_official, and auditor (which can read "
+                f"everything and change nothing)."
             ),
         )
 

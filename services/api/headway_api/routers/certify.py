@@ -244,6 +244,37 @@ def _figure_receipt(row) -> dict:
     return figure
 
 
+
+def _certifier_block(identity: Identity, body) -> dict:
+    """Who signed, inside the signed bytes.
+
+    A LOCAL certifier's block is byte-for-byte what it always was — the four
+    keys below and nothing else — so documents signed before federation
+    existed and after it stay directly comparable, and no previously signed
+    certification is retrospectively a different shape.
+
+    A FEDERATED certifier's block gains the IdP issuer and subject
+    (handoff 0046). This is the point of recording both: "an SSO user" is not
+    a signer, and a signature whose signer cannot be resolved years later —
+    after the person has left, after the username has been reused, after the
+    tenant has been migrated — is not a signature. The subject is the one
+    identifier a provider promises never to reuse; the username is what a
+    human recognises. Both go inside the signed document, so neither can be
+    changed afterwards without breaking the Ed25519 verification.
+    """
+    block = {
+        "username": identity.username,
+        "role": identity.role,
+        "typed_full_name": body.signer_full_name,
+        "typed_title": body.signer_title,
+    }
+    if identity.is_federated:
+        block["authenticated_via"] = "oidc"
+        block["idp_issuer"] = identity.idp_issuer
+        block["idp_subject"] = identity.idp_subject
+    return block
+
+
 def _signer_identity_from_document(
     canonical_document: str | None,
 ) -> tuple[Optional[str], Optional[str]]:
@@ -497,12 +528,7 @@ def certify(
             "document_version": DOCUMENT_VERSION,
             "certification_id": certification_id,
             "certified_at": certified_at.isoformat(),
-            "certifier": {
-                "username": identity.username,
-                "role": identity.role,
-                "typed_full_name": body.signer_full_name,
-                "typed_title": body.signer_title,
-            },
+            "certifier": _certifier_block(identity, body),
             "intent_statement": INTENT_STATEMENT,
             "scope_statement": SIGNATURE_SCOPE_STATEMENT,
             "attestation_text": body.attestation,
@@ -549,6 +575,7 @@ def certify(
                 "metric_value_ids": ids,
                 "attestation": body.attestation,
                 "certified_by_role": identity.role,
+                **identity.audit_actor_detail(),
                 "signer_full_name": body.signer_full_name,
                 "signer_title": body.signer_title,
                 "key_fingerprint": signer.key_fingerprint,

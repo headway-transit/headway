@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Headway API",
-    "description": "Serves computed transit metrics with full lineage, the DQ resolution workflow, and the audited certification action. This API never computes a reported figure; it serves what the calculation library produced, joined to its provenance. Reported values are JSON strings (exact NUMERIC, never float). Auth: local accounts (ADR-0011); the native OIDC relying party is the next increment behind the same {sub, username, role} claim set.",
+    "description": "Serves computed transit metrics with full lineage, the DQ resolution workflow, and the audited certification action. This API never computes a reported figure; it serves what the calculation library produced, joined to its provenance. Reported values are JSON strings (exact NUMERIC, never float). Auth: local accounts AND a native OIDC relying party (ADR-0011), both producing the same {sub, username, role} claim set. Local accounts are never disabled by single sign-on \u2014 an IdP outage, an air-gapped box, or a misconfigured provider all leave the local path working.",
     "version": "0.1.0"
   },
   "paths": {
@@ -12,6 +12,7 @@
           "auth"
         ],
         "summary": "Login",
+        "description": "Sign in with a local Headway account.\n\nTHIS PATH NEVER STOPS WORKING. It does not consult the OIDC\nconfiguration, so a misconfigured provider, an unreachable IdP, or an\ninstallation with no internet at all leaves it untouched \u2014 the\nbreak-glass guarantee of handoff 0046.",
         "operationId": "login_auth_login_post",
         "requestBody": {
           "content": {
@@ -4345,6 +4346,421 @@
           }
         }
       }
+    },
+    "/auth/oidc/status": {
+      "get": {
+        "tags": [
+          "sso"
+        ],
+        "summary": "Sso Status",
+        "description": "Should the sign-in screen offer a single-sign-on button, and what does\nit say? Unauthenticated by necessity, and tells an anonymous caller\nnothing beyond that.",
+        "operationId": "sso_status_auth_oidc_status_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SsoStatus"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/oidc/start": {
+      "post": {
+        "tags": [
+          "sso"
+        ],
+        "summary": "Start Login",
+        "description": "Begin an authorization-code + PKCE sign-in.\n\nGenerates ``state``, ``nonce``, a PKCE verifier and a browser binding\ntoken, stores everything but the browser token server-side, and hands\nback the provider URL to send the browser to.\n\nRATE LIMITED because it is unauthenticated AND expensive: it can open an\noutbound connection to the identity provider and it INSERTs a row. Every\nendpoint in this API is synchronous, so a request waiting on an\nunreachable provider is holding a worker thread \u2014 and the request that\nmust never queue behind it is ``POST /auth/login``, the break-glass path\nthis whole wave promises keeps working when the IdP does not.",
+        "operationId": "start_login_auth_oidc_start_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StartLoginResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/oidc/callback": {
+      "post": {
+        "tags": [
+          "sso"
+        ],
+        "summary": "Oidc Callback",
+        "description": "Finish a sign-in: consume the state, exchange the code, validate the\nID token in full, map claims onto a role, provision if needed, and issue\na Headway session.\n\nEvery refusal below returns the SAME message. The reason is in the audit\ntrail; the wire never says whether the account exists, whether it was\nmapped, or which check failed.\n\nRATE LIMITED for the same reason as ``start_login``, plus one of its own:\na caller who reaches the code exchange makes Headway POST to the agency's\nidentity provider, so an unlimited callback turns this box into a traffic\namplifier pointed at the agency's own IdP.",
+        "operationId": "oidc_callback_auth_oidc_callback_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CallbackRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CallbackResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/oidc/config": {
+      "get": {
+        "tags": [
+          "sso"
+        ],
+        "summary": "Get Config",
+        "description": "The stored configuration. NEVER includes the client secret \u2014 there is\nno field on this model that could carry it.",
+        "operationId": "get_config_auth_oidc_config_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderConfigResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "sso"
+        ],
+        "summary": "Put Config",
+        "description": "Save the provider configuration (certifying official only; audited).\n\nThe client secret is encrypted before it touches the database and the\naudit record says only that it CHANGED. Passing null keeps the stored\nsecret, so an admin can edit the group claim without re-entering a\ncredential they were shown once.",
+        "operationId": "put_config_auth_oidc_config_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateProviderRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateProviderResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/oidc/config/test": {
+      "post": {
+        "tags": [
+          "sso"
+        ],
+        "summary": "Test Config",
+        "description": "Prove the configuration works BEFORE anyone depends on it.\n\nRuns the same code the sign-in path runs, in the same order, as far as it\ncan go without a human at a browser: reach the discovery document over\nTLS, read the endpoints, fetch the signing keys, and prove the client id\nand secret are accepted by redeeming a deliberately invalid code (see\n``oidc.probe_client_credentials``). Then it checks the two things that\nare correct in configuration but useless in practice: no role mappings\n(every sign-in would be refused) and sign-on left switched off.\n\nEach step reports pass/fail with a message written for someone who has\nnever configured OIDC and does not have database access.",
+        "operationId": "test_config_auth_oidc_config_test_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TestConfigResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/oidc/mappings": {
+      "get": {
+        "tags": [
+          "sso"
+        ],
+        "summary": "List Mappings",
+        "description": "Every configured claim -> role grant. Certifying official only.",
+        "operationId": "list_mappings_auth_oidc_mappings_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/RoleMapping"
+                  },
+                  "type": "array",
+                  "title": "Response List Mappings Auth Oidc Mappings Get"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "sso"
+        ],
+        "summary": "Create Mapping",
+        "description": "Grant a Headway role to everyone carrying one exact claim value.\n\n``certifying_official`` is refused here in plain language, and the\ndatabase refuses it too (migration 0043). The message explains WHY rather\nthan just saying no, because an administrator told \"no\" without a reason\nwill look for a way around it.",
+        "operationId": "create_mapping_auth_oidc_mappings_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateMappingRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateMappingResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/oidc/mappings/{mapping_id}": {
+      "delete": {
+        "tags": [
+          "sso"
+        ],
+        "summary": "Delete Mapping",
+        "description": "Remove a grant (certifying official only; audited with what it was).\n\nExisting accounts are NOT deleted \u2014 removing a mapping stops future\nsign-ins for that group, and the accounts it already created are managed\nunder Admin -> Users like any other. Deleting people's accounts as a side\neffect of a configuration edit would be a surprise, and a destructive one.",
+        "operationId": "delete_mapping_auth_oidc_mappings__mapping_id__delete",
+        "parameters": [
+          {
+            "name": "mapping_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Mapping Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteMappingResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/audit/events": {
+      "get": {
+        "tags": [
+          "audit"
+        ],
+        "summary": "List Audit Events",
+        "description": "The audit trail, newest first. Auditors and certifying officials only.",
+        "operationId": "list_audit_events_audit_events_get",
+        "parameters": [
+          {
+            "name": "actor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only entries by this exact username or machine key.",
+              "title": "Actor"
+            },
+            "description": "Only entries by this exact username or machine key."
+          },
+          {
+            "name": "action",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only entries of this exact action.",
+              "title": "Action"
+            },
+            "description": "Only entries of this exact action."
+          },
+          {
+            "name": "subject_kind",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only entries about this kind of thing, e.g. cert.certifications.",
+              "title": "Subject Kind"
+            },
+            "description": "Only entries about this kind of thing, e.g. cert.certifications."
+          },
+          {
+            "name": "subject_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only entries about this exact record.",
+              "title": "Subject Id"
+            },
+            "description": "Only entries about this exact record."
+          },
+          {
+            "name": "before_event_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Cursor from the previous page's next_cursor.",
+              "title": "Before Event Id"
+            },
+            "description": "Cursor from the previous page's next_cursor."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 500,
+              "minimum": 1,
+              "default": 100,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditPage"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -4814,6 +5230,98 @@
           "audit_event_id"
         ],
         "title": "AttestationRevoked"
+      },
+      "AuditEvent": {
+        "properties": {
+          "event_id": {
+            "type": "integer",
+            "title": "Event Id"
+          },
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Occurred At"
+          },
+          "actor": {
+            "type": "string",
+            "title": "Actor"
+          },
+          "action": {
+            "type": "string",
+            "title": "Action"
+          },
+          "subject_kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subject Kind"
+          },
+          "subject_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subject Id"
+          },
+          "detail": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "required": [
+          "event_id",
+          "occurred_at",
+          "actor",
+          "action",
+          "subject_kind",
+          "subject_id",
+          "detail"
+        ],
+        "title": "AuditEvent"
+      },
+      "AuditPage": {
+        "properties": {
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/AuditEvent"
+            },
+            "type": "array",
+            "title": "Events"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          },
+          "note": {
+            "type": "string",
+            "title": "Note"
+          }
+        },
+        "type": "object",
+        "required": [
+          "events",
+          "next_cursor",
+          "note"
+        ],
+        "title": "AuditPage"
       },
       "BoardingReview": {
         "properties": {
@@ -5324,6 +5832,62 @@
         ],
         "title": "CalcRunRequest",
         "description": "One dispatch request: the half-open period only. No calc selection,\nno threshold knobs \u2014 the runner resolves thresholds exactly as the CLI\ndoes (explicit flag > audited app.settings row > code default; here\nthere are no explicit flags, so the audited settings govern)."
+      },
+      "CallbackRequest": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "state": {
+            "type": "string",
+            "title": "State"
+          },
+          "browser_token": {
+            "type": "string",
+            "title": "Browser Token"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "state",
+          "browser_token"
+        ],
+        "title": "CallbackRequest"
+      },
+      "CallbackResponse": {
+        "properties": {
+          "access_token": {
+            "type": "string",
+            "title": "Access Token"
+          },
+          "token_type": {
+            "type": "string",
+            "title": "Token Type",
+            "default": "bearer"
+          },
+          "expires_in": {
+            "type": "integer",
+            "title": "Expires In"
+          },
+          "username": {
+            "type": "string",
+            "title": "Username"
+          },
+          "role": {
+            "type": "string",
+            "title": "Role"
+          }
+        },
+        "type": "object",
+        "required": [
+          "access_token",
+          "expires_in",
+          "username",
+          "role"
+        ],
+        "title": "CallbackResponse"
       },
       "CanonicalLiveness": {
         "properties": {
@@ -6212,6 +6776,91 @@
         ],
         "title": "CreateKeyResponse"
       },
+      "CreateMappingRequest": {
+        "properties": {
+          "claim_value": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Claim Value"
+          },
+          "headway_role": {
+            "type": "string",
+            "title": "Headway Role"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "type": "object",
+        "required": [
+          "claim_value",
+          "headway_role"
+        ],
+        "title": "CreateMappingRequest"
+      },
+      "CreateMappingResponse": {
+        "properties": {
+          "mapping_id": {
+            "type": "string",
+            "title": "Mapping Id"
+          },
+          "claim_value": {
+            "type": "string",
+            "title": "Claim Value"
+          },
+          "headway_role": {
+            "type": "string",
+            "title": "Headway Role"
+          },
+          "role_label": {
+            "type": "string",
+            "title": "Role Label"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "created_by": {
+            "type": "string",
+            "title": "Created By"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "audit_event_id": {
+            "type": "integer",
+            "title": "Audit Event Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "mapping_id",
+          "claim_value",
+          "headway_role",
+          "role_label",
+          "created_by",
+          "created_at",
+          "audit_event_id"
+        ],
+        "title": "CreateMappingResponse"
+      },
       "CreateSubscriptionRequest": {
         "properties": {
           "url": {
@@ -6370,6 +7019,29 @@
           "note"
         ],
         "title": "DecoderBlock"
+      },
+      "DeleteMappingResponse": {
+        "properties": {
+          "claim_value": {
+            "type": "string",
+            "title": "Claim Value"
+          },
+          "headway_role": {
+            "type": "string",
+            "title": "Headway Role"
+          },
+          "audit_event_id": {
+            "type": "integer",
+            "title": "Audit Event Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "claim_value",
+          "headway_role",
+          "audit_event_id"
+        ],
+        "title": "DeleteMappingResponse"
       },
       "DeleteServiceDayOverrideResponse": {
         "properties": {
@@ -8692,6 +9364,127 @@
         "title": "PreviewSide",
         "description": "One variant's outcome for one metric: the would-be value (or an\nhonest refusal) plus every would-be finding. Nothing here was written\nanywhere."
       },
+      "ProviderConfigResponse": {
+        "properties": {
+          "configured": {
+            "type": "boolean",
+            "title": "Configured"
+          },
+          "discovery_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Discovery Url"
+          },
+          "client_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Id"
+          },
+          "client_secret_set": {
+            "type": "boolean",
+            "title": "Client Secret Set",
+            "default": false
+          },
+          "redirect_uri": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Redirect Uri"
+          },
+          "groups_claim": {
+            "type": "string",
+            "title": "Groups Claim",
+            "default": "groups"
+          },
+          "username_claim": {
+            "type": "string",
+            "title": "Username Claim",
+            "default": "preferred_username"
+          },
+          "clock_skew_seconds": {
+            "type": "integer",
+            "title": "Clock Skew Seconds",
+            "default": 120
+          },
+          "ca_bundle_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ca Bundle Path"
+          },
+          "button_label": {
+            "type": "string",
+            "title": "Button Label",
+            "default": "Sign in with single sign-on"
+          },
+          "is_enabled": {
+            "type": "boolean",
+            "title": "Is Enabled",
+            "default": false
+          },
+          "updated_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated By"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "secret_storage_available": {
+            "type": "boolean",
+            "title": "Secret Storage Available",
+            "default": true
+          },
+          "disabled_by_environment": {
+            "type": "boolean",
+            "title": "Disabled By Environment",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "configured"
+        ],
+        "title": "ProviderConfigResponse",
+        "description": "The configuration as an admin sees it.\n\n``client_secret_set`` is a boolean and there is no field that could ever\ncarry the secret. Show-once means show once."
+      },
       "PublicCertificationRef": {
         "properties": {
           "certification_id": {
@@ -9226,6 +10019,56 @@
           "audit_event_id"
         ],
         "title": "RevokeSubscriptionResponse"
+      },
+      "RoleMapping": {
+        "properties": {
+          "mapping_id": {
+            "type": "string",
+            "title": "Mapping Id"
+          },
+          "claim_value": {
+            "type": "string",
+            "title": "Claim Value"
+          },
+          "headway_role": {
+            "type": "string",
+            "title": "Headway Role"
+          },
+          "role_label": {
+            "type": "string",
+            "title": "Role Label"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "created_by": {
+            "type": "string",
+            "title": "Created By"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "mapping_id",
+          "claim_value",
+          "headway_role",
+          "role_label",
+          "created_by",
+          "created_at"
+        ],
+        "title": "RoleMapping"
       },
       "RouteFeature": {
         "properties": {
@@ -10206,6 +11049,48 @@
         ],
         "title": "Ss50Deadline"
       },
+      "SsoStatus": {
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          },
+          "button_label": {
+            "type": "string",
+            "title": "Button Label"
+          }
+        },
+        "type": "object",
+        "required": [
+          "enabled",
+          "button_label"
+        ],
+        "title": "SsoStatus",
+        "description": "What the sign-in screen may know before anyone is signed in.\n\nDeliberately tiny: whether the button should appear and what it should\nsay. No discovery URL, no client id, no issuer \u2014 an unauthenticated\ncaller learns nothing about the agency's identity provider that it could\nnot learn by clicking the button."
+      },
+      "StartLoginResponse": {
+        "properties": {
+          "authorization_url": {
+            "type": "string",
+            "title": "Authorization Url"
+          },
+          "state": {
+            "type": "string",
+            "title": "State"
+          },
+          "browser_token": {
+            "type": "string",
+            "title": "Browser Token"
+          }
+        },
+        "type": "object",
+        "required": [
+          "authorization_url",
+          "state",
+          "browser_token"
+        ],
+        "title": "StartLoginResponse"
+      },
       "StopFeature": {
         "properties": {
           "type": {
@@ -10544,6 +11429,55 @@
         ],
         "title": "SupersedeRequest"
       },
+      "TestConfigResponse": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          },
+          "steps": {
+            "items": {
+              "$ref": "#/components/schemas/TestStep"
+            },
+            "type": "array",
+            "title": "Steps"
+          },
+          "audit_event_id": {
+            "type": "integer",
+            "title": "Audit Event Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ok",
+          "steps",
+          "audit_event_id"
+        ],
+        "title": "TestConfigResponse"
+      },
+      "TestStep": {
+        "properties": {
+          "step": {
+            "type": "string",
+            "title": "Step"
+          },
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "step",
+          "ok",
+          "message"
+        ],
+        "title": "TestStep"
+      },
       "ThresholdExplanation": {
         "properties": {
           "threshold": {
@@ -10566,6 +11500,209 @@
           "citation"
         ],
         "title": "ThresholdExplanation"
+      },
+      "UpdateProviderRequest": {
+        "properties": {
+          "discovery_url": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Discovery Url"
+          },
+          "client_id": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Client Id"
+          },
+          "client_secret": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Secret"
+          },
+          "redirect_uri": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Redirect Uri"
+          },
+          "groups_claim": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Groups Claim",
+            "default": "groups"
+          },
+          "username_claim": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Username Claim",
+            "default": "preferred_username"
+          },
+          "clock_skew_seconds": {
+            "type": "integer",
+            "maximum": 600.0,
+            "minimum": 0.0,
+            "title": "Clock Skew Seconds",
+            "default": 120
+          },
+          "ca_bundle_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ca Bundle Path"
+          },
+          "button_label": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Button Label",
+            "default": "Sign in with single sign-on"
+          },
+          "is_enabled": {
+            "type": "boolean",
+            "title": "Is Enabled",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "discovery_url",
+          "client_id",
+          "redirect_uri"
+        ],
+        "title": "UpdateProviderRequest"
+      },
+      "UpdateProviderResponse": {
+        "properties": {
+          "configured": {
+            "type": "boolean",
+            "title": "Configured"
+          },
+          "discovery_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Discovery Url"
+          },
+          "client_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Id"
+          },
+          "client_secret_set": {
+            "type": "boolean",
+            "title": "Client Secret Set",
+            "default": false
+          },
+          "redirect_uri": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Redirect Uri"
+          },
+          "groups_claim": {
+            "type": "string",
+            "title": "Groups Claim",
+            "default": "groups"
+          },
+          "username_claim": {
+            "type": "string",
+            "title": "Username Claim",
+            "default": "preferred_username"
+          },
+          "clock_skew_seconds": {
+            "type": "integer",
+            "title": "Clock Skew Seconds",
+            "default": 120
+          },
+          "ca_bundle_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ca Bundle Path"
+          },
+          "button_label": {
+            "type": "string",
+            "title": "Button Label",
+            "default": "Sign in with single sign-on"
+          },
+          "is_enabled": {
+            "type": "boolean",
+            "title": "Is Enabled",
+            "default": false
+          },
+          "updated_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated By"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "secret_storage_available": {
+            "type": "boolean",
+            "title": "Secret Storage Available",
+            "default": true
+          },
+          "disabled_by_environment": {
+            "type": "boolean",
+            "title": "Disabled By Environment",
+            "default": false
+          },
+          "audit_event_id": {
+            "type": "integer",
+            "title": "Audit Event Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "configured",
+          "audit_event_id"
+        ],
+        "title": "UpdateProviderResponse"
       },
       "UpdateSettingRequest": {
         "properties": {

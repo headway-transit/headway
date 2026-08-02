@@ -123,4 +123,27 @@ def test_token_with_unknown_role_is_401(client):
 def test_token_helper_matches_login_token_shape(fake_db):
     t = token_for(fake_db, "vera")
     claims = pyjwt.decode(t, TEST_SECRET, algorithms=["HS256"])
-    assert set(claims) == {"sub", "username", "role", "iat", "exp"}
+    # `jti` joined the claim set with handoff 0046: a session identifier,
+    # freshly minted on every login. The IdP claims are absent for a local
+    # account — they appear only on a federated session.
+    assert set(claims) == {"sub", "username", "role", "jti", "iat", "exp"}
+
+
+def test_every_login_mints_a_new_session_id(client):
+    """Session fixation has no purchase: nothing a browser held before
+    signing in survives the login. Two sign-ins as the same person carry
+    different session identifiers."""
+    first = client.post(
+        "/auth/login", json={"username": "vera", "password": "viewer-pass-1"}
+    )
+    second = client.post(
+        "/auth/login", json={"username": "vera", "password": "viewer-pass-1"}
+    )
+    assert first.status_code == 200 and second.status_code == 200
+    one = pyjwt.decode(
+        first.json()["access_token"], TEST_SECRET, algorithms=["HS256"]
+    )
+    two = pyjwt.decode(
+        second.json()["access_token"], TEST_SECRET, algorithms=["HS256"]
+    )
+    assert one["jti"] and two["jti"] and one["jti"] != two["jti"]

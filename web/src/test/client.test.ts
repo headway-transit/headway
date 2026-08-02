@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   ApiError,
+  finishSsoLogin,
   listMetricValues,
   setUnauthorizedHandler,
 } from "../api/client";
@@ -25,6 +26,30 @@ describe("api client", () => {
     });
     expect(getSession()).toBeNull();
     expect(onUnauthorized).toHaveBeenCalledTimes(1);
+    setUnauthorizedHandler(null);
+  });
+
+  it("does not mistake a refused single sign-on for an expired session", async () => {
+    // A 401 from an unauthenticated SIGN-IN endpoint means "that attempt
+    // failed", never "your session expired": bouncing to /login from here
+    // would take the sign-in screen out from under its own error message
+    // before anyone could read it.
+    const onUnauthorized = vi.fn();
+    setUnauthorizedHandler(onUnauthorized);
+    mockApi({
+      "POST /auth/oidc/callback": {
+        status: 401,
+        body: { detail: "Headway could not sign you in with single sign-on." },
+      },
+    });
+
+    await expect(
+      finishSsoLogin({ code: "c", state: "s", browser_token: "b" }),
+    ).rejects.toMatchObject({
+      status: 401,
+      message: "Headway could not sign you in with single sign-on.",
+    });
+    expect(onUnauthorized).not.toHaveBeenCalled();
     setUnauthorizedHandler(null);
   });
 
