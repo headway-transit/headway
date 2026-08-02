@@ -295,6 +295,14 @@ code,
   margin: 0 0 var(--space-1);
 }
 
+/* `hidden` is a promise, not a hint: a component that sets `display` would
+   otherwise paint (and keep focusable) a panel the markup says is closed.
+   Found live in handoff 0044's first browser pass — the nav groups' link
+   lists were peeking under the command bar while marked hidden. */
+[hidden] {
+  display: none !important;
+}
+
 /* Visible focus everywhere (WCAG 2.4.7). */
 :focus-visible {
   outline: var(--focus-ring);
@@ -346,12 +354,15 @@ h3 {
   left: 0;
 }
 
+/* ---- THE COMMAND BAR (handoff 0044, output 1) ----------------------------
+   Two dense rows with different jobs: a command bar (brand · agency · the
+   room you are in · the "as computed" run stamp · utilities) over ONE
+   navigation row. Flat throughout — hairline etch, no bevel, no elevation.
+   Every colour pair here is a registered AA pair (scripts/check-contrast). */
+
 .app-header {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-2) var(--space-4);
+  flex-direction: column;
   border-bottom: 1px solid var(--color-border);
   /* Brand chrome: the decorative top bar takes the agency's primary color
      (non-text, both themes). Charts never take brand colors. */
@@ -364,6 +375,14 @@ h3 {
   background: var(--chrome-header-bg, var(--color-bg));
   color: var(--chrome-header-text, var(--color-text));
 }
+/* Row 1 — the command bar itself. */
+.command-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-3);
+  padding: var(--space-2) var(--space-3);
+}
 /* The wordmark: the display face behind a signal-orange rule. This is an
    IDENTITY moment — the one place the accent is allowed to mean nothing but
    "this is Headway". */
@@ -373,8 +392,8 @@ h3 {
   gap: var(--space-2);
   font-family: var(--font-display);
   font-weight: 700;
-  font-size: var(--text-lg);
-  letter-spacing: 0.02em;
+  font-size: var(--text-base);
+  letter-spacing: 0.04em;
   border-left: 3px solid var(--signal);
   padding-left: var(--space-2);
 }
@@ -385,18 +404,98 @@ h3 {
   width: auto;
   max-width: 10rem;
 }
-.app-header nav ul {
+/* The room you are in: the study's dim agency line, tracked and uppercase.
+   Muted body text on the header surface is a registered AA pair. */
+.command-context {
+  font-family: var(--font-display);
+  font-size: 0.75rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--chrome-header-text, var(--color-text-muted));
+}
+.command-context::before {
+  content: "· ";
+}
+
+/* The "as computed" run stamp: pushed right, mono, tabular. It is a stamp,
+   never a figure — the label says so and the value is the server's own
+   timestamp string. */
+.run-stamp {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  font-size: 0.7rem;
+  color: var(--chrome-header-text, var(--color-text-muted));
+}
+.run-stamp-label {
+  font-family: var(--font-display);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+.run-stamp-value {
+  font-size: 0.7rem;
+}
+
+.app-header .session-info {
   display: flex;
-  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--chrome-header-text, var(--color-text-muted));
+  font-size: 0.75rem;
+}
+/* Compact utilities: still >= 24px of target, still full labels. */
+.app-header .session-info button,
+.app-header .session-info a {
+  font-size: 0.75rem;
+  padding: var(--space-1) var(--space-2);
+}
+/* When no run stamp renders (signed out) the utilities still sit right. */
+.command-bar > .session-info:first-of-type {
+  margin-left: auto;
+}
+/* The "Take the tour" control is a BUTTON (it navigates AND starts the
+   tour — not a plain link). On a themed header the accent-blue link color
+   could vanish against the chrome background (2026-07-20 live click-through
+   finding), so it takes the server-verified header text color there;
+   neutral chrome keeps body text — both AA pairs. */
+.app-header button.link-like {
+  color: var(--chrome-header-text, var(--color-text));
+  padding: var(--space-1) var(--space-2);
+}
+/* The signed-out "Sign in" link sits on the (possibly themed) header bar:
+   on a chrome theme it takes the server-verified header text color — the
+   accent-blue default would vanish on a dark themed bar (2026-07-14 live
+   click-through finding). Neutral chrome keeps the accent link. */
+.app-header .session-info a {
+  color: var(--chrome-header-text, var(--color-accent));
+}
+
+/* Row 2 — ONE dense navigation row. It no longer wraps to two rows of
+   seventeen links: the rooms people live in are direct links and the long
+   tail sits in named groups. It stays scrollable rather than wrapping, so
+   the shell's height never changes under the content. */
+.nav-strip {
+  padding: 0 var(--space-4) var(--space-2);
+  overflow-x: auto;
+}
+.nav-strip ul {
+  display: flex;
+  align-items: center;
   gap: var(--space-1);
   list-style: none;
   margin: 0;
   padding: 0;
 }
+.nav-strip > ul {
+  flex-wrap: nowrap;
+}
 .app-header nav a {
   display: inline-block;
+  white-space: nowrap;
   padding: var(--space-1) var(--space-2);
   border-radius: var(--radius-1);
+  font-size: var(--text-sm);
   color: var(--chrome-header-text, var(--color-text));
   text-decoration: none;
 }
@@ -419,37 +518,90 @@ h3 {
   text-decoration-thickness: 3px;
   text-underline-offset: 6px;
 }
-.app-header .session-info {
-  margin-left: auto;
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  color: var(--chrome-header-text, var(--color-text-muted));
-  font-size: var(--text-sm);
+
+/* A named group in the nav row: a disclosure over ordinary links. */
+.nav-group {
+  position: relative;
 }
-/* The "Take the tour" control is a BUTTON in the nav list (it navigates
-   AND starts the tour — not a plain link). On a themed header the accent-
-   blue link color could vanish against the chrome background (2026-07-20
-   live click-through finding), so it takes the server-verified header
-   text color there; neutral chrome keeps body text — both AA pairs. The
-   underline keeps it recognizable as an action either way. */
-.app-header nav button.link-like {
-  color: var(--chrome-header-text, var(--color-text));
+.nav-group-toggle {
+  font: inherit;
+  font-size: var(--text-sm);
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
   padding: var(--space-1) var(--space-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius-1);
+  background: transparent;
+  color: var(--chrome-header-text, var(--color-text));
+  cursor: pointer;
+}
+.nav-group-toggle:hover {
+  background: var(--color-surface);
+}
+/* The group holding the page you are on: weight + the same accent rule the
+   current link uses, and a screen-reader sentence — never colour alone. */
+.nav-group-toggle[data-current="true"] {
+  font-weight: 700;
+  text-decoration: underline;
+  text-decoration-color: var(--chrome-active-accent, var(--color-accent));
+  text-decoration-thickness: 3px;
+  text-underline-offset: 6px;
+}
+.nav-group-caret {
+  /* currentColor, so a server-themed chrome header keeps the pair it was
+     validated for rather than borrowing an unverified muted token. */
+  font-size: 0.7em;
+  color: inherit;
+}
+.nav-group-panel {
+  position: absolute;
+  z-index: 12;
+  top: calc(100% + 2px);
+  left: 0;
+  min-width: 13rem;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
+  padding: var(--space-1);
+  margin: 0;
+  list-style: none;
+  background: var(--color-bg);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-2);
+  box-shadow: var(--shadow-2);
+}
+.nav-group-panel a {
+  display: block;
+  color: var(--color-text);
 }
 
-/* The signed-out "Sign in" link sits on the (possibly themed) header bar:
-   on a chrome theme it takes the server-verified header text color — the
-   accent-blue default would vanish on a dark themed bar (2026-07-14 live
-   click-through finding). Neutral chrome keeps the accent link. */
-.app-header .session-info a {
-  color: var(--chrome-header-text, var(--color-accent));
+/* The app is a viewport-tall column: command bar, nav row, then the page.
+   The map's hero measures itself from what is LEFT rather than guessing a
+   header height (handoff 0044, output 2). */
+#root {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
 }
 
 main {
+  flex: 1 0 auto;
+  width: 100%;
   max-width: 72rem;
   margin: 0 auto;
   padding: var(--space-4) var(--space-3) var(--space-5);
+}
+/* The map takes the whole viewport (handoff 0044, output 2). */
+main.page-full {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-width: none;
+  padding: 0;
 }
 
 /* ---- card surface (subtle elevation; shared by receipts, issues,
@@ -2742,6 +2894,32 @@ button.figure-button {
       transform: none;
     }
   }
+
+  /* The provenance terminal (handoff 0044, output 4). Both of its moving
+     parts live HERE — which is exactly what "reduced motion disables the
+     slide-in but the stream still updates" means in practice: the poll and
+     the rows are outside this block; only the decoration is inside it. */
+  .term-row {
+    animation: hw-term-slide 300ms ease;
+  }
+  .term-live-dot {
+    animation: hw-term-blink 1.8s ease-in-out infinite;
+  }
+  @keyframes hw-term-slide {
+    from {
+      opacity: 0;
+      transform: translateX(-4px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  @keyframes hw-term-blink {
+    50% {
+      opacity: 0.3;
+    }
+  }
 }
 /* The instant (non-motion) half of the hover affordance: elevation. */
 .summary-card:hover,
@@ -3418,4 +3596,531 @@ button.figure-button {
 .raw-record-preview-heading {
   margin: var(--space-3) 0 var(--space-2);
   font-size: 1rem;
+}
+
+/* ==========================================================================
+   THE CONTROL ROOM (handoff 0044) — composition, not paint.
+   ==========================================================================
+   0041 and 0043 shipped the tokens and the features; neither commissioned
+   LAYOUT, so every figure sat below a screen of paragraphs. What follows is
+   the missing half: a page-level shell grid, a persistent rail, a compact
+   control strip, the provenance terminal, and the disclosure that lets an
+   explanation fold without letting an ADMISSION fold with it.
+
+   Flat throughout: hairline etch (`--color-border`), no bevels, no
+   elevation except the two popovers that must sit over content. Figures and
+   ids are mono + tabular-nums. The identity accent is non-semantic; the
+   ok/watch/alert set is the only thing that means severity. */
+
+/* ---- progressive disclosure -------------------------------------------- */
+
+.disclosure {
+  margin: var(--space-2) 0;
+}
+.disclosure-toggle {
+  font: inherit;
+  font-size: var(--text-sm);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2) var(--space-1) 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-accent);
+  text-decoration: underline;
+  cursor: pointer;
+}
+.disclosure-caret {
+  font-size: 0.8em;
+  text-decoration: none;
+}
+.disclosure-panel {
+  margin-top: var(--space-1);
+  padding-left: var(--space-3);
+  border-left: 2px solid var(--color-border);
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+.disclosure-panel > p {
+  margin: 0 0 var(--space-2);
+}
+.disclosure-panel > p:last-child {
+  margin-bottom: 0;
+}
+
+/* An ADMISSION never folds. This is the visible-at-all-times treatment for
+   a refusal, a held or excluded count, a cap, a staleness note, a scope
+   receipt, or a "not narrowed / not an NTD figure" boundary: compact, but
+   never hidden and never behind a control. */
+.admission {
+  margin: var(--space-2) 0 0;
+  padding-left: var(--space-2);
+  border-left: 2px solid var(--color-input-border);
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+
+/* ---- the map page: full-bleed hero + persistent rail -------------------- */
+
+.map-shell {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 23rem;
+  /* The 1px gap IS the etch: the shell's own background shows through. */
+  gap: 1px;
+  background: var(--color-border);
+  /* The viewport minus the command bar: the canvas is the hero, and the
+     legend/list below it are a deliberate scroll, not the first thing you
+     meet. 7rem is a slack allowance over the measured 5.75rem bar, so a
+     taller branded header cannot clip the shell. A DEFINITE height (not a
+     minimum) is what lets the rail distribute itself internally instead of
+     growing the hero past the fold. */
+  height: calc(100vh - 7rem);
+  min-height: 30rem;
+}
+@media (max-width: 60rem) {
+  .map-shell {
+    grid-template-columns: minmax(0, 1fr);
+    flex: 0 0 auto;
+  }
+}
+
+.map-hero {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--color-bg);
+}
+/* The canvas fills what the toolbar leaves. In the old composition it was a
+   fixed 62vh block halfway down a scroll; here it is the hero. */
+.map-hero .map-canvas-wrap {
+  position: relative;
+  flex: 1;
+  min-height: 22rem;
+}
+.map-hero .map-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+}
+
+/* The hero caption: the room's name over the canvas, on a solid token
+   surface so the AA pair is the registered text-on-card one rather than
+   "text over whatever the map happens to be drawing". */
+.hero-cap {
+  position: absolute;
+  z-index: 3;
+  top: var(--space-2);
+  left: var(--space-2);
+  padding: var(--space-1) var(--space-3);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-left: 3px solid var(--signal);
+  border-radius: var(--radius-2);
+  pointer-events: none;
+}
+.hero-cap .eyebrow {
+  margin: 0;
+}
+.hero-cap h1 {
+  margin: 0;
+  font-size: var(--text-lg);
+}
+/* The honesty line, bottom-left, always visible — the one-line summary that
+   stays on screen while the full explanation folds into the toolbar's
+   disclosure. */
+.hero-honesty {
+  position: absolute;
+  z-index: 3;
+  left: var(--space-2);
+  bottom: var(--space-2);
+  max-width: 34rem;
+  margin: 0;
+  padding: var(--space-1) var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--color-text);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-2);
+  pointer-events: none;
+}
+
+/* The compact control strip: window, street style, mode highlight, the
+   staleness chip and the refresh control — one dense row in the map chrome
+   instead of three stacked filter bars with a paragraph under each. */
+.map-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface);
+}
+.map-toolbar button {
+  font-size: 0.75rem;
+  padding: var(--space-1) var(--space-2);
+}
+.map-toolbar .chip {
+  font-size: 0.72rem;
+}
+.map-toolbar .filter-bar {
+  margin: 0;
+}
+.map-toolbar .filter-bar-label {
+  font-size: 0.75rem;
+  letter-spacing: 0.04em;
+}
+.map-toolbar .map-status {
+  margin: 0;
+  margin-left: auto;
+  font-size: 0.75rem;
+}
+/* The cadence line and the "how these controls work" disclosure share the
+   strip's last line: the caveat stays visible, the explanation folds. */
+.map-toolbar .admission {
+  flex: 1 1 24rem;
+  margin: 0;
+  padding-left: 0;
+  border-left: 0;
+  font-size: 0.72rem;
+}
+.map-toolbar .disclosure {
+  margin: 0;
+  flex: 0 0 auto;
+}
+.map-toolbar .disclosure-panel {
+  flex-basis: 100%;
+}
+
+/* ---- the rail ---------------------------------------------------------- */
+
+.rail {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+  background: var(--color-bg);
+}
+/* The worklist takes the leftover height and scrolls IN PLACE, so the fleet
+   readout and the provenance terminal below it are always on screen. The
+   list is never shortened — only the viewport it sits in is. */
+.rail > .map-flags {
+  flex: 3 1 20rem;
+  min-height: 14rem;
+  overflow-y: auto;
+}
+.rail > .rail-section,
+.rail > .prov-terminal,
+.rail > .rail-notices {
+  flex: 0 0 auto;
+}
+.prov-terminal .term-stream {
+  max-height: 8.5rem;
+}
+.rail > * {
+  border-bottom: 1px solid var(--color-border);
+}
+.rail > *:last-child {
+  border-bottom: 0;
+}
+/* Section headers in the rail: the transit-diagram label voice. */
+.rail-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+}
+.rail-head-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+.rail-section {
+  padding: var(--space-3);
+}
+.rail-section .admission,
+.rail-section .stat-flags {
+  font-size: 0.72rem;
+}
+.rail-section > h2 {
+  margin: 0 0 var(--space-2);
+  font-family: var(--font-display);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+/* The fleet readout: figure cards, monospace and flat. The figure NEVER
+   carries a glow or a status colour (glow says "look here", not "this
+   number is good") — an attention rail goes on the card FRAME. */
+.readout {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.readout > li {
+  position: relative;
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+}
+.readout > li:last-child {
+  border-bottom: 0;
+}
+.readout-label {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+.readout-figure {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 1.6rem;
+  font-weight: 600;
+  line-height: 1.1;
+  color: var(--color-text);
+}
+.readout-figure .readout-unit {
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  font-weight: 400;
+  color: var(--color-text-muted);
+  margin-left: var(--space-1);
+}
+.readout-receipt {
+  margin: var(--space-1) 0 0;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.7rem;
+  color: var(--color-text-muted);
+}
+/* The attention rail on the FRAME of a card that needs a person. Shape
+   (the rail) + the sentence in the receipt line carry it; the glow is the
+   scarce echo, and prefers-reduced-motion never animates it because it
+   never animates at all. */
+.readout > li[data-attention="alert"] {
+  border-left: 3px solid var(--status-alert);
+  box-shadow: inset 3px 0 10px -6px var(--status-alert-glow);
+}
+
+/* The rail's honesty notices: whatever the server said about this data,
+   verbatim, at the TOP of the rail so it is on screen without scrolling. */
+.rail-notices {
+  padding: var(--space-2) var(--space-3);
+}
+.rail-notices > * {
+  margin: 0 0 var(--space-2);
+}
+.rail-notices > *:last-child {
+  margin-bottom: 0;
+}
+/* Inside the rail the findings list drops its page-level margins. */
+.rail .map-flags {
+  padding: var(--space-3);
+  margin: 0;
+  font-size: var(--text-sm);
+}
+.rail .map-flags p {
+  font-size: 0.78rem;
+}
+.rail .map-flag {
+  font-size: 0.8rem;
+}
+.rail .map-flags h2 {
+  margin: 0 0 var(--space-2);
+  font-family: var(--font-display);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+/* ---- the provenance terminal ------------------------------------------- */
+
+.prov-terminal {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding-bottom: var(--space-2);
+}
+.term-live {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-family: var(--font-display);
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--status-ok);
+}
+.term-live-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--status-ok);
+}
+.term-stream {
+  list-style: none;
+  margin: 0;
+  padding: var(--space-1) 0;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.72rem;
+  line-height: 1.5;
+  overflow-y: auto;
+}
+.term-row {
+  display: grid;
+  grid-template-columns: 4.2rem minmax(0, 1fr) auto;
+  gap: var(--space-2);
+  align-items: baseline;
+  padding: 2px var(--space-3);
+  border-left: 2px solid transparent;
+}
+.term-time {
+  color: var(--color-text-muted);
+}
+.term-msg {
+  color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.term-tag {
+  font-size: 0.62rem;
+  letter-spacing: 0.06em;
+  color: var(--color-text-muted);
+}
+/* The rails. `note` is deliberately colourless: a computed figure is
+   neither good news nor bad news. `sig` is the non-semantic identity
+   accent, used for Headway's own refusals. */
+.term-sig {
+  /* The full identity token, not the soft line: the rail is gated at 3:1
+     against both card grounds (6.01:1 light / 7.13:1 dark). */
+  border-left-color: var(--signal);
+}
+.term-sig .term-tag {
+  color: var(--signal);
+}
+.term-watch {
+  border-left-color: var(--status-watch);
+}
+.term-watch .term-tag {
+  color: var(--status-watch);
+}
+.term-alert {
+  border-left-color: var(--status-alert);
+}
+.term-alert .term-tag {
+  color: var(--status-alert);
+}
+.term-note-row {
+  border-left-color: var(--color-border);
+}
+.term-note {
+  margin: var(--space-2) var(--space-3) 0;
+  font-size: 0.72rem;
+  color: var(--color-text-muted);
+}
+.term-error {
+  color: var(--color-danger-text);
+  background: var(--color-danger-bg);
+  padding: var(--space-2);
+  border-radius: var(--radius-1);
+}
+
+/* ---- the dashboard: figures above the fold ----------------------------- */
+
+/* One compact strip instead of three stacked paragraph-wrapped blocks. The
+   controls sit in one etched row above what they scope (the house dataviz
+   rule), and their EXPLANATIONS fold into a single disclosure. Every scope
+   receipt and every "this is not narrowed" boundary stays outside it. */
+.control-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
+  margin: var(--space-2) 0 var(--space-4);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-2);
+  background: var(--color-bg);
+}
+.control-strip .filter-bar {
+  margin: 0;
+}
+.control-strip .mode-bar,
+.control-strip .lens-bar {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+}
+.control-strip .chart-filters {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+}
+.control-strip .filter-bar-label {
+  font-size: 0.75rem;
+  letter-spacing: 0.04em;
+}
+/* The strip's own admissions row: scope receipts and boundary statements,
+   full width beneath the controls, always visible. */
+.control-strip .admission,
+.control-strip .mode-scope-receipt {
+  flex-basis: 100%;
+  font-size: 0.72rem;
+  margin: 0;
+}
+.control-strip-admissions {
+  flex-basis: 100%;
+  margin: 0;
+}
+.control-strip-admissions > * {
+  margin: var(--space-1) 0 0;
+}
+.control-strip .disclosure {
+  flex-basis: 100%;
+  margin: 0;
+}
+
+/* The page's own one-line summary, always visible, directly under the h1. */
+.page-summary {
+  margin: 0 0 var(--space-2);
+  color: var(--color-text);
+}
+
+/* Page-level alerts and the below-the-hero sections on the full-bleed map
+   page carry their own padding, because <main> gave its up to the shell. */
+.map-alerts {
+  padding: var(--space-3) var(--space-3) 0;
+}
+.map-below {
+  padding: var(--space-4) var(--space-3) var(--space-5);
 }

@@ -66,6 +66,7 @@ import {
   rowInScope,
   selectedModeLabel,
 } from "../reports/modes";
+import { Disclosure } from "../components/Disclosure";
 import { ModeBar } from "../components/ModeBar";
 import { ChartCard } from "../components/charts/ChartCard";
 import {
@@ -509,7 +510,6 @@ function LensBar({
   const t = copy.dashboard.lens;
   return (
     <section aria-label={t.rowLabel} className="lens-bar">
-      <p className="chart-desc">{t.intro}</p>
       <div className="chart-filters">
         <div className="filter-bar" role="group" aria-label={t.rowLabel}>
           <span className="filter-bar-label">{t.rowLabel}:</span>
@@ -538,12 +538,19 @@ function LensBar({
           ))}
         </div>
       </div>
-      {preset && <p className="chart-desc">{t.presetHints[preset]}</p>}
+      {/* HANDOFF 0044, OUTPUT 5. The server's own grouping note is an
+          ADMISSION about how these trends were bucketed — it stays visible.
+          The lens explanation and the per-preset framing hints are
+          EXPLANATION and fold, verbatim, into the disclosure. */}
       {groupingNote && (
-        <p className="chart-desc">
+        <p className="admission">
           {t.groupingIntro} {groupingNote}
         </p>
       )}
+      <Disclosure label={copy.disclosure.how}>
+        <p>{t.intro}</p>
+        {preset && <p>{t.presetHints[preset]}</p>}
+      </Disclosure>
     </section>
   );
 }
@@ -842,7 +849,14 @@ export function DashboardView() {
   return (
     <>
       <h1>{copy.dashboard.heading}</h1>
-      <p>{copy.dashboard.intro}</p>
+      {/* HANDOFF 0044, OUTPUT 3 + 5: a one-line summary that always shows,
+          with the full introduction folded — verbatim — beneath it, so the
+          figures start within the first screen instead of below a wall of
+          gray paragraphs. */}
+      <p className="page-summary">{copy.dashboard.summary}</p>
+      <Disclosure>
+        <p>{copy.dashboard.intro}</p>
+      </Disclosure>
 
       {valuesError && (
         <div role="alert" className="alert">
@@ -859,10 +873,17 @@ export function DashboardView() {
 
       {values && (
         <>
-          {/* The control deck: Mode, then Audience lens and Group trends
-              by — one honest strip, everything visible at once (handoff
-              0041 #1: no fly-out, no sub-menu). */}
-          <div className="control-deck">
+          {/* The control strip (handoff 0044, output 3): Mode, Audience
+              lens and "Group trends by" in ONE compact row above what they
+              scope — still no fly-out and no sub-menu (handoff 0041 #1),
+              but no longer three stacked paragraph-wrapped blocks pushing
+              every figure below the fold. Each control keeps its own
+              admissions visible and folds only its explanation. */}
+          <div
+            className="control-strip"
+            role="group"
+            aria-label={copy.dashboard.controls.label}
+          >
             <ModeBar
               options={modeOpts}
               scope={modeScope}
@@ -879,7 +900,7 @@ export function DashboardView() {
           {/* A trend that failed to load is stated, never blank — the tiles
               themselves still render their certified figures. */}
           {historyError && (
-            <p className="chart-desc">
+            <p className="admission">
               {copy.dashboard.lens.historyUnavailable(historyError)}
             </p>
           )}
@@ -889,7 +910,7 @@ export function DashboardView() {
                 ? copy.dashboard.tilesHeading
                 : copy.dashboard.mode.tilesFor(modeLabel)}
             </h2>
-            <p className="chart-desc">{copy.dashboard.tilesIntro}</p>
+            <p className="page-summary">{copy.dashboard.tilesIntro}</p>
             <ul className="stat-grid">
               {["vrm", "vrh", "upt"].map((metric) => (
                 <StatTile

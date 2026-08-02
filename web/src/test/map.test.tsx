@@ -1217,8 +1217,14 @@ describe("/map — flagged findings and the relationship inspector (handoff 0043
     renderApp("/map");
     await screen.findByRole("heading", { name: "Needs investigation" });
 
-    // Scarce by construction: open AND blocking only.
-    const ask = calls.find((c) => c.path === "/dq/issues");
+    // Scarce by construction: the FLAG request asks for open AND blocking
+    // only. Since handoff 0044 the provenance terminal in the rail also
+    // reads /dq/issues (unfiltered, for the event stream), so the flag
+    // request is identified by its own filters rather than by being the
+    // first call to that path.
+    const ask = calls
+      .filter((c) => c.path === "/dq/issues")
+      .find((c) => c.url.includes("severity=blocking"));
     expect(ask?.url).toContain("status=open");
     expect(ask?.url).toContain("severity=blocking");
 

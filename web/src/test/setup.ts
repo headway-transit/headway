@@ -1,6 +1,17 @@
 import { afterEach, vi } from "vitest";
-import { cleanup } from "@testing-library/react";
+import { cleanup, configure } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
+
+/**
+ * The findBy* wait window. Testing Library's default is 1 s, which is tight
+ * on a fully-parallel 44-file run now that the app shell performs one extra
+ * round-trip on mount (the command bar's "as computed" run stamp — handoff
+ * 0044) and the map mounts the provenance terminal beside the canvas. This
+ * changes only how long a query WAITS for the DOM it already asserts on;
+ * no assertion is weakened, and a genuinely missing element still fails.
+ */
+configure({ asyncUtilTimeout: 4000 });
+
 import { clearSession } from "../auth/session";
 import { clearBranding } from "../branding";
 import { clearToasts } from "../toasts";
