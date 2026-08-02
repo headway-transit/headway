@@ -20,33 +20,57 @@ _(Edit this section when reviewing different code — the build script fills the
 
 Try actively to falsify each. For every one, either produce a concrete break or state plainly that you tried and it holds.
 
-**Surface A — revenue classification of boardings (`services/calc/headway_calc/upt.py`, `revenue_window.py`, the transform adapter path, migration `0039_passenger_event_revenue_classification.sql`):**
+**Two failure classes outrank everything else here. Rank findings by which one they touch.**
 
-This wave decides which boardings count toward a **federally reported** ridership figure. A boarding on a vehicle not logged into a run is not in revenue service, so it is excluded; genuinely ambiguous ones are **held pending human review**. The figure is certified and submitted to the FTA — a wrong exclusion under-reports, a wrong inclusion over-reports, and both are audit findings against a real agency.
+1. **A false figure that survives certification.** A named person signs these numbers and federal funding is apportioned from them. A number that is wrong *and* carries a valid receipt is worse than no product, because it launders a defect into evidence.
+2. **Rider privacy.** Paratransit pickup/dropoff coordinates are **rider home addresses**, and an ADA trip record discloses disability status *by existing*. One leaked coordinate through any surface — API, SQL role, evidence bundle, audit detail, log line, error message — is a reportable incident, not a bug.
 
-- **Pending-review boardings must never silently reach a certifiable figure.** The default is exclude-until-classified. Attack: any path — preview, per-mode, re-run, dedupe, empty-period guard, a mode/scope combination — where a `pending_review` boarding is counted, or where the held count is dropped from the detail so the figure looks complete when it isn't.
-- **No double-count with the missing-trip factor.** Excluded boardings must not participate in the 2% missing-trip factor-up (FTA p.146). Attack: an ordering where exclusion happens before/after factoring such that the same boarding is both removed and compensated for, or where the factor's denominator silently includes excluded rows.
-- **The split must be arithmetically closed.** revenue + excluded_non_revenue + pending_review must account for every boarding — no row falls out of all three, none is counted twice. Attack: NULL/unknown classification, a row that matches two predicates, an adapter path that emits a boarding with no classification at all.
-- **Revenue-window derivation is corroborating, not authoritative.** The primary discriminator is the no-run assignment itself. Attack: a route with no schedule, service spanning midnight / service-day rollover, a DST transition, a timezone mismatch between the schedule and the APC timestamps — anything that makes the window wrongly classify a *real* rider as prep. **The known-dangerous case: a catch-up/supplemental bus dispatched without a formal trip assignment looks exactly like a mid-service no-run boarding — wrongly excluding it drops real riders.**
-- **Classification must never rewrite history.** A re-run or a later classification must not mutate an already-certified figure. Attack: any path that updates a persisted value in place, or where the dedupe (identical-rerun reuse) collapses two runs whose classification inputs actually differed.
+**Surface A — the read-only role's write guard and its ONE route exception (`services/api/headway_api/auth.py`, `authz.py`):**
 
-**Surface B — the human-in-the-loop review queue (`services/api/headway_api/routers/revenue_review.py`, `services/calc/headway_calc/boarding_reviews.py`, migration `0040_boarding_revenue_reviews.sql`, and `web/src/views/RevenueReviewView.tsx`):**
+An `auditor` is a read-everything/change-nothing role, enforced in three independent places: off the `ROLE_RANK` ladder entirely (so rank arithmetic fails it by construction), refused every unsafe HTTP method at the single authentication choke point, and evaluated at *viewer* breadth for content sensitivity. This wave opened **exactly one hole**, as a named route allowlist:
 
-A data steward classifies a held boarding as revenue/non-revenue with a written justification; the next calc run reads that decision back into a federally reported figure. **A human decision now moves a regulatory number** — that is the whole attack surface.
+```
+("POST", re.compile(r"/raw/records/[^/]+/verify"))
+```
 
-- **A justification note is REQUIRED — enforced in the schema** (`boarding_review_decision_complete` moves verdict/note/author/time together; `boarding_review_justification_not_blank` rejects whitespace). Attack: any path that lands a verdict without a reason — a partial UPDATE touching only some of the four columns, a NULL-vs-empty-string gap, a unicode/zero-width string that passes the not-blank CHECK, a bulk or default path, an API route that writes columns individually.
-- **Human-counted boardings are added AFTER the p.146 missing-trip factor-up, never multiplied by it.** (The shipped test: 100 × 50/49 → 102, then +100 = 202; multiplying gives 204 — riders nobody observed.) Attack: any ordering, per-mode path, or re-run where a human-added boarding gets factored, or where the factor's denominator shifts because of a classification.
-- **Certified periods must refuse outright (409), writing nothing.** Attack: any path where classifying inside a certified period partially writes, leaves the transaction half-applied, or mutates a certified figure; a race where certification lands between the check and the write.
-- **A blocked run stays blocked.** A classification is not a statistician's approval and must not unblock a refusal. Attack: any path where resolving reviews clears a blocking DQ finding that was not about this boarding, or where the DQ-finding close (done in the same transaction) closes more than it should.
-- **The receipt must be truthful.** The note travels: `justification` → `load_boarding_reviews` → `UptDetail.human_classifications` → **frozen into `computed.metric_values.detail` at compute time** → rendered verbatim. Attack: a classification that changes a figure without appearing in its receipt; a receipt claiming a human decision that was later edited/deleted/superseded; an editable note that silently rewrites the justification behind an already-computed figure.
-- **Concurrency + idempotency.** Attack: two stewards classifying the same boarding (lost update), a classification landing mid-calc-run, a TOCTOU between "read pending" and "resolve", a re-run after a decision writing duplicate rows or overwriting the human verdict, keyset pagination that skips or repeats a pending item while the queue mutates.
+- **Nothing but that route may match.** Attack the matcher itself: percent-encoded separators (`%2F`) surviving into `request.url.path`, `..` segments and path normalization, duplicate/trailing slashes, case, unicode normalization, a mounted `root_path` or reverse-proxy prefix invalidating the code's own comment that none is configured, and method-override headers (`X-HTTP-Method-Override`).
+- **Invert it: find a write that never reaches the choke point at all.** Machine-key routes, MCP tools, background tasks, startup hooks, anything mounted as a sub-application or registered outside the router set this dependency sees.
+- **The off-ladder role must satisfy no rank comparison.** Attack: any surviving raw `ROLE_RANK[...]` index that would `KeyError` or, worse, default; any new endpoint gated by something other than `require_at_least`.
 
-**Surface C — vanpool refusal (`services/calc/headway_calc/vp.py`):**
-- **Every vanpool figure must REFUSE.** Telematics cannot produce certifiable vanpool ridership (rider-self-reported per FTA p.131). Attack: any input, mode/scope combination, attestation, sandbox/preview path, or persistence route that yields a *number* for a VP metric instead of a refusal — including a 0.00, a NULL rendered as zero, or a partial figure escaping through the per-mode rollup into an agency total.
+**Surface B — the two privacy layers, and whether they still agree (`raw_payloads.py`, `authz.may_read_sensitivity`, `db/migrations/0028_readonly_analyst_role.sql`):**
+
+Rider-location withholding is enforced **twice, at different boundaries, maintained independently**:
+
+- **SQL layer** — migration 0028's column-level `GRANT` for the `headway_readonly` analyst role: `raw.records` metadata only, and `canonical.dr_trips` operational columns **without** the coordinates.
+- **API layer** — `raw_payloads.classify` marks the record restricted at `RESTRICTED_MINIMUM_ROLE` (`data_steward`); an auditor reads at viewer breadth and is refused.
+
+- **The highest-value question in this review: does any API endpoint serve a `canonical.dr_trips` rider coordinate that migration 0028 forbids the SQL role from reading?** The two lists were written at different times for different threat models. If they have drifted, the API is the weaker layer and the drift is the vulnerability. Check the ops, history, reports, sandbox, public and machine-read surfaces, and anything returning a trip-shaped row or map feature.
+- **Paratransit geometry is aggregated zones only — never rider-address pins.** Attack: any endpoint or map layer coaxed into emitting point geometry for DR trips, at high zoom, via bounding-box queries, or through a GeoJSON/PMTiles path.
+
+**Surface C — the evidence bundle (`services/api/headway_api/routers/evidence.py`):**
+
+`GET /certifications/{id}/evidence` produces a document an auditor carries out of the building. It is **role-sensitive on purpose**: two accounts can legitimately receive different `withheld` lists.
+
+- **Withheld content must not escape through a side channel** rather than the payload field. Attack: `parse_error` text echoing input bytes, a lineage node, `figure.detail`, an exception message, or the audit `detail` row written when the bundle is generated — the record of a refusal must never become a copy of the thing refused.
+- **`bundle_sha256` must be reproducible from the served body and must actually seal it.** The hash covers the document with `manifest.bundle_sha256` deleted. Attack: a field-injection or key-ordering trick that lets two different bundles hash alike, or an edit that survives verification.
+- **`withheld` and `gaps` must stay distinct.** A privacy withholding and a data defect are different findings; either misreading produces a false finding against an agency. Attack: any path that files one as the other, or drops an item from both.
+- **Scale.** `MAX_RAW_RECORD_LABELS` caps labels; does it fail loud or fail open? What does a certification covering thousands of figures cost — is this a DoS amplifier?
+
+**Surface D — OIDC relying party (`services/api/headway_api/oidc.py`, `routers/oidc.py`, migration `0043_oidc_relying_party.sql`):**
+
+Native relying party; no native SAML (ADR-0011).
+
+- Is `state` genuinely single-use and race-free under concurrency? Is `nonce` bound and checked? Is PKCE enforced? Are `iss`/`aud` validated, and is algorithm confusion (`alg: none`, HS/RS) possible? How is JWKS fetched, cached and rotated? Is the redirect URI matched exactly or by prefix (open redirect)?
+- **Can a user-controlled claim drive the group→role mapping, and can it mint `certifying_official`?** No group name is hardcoded or seeded by design — check that the flexibility did not buy an injection.
 
 Also flag any **general** correctness or security bug you find along the way — SQL construction/injection, race conditions, resource leaks, integer/decimal handling (these are money-adjacent regulatory figures: watch float-vs-Decimal, rounding, and unit conversion), auth-check ordering, unhandled errors, TOCTOU — even outside these surfaces.
 
-Also flag any **general** correctness or security bug you find along the way — SQL construction/injection, race conditions, resource leaks, integer/decimal handling, auth-check ordering, unhandled errors, TOCTOU — even outside the two surfaces.
+## Already known — confirm or escalate, but do not spend the round rediscovering
+
+- Failure-audit throttle buckets by client IP and collapses behind a reverse proxy.
+- Auditor demotion lags by up to the 30-minute JWT TTL.
+- The single-use OIDC `state` UPDATE has never been exercised against a real engine — only an in-repo fake connection.
+- Most suites run against that fake connection; CI has one real-Postgres job. A finding that only reproduces against real Postgres is still a finding — say so explicitly.
 
 ## How to work
 
