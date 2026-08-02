@@ -168,26 +168,55 @@ def _is_simulated(source: str) -> bool:
 
 def _observed_movement(
     rows: list[VpTelematicsDay],
-) -> tuple[Decimal, Decimal, dict[str, Decimal]]:
-    """Sum the MEASURED movement per basis — CONTEXT only, never a reportable
-    figure. Returns (total_distance_meters, total_engine_seconds, by_basis).
+) -> tuple[Decimal | None, Decimal | None, dict[str, Decimal]]:
+    """Sum the MEASURED movement per (measure, basis) — CONTEXT only, never a
+    reportable figure. Returns (distance_meters, engine_seconds, by_basis),
+    where either total is None when it is not well defined.
 
     An UNMEASURED series (``value is None``) contributes nothing to the sums
     and is NOT counted here as 0 movement — it is counted as unmeasured by
-    the caller. The per-basis breakdown keeps every basis distinct (the
-    honesty wall: no basis is ever merged into another)."""
-    total_distance = Decimal(0)
-    total_engine = Decimal(0)
-    by_basis: dict[str, Decimal] = {}
+    the caller.
+
+    Two honesty rules an external adversarial review (2026-08-01) caught this
+    function breaking:
+
+    1. **Units never mix.** ``by_basis`` is keyed by ``measure:basis``, not by
+       basis alone. Keyed by basis alone, a source reporting both distance and
+       engine time on the same basis had METRES and SECONDS added into one
+       bucket.
+    2. **Bases are never merged into a headline total.** A vehicle-day may
+       report distance on both ``odometer`` and ``gps``; adding them stated a
+       vehicle travelled the sum of two measurements of the SAME movement
+       (10,000 m + 9,950 m = 19,950 m for one ~10 km day). Picking one basis
+       instead would be silent basis substitution, which ADR-0013 makes
+       unrepresentable. So when more than one basis supplies a measure, the
+       single-number total is **None** — undefined, stated as such — and the
+       per-basis breakdown carries the truth. The basis-conflict warning
+       already names the disagreement (Shared Constraint 7: surfaced, never
+       averaged)."""
+    by_key: dict[str, Decimal] = {}
+    bases_per_measure: dict[str, set[str]] = {}
     for row in rows:
         if row.value is None:
             continue
-        by_basis[row.basis] = by_basis.get(row.basis, Decimal(0)) + row.value
-        if row.measure == VP_MEASURE_DISTANCE:
-            total_distance += row.value
-        elif row.measure == VP_MEASURE_ENGINE_TIME:
-            total_engine += row.value
-    return total_distance, total_engine, by_basis
+        by_key[f"{row.measure}:{row.basis}"] = (
+            by_key.get(f"{row.measure}:{row.basis}", Decimal(0)) + row.value
+        )
+        bases_per_measure.setdefault(row.measure, set()).add(row.basis)
+
+    def _single_basis_total(measure: str) -> Decimal | None:
+        bases = bases_per_measure.get(measure)
+        if not bases or len(bases) > 1:
+            # No data, or two measurements of the same movement — a sum would
+            # be a fiction and a pick would be substitution. Say nothing.
+            return None
+        return by_key[f"{measure}:{next(iter(bases))}"]
+
+    return (
+        _single_basis_total(VP_MEASURE_DISTANCE),
+        _single_basis_total(VP_MEASURE_ENGINE_TIME),
+        by_key,
+    )
 
 
 def _basis_conflict_findings(
@@ -331,17 +360,22 @@ def _refusal_result(
         figure=figure,
         reportable=False,
         refusal_reason=refusal_issue,
-        vehicle_days_seen=len(material),
-        vehicle_days_unmeasured=len(unmeasured),
+        # DISTINCT (vehicle, service date) pairs — not len(material), which
+        # counts SERIES. One vehicle-day reporting distance on two bases plus
+        # engine time is three rows and exactly one vehicle-day; the old count
+        # inflated the fleet an auditor thinks was observed (external review,
+        # 2026-08-01).
+        vehicle_days_seen=len({(r.vehicle_id, r.service_date) for r in material}),
+        vehicle_days_unmeasured=len(
+            {(r.vehicle_id, r.service_date) for r in unmeasured}
+        ),
+        # None when the total is not well defined (no rows for the measure, or
+        # more than one basis measuring it) — see _observed_movement.
         observed_distance_meters=(
-            str(total_distance) if any(
-                r.measure == VP_MEASURE_DISTANCE for r in material
-            ) else None
+            str(total_distance) if total_distance is not None else None
         ),
         observed_engine_seconds=(
-            str(total_engine) if any(
-                r.measure == VP_MEASURE_ENGINE_TIME for r in material
-            ) else None
+            str(total_engine) if total_engine is not None else None
         ),
         by_basis={k: str(v) for k, v in by_basis.items()},
         basis_conflicts=sum(

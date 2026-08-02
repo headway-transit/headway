@@ -108,8 +108,16 @@ def test_vp_golden_matches_expected():
 
 
 def test_vp_golden_observed_distance_excludes_unmeasured():
-    """The observed distance is exactly the two MEASURED van-42 series
-    (72000 + 72900); the unmeasured van-77 series adds nothing (never 0)."""
+    """van-42's two MEASURED distance series are two readings of ONE day's
+    movement, so there is no honest single total — the headline is None and
+    the per-basis breakdown carries both. The unmeasured van-77 series adds
+    nothing (never 0), and it is still COUNTED as unmeasured.
+
+    Pre-2026-08-01 this asserted 72000 + 72900 = "144900", which stated the
+    van drove twice the distance it did (external adversarial review).
+    """
     detail = compute_vp_vrm(_fixture()).detail
-    assert detail.observed_distance_meters == "144900"
+    assert detail.observed_distance_meters is None
+    assert detail.by_basis["distance:ecu_odometer"] == "72000"
+    assert detail.by_basis["distance:gps_distance"] == "72900"
     assert detail.vehicle_days_unmeasured == 1

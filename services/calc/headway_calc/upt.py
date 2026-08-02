@@ -110,7 +110,7 @@ CALC_NAME = "upt_v0"
 #: copied verbatim into the detail, so the figure carries the reasoning that
 #: defends it. A run with no recorded decisions computes BYTE-FOR-BYTE as
 #: 0.3.0, which is retained runnable as compute_upt_v0_3_0.
-CALC_VERSION = "0.4.0"
+CALC_VERSION = "0.5.0"
 
 #: The transform's assignment status (migration 0039). 'unassigned' is the
 #: no-run ghost boarding; 'assigned' resolved to a run; None (the pre-0040
@@ -285,6 +285,45 @@ def _no_run_warning(event: PassengerEvent, verdict: str, reason: str) -> Finding
     )
 
 
+def _unclassified_no_run_warning(event: PassengerEvent) -> Finding:
+    """ONE warning per boarding that has no trip AND no revenue classification.
+
+    Distinct from ``_no_run_warning``: that one describes a boarding the
+    pipeline DID classify as 'unassigned' and then routed into the revenue
+    split. This one describes a boarding the pipeline could not place at all,
+    so it reaches none of the three buckets. The figure is unchanged from the
+    pre-0040 trip-assignment proxy (it was skipped then too); the point of the
+    finding is that the omission is now visible instead of silent.
+    """
+    return Finding(
+        issue_type="boarding_unclassified_no_run",
+        severity=SEVERITY_WARNING,
+        title=(
+            f"Boarding {short_id(event.passenger_event_id)} has no run and no "
+            f"revenue classification — vehicle {short_id(event.vehicle_id)}, "
+            f"{event.event_timestamp.isoformat()}"
+        ),
+        description=(
+            f"Passenger event {event.passenger_event_id!r} (vehicle_id="
+            f"{event.vehicle_id!r}, {event.event_timestamp.isoformat()}, "
+            f"count={event.event_count}) carries NO trip assignment and NO "
+            "revenue_classification value at all — not even 'unassigned'. "
+            "Headway cannot tell whether this was a rider or a staff boarding "
+            "during prep, so it is NOT counted toward Unlinked Passenger "
+            "Trips and it does NOT appear in the revenue split: there is no "
+            "basis on which to place it, and guessing would put an invented "
+            "classification into a reported number. "
+            "This is what a boarding recorded before revenue classification "
+            "existed looks like, or one from a data source that does not set "
+            "the field. To bring it into the figure, re-process the source "
+            "records through an adapter that sets revenue_classification; the "
+            "boarding will then be classified automatically or routed to the "
+            "revenue review queue for a person to decide."
+        ),
+        source_record_ids=(event.source_record_id,),
+    )
+
+
 def _human_verdict_info(
     event: PassengerEvent, decision: HumanBoardingVerdict
 ) -> Finding:
@@ -419,8 +458,17 @@ def compute_upt(
     attestations: Iterable[AttestationContext] = (),
     revenue_windows: Mapping[date, RevenueWindow] | None = None,
     boarding_reviews: Mapping[str, HumanBoardingVerdict] | None = None,
+    _report_unclassified: bool = True,
 ) -> CalcResult:
-    """Compute upt_v0 (version 0.4.0) — Unlinked Passenger Trips.
+    """Compute upt_v0 (version 0.5.0) — Unlinked Passenger Trips.
+
+    ``_report_unclassified`` (0.5.0, private) reports boardings that have no
+    trip AND no revenue_classification, instead of skipping them silently.
+    Every RETAINED version passes False: the retained wrappers delegate to
+    this same function and only relabel ``calc_version``, so without the flag
+    the new warning and detail key would leak backwards and a figure certified
+    under 0.1.0–0.4.0 would no longer recompute byte-identically. The flag is
+    the version boundary, expressed as code rather than as a promise.
 
     Human classifications (0.4.0, handoff 0040 review sub-wave).
     ``boarding_reviews`` maps ``passenger_event_id`` to the decision a named
@@ -565,6 +613,12 @@ def compute_upt(
     review_items: list[BoardingReviewItem] = []
     excluded_record_ids: dict[str, None] = {}
     pending_record_ids: dict[str, None] = {}
+    # Boardings with no trip AND no revenue_classification — placeable in none
+    # of the three buckets, so they are reported separately rather than being
+    # left to vanish (external review, 2026-08-01). Not part of the split; the
+    # split's own arithmetic stays exact.
+    unclassified_boardings = 0
+    unclassified_record_ids: dict[str, None] = {}
     reviews = boarding_reviews or {}
 
     # --- base count (p. 143) + lineage + null-count warnings ----------------
@@ -638,6 +692,27 @@ def compute_upt(
                         pending_record_ids.setdefault(event.source_record_id, None)
                         review_items.append(_review_item(event, reason))
                         warnings.append(_no_run_warning(event, verdict, reason))
+            elif (
+                _report_unclassified
+                and event.event_type == BOARDING_EVENT_TYPE
+                and event.event_count is not None
+            ):
+                # A boarding with no trip AND no revenue classification at all
+                # (NULL, not 'unassigned'). It reaches none of the three
+                # buckets, so the split stops accounting for every boarding —
+                # an external adversarial review (2026-08-01) named this as the
+                # arithmetic hole. It is NOT counted: with no classification we
+                # have no basis to call it revenue, and inventing one would put
+                # a guess into a reported number. But it is no longer SILENT.
+                #
+                # The live cause is real: every passenger_events row written
+                # before migration 0039 has revenue_classification = NULL, as
+                # does anything an older adapter emits. The figure is unchanged
+                # from the pre-0040 proxy; what changes is that the omission
+                # now announces itself instead of vanishing.
+                unclassified_boardings += event.event_count
+                unclassified_record_ids.setdefault(event.source_record_id, None)
+                warnings.append(_unclassified_no_run_warning(event))
             continue  # revenue-service proxy: unassigned events not counted
         if event.event_type == BOARDING_EVENT_TYPE:
             if event.event_count is None:
@@ -845,13 +920,22 @@ def compute_upt(
     value: Decimal | None = None
     attestation_provenance: dict | None = None
     governing = governing_attestation(attestations, "upt")
-    if above_threshold and governing is not None:
+    if above_threshold and governing is not None and trips_with_events_count > 0:
         # The p. 146 sentence's OWN permission path (handoff 0019): a
         # qualified statistician approved the factoring method, recorded as
         # an unrevoked in-scope cert.attestations row — so the SAME
         # deterministic factor-up as the ≤2% branch applies, and the figure
         # carries the attestation's provenance permanently. missing_count>0
         # here by construction (share > threshold > 0).
+        #
+        # trips_with_events_count > 0 is LOAD-BEARING, not defensive: at 100%
+        # missing, the divisor (operated - missing) is exactly zero. Factoring
+        # up needs observed trips to scale FROM — with none observed there is
+        # nothing to scale, and no attestation can conjure one. Without this
+        # guard a total APC outage raised decimal.DivisionByZero instead of
+        # refusing, which is the loud-refusal rule failing in the exact case
+        # it exists for. That case now falls through to the refusal below,
+        # which already speaks to a total outage ("start with the feed").
         exact_factor = Decimal(operated_count) / Decimal(
             operated_count - missing_count
         )
@@ -1021,6 +1105,7 @@ def compute_upt(
         attestation=attestation_provenance,
         excluded_non_revenue_boardings=excluded_non_revenue_boardings,
         pending_review_boardings=pending_review_boardings,
+        unclassified_no_run_boardings=unclassified_boardings,
         human_revenue_boardings=human_revenue_boardings,
         human_non_revenue_boardings=human_non_revenue_boardings,
         human_classifications=tuple(human_classifications),
@@ -1038,6 +1123,42 @@ def compute_upt(
         detail=detail,
         review_items=tuple(review_items),
     )
+
+
+def compute_upt_v0_4_0(
+    events: Iterable[PassengerEvent],
+    operated_trip_ids: Iterable[str],
+    *,
+    missing_trip_threshold: Decimal = MISSING_TRIP_THRESHOLD,
+    imbalance_threshold: Decimal = IMBALANCE_THRESHOLD,
+    attestations: Iterable[AttestationContext] = (),
+    revenue_windows: Mapping[date, RevenueWindow] | None = None,
+    boarding_reviews: Mapping[str, HumanBoardingVerdict] | None = None,
+) -> CalcResult:
+    """upt_v0 0.4.0, RETAINED runnable (the sscls convention — shipped
+    versions stay reproducible).
+
+    0.4.0 predates the unclassified-boarding report: a boarding with no trip
+    AND no revenue_classification was skipped silently, reaching none of the
+    three split buckets. 0.5.0 states that set instead (an external adversarial
+    review, 2026-08-01, named the silence as the arithmetic hole). The FIGURE
+    is identical either way — an unclassified boarding is not counted under
+    0.4.0 or 0.5.0, because with no classification there is no basis to call it
+    revenue — so 0.5.0 adds a warning and a detail key and changes no number.
+    This wrapper keeps 0.4.0's output byte-identical for anything certified
+    under it.
+    """
+    result = compute_upt(
+        events,
+        operated_trip_ids,
+        missing_trip_threshold=missing_trip_threshold,
+        imbalance_threshold=imbalance_threshold,
+        attestations=attestations,
+        revenue_windows=revenue_windows,
+        boarding_reviews=boarding_reviews,
+        _report_unclassified=False,
+    )
+    return dataclasses.replace(result, calc_version="0.4.0")
 
 
 def compute_upt_v0_3_0(
@@ -1068,6 +1189,7 @@ def compute_upt_v0_3_0(
         attestations=attestations,
         revenue_windows=revenue_windows,
         boarding_reviews=None,
+        _report_unclassified=False,
     )
     return dataclasses.replace(result, calc_version="0.3.0")
 
@@ -1118,6 +1240,7 @@ def compute_upt_v0_2_0(
         imbalance_threshold=imbalance_threshold,
         attestations=attestations,
         revenue_windows=None,
+        _report_unclassified=False,
     )
     return dataclasses.replace(result, calc_version="0.2.0")
 
@@ -1146,5 +1269,6 @@ def compute_upt_v0_1_0(
         imbalance_threshold=imbalance_threshold,
         attestations=(),
         revenue_windows=None,
+        _report_unclassified=False,
     )
     return dataclasses.replace(result, calc_version="0.1.0")

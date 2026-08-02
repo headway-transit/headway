@@ -45,6 +45,7 @@ from __future__ import annotations
 import base64
 import binascii
 import datetime as dt
+import unicodedata
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -84,6 +85,30 @@ DEFAULT_PAGE_LIMIT = 50
 #: The hard ceiling, enforced by FastAPI (``le=``) so no value of ``limit``
 #: can ask for the whole table.
 MAX_PAGE_LIMIT = 200
+
+#: Characters that occupy no visual space but are NOT whitespace to Python's
+#: ``str.strip()`` — zero-width space/non-joiner/joiner, word joiner, BOM, and
+#: the Mongolian vowel separator. An external adversarial review (2026-08-01)
+#: found that a justification of U+200B alone satisfied both ``str.strip()``
+#: and Postgres ``btrim()`` (whose one-argument form trims spaces only),
+#: landing a verdict with an effectively blank reason through a guarantee we
+#: state as schema-enforced. A reason nobody can read is not a reason.
+_ZERO_WIDTH = "​‌‍⁠﻿᠎"
+
+
+def _visible_text(value: str) -> str:
+    """The note with invisible padding removed — empty if it says nothing.
+
+    Unicode categories Cf (format) and Cc (control) are dropped wholesale, so
+    a future invisible codepoint cannot reopen this hole, then ordinary
+    whitespace is stripped. Returns "" when nothing visible survives.
+    """
+    kept = "".join(
+        ch
+        for ch in value
+        if ch not in _ZERO_WIDTH and unicodedata.category(ch) not in ("Cf", "Cc")
+    )
+    return kept.strip()
 
 
 class BoardingReview(BaseModel):
@@ -184,7 +209,7 @@ class ClassifyRequest(BaseModel):
     @field_validator("justification")
     @classmethod
     def _justification_says_something(cls, v: str) -> str:
-        if not v.strip():
+        if not _visible_text(v):
             raise ValueError(
                 "Write why you classified this boarding the way you did — for "
                 "example \"unit's counter double-fired during layover, "
@@ -195,7 +220,7 @@ class ClassifyRequest(BaseModel):
                 "asserting it, so there is no way to record a decision "
                 "without one."
             )
-        return v.strip()
+        return _visible_text(v)
 
 
 class ClassifyResponse(BaseModel):

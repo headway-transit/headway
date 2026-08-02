@@ -173,3 +173,41 @@ Commit context: worktree `agent-a3f272a90c3e30d6a`, branch `main` (no commits
 
 NOT touched: `upt.py`, `runner.py`, existing tracker rows (conflict avoidance
 with wave 0040).
+
+---
+
+## External adversarial review — F3 fixed (2026-08-01)
+
+A review by a different model family found `_observed_movement` inflating the
+context detail that travels with every VP refusal. Two distinct breaks, both
+real, both fixed:
+
+1. **Bases were merged into a headline total.** A vehicle-day may report
+   distance on both `ecu_odometer` and `gps_distance` — two measurements of the
+   SAME movement. They were added, so the golden fixture asserted
+   `observed_distance_meters = 72000 + 72900 = 144900` for a van that drove
+   about 72 km. Picking one basis instead would be silent basis substitution,
+   which ADR-0013 makes unrepresentable, so the honest answer is that **there
+   is no single number**: when more than one basis measures a quantity the
+   total is `None`, stated as undefined, and the per-basis breakdown carries
+   the truth. The existing basis-conflict warning already names the
+   disagreement (Shared Constraint 7 — surfaced, never averaged).
+2. **Units were mixed.** `by_basis` was keyed by basis alone, so a source
+   reporting distance AND engine time on one basis added **metres to seconds**
+   in a single bucket. It is now keyed `measure:basis`.
+
+Also corrected alongside: `vehicle_days_seen` / `vehicle_days_unmeasured`
+counted **series**, not vehicle-days — one van on one date reporting two
+distance bases plus engine time counted as 3 or 4 "vehicle-days". They now
+count distinct `(vehicle_id, service_date)` pairs, so the fleet an auditor is
+told was observed is the fleet that was observed.
+
+**No reported figure changes** — every VP figure still REFUSES, by design; this
+is the context block inside the refusal, which an auditor reads to understand
+what was seen. A refusal that overstates the evidence behind it is still a
+false statement, which is why this was worth fixing rather than filing.
+
+The golden fixture had encoded the bug as intent (its own comment read
+"observed_distance_meters = 72000 + 72900 = 144900"); both the fixture and its
+comment are corrected, and the disagreeing-bases test now pins that the sum is
+**not** reported. calc suite **681** green.

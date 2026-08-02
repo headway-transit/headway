@@ -1,0 +1,487 @@
+<title>Headway — Control Instrument</title>
+<style>
+  :root{
+    /* ── Ground: obsidian, matte, warm-black — moved OFF generic dark slate ── */
+    --void:#07090E; --graphite:#0F131B; --graphite-2:#151B26; --raised:#1A2130;
+    --etch:#242C3A;        /* hairline panel separation — no bevels */
+    --grid:#161D28;        /* schematic underlay */
+    --fg:#E9EEF5; --fg-dim:#96A3B7; --fg-mute:#586576;
+    /* ── Identity accent (replaces cyan). Non-semantic. Transit-signal orange ── */
+    --signal:#FF7A1A; --signal-soft:rgba(255,122,26,.13); --signal-line:rgba(255,122,26,.4);
+    /* ── Semantic status set — CVD-safe, each colour means ONE thing ── */
+    --ok:#3FC79B; --watch:#F2B43D; --alert:#F5514E;
+    --alert-glow:rgba(245,81,78,.55); --watch-glow:rgba(242,180,61,.5);
+    /* ── Mode line colours — categorical, like a transit diagram ── */
+    --m-fixed:#4C8DF5; --m-dar:#A06AF0; --m-vp:#2FB6A8; --m-via:#E86AA6;
+    /* type */
+    --display:'Arial Narrow','Helvetica Neue',Helvetica,system-ui,sans-serif; /* prod: self-hosted Overpass */
+    --ui:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
+    --mono:ui-monospace,'SF Mono','JetBrains Mono',Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    background:var(--void); color:var(--fg); font-family:var(--ui);
+    font-size:14px; line-height:1.45; -webkit-font-smoothing:antialiased;
+    display:flex; flex-direction:column; min-height:100%; overflow-x:hidden;
+  }
+  .mono{font-family:var(--mono); font-variant-numeric:tabular-nums}
+  .disp{font-family:var(--display); text-transform:uppercase; letter-spacing:.08em; font-weight:700}
+
+  /* ── Command bar ── */
+  header{
+    display:flex; align-items:center; gap:22px; padding:14px 22px;
+    border-bottom:1px solid var(--etch); background:var(--graphite);
+  }
+  .brand{display:flex; align-items:baseline; gap:11px}
+  .brand .logo{
+    font-family:var(--display); font-weight:800; font-size:22px; letter-spacing:.16em;
+    text-transform:uppercase; color:var(--fg);
+    padding:2px 10px; border:1.5px solid var(--signal); border-radius:2px;
+    box-shadow:inset 0 0 0 1px rgba(255,122,26,.15);
+  }
+  .brand .logo b{color:var(--signal); font-weight:800}
+  .brand .agency{color:var(--fg-dim); font-size:12.5px; letter-spacing:.04em}
+  .stamp{margin-left:auto; display:flex; align-items:center; gap:16px; color:var(--fg-mute); font-size:11.5px}
+  .stamp .dot{width:6px;height:6px;border-radius:50%;background:var(--ok);box-shadow:0 0 8px var(--ok)}
+  .stamp b{color:var(--fg-dim); font-weight:600}
+
+  /* segmented controls */
+  .seg{display:inline-flex; border:1px solid var(--etch); border-radius:3px; overflow:hidden; background:var(--void)}
+  .seg button{
+    font-family:var(--ui); font-size:11.5px; letter-spacing:.04em; color:var(--fg-mute);
+    background:transparent; border:0; padding:6px 12px; cursor:pointer; border-right:1px solid var(--etch);
+    text-transform:uppercase; transition:color .15s, background .15s;
+  }
+  .seg button:last-child{border-right:0}
+  .seg button:hover{color:var(--fg-dim)}
+  .seg button[aria-pressed="true"]{color:var(--void); background:var(--signal); font-weight:600}
+  .seg button:focus-visible{outline:2px solid var(--signal); outline-offset:-2px}
+
+  /* ── Main grid ── */
+  main{flex:1; display:grid; grid-template-columns:1fr 350px; gap:1px; background:var(--etch); min-height:0}
+  @media(max-width:920px){ main{grid-template-columns:1fr} }
+  .hero{background:var(--void); position:relative; min-height:520px; overflow:hidden}
+  .rail{background:var(--graphite); display:flex; flex-direction:column; min-height:0; overflow-y:auto}
+
+  /* hero caption / legend */
+  .hero-cap{position:absolute; top:16px; left:20px; z-index:3; pointer-events:none}
+  .hero-cap .k{font-family:var(--display); font-size:12px; letter-spacing:.22em; color:var(--fg-dim)}
+  .hero-cap .h{font-family:var(--display); font-size:26px; letter-spacing:.04em; margin-top:2px}
+  .hero-cap .h b{color:var(--signal)}
+  .legend{position:absolute; bottom:14px; left:20px; z-index:3; display:flex; gap:15px; flex-wrap:wrap;
+    font-size:10.5px; color:var(--fg-mute); letter-spacing:.03em}
+  .legend span{display:inline-flex; align-items:center; gap:6px; text-transform:uppercase}
+  .legend i{width:11px;height:3px;border-radius:2px;display:inline-block}
+  .honesty{position:absolute; bottom:14px; right:20px; z-index:3; font-size:10.5px; color:var(--fg-mute);
+    letter-spacing:.03em; max-width:260px; text-align:right}
+
+  svg.net{position:absolute; inset:0; width:100%; height:100%}
+  .route{fill:none; stroke-width:3.5; stroke-linecap:round; stroke-linejoin:round; transition:opacity .3s}
+  .route.sel{stroke-width:5}
+  .stop{fill:var(--void); stroke:var(--fg-mute); stroke-width:1.4; transition:opacity .3s}
+  .hub{fill:var(--graphite); stroke:var(--fg-dim); stroke-width:2}
+  .hublabel{fill:var(--fg-dim); font-family:var(--mono); font-size:9px; letter-spacing:.04em}
+
+  /* vehicle marks — flat, mode-shaped, mode-coloured */
+  .mark{cursor:pointer; transition:opacity .3s}
+  .mark .body{transition:transform .12s}
+  .mark:hover .body{transform:scale(1.25); transform-box:fill-box; transform-origin:center}
+  .mark:focus-visible{outline:none}
+  .mark:focus-visible .body{stroke:var(--fg); stroke-width:1.5}
+
+  /* observed-ping breadcrumb (honest: discrete, gap drawn as gap) */
+  .ping{fill:var(--m-fixed); opacity:.5}
+  .gaptick{stroke:var(--alert); stroke-width:1.5; stroke-dasharray:2 2; opacity:.7}
+
+  /* dimming for mode filter */
+  main[data-focus] .route:not([data-mode~=_f]),
+  main[data-focus] .mark:not([data-mode~=_f]),
+  main[data-focus] .stop{opacity:.12}
+
+  /* ── Attention: glow = "look here", never valence. Halo on the frame, scarce ── */
+  .halo-bloom{opacity:.9}
+  .halo-ring{fill:none; stroke-width:1.5; transform-box:fill-box; transform-origin:center;
+    animation:ping 2.6s ease-out infinite}
+  .flag--alert .halo-ring{stroke:var(--alert)} .flag--alert .halo-bloom{fill:var(--alert-glow)}
+  .flag--watch .halo-ring{stroke:var(--watch)} .flag--watch .halo-bloom{fill:var(--watch-glow)}
+  .flag--watch .halo-ring{animation-duration:3.4s}
+  @keyframes ping{0%{transform:scale(.6);opacity:.9} 70%{opacity:0} 100%{transform:scale(2.4);opacity:0}}
+
+  /* ── Readout rail ── */
+  .rail-h{padding:12px 16px 8px; font-family:var(--display); font-size:11px; letter-spacing:.22em;
+    color:var(--fg-mute); border-bottom:1px solid var(--etch)}
+  .card{padding:14px 16px; border-bottom:1px solid var(--etch); cursor:default; position:relative}
+  .card .top{display:flex; align-items:baseline; justify-content:space-between; margin-bottom:4px}
+  .card .metric{font-family:var(--display); font-size:11px; letter-spacing:.14em; color:var(--fg-dim)}
+  .card .chip{font-family:var(--mono); font-size:9.5px; letter-spacing:.05em; padding:2px 7px; border-radius:2px;
+    text-transform:uppercase; border:1px solid}
+  .chip.ok{color:var(--ok); border-color:rgba(63,199,155,.4); background:rgba(63,199,155,.08)}
+  .chip.watch{color:var(--watch); border-color:rgba(242,180,61,.4); background:rgba(242,180,61,.08)}
+  .chip.refused{color:var(--alert); border-color:rgba(245,81,78,.4); background:rgba(245,81,78,.08)}
+  .card .fig{font-family:var(--mono); font-variant-numeric:tabular-nums; font-size:30px; font-weight:600;
+    color:var(--fg); line-height:1.05; letter-spacing:-.01em}
+  .card .fig .u{font-size:13px; color:var(--fg-mute); font-weight:400; margin-left:6px; letter-spacing:.02em}
+  .card .fig.refused{font-size:17px; color:var(--alert); font-weight:600; letter-spacing:.03em}
+  .card .rcpt{font-family:var(--mono); font-size:10px; color:var(--fg-mute); margin-top:7px; letter-spacing:.02em}
+  .card .rcpt b{color:var(--signal); font-weight:500}
+  .spark{margin-top:10px; height:34px; width:100%; display:block}
+  /* attention card: glow the EDGE-RAIL, never the figure */
+  .card.attn{background:linear-gradient(90deg, rgba(245,81,78,.06), transparent 60%)}
+  .card.attn::before{content:""; position:absolute; left:0; top:0; bottom:0; width:2.5px; background:var(--alert);
+    box-shadow:0 0 12px var(--alert-glow), 0 0 3px var(--alert)}
+
+  /* ── Provenance terminal ── */
+  .term{flex:1; min-height:180px; display:flex; flex-direction:column}
+  .term .rail-h{display:flex; align-items:center; justify-content:space-between}
+  .term .live{display:inline-flex; align-items:center; gap:6px; color:var(--ok); font-size:9.5px; letter-spacing:.1em}
+  .term .live i{width:5px;height:5px;border-radius:50%;background:var(--ok);box-shadow:0 0 7px var(--ok);
+    animation:blink 1.6s ease-in-out infinite}
+  @keyframes blink{50%{opacity:.3}}
+  .stream{flex:1; overflow-y:auto; padding:4px 0; font-family:var(--mono); font-size:11px}
+  .er{display:grid; grid-template-columns:56px 1fr auto; gap:10px; padding:4px 16px; align-items:baseline;
+    border-left:2px solid transparent; animation:slidein .35s ease}
+  @keyframes slidein{from{opacity:0; transform:translateX(-6px)} to{opacity:1; transform:none}}
+  .er .t{color:var(--fg-mute); font-size:10px}
+  .er .m{color:var(--fg-dim); white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  .er .m b{color:var(--fg); font-weight:500}
+  .er .s{font-size:9px; letter-spacing:.04em; text-transform:uppercase}
+  .er.ok{border-left-color:rgba(63,199,155,.5)} .er.ok .s{color:var(--ok)}
+  .er.watch{border-left-color:var(--watch)} .er.watch .s{color:var(--watch)}
+  .er.alert{border-left-color:var(--alert)} .er.alert .s{color:var(--alert)}
+  .er.sig{border-left-color:var(--signal-line)} .er.sig .s{color:var(--signal)}
+
+  /* ── Inspector slide-over ── */
+  .scrim{position:fixed; inset:0; background:rgba(3,5,9,.55); opacity:0; pointer-events:none;
+    transition:opacity .25s; z-index:20}
+  .scrim.open{opacity:1; pointer-events:auto}
+  .inspect{position:fixed; top:0; right:0; bottom:0; width:min(430px,92vw); background:var(--graphite);
+    border-left:1px solid var(--etch); transform:translateX(100%); transition:transform .3s cubic-bezier(.2,.8,.2,1);
+    z-index:21; display:flex; flex-direction:column; box-shadow:-24px 0 60px rgba(0,0,0,.5)}
+  .inspect.open{transform:none}
+  .insp-h{padding:16px 20px; border-bottom:1px solid var(--etch); display:flex; align-items:flex-start; gap:12px}
+  .insp-h .sev{font-family:var(--mono); font-size:9.5px; padding:3px 8px; border-radius:2px; letter-spacing:.06em;
+    text-transform:uppercase; white-space:nowrap; margin-top:2px}
+  .sev.alert{color:var(--alert); background:rgba(245,81,78,.1); border:1px solid rgba(245,81,78,.4)}
+  .sev.watch{color:var(--watch); background:rgba(242,180,61,.1); border:1px solid rgba(242,180,61,.4)}
+  .insp-h h2{font-family:var(--display); font-size:17px; margin:0; letter-spacing:.02em; line-height:1.2}
+  .insp-h .close{margin-left:auto; background:none; border:1px solid var(--etch); color:var(--fg-dim);
+    width:28px;height:28px; border-radius:3px; cursor:pointer; font-size:15px; flex:none}
+  .insp-h .close:hover{border-color:var(--fg-mute); color:var(--fg)}
+  .insp-b{padding:18px 20px; overflow-y:auto; flex:1}
+  .insp-b .lead{color:var(--fg-dim); font-size:13px; margin:0 0 18px}
+  .insp-b .lead b{color:var(--fg)}
+  .kv{display:grid; grid-template-columns:auto 1fr; gap:6px 14px; font-size:12px; margin-bottom:20px}
+  .kv .k{color:var(--fg-mute); font-family:var(--mono); font-size:10.5px; letter-spacing:.03em; text-transform:uppercase}
+  .kv .v{color:var(--fg-dim); font-family:var(--mono)}
+  .kv .v b{color:var(--fg)}
+  .relh{font-family:var(--display); font-size:10.5px; letter-spacing:.2em; color:var(--fg-mute); margin:0 0 12px}
+  .chain{display:flex; flex-direction:column; gap:0}
+  .node{display:flex; align-items:center; gap:11px; padding:9px 11px; border:1px solid var(--etch); border-radius:3px;
+    background:var(--void); position:relative}
+  .node .ic{width:26px;height:26px;border-radius:3px; flex:none; display:grid; place-items:center;
+    font-family:var(--mono); font-size:11px; color:var(--void); font-weight:700}
+  .node .nk{font-family:var(--mono); font-size:9.5px; color:var(--fg-mute); text-transform:uppercase; letter-spacing:.04em}
+  .node .nv{font-size:12.5px; color:var(--fg)}
+  .node.sound .ic{background:var(--ok)} .node.bad .ic{background:var(--alert)} .node.sig .ic{background:var(--signal)}
+  .connect{width:1px; height:14px; background:var(--etch); margin:0 0 0 22px}
+  .connect::after{content:"▾"; color:var(--fg-mute); font-size:9px; position:relative; left:-4px; top:-2px}
+
+  @media(prefers-reduced-motion:reduce){
+    .halo-ring{animation:none; opacity:.5; transform:scale(1.5)}
+    .er{animation:none} .term .live i{animation:none}
+    *{transition-duration:.01ms !important}
+  }
+</style>
+
+<header>
+  <div class="brand">
+    <span class="logo">HEAD<b>WAY</b></span>
+    <span class="agency">Riverbend Transit Authority · Telemetry &amp; Compliance</span>
+  </div>
+  <div class="seg" role="group" aria-label="Mode filter" id="modes">
+    <button aria-pressed="true" data-m="all">All modes</button>
+    <button aria-pressed="false" data-m="_f">Fixed</button>
+    <button aria-pressed="false" data-m="_d">Dial-A-Ride</button>
+    <button aria-pressed="false" data-m="_v">Vanpool</button>
+    <button aria-pressed="false" data-m="_i">Via</button>
+  </div>
+  <div class="stamp">
+    <span>AS COMPUTED <b>2026-08-01 06:12:04Z</b></span>
+    <span><span class="dot"></span> <b>PIPELINE NOMINAL</b></span>
+  </div>
+</header>
+
+<main data-focus="" id="main">
+  <section class="hero" aria-label="Network schematic">
+    <div class="hero-cap">
+      <div class="k">NETWORK SCHEMATIC</div>
+      <div class="h">RIVERBEND <b>GRID</b></div>
+    </div>
+
+    <svg class="net" viewBox="0 0 1000 640" preserveAspectRatio="xMidYMid slice" aria-hidden="false">
+      <defs>
+        <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+          <path d="M40 0H0V40" fill="none" stroke="var(--grid)" stroke-width="1"/>
+        </pattern>
+        <filter id="bloom" x="-80%" y="-80%" width="260%" height="260%">
+          <feGaussianBlur stdDeviation="7"/>
+        </filter>
+      </defs>
+      <rect x="0" y="0" width="1000" height="640" fill="url(#grid)"/>
+      <!-- radar sweep arcs, subtle -->
+      <circle cx="500" cy="330" r="150" fill="none" stroke="var(--grid)" stroke-width="1"/>
+      <circle cx="500" cy="330" r="300" fill="none" stroke="var(--grid)" stroke-width="1"/>
+
+      <!-- ROUTES (Vignelli geometry: orthogonal + 45°) -->
+      <!-- Fixed R1 -->
+      <polyline class="route" data-mode="_f" stroke="var(--m-fixed)"
+        points="80,180 300,180 380,260 620,260 700,180 920,180"/>
+      <!-- Fixed R2 -->
+      <polyline class="route" data-mode="_f" stroke="var(--m-fixed)"
+        points="160,540 160,340 380,260 620,260 840,260 840,460"/>
+      <!-- Dial-A-Ride -->
+      <polyline class="route" data-mode="_d" stroke="var(--m-dar)"
+        points="120,470 320,470 500,470 500,330 620,260"/>
+      <!-- Vanpool -->
+      <polyline class="route" data-mode="_v" stroke="var(--m-vp)"
+        points="720,560 720,400 840,280"/>
+      <!-- Via -->
+      <polyline class="route" data-mode="_i" stroke="var(--m-via)"
+        points="80,80 260,80 380,200 380,260"/>
+
+      <!-- transfer hubs -->
+      <circle class="hub" cx="380" cy="260" r="8"/>
+      <circle class="hub" cx="620" cy="260" r="8"/>
+      <text class="hublabel" x="366" y="244">CENTRAL</text>
+      <text class="hublabel" x="628" y="244">RIVERGATE</text>
+
+      <!-- a scatter of stops -->
+      <g id="stops">
+        <circle class="stop" cx="300" cy="180" r="3.4"/><circle class="stop" cx="700" cy="180" r="3.4"/>
+        <circle class="stop" cx="160" cy="340" r="3.4"/><circle class="stop" cx="840" cy="260" r="3.4"/>
+        <circle class="stop" cx="500" cy="470" r="3.4"/><circle class="stop" cx="320" cy="470" r="3.4"/>
+        <circle class="stop" cx="500" cy="330" r="3.4"/><circle class="stop" cx="260" cy="80" r="3.4"/>
+        <circle class="stop" cx="720" cy="400" r="3.4"/>
+      </g>
+
+      <!-- observed-ping breadcrumb on one vehicle: discrete dots, a GAP drawn as a gap -->
+      <g id="breadcrumb">
+        <circle class="ping" cx="300" cy="180" r="2.6" opacity=".25"/>
+        <circle class="ping" cx="330" cy="180" r="2.6" opacity=".35"/>
+        <circle class="ping" cx="360" cy="200" r="2.6" opacity=".5"/>
+        <!-- 7-min silence: no observed pings here; the gap is left empty, marked -->
+        <line class="gaptick" x1="392" y1="272" x2="470" y2="272"/>
+        <text class="hublabel" x="398" y="290" fill="var(--alert)" opacity=".8">7-MIN GAP</text>
+      </g>
+
+      <!-- VEHICLES (flat, mode-shaped). Flagged ones carry a scarce attention halo. -->
+      <!-- flagged: telemetry gap (ALERT) -->
+      <g class="mark flag--alert" data-mode="_f" tabindex="0" role="button" data-id="gap"
+         aria-label="Vehicle V-3684, 7-minute telemetry gap — needs investigation">
+        <circle class="halo-bloom" cx="380" cy="260" r="15" filter="url(#bloom)"/>
+        <circle class="halo-ring" cx="380" cy="260" r="12"/>
+        <circle class="body" cx="380" cy="260" r="6" fill="var(--m-fixed)" stroke="var(--void)" stroke-width="1.5"/>
+      </g>
+      <!-- flagged: ghost boardings (WATCH) -->
+      <g class="mark flag--watch" data-mode="_f" tabindex="0" role="button" data-id="ghost"
+         aria-label="292 unassigned boardings held for classification — needs review">
+        <circle class="halo-bloom" cx="700" cy="180" r="14" filter="url(#bloom)"/>
+        <circle class="halo-ring" cx="700" cy="180" r="11"/>
+        <circle class="body" cx="700" cy="180" r="6" fill="var(--m-fixed)" stroke="var(--void)" stroke-width="1.5"/>
+      </g>
+      <!-- flagged: VRH variance (WATCH) — on DAR -->
+      <g class="mark flag--watch" data-mode="_d" tabindex="0" role="button" data-id="vrh"
+         aria-label="VRH variance versus dispatch report — needs review">
+        <rect class="halo-bloom" x="486" y="456" width="28" height="28" rx="3" filter="url(#bloom)"/>
+        <rect class="halo-ring" x="489" y="459" width="22" height="22" rx="2"/>
+        <rect class="body" x="493" y="463" width="14" height="14" rx="2" fill="var(--m-dar)" stroke="var(--void)" stroke-width="1.5"/>
+      </g>
+
+      <!-- calm vehicles: quiet, unlit -->
+      <circle class="mark body" data-mode="_f" cx="300" cy="180" r="5.5" fill="var(--m-fixed)" stroke="var(--void)" stroke-width="1.5"/>
+      <circle class="mark body" data-mode="_f" cx="840" cy="260" r="5.5" fill="var(--m-fixed)" stroke="var(--void)" stroke-width="1.5"/>
+      <rect class="mark body" data-mode="_d" x="315" y="465" width="11" height="11" rx="2" fill="var(--m-dar)" stroke="var(--void)" stroke-width="1.5"/>
+      <rect class="mark body" data-mode="_v" x="714" y="394" width="11" height="11" rx="2" fill="var(--m-vp)" stroke="var(--void)" stroke-width="1.5" transform="rotate(45 720 400)"/>
+      <path class="mark body" data-mode="_i" d="M260 74 l6 11 h-12 z" fill="var(--m-via)" stroke="var(--void)" stroke-width="1.5"/>
+    </svg>
+
+    <div class="legend">
+      <span><i style="background:var(--m-fixed)"></i>Fixed route</span>
+      <span><i style="background:var(--m-dar)"></i>Dial-A-Ride</span>
+      <span><i style="background:var(--m-vp)"></i>Vanpool</span>
+      <span><i style="background:var(--m-via)"></i>Via</span>
+      <span><i style="background:var(--alert);box-shadow:0 0 7px var(--alert-glow)"></i>Flagged for investigation</span>
+    </div>
+    <div class="honesty">Positions observed, never interpolated. A gap in telemetry is drawn as a gap, not bridged.</div>
+  </section>
+
+  <aside class="rail">
+    <div class="rail-h">FLEET READOUT · JULY 2026</div>
+
+    <div class="card" data-fig="VRH">
+      <div class="top"><span class="metric">Vehicle Revenue Hours</span><span class="chip ok">Certified</span></div>
+      <div class="fig"><span class="count" data-target="612.48" data-dec="2">0.00</span><span class="u">hrs</span></div>
+      <svg class="spark" viewBox="0 0 300 34" preserveAspectRatio="none" data-spark="18,20,17,22,19,24,21,25,23,26,24,25"></svg>
+      <div class="rcpt">RECEIPT <b>mvid:8f2a·c41d</b> · telemetry-grounded · 2 leaves</div>
+    </div>
+
+    <div class="card" data-fig="VRM">
+      <div class="top"><span class="metric">Vehicle Revenue Miles</span><span class="chip ok">Certified</span></div>
+      <div class="fig"><span class="count" data-target="9317.64" data-dec="2">0.00</span><span class="u">mi</span></div>
+      <svg class="spark" viewBox="0 0 300 34" preserveAspectRatio="none" data-spark="20,19,21,20,23,22,24,23,25,24,26,27"></svg>
+      <div class="rcpt">RECEIPT <b>mvid:1b90·77e2</b> · schedule-aligned · 2 leaves</div>
+    </div>
+
+    <div class="card" data-fig="UPT">
+      <div class="top"><span class="metric">Unlinked Passenger Trips</span><span class="chip watch">292 held</span></div>
+      <div class="fig"><span class="count" data-target="41982" data-dec="0">0</span><span class="u">trips</span></div>
+      <svg class="spark" viewBox="0 0 300 34" preserveAspectRatio="none" data-spark="15,17,16,19,18,20,19,22,20,21,22,23"></svg>
+      <div class="rcpt">RECEIPT <b>mvid:5d3c·a018</b> · revenue-only · 292 pending review</div>
+    </div>
+
+    <div class="card attn" data-fig="VP">
+      <div class="top"><span class="metric">Vanpool · Passenger Trips</span><span class="chip refused">Refused</span></div>
+      <div class="fig refused">FIGURE WITHHELD</div>
+      <div class="rcpt">Telematics cannot certify vanpool ridership — rider-self-reported per FTA p.131. No number will be invented.</div>
+    </div>
+
+    <div class="term">
+      <div class="rail-h">PROVENANCE TERMINAL <span class="live"><i></i>LIVE</span></div>
+      <div class="stream" id="stream" aria-live="polite"></div>
+    </div>
+  </aside>
+</main>
+
+<div class="scrim" id="scrim"></div>
+<aside class="inspect" id="inspect" role="dialog" aria-modal="true" aria-labelledby="insp-title"></aside>
+
+<script>
+(function(){
+  var rm = window.matchMedia('(prefers-reduced-motion:reduce)').matches;
+
+  /* ── Count-up: lands EXACTLY on the computed value, then flat. Never glows. ── */
+  function countUp(el){
+    var target = parseFloat(el.getAttribute('data-target'));
+    var dec = parseInt(el.getAttribute('data-dec'),10);
+    var fmt = function(n){ return n.toLocaleString('en-US',{minimumFractionDigits:dec,maximumFractionDigits:dec}); };
+    if(rm){ el.textContent = fmt(target); return; }
+    var dur=1100, t0=null;
+    function step(ts){
+      if(!t0) t0=ts;
+      var p=Math.min((ts-t0)/dur,1);
+      var e=1-Math.pow(1-p,3);
+      el.textContent = fmt(target*e);
+      if(p<1) requestAnimationFrame(step);
+      else el.textContent = fmt(target); /* exact landing */
+    }
+    requestAnimationFrame(step);
+  }
+  document.querySelectorAll('.count').forEach(countUp);
+
+  /* ── Sparklines: area fill + emphasised endpoint, flat honest scale ── */
+  document.querySelectorAll('[data-spark]').forEach(function(svg){
+    var v = svg.getAttribute('data-spark').split(',').map(Number);
+    var W=300,H=34,pad=3, max=Math.max.apply(null,v), min=Math.min.apply(null,v);
+    var xs=function(i){return i*(W/(v.length-1));};
+    var ys=function(d){return H-pad-((d-min)/(max-min||1))*(H-2*pad);};
+    var line=v.map(function(d,i){return (i?'L':'M')+xs(i).toFixed(1)+' '+ys(d).toFixed(1);}).join(' ');
+    var area=line+' L'+W+' '+H+' L0 '+H+' Z';
+    var ex=xs(v.length-1), ey=ys(v[v.length-1]);
+    svg.innerHTML=
+      '<defs><linearGradient id="g'+Math.round(ey*ex)+'" x1="0" y1="0" x2="0" y2="1">'+
+      '<stop offset="0" stop-color="var(--signal)" stop-opacity=".28"/>'+
+      '<stop offset="1" stop-color="var(--signal)" stop-opacity="0"/></linearGradient></defs>'+
+      '<path d="'+area+'" fill="url(#g'+Math.round(ey*ex)+')"/>'+
+      '<path d="'+line+'" fill="none" stroke="var(--signal)" stroke-width="1.6"/>'+
+      '<circle cx="'+ex.toFixed(1)+'" cy="'+ey.toFixed(1)+'" r="2.6" fill="var(--signal)"/>';
+  });
+
+  /* ── Mode filter ── */
+  var main=document.getElementById('main');
+  document.getElementById('modes').addEventListener('click',function(e){
+    var b=e.target.closest('button'); if(!b) return;
+    this.querySelectorAll('button').forEach(function(x){x.setAttribute('aria-pressed', x===b?'true':'false');});
+    var m=b.getAttribute('data-m');
+    if(m==='all') main.removeAttribute('data-focus');
+    else { main.setAttribute('data-focus', m);
+      /* rewrite the CSS-driving attribute selector by toggling a class per mode */
+      main.querySelectorAll('.route,.mark').forEach(function(el){
+        el.style.opacity = (el.getAttribute('data-mode')||'').indexOf(m)>=0 ? '' : '.12';
+      });
+    }
+    if(m==='all') main.querySelectorAll('.route,.mark').forEach(function(el){el.style.opacity='';});
+  });
+
+  /* ── Provenance terminal stream ── */
+  var rows=[
+    ['06:12:04','<b>UPT</b> revenue split applied · 292 held','sig','HELD'],
+    ['06:12:03','<b>V-3684</b> telemetry gap · 7m04s','alert','GAP'],
+    ['06:12:01','block <b>1-3</b> VRH reconciled','ok','OK'],
+    ['06:11:58','<b>VRM</b> leaf verified · sha 2f…9c','ok','VERIFIED'],
+    ['06:11:55','ghost boardings clustered · pre-service','watch','REVIEW'],
+    ['06:11:52','Via trip <b>7741</b> matched schedule','ok','OK'],
+    ['06:11:49','vanpool figure withheld · no basis','sig','REFUSED'],
+    ['06:11:47','coverage 0.981 · above 0.95 floor','ok','OK']
+  ];
+  var stream=document.getElementById('stream'), i=0;
+  function emit(){
+    var r=rows[i%rows.length]; i++;
+    var d=document.createElement('div'); d.className='er '+r[2];
+    d.innerHTML='<span class="t">'+r[0]+'</span><span class="m">'+r[1]+'</span><span class="s">'+r[3]+'</span>';
+    stream.insertBefore(d,stream.firstChild);
+    while(stream.children.length>9) stream.removeChild(stream.lastChild);
+  }
+  rows.slice(0,6).reverse().forEach(function(_,k){ /* seed */ });
+  for(var s=0;s<6;s++) emit();
+  if(!rm) setInterval(emit, 2600);
+
+  /* ── Inspector + relationship chain ── */
+  var DATA={
+    gap:{sev:'alert',title:'Telemetry Gap · V-3684',
+      lead:'Vehicle <b>V-3684</b> (Route E) went silent for <b>7m04s</b> during revenue service. Positions before and after are observed; the interval is <b>not interpolated</b> — it is held as a gap and excluded from the covered window.',
+      kv:[['Vehicle','V-3684'],['Route','E · Fixed'],['Block','1-3'],['Gap','07:41:12 → 07:48:16'],['Effect','VRH window excised']],
+      chain:[['bad','!','FINDING','Telemetry gap · 7m04s'],['sig','B','BLOCK','1-3 (Route E)'],['sig','R','ROUTE','E · Fixed route'],['bad','C','CALC','VRH · window excised'],['sound','@','DQ OWNER','fleet-telemetry · open']]},
+    ghost:{sev:'watch',title:'Unassigned Boardings · 292 held',
+      lead:'<b>292</b> boardings resolved to <b>no run assignment</b> (all context fields null), clustered at the pre-service hour. Auto-classified as likely non-revenue prep — <b>held out of UPT</b> until a human confirms. A justification note will be attached to the receipt.',
+      kv:[['Count','292 boardings'],['Window','04:00 → 06:00'],['Signal','no-run + pre-service'],['Default','exclude-until-classified'],['Status','pending review']],
+      chain:[['bad','!','FINDING','292 no-run boardings'],['sig','V','VEHICLES','7 units, pre-service'],['sig','R','WINDOW','before first sched. trip'],['bad','C','CALC','UPT · 292 held'],['sound','@','DQ OWNER','ridership-analyst · open']]},
+    vrh:{sev:'watch',title:'VRH Variance vs Dispatch',
+      lead:'Dispatch revenue report shows <b>742.03 h</b>; Headway computes <b>587.32 h</b> from telemetry, schedule-aligned. The delta is <b>deadhead and non-revenue movement</b> that dispatch counts and NTD excludes — Headway is not under-counting, the raw report is over-stating revenue hours.',
+      kv:[['Dispatch','742.03 h'],['Headway','587.32 h'],['Delta','154.71 h (20.9%)'],['Cause','deadhead / non-revenue'],['Treatment','excluded per FTA Ex.35']],
+      chain:[['bad','!','FINDING','VRH variance 20.9%'],['sig','B','BLOCKS','1-1 … 1-7'],['sig','R','ROUTE','1 · Fixed route'],['sound','C','CALC','VRH · revenue-only'],['sound','@','RECONCILIATION','transparent to agency']]}
+  };
+  var scrim=document.getElementById('scrim'), insp=document.getElementById('inspect'), lastFocus=null;
+  function open(id){
+    var d=DATA[id]; if(!d) return; lastFocus=document.activeElement;
+    var kv=d.kv.map(function(r){return '<div class="k">'+r[0]+'</div><div class="v"><b>'+r[1]+'</b></div>';}).join('');
+    var chain=d.chain.map(function(n,idx){
+      return (idx?'<div class="connect"></div>':'')+
+        '<div class="node '+n[0]+'"><span class="ic">'+n[1]+'</span>'+
+        '<span><span class="nk">'+n[2]+'</span><br><span class="nv">'+n[3]+'</span></span></div>';
+    }).join('');
+    insp.innerHTML=
+      '<div class="insp-h"><span class="sev '+d.sev+'">'+(d.sev==='alert'?'Alert':'Review')+'</span>'+
+      '<h2 id="insp-title">'+d.title+'</h2>'+
+      '<button class="close" aria-label="Close">✕</button></div>'+
+      '<div class="insp-b"><p class="lead">'+d.lead+'</p>'+
+      '<div class="kv">'+kv+'</div>'+
+      '<p class="relh">RELATIONSHIP TRAIL</p><div class="chain">'+chain+'</div></div>';
+    scrim.classList.add('open'); insp.classList.add('open');
+    insp.querySelector('.close').addEventListener('click', close);
+    insp.querySelector('.close').focus();
+    /* highlight related route */
+    main.querySelectorAll('.route').forEach(function(r){ r.classList.remove('sel'); });
+  }
+  function close(){
+    scrim.classList.remove('open'); insp.classList.remove('open');
+    if(lastFocus) lastFocus.focus();
+  }
+  scrim.addEventListener('click', close);
+  document.addEventListener('keydown', function(e){ if(e.key==='Escape') close(); });
+  document.querySelectorAll('.mark[data-id]').forEach(function(m){
+    m.addEventListener('click', function(){ open(m.getAttribute('data-id')); });
+    m.addEventListener('keydown', function(e){ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); open(m.getAttribute('data-id')); }});
+  });
+})();
+</script>

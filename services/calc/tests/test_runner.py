@@ -168,7 +168,7 @@ def test_clean_period_persists_telemetry_metrics_and_refuses_upt_pmt(clean_rows)
     )
     assert vrm.calc_version == "0.2.0"
     assert vrh.calc_version == "0.4.0"
-    assert upt.calc_version == "0.4.0"  # handoff 0040: revenue classification
+    assert upt.calc_version == "0.5.0"  # handoff 0040: revenue classification
     assert pmt.calc_version == "0.2.0"
     # Golden expected values (tests/golden/vrm_vrh_v0/expected.json; the
     # no-block fallback reproduces the 0.2.0 VRH value exactly). No
@@ -537,7 +537,7 @@ def test_run_report_json_is_parseable_and_complete(clean_rows):
     assert parsed["metrics"][1]["detail"] == VRH_CLEAN_DETAIL
     assert parsed["metrics"][1]["info_count"] == 2
     # upt/pmt refused (no count data): no value, no detail, one blocking id.
-    assert parsed["metrics"][2]["calc_version"] == "0.4.0"  # handoff 0040
+    assert parsed["metrics"][2]["calc_version"] == "0.5.0"  # handoff 0040
     assert parsed["metrics"][2]["unit"] == "unlinked_passenger_trips"
     assert parsed["metrics"][2]["value"] is None
     assert parsed["metrics"][2]["persisted"] is False
@@ -659,10 +659,12 @@ def test_upt_blocked_case_routes_blocking_and_persists_nothing_for_upt(
 
     upt = report.outcomes[2]
     assert not upt.persisted and upt.value is None
-    # 1 simulated info + 3 warnings (null count, imbalance, negative load)
+    # 1 simulated info + 4 warnings (null count, imbalance, negative load,
+    # and — new in upt_v0 0.5.0 — the no-trip boardings this fixture carries
+    # with NO revenue_classification at all, which 0.4.0 dropped in silence).
     # + 1 blocking, routed after vrh's 2 block_unavailable infos.
     assert len(upt.routed_info_ids) == 1
-    assert len(upt.routed_warning_ids) == 3
+    assert len(upt.routed_warning_ids) == 4
     assert len(upt.routed_blocking_ids) == 1
     dq_params = [p for _, p in conn.statements_matching("INSERT INTO dq.issues")]
     upt_types = [
@@ -1188,7 +1190,7 @@ def test_no_run_boardings_classified_through_runner(clean_rows):
     report = run_period(conn, PERIOD_START, PERIOD_END)
 
     upt = report.outcomes[2]
-    assert upt.calc_version == "0.4.0"
+    assert upt.calc_version == "0.5.0"
     assert upt.persisted and upt.value == "5"  # only the assigned boarding
     split = upt.detail["revenue_classification"]
     assert split["revenue_boardings"] == 5

@@ -224,10 +224,19 @@ def test_excluded_boardings_do_not_distort_missing_trip_factor() -> None:
 # Byte-for-byte 0.2.0 retention
 # ---------------------------------------------------------------------------
 
-def test_unclassified_feed_is_byte_for_byte_0_2_0() -> None:
+def test_unclassified_feed_computes_0_2_0_s_FIGURE_and_says_what_0_2_0_hid() -> None:
     """A feed that sets no revenue_classification (every first-party TIDES
-    feed) produces a detail with NO revenue split and computes exactly as
-    0.2.0 — the change is strictly additive."""
+    feed) yields the SAME FIGURE as 0.2.0 — and, from 0.5.0, says out loud
+    that a boarding was set aside instead of dropping it in silence.
+
+    The guarantee that matters is the retained runnable: compute_upt_v0_2_0
+    still reproduces 0.2.0 byte-for-byte, so anything certified under it
+    recomputes exactly. The CURRENT version is allowed to say MORE about the
+    same number — never to report a different one. An external adversarial
+    review (2026-08-01) found that a no-trip boarding carrying no
+    classification at all reached none of the three split buckets and vanished
+    without a word; the count below is the boarding that used to vanish.
+    """
     events = [
         boarding("a1", when=FIRST_DEP + timedelta(hours=1), trip_id="trip-1", count=5),
         # an unassigned trip_id but NO 0040 status (the pre-0040 proxy path)
@@ -235,14 +244,28 @@ def test_unclassified_feed_is_byte_for_byte_0_2_0() -> None:
     ]
     new = compute_upt(events, ["trip-1"], revenue_windows=WINDOW)
     v020 = compute_upt_v0_2_0(events, ["trip-1"])
-    assert new.value == v020.value == Decimal("5")
-    assert "revenue_classification" not in new.detail.to_dict()
-    # modulo the version string, the whole result matches 0.2.0
-    import dataclasses
 
-    assert dataclasses.replace(new, calc_version="x") == dataclasses.replace(
-        v020, calc_version="x"
+    # THE FIGURE IS UNCHANGED. An unclassified boarding is not counted under
+    # either version — with no classification there is no basis to call it
+    # revenue, and inventing one would put a guess into a reported number.
+    assert new.value == v020.value == Decimal("5")
+
+    # The retained runnable is still byte-for-byte 0.2.0 — no split, no
+    # unclassified key, no extra finding. This is the audit guarantee.
+    assert "revenue_classification" not in v020.detail.to_dict()
+    assert not any(
+        f.issue_type == "boarding_unclassified_no_run" for f in v020.warnings
     )
+
+    # The current version states the set it could not place — 9 boardings, the
+    # ones 0.2.0 silently discarded — WITHOUT folding them into the split.
+    detail = new.detail.to_dict()
+    assert detail["revenue_classification"]["unclassified_no_run_boardings"] == 9
+    assert detail["revenue_classification"]["excluded_non_revenue_boardings"] == 0
+    assert detail["revenue_classification"]["pending_review_boardings"] == 0
+    assert [
+        f.issue_type for f in new.warnings if f.issue_type == "boarding_unclassified_no_run"
+    ] == ["boarding_unclassified_no_run"]
 
 
 def test_retained_versions_ignore_classification() -> None:

@@ -82,7 +82,7 @@ OPERATED = [f"trip-{i}" for i in range(1, 11)]
 def test_without_attestation_refusal_is_byte_for_byte_0_1_0():
     new = compute_upt(EVENTS, OPERATED)
     old = compute_upt_v0_1_0(EVENTS, OPERATED)
-    assert new.calc_version == "0.4.0"
+    assert new.calc_version == "0.5.0"
     assert old.calc_version == "0.1.0"
     # Everything except the version string is byte-identical — the 0.2.0 and
     # 0.3.0 changes are strictly additive (no classified boardings here).
@@ -103,7 +103,7 @@ def test_with_attestation_factors_up_with_provenance_and_info_finding():
     # 10 counted × 10/(10−9) = 100 boardings.
     assert result.value == Decimal("100")
     assert result.blocking_issues == ()
-    assert result.calc_version == "0.4.0"
+    assert result.calc_version == "0.5.0"
     detail = result.detail.to_dict()
     assert detail["factor_applied"] == "10.000000"
     assert detail["missing_share"] == "0.9000"
@@ -189,3 +189,44 @@ def test_retained_0_1_0_never_factors_beyond_threshold():
         compute_upt_v0_1_0
     ).parameters
     assert compute_upt_v0_1_0(EVENTS, OPERATED).value is None
+
+
+# ---------------------------------------------------------------------------
+# Total-outage guard (external adversarial review, 2026-08-01)
+# ---------------------------------------------------------------------------
+
+
+def test_total_outage_with_attestation_refuses_instead_of_dividing_by_zero() -> None:
+    """100% of operated trips missing + a governing attestation must REFUSE.
+
+    The p. 146 attested path factors up by operated / (operated - missing).
+    When every operated trip is missing that divisor is exactly zero: an
+    external review found this raised decimal.DivisionByZero — a crash where
+    the whole platform's rule is to refuse loudly and say why. Factoring up
+    needs observed trips to scale FROM; with none observed there is nothing to
+    scale and no attestation can conjure one.
+    """
+    # One operated trip, and NO event for it: missing == operated == 1.
+    events = [boarding("b1", None, 3, 10)]
+    result = compute_upt(events, ["trip-1"], attestations=[attestation()])
+
+    # It refuses — no value, no invented factor.
+    assert result.value is None
+    assert result.detail.factor_applied is None
+    # ...and it says the true thing: this is a feed problem, not a trip problem.
+    blocking = [f.issue_type for f in result.blocking_issues]
+    assert blocking, "a total outage must produce a blocking finding"
+    assert any("missing" in t for t in blocking)
+
+
+def test_partial_outage_with_attestation_still_factors_up() -> None:
+    """The guard must not disarm the attested path it protects: with at least
+    one observed trip the factor-up still applies exactly as before."""
+    events = [
+        boarding("b1", "trip-1", 10, 10),
+        boarding("b2", None, 0, 20),
+    ]
+    # 2 operated, 1 missing (50% — far above the 2% line), attestation present.
+    result = compute_upt(events, ["trip-1", "trip-2"], attestations=[attestation()])
+    assert result.value == Decimal("20")  # 10 x 2/1
+    assert result.detail.factor_applied == Decimal("2.000000")

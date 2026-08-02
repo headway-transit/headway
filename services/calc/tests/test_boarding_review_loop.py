@@ -396,7 +396,7 @@ def test_no_decisions_is_byte_for_byte_0_3_0() -> None:
     assert "human_classifications" not in current.detail.to_dict()[
         "revenue_classification"
     ]
-    assert current.calc_version == "0.4.0"
+    assert current.calc_version == "0.5.0"
     assert retained.calc_version == "0.3.0"
 
 

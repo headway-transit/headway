@@ -251,6 +251,55 @@ def test_blank_justification_is_refused_with_an_example(client, fake_db):
     assert fake_db.boarding_reviews["pe-1"]["verdict"] is None
 
 
+def test_invisible_justification_is_refused_too(client, fake_db):
+    """A note nobody can read is not a reason.
+
+    An external adversarial review (2026-08-01) landed a verdict whose entire
+    justification was a single ZERO-WIDTH SPACE. It passed BOTH guards: Python
+    str.strip() does not treat U+200B as whitespace, and PostgreSQL's
+    one-argument btrim() removes the SPACE character only. The guarantee we
+    state — the justification is required, enforced in the schema — was false
+    for every invisible codepoint. Migration 0041 fixes the database side.
+    """
+    fake_db.add_boarding_review(passenger_event_id="pe-1")
+    invisible = (
+        "​",  # zero-width space — the one the review actually used
+        "‌‍",  # zero-width non-joiner + joiner
+        "﻿",  # zero-width no-break space (BOM)
+        "⁠",  # word joiner
+        " ",  # non-breaking space: blank, but not an ASCII space
+        " ​ \t\n",  # mixed with ordinary whitespace
+    )
+    for blank in invisible:
+        r = client.post(
+            "/revenue-review/boardings/pe-1/classify",
+            json={"verdict": "revenue", "justification": blank},
+            headers=auth_header(fake_db, "stella"),
+        )
+        assert r.status_code == 422, repr(blank)
+    # Nothing recorded: the boarding still waits for a real answer.
+    assert fake_db.boarding_reviews["pe-1"]["verdict"] is None
+
+
+def test_a_real_note_carrying_an_invisible_character_still_works(client, fake_db):
+    """The guard strips invisible padding; it must not reject real prose that
+    happens to carry one (a paste out of a word processor)."""
+    fake_db.add_boarding_review(passenger_event_id="pe-1")
+    r = client.post(
+        "/revenue-review/boardings/pe-1/classify",
+        json={
+            "verdict": "revenue",
+            "justification": "​extra bus sent to recover the route at 15:10",
+        },
+        headers=auth_header(fake_db, "stella"),
+    )
+    assert r.status_code == 200
+    assert (
+        fake_db.boarding_reviews["pe-1"]["justification"]
+        == "extra bus sent to recover the route at 15:10"
+    )
+
+
 def test_justification_is_required_by_the_schema_not_just_the_form(
     client, fake_db
 ):

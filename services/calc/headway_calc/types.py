@@ -917,6 +917,14 @@ class UptDetail:
     excluded_non_revenue_boardings: int = 0
     pending_review_boardings: int = 0
     pending_review_policy: str = "exclude_until_classified"
+    # Boardings with NO trip and NO revenue_classification at all — the calc
+    # could not place them in the split, so they are stated here rather than
+    # left to vanish (external adversarial review, 2026-08-01). NOT counted
+    # toward UPT and NOT part of the split's arithmetic: with no
+    # classification there is no basis to call them revenue, and inventing one
+    # would put a guess into a reported number. Non-zero here means rows
+    # written before migration 0039, or a source that does not set the field.
+    unclassified_no_run_boardings: int = 0
     # --- human classifications (upt_v0 0.4.0, handoff 0040 review sub-wave) -
     # The judgment calls that shaped this figure. A no-run boarding 0.3.0
     # would have held PENDING is counted (or excluded) here because a named
@@ -955,6 +963,7 @@ class UptDetail:
             or self.pending_review_boardings
             or self.human_revenue_boardings
             or self.human_non_revenue_boardings
+            or self.unclassified_no_run_boardings
         ):
             split = {
                 "revenue_boardings": self.total_boardings_counted,
@@ -972,6 +981,13 @@ class UptDetail:
                 split["human_classifications"] = [
                     dict(c) for c in self.human_classifications
                 ]
+            # Stated only when non-zero, so a fully-classified feed's detail is
+            # unchanged. Deliberately OUTSIDE the three split counts: it is the
+            # set the split could not account for, not a fourth bucket of it.
+            if self.unclassified_no_run_boardings:
+                split["unclassified_no_run_boardings"] = (
+                    self.unclassified_no_run_boardings
+                )
             detail["revenue_classification"] = split
         return detail
 

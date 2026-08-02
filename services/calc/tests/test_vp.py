@@ -160,8 +160,17 @@ def test_observed_movement_recorded_as_context():
     detail = compute_vp_vrm(rows).detail
     assert detail.observed_distance_meters == "60000"
     assert detail.observed_engine_seconds == "43200"
-    assert detail.by_basis == {"ecu_odometer": "60000", "ecu_engine_time": "43200"}
-    assert detail.vehicle_days_seen == 2
+    # Keyed measure:basis, not basis alone. Keyed by basis alone, a source
+    # reporting distance AND engine time on one basis added METRES to SECONDS
+    # in a single bucket (external adversarial review, 2026-08-01).
+    assert detail.by_basis == {
+        "distance:ecu_odometer": "60000",
+        "engine_time:ecu_engine_time": "43200",
+    }
+    # ONE vehicle-day: the same van on the same date reporting two measures is
+    # two SERIES. Counting series inflated the fleet an auditor is told was
+    # observed.
+    assert detail.vehicle_days_seen == 1
 
 
 def test_unmeasured_series_is_stated_never_zeroed():
@@ -196,7 +205,17 @@ def test_disagreeing_bases_raise_one_warning_never_averaged():
     assert len(conflicts) == 1
     assert result.detail.basis_conflicts == 1
     # both bases kept distinct in the detail — never merged into one number
-    assert result.detail.by_basis == {"ecu_odometer": "60000", "gps_distance": "60900"}
+    assert result.detail.by_basis == {
+        "distance:ecu_odometer": "60000",
+        "distance:gps_distance": "60900",
+    }
+    # ...and there is NO headline total, because there is no honest one to
+    # give. These are two measurements of ONE ~60 km day. Adding them claimed
+    # the van drove 120,900 m (external adversarial review, 2026-08-01);
+    # picking one would be silent basis substitution, which ADR-0013 makes
+    # unrepresentable. So the single number is undefined and says so, and the
+    # per-basis breakdown above carries the truth.
+    assert result.detail.observed_distance_meters is None
     assert set(conflicts[0].source_record_ids) == {"ecu", "gps"}
 
 

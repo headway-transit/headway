@@ -505,3 +505,90 @@ what grounds.
 - **A boarding whose finding predates this wave** cannot be classified: it has
   no queue row. Re-running the calculation over the period raises it again and
   puts it in the queue — stated rather than silently worked around.
+
+---
+
+## External adversarial review — findings fixed (2026-08-01)
+
+The session diff went through a **different model family** (via `agy`) using
+`tools/review-pack/build.py`. Five findings came back; each was verified against
+live code before acting, because an external "confirmed" is a hypothesis, not a
+verdict. **Four were real and are fixed here; one was refuted by measurement.**
+
+### REFUTED — DST spring-forward does not drop riders
+
+The review argued `revenue_window.scheduled_instant` used wall-clock addition,
+so on a spring-forward day a 24:00:00 GTFS time would land an hour early and
+end-of-service catch-up boardings would be auto-excluded. **Tested rather than
+reasoned about:** for `America/Los_Angeles` on 2026-03-08, wall-clock addition
+and elapsed-from-anchor agree exactly at 08:00, 23:00, 24:00 and 26:00 (24:00 →
+2026-03-09 07:00 UTC under both). The renderings are also correct in local
+terms: 08:00 → 08:00 local, 24:00 → midnight the next day. The two readings
+diverge only for a time strictly *before* the transition (01:00), where the
+current behaviour — 01:00 local — is the practical GTFS meaning. A nonexistent
+local time (02:30) resolves to 03:30 local rather than erroring. No fix made;
+the claimed exploit does not occur.
+
+### F5 (highest impact) — a total APC outage CRASHED instead of refusing
+
+`upt.py`'s p. 146 attested factor-up divides by `operated - missing`. When every
+operated trip is missing that divisor is **exactly zero**, so a 100% outage with
+a governing statistician attestation on file raised `decimal.DivisionByZero`.
+The whole platform's rule is to refuse loudly and say why; this was a crash in
+the exact case the rule exists for. Factoring up needs observed trips to scale
+FROM — with none observed there is nothing to scale, and no attestation can
+conjure one. The branch is now guarded by `trips_with_events_count > 0`, so the
+case falls to the existing refusal, which already speaks to a total outage
+("start with the feed rather than the trips"). Pinned by two tests: the outage
+refuses, and a *partial* outage with an attestation still factors up — the
+guard must not disarm the path it protects.
+
+### F4 — the "schema-enforced" justification was bypassable by invisible text
+
+Handoff 0040 stated the required justification is enforced **in the schema**.
+It was not. `btrim(justification)` with one argument removes the SPACE
+character only, and Python's `str.strip()` does not treat U+200B as whitespace
+— so a justification consisting solely of a zero-width space satisfied **both**
+layers and landed a verdict with an unreadable reason. **Proven in real
+Postgres** on a disposable container: the 0040 constraint returned `INSERT 0 1`
+for a zero-width space; the new one rejects it, while real prose and NULL still
+insert. Fixed in two places: **migration 0041** trims zero-width and
+non-breaking characters before the non-empty test, and the API's validator now
+drops Unicode categories Cf/Cc wholesale so a future invisible codepoint cannot
+reopen the hole. A real note that merely *contains* an invisible character (a
+paste out of a word processor) still works — it is cleaned, not rejected.
+
+### F2 — an unclassified boarding vanished without a word (upt_v0 0.5.0)
+
+A boarding with no trip **and** no `revenue_classification` at all (NULL, not
+`'unassigned'`) reached none of the three split buckets and was skipped in
+silence, so the split stopped accounting for every boarding. The live cause is
+real and not hypothetical: **every `passenger_events` row written before
+migration 0039 has `revenue_classification = NULL`**, as does anything an older
+adapter emits.
+
+The **figure is unchanged** — such a boarding is not counted under 0.4.0 or
+0.5.0, because with no classification there is no basis to call it revenue and
+inventing one would put a guess into a reported number. What changes is that
+the omission now announces itself: one warning finding
+(`boarding_unclassified_no_run`) naming the vehicle, time and count, plus an
+`unclassified_no_run_boardings` key stated **outside** the three split counts —
+it is the set the split could not account for, not a fourth bucket of it.
+
+**A regression this caught in passing.** The first cut of the fix leaked
+backwards: the retained-version wrappers delegate to the same `compute_upt` and
+only relabel `calc_version`, so 0.1.0–0.4.0 began emitting the new warning and
+detail key — breaking byte-identical recomputation for anything certified under
+them. That is the audit guarantee, and it was found by running the suite rather
+than by reading the diff. The version boundary is now expressed **as code**: a
+private `_report_unclassified` flag that every retained wrapper passes `False`.
+`compute_upt_v0_4_0` was added as a retained runnable (0.4.0 shipped earlier the
+same day), and the byte-identity test was rewritten to assert the thing that
+actually matters — the retained runnable reproduces 0.2.0 exactly, while the
+current version is free to say MORE about the same number, never to report a
+different one.
+
+### Suites after the fixes
+
+calc **681**, api **522**, transform 237, web 411, migrations 30 — all green;
+openapi/quotes drift gates clean.
