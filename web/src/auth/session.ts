@@ -52,20 +52,48 @@ export function useSession(): Session | null {
   return useSyncExternalStore(subscribe, getSession, getSession);
 }
 
-const ROLE_RANK: Record<Role, number> = {
+/**
+ * THE LADDER, mirroring services/api authz.py exactly. `auditor` is
+ * deliberately ABSENT (handoff 0046): every helper below asks
+ * `rank(caller) >= rank(required)`, so a rung would hand a read-only role
+ * every capability at or below it by arithmetic. Off the ladder, it fails
+ * every one of them by construction — the same shape as the server, so the
+ * UI hides exactly what the API refuses.
+ */
+const ROLE_RANK: Record<string, number> = {
   viewer: 0,
   data_steward: 1,
   report_preparer: 2,
   certifying_official: 3,
 };
 
+/** Roles that live BESIDE the ladder: broad read, zero write. */
+const READ_ONLY_ROLES = new Set<string>(["auditor"]);
+
+const KNOWN_ROLES = new Set<string>([
+  ...Object.keys(ROLE_RANK),
+  ...READ_ONLY_ROLES,
+]);
+
 export function isKnownRole(role: string): role is Role {
-  return role in ROLE_RANK;
+  return KNOWN_ROLES.has(role);
+}
+
+/**
+ * Rank comparison that is honest about off-ladder roles: an auditor (or any
+ * role this build does not recognise) satisfies NOTHING. Deny-by-default in
+ * the UI too, so a screen never offers a control the server will refuse.
+ */
+function atLeast(session: Session | null, minimum: string): boolean {
+  if (session === null) return false;
+  if (READ_ONLY_ROLES.has(session.role)) return false;
+  const rank = ROLE_RANK[session.role];
+  return rank !== undefined && rank >= ROLE_RANK[minimum];
 }
 
 /** Mirrors the API: resolving a DQ issue requires data_steward or above. */
 export function canResolveDqIssues(session: Session | null): boolean {
-  return session !== null && ROLE_RANK[session.role] >= ROLE_RANK.data_steward;
+  return atLeast(session, "data_steward");
 }
 
 /** Mirrors the API: certification requires EXACTLY certifying_official. */
@@ -94,7 +122,7 @@ export function canEnterAttestations(session: Session | null): boolean {
  * certification, not computation). UX only; the API enforces the role.
  */
 export function canComputeFigures(session: Session | null): boolean {
-  return session !== null && ROLE_RANK[session.role] >= ROLE_RANK.data_steward;
+  return atLeast(session, "data_steward");
 }
 
 /**
@@ -103,7 +131,7 @@ export function canComputeFigures(session: Session | null): boolean {
  * steward may open /admin/sources directly — same rule as the API.
  */
 export function canViewSourceStatus(session: Session | null): boolean {
-  return session !== null && ROLE_RANK[session.role] >= ROLE_RANK.data_steward;
+  return atLeast(session, "data_steward");
 }
 
 /**
@@ -111,7 +139,7 @@ export function canViewSourceStatus(session: Session | null): boolean {
  * requires data_steward or above.
  */
 export function canEnterSafetyEvents(session: Session | null): boolean {
-  return session !== null && ROLE_RANK[session.role] >= ROLE_RANK.data_steward;
+  return atLeast(session, "data_steward");
 }
 
 /**
@@ -120,7 +148,7 @@ export function canEnterSafetyEvents(session: Session | null): boolean {
  * Reading plans stays open to every signed-in role.
  */
 export function canManageSampling(session: Session | null): boolean {
-  return session !== null && ROLE_RANK[session.role] >= ROLE_RANK.data_steward;
+  return atLeast(session, "data_steward");
 }
 
 /**
@@ -128,7 +156,5 @@ export function canManageSampling(session: Session | null): boolean {
  * report_preparer or above (services/api routers/sampling.py).
  */
 export function canRunSamplingEstimate(session: Session | null): boolean {
-  return (
-    session !== null && ROLE_RANK[session.role] >= ROLE_RANK.report_preparer
-  );
+  return atLeast(session, "report_preparer");
 }

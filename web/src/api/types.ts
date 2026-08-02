@@ -10,7 +10,11 @@ export type Role =
   | "viewer"
   | "data_steward"
   | "report_preparer"
-  | "certifying_official";
+  | "certifying_official"
+  // Handoff 0046: reads broadly, writes nothing. Deliberately NOT a rung on
+  // the rank ladder in services/api authz — a rung would inherit every write
+  // permission at or below it by arithmetic.
+  | "auditor";
 
 // ---- /auth/login ----
 

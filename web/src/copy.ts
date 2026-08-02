@@ -2587,13 +2587,22 @@ export const copy = {
       },
       sso: {
         title: "Single sign-on",
-        /* HONEST CARD (binding): SSO is designed (ADR-0011), not built.
-           No toggle, no setup button — nothing pretends. */
-        body: [
-          "Single sign-on with Entra ID, Google, or Okta is designed for Headway but not available yet. The design is recorded as ADR-0011: Headway will sign users in directly against your identity provider (native OIDC), alongside the local accounts that exist today.",
-          "Until then, every account is a local Headway account, managed under Users on this page. When SSO ships, it will be set up here.",
-        ],
-        status: "Designed, not yet available (ADR-0011)",
+        /* This card was an HONEST CARD for weeks: "designed (ADR-0011), not
+           built". Handoff 0046 built it, so the card is now real — a live
+           status and a way into the configuration below. The honesty rule is
+           unchanged: the status line says what is actually true right now,
+           and nothing here pretends to work before it has been tested. */
+        description:
+          "Let people sign in with your agency's own identity provider — Microsoft Entra ID, Google, Okta, or Keycloak. Their accounts, passwords and multi-factor sign-in stay where your IT team already manages them.",
+        localAlwaysWorks:
+          "Headway accounts keep working alongside single sign-on, always. If your identity provider is unreachable, or the settings below are wrong, you can still sign in here with a Headway username and password.",
+        statusNotConfigured: "Not set up yet",
+        statusOff: "Set up, but turned off",
+        statusOn: "On",
+        statusDisabledByServer: "Turned off on the server",
+        configure: "Set up single sign-on",
+        hide: "Hide single sign-on settings",
+        link: "Set up single sign-on",
       },
       updates: {
         title: "Updates",
@@ -2614,6 +2623,115 @@ export const copy = {
           "There is deliberately no update button here: a web session must never be able to replace the software it runs in.",
         status: "Updated on the server by an administrator",
       },
+    },
+
+    /* ------------------------------------------------------------------
+       Single sign-on (handoff 0046). Written for someone who has never
+       configured OIDC and has no database access: every field says where
+       to find its value, and every refusal says what to do next.
+       ------------------------------------------------------------------ */
+    sso: {
+      heading: "Single sign-on",
+      intro:
+        "Headway signs people in directly against your identity provider. You register Headway there once, paste three values here, then say which of your groups gets which Headway role.",
+      loadError: "Could not load the single sign-on settings.",
+      /* Role names live here rather than in the shared label list, so this
+         screen owns its own words (Wave F does not edit shared blocks). */
+      roleLabels: {
+        viewer: "Viewer",
+        data_steward: "Data steward",
+        report_preparer: "Report preparer",
+        certifying_official: "Certifying official",
+        auditor: "Auditor",
+      } as Record<string, string>,
+      settingsHeading: "Your identity provider",
+      discoveryLabel: "Discovery address",
+      discoveryHint:
+        "The address your provider publishes for its own settings. It almost always ends in /.well-known/openid-configuration. Microsoft Entra ID: use the one containing your tenant id, not the shared 'common' address.",
+      clientIdLabel: "Application (client) id",
+      clientIdHint:
+        "The id your provider gave Headway when you registered it as an application.",
+      clientSecretLabel: "Client secret",
+      clientSecretHintUnset:
+        "The secret your provider gave Headway. It is stored encrypted and never shown again — keep your own copy until sign-in works.",
+      clientSecretHintSet:
+        "A client secret is stored. Leave this blank to keep it. Type a new one only to replace it — Headway cannot show you the stored one, because it is encrypted and never displayed again.",
+      clientSecretPlaceholderSet: "Stored — leave blank to keep it",
+      clientSecretUnavailable:
+        "This server has nowhere safe to keep a secret yet, so Headway will refuse to save one. Ask whoever runs the server to set HEADWAY_SECRET_ENCRYPTION_KEY (or HEADWAY_SECRET_ENCRYPTION_KEY_FILE) and restart Headway.",
+      redirectLabel: "Sign-in return address",
+      redirectHint:
+        "Where your provider sends people back to after they sign in. Register this exact address at your provider — every character must match, including https:// and the path.",
+      groupsClaimLabel: "Group claim",
+      groupsClaimHint:
+        "The name of the field your provider uses to list a person's groups. Entra ID, Okta and Keycloak usually call it 'groups'; some installations use 'roles' or 'wids'. Whatever yours is called, type it here — nothing is assumed.",
+      usernameClaimLabel: "Username field",
+      usernameClaimHint:
+        "The field Headway reads to get a person's name. Usually 'preferred_username'; Entra ID installations sometimes use 'upn'. This is the name that appears in the audit trail beside everything they do.",
+      skewLabel: "Clock difference allowed (seconds)",
+      skewHint:
+        "How far apart this server's clock and your provider's clock may be before a sign-in is refused. 120 seconds suits almost everyone. Raise it only if sign-ins fail with clock errors — the real fix is to run a time service on this server.",
+      caBundleLabel: "Certificate authority file (optional)",
+      caBundleHint:
+        "Leave blank unless your network inspects encrypted traffic. If it does, put your organisation's certificate file on the Headway server and give its full path here. Headway will not skip certificate checking: that would let anyone on the network impersonate your provider.",
+      buttonLabelLabel: "Words on the sign-in button",
+      buttonLabelHint:
+        "What staff will see on the sign-in page — for example 'Sign in with County SSO'.",
+      enabledLabel: "Turn single sign-on on",
+      enabledHint:
+        "Leave this off until the test below passes. Turning it on only adds a button to the sign-in page; Headway usernames and passwords keep working either way.",
+      save: "Save settings",
+      saved: "Settings saved.",
+      test: "Test this configuration",
+      testing: "Testing…",
+      testHeading: "Test results",
+      testIntro:
+        "Headway just did everything a real sign-in does, short of opening your provider's sign-in page: it read your provider's settings, read its signing keys, and proved your client id and secret are accepted. Nobody was signed in.",
+      testPassed: "Everything Headway can check by itself is working.",
+      testFailed:
+        "Something is not right yet. Each step below says what to do about it.",
+      stepOk: "Working",
+      stepFailed: "Needs attention",
+      mappingsHeading: "Who gets which role",
+      mappingsIntro:
+        "A person is allowed in only if one of their groups appears below. If none of them do, they are refused and no account is created for them — Headway never guesses. Use the groups your directory already has; there is no group Headway expects to find, and no name it requires.",
+      mappingsEmpty:
+        "No groups are mapped yet. Until at least one is, every single sign-on attempt is refused and no accounts are created.",
+      mappingsTable: {
+        claim: "Group from your provider",
+        role: "Headway role",
+        note: "Note",
+        addedBy: "Added by",
+        actions: "Actions",
+      },
+      addMappingHeading: "Add a group",
+      claimValueLabel: "Group value",
+      claimValueHint:
+        "Exactly as your provider sends it — no wildcards, and capital letters matter. Microsoft Entra ID usually sends a group's object id (a long code); Okta and Keycloak usually send the group's name.",
+      /* An EXAMPLE, labelled as one. Deliberately a name an agency might
+         already have in its own directory, and deliberately NOT anything
+         that looks like a naming convention this product requires: use the
+         groups you already have, do not create new ones for us. */
+      claimValueExample:
+        "Example: transit-data-stewards — but use whatever your groups are already called. Headway does not require any particular naming, and you never need to create a group for it.",
+      claimValuePlaceholder: "your-directory-group-name",
+      mappingRoleLabel: "Headway role for this group",
+      mappingRoleHint:
+        "What everyone in this group may do in Headway. 'Auditor' can read everything and change nothing.",
+      noteLabel: "Note (optional)",
+      noteHint:
+        "For your own reference — for example 'Finance team' beside a group code that means nothing to a human.",
+      addMapping: "Add group",
+      mappingAdded: (claim: string, role: string) =>
+        `Anyone in '${claim}' will sign in as a ${role} from now on.`,
+      removeMapping: "Remove",
+      removeMappingLabel: (claim: string) => `Remove the mapping for ${claim}`,
+      mappingRemoved: (claim: string) =>
+        `'${claim}' no longer grants any access. Accounts it already created are unchanged — manage them under Users.`,
+      certifyingOfficialNote:
+        "Certifying official is deliberately missing from this list. Certifying is a legal attestation that figures sent to the federal government are correct, so who may do it is decided here in Headway and recorded in Headway's audit trail — not by a group membership changed elsewhere. Map people to another role here, then make the specific people who certify into certifying officials under Users. They still sign in through your identity provider.",
+      loginButtonPending:
+        "The sign-in page does not offer this button yet — wiring it into the sign-in screen is a separate, recorded piece of work. Everything on this page is live: the settings, the test, and the group mappings.",
     },
 
     users: {

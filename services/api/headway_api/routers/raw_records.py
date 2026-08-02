@@ -83,7 +83,7 @@ from pydantic import BaseModel
 from .. import raw_payloads
 from ..audit import write_event
 from ..auth import Identity
-from ..authz import ROLE_LABELS, ROLE_RANK, require_authenticated
+from ..authz import ROLE_LABELS, may_read_sensitivity, require_authenticated
 from ..db import get_db
 from ..raw_payloads import (
     PayloadUnavailable,
@@ -270,9 +270,18 @@ def _reader(request: Request):
 
 
 def _require_content_access(record: RawRecord, identity: Identity) -> None:
-    """Server-side sensitivity gate for payload CONTENT (never client-side)."""
+    """Server-side sensitivity gate for payload CONTENT (never client-side).
+
+    Goes through ``authz.may_read_sensitivity`` rather than indexing
+    ROLE_RANK, because not every role is ON the rank ladder. An ``auditor``
+    (handoff 0046) reads at VIEWER breadth here on purpose: migration 0028
+    withholds demand-response rider coordinates from the read-only analyst
+    role because a paratransit pickup point is a rider's home address, and
+    that withholding is not waived for an auditor. Rider privacy is not an
+    auditor exception.
+    """
     sensitivity = raw_payloads.classify(record)
-    if ROLE_RANK[identity.role] < ROLE_RANK[sensitivity.minimum_role]:
+    if not may_read_sensitivity(identity.role, sensitivity.minimum_role):
         raise HTTPException(status_code=403, detail=sensitivity.refusal)
 
 
@@ -432,12 +441,12 @@ def raw_record_label(
             label=sensitivity.label,
             minimum_role=sensitivity.minimum_role,
             reason=sensitivity.reason,
-            preview_allowed=(
-                ROLE_RANK[identity.role] >= ROLE_RANK[sensitivity.minimum_role]
+            preview_allowed=may_read_sensitivity(
+                identity.role, sensitivity.minimum_role
             ),
             refusal=(
                 None
-                if ROLE_RANK[identity.role] >= ROLE_RANK[sensitivity.minimum_role]
+                if may_read_sensitivity(identity.role, sensitivity.minimum_role)
                 else sensitivity.refusal
             ),
         ),

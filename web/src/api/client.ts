@@ -1321,3 +1321,201 @@ export function classifyBoarding(
     body,
   );
 }
+
+// ---------------------------------------------------------------------------
+// Single sign-on (handoff 0046 / ADR-0011)
+// ---------------------------------------------------------------------------
+//
+// Two audiences behind one section. The three sign-in calls are deliberately
+// UNAUTHENTICATED (`auth: false`) — nobody is signed in yet, and attaching a
+// stale bearer token to them would be meaningless at best. The configuration
+// calls are ordinary authenticated admin calls, certifying-official only at
+// the server.
+//
+// There is NO function here that reads a client secret back, because there is
+// no endpoint that serves one. A stored secret is encrypted at rest and shown
+// exactly once — at the moment the administrator typed it.
+
+/** What the sign-in screen may know before anyone signs in. Nothing else. */
+export interface SsoStatus {
+  enabled: boolean;
+  button_label: string;
+}
+
+export interface SsoStartResponse {
+  authorization_url: string;
+  state: string;
+  /**
+   * Keep in sessionStorage for the length of the redirect and send back at
+   * the callback. In a bearer-token app there is no cookie to bind `state`
+   * to, so this is what ties a sign-in to THIS browser.
+   */
+  browser_token: string;
+}
+
+export interface SsoCallbackRequest {
+  code: string;
+  state: string;
+  browser_token: string;
+}
+
+export interface SsoCallbackResponse {
+  access_token: string;
+  token_type: string;
+  expires_in: number;
+  username: string;
+  role: string;
+}
+
+export interface SsoConfig {
+  configured: boolean;
+  discovery_url: string | null;
+  client_id: string | null;
+  /** Whether a secret is stored. The secret itself is never served. */
+  client_secret_set: boolean;
+  redirect_uri: string | null;
+  groups_claim: string;
+  username_claim: string;
+  clock_skew_seconds: number;
+  ca_bundle_path: string | null;
+  button_label: string;
+  is_enabled: boolean;
+  updated_by: string | null;
+  updated_at: string | null;
+  /** False when the server has no at-rest encryption key — warn BEFORE the
+      administrator types a credential, not with a 503 afterwards. */
+  secret_storage_available: boolean;
+  disabled_by_environment: boolean;
+}
+
+export interface UpdateSsoConfigRequest {
+  discovery_url: string;
+  client_id: string;
+  /** Omit to KEEP the stored secret; "" clears it. */
+  client_secret?: string | null;
+  redirect_uri: string;
+  groups_claim: string;
+  username_claim: string;
+  clock_skew_seconds: number;
+  ca_bundle_path: string | null;
+  button_label: string;
+  is_enabled: boolean;
+}
+
+export interface SsoConfigUpdated extends SsoConfig {
+  audit_event_id: number;
+}
+
+export interface SsoTestStep {
+  step: string;
+  ok: boolean;
+  message: string;
+}
+
+export interface SsoTestResult {
+  ok: boolean;
+  steps: SsoTestStep[];
+  audit_event_id: number;
+}
+
+export interface SsoRoleMapping {
+  mapping_id: string;
+  claim_value: string;
+  headway_role: string;
+  role_label: string;
+  note: string | null;
+  created_by: string;
+  created_at: string;
+}
+
+export interface CreateSsoMappingRequest {
+  claim_value: string;
+  headway_role: string;
+  note?: string | null;
+}
+
+export interface SsoMappingCreated extends SsoRoleMapping {
+  audit_event_id: number;
+}
+
+export interface SsoMappingDeleted {
+  claim_value: string;
+  headway_role: string;
+  audit_event_id: number;
+}
+
+/** GET /auth/oidc/status — unauthenticated; enough to draw a button, no more. */
+export function getSsoStatus(): Promise<SsoStatus> {
+  return request<SsoStatus>("GET", "/auth/oidc/status", undefined, {
+    auth: false,
+  });
+}
+
+/**
+ * POST /auth/oidc/start — begin an authorization-code + PKCE sign-in.
+ * Unauthenticated. The caller sends the browser to `authorization_url` and
+ * keeps `browser_token` until the provider sends it back.
+ */
+export function startSsoLogin(): Promise<SsoStartResponse> {
+  return request<SsoStartResponse>("POST", "/auth/oidc/start", undefined, {
+    auth: false,
+  });
+}
+
+/**
+ * POST /auth/oidc/callback — finish the sign-in and receive a Headway
+ * session. Unauthenticated. Every failure returns one generic message; the
+ * real reason is in Headway's audit trail, by design.
+ */
+export function finishSsoLogin(
+  body: SsoCallbackRequest,
+): Promise<SsoCallbackResponse> {
+  return request<SsoCallbackResponse>(
+    "POST",
+    "/auth/oidc/callback",
+    body,
+    { auth: false },
+  );
+}
+
+/** GET /auth/oidc/config — the stored settings, never the client secret. */
+export function getSsoConfig(): Promise<SsoConfig> {
+  return request<SsoConfig>("GET", "/auth/oidc/config");
+}
+
+/** PUT /auth/oidc/config — save the settings (audited; secret encrypted). */
+export function updateSsoConfig(
+  body: UpdateSsoConfigRequest,
+): Promise<SsoConfigUpdated> {
+  return request<SsoConfigUpdated>("PUT", "/auth/oidc/config", body);
+}
+
+/**
+ * POST /auth/oidc/config/test — prove it works before anyone depends on it.
+ * Runs the real sign-in code as far as it can go without a browser.
+ */
+export function testSsoConfig(): Promise<SsoTestResult> {
+  return request<SsoTestResult>("POST", "/auth/oidc/config/test");
+}
+
+/** GET /auth/oidc/mappings — every configured group -> role grant. */
+export function listSsoMappings(): Promise<SsoRoleMapping[]> {
+  return request<SsoRoleMapping[]>("GET", "/auth/oidc/mappings");
+}
+
+/** POST /auth/oidc/mappings — grant a role to one exact group value. */
+export function createSsoMapping(
+  body: CreateSsoMappingRequest,
+): Promise<SsoMappingCreated> {
+  return request<SsoMappingCreated>("POST", "/auth/oidc/mappings", body);
+}
+
+/** DELETE /auth/oidc/mappings/{id} — remove a grant. Accounts are untouched. */
+export function deleteSsoMapping(
+  mappingId: string,
+): Promise<SsoMappingDeleted> {
+  return request<SsoMappingDeleted>(
+    "DELETE",
+    `/auth/oidc/mappings/${encodeURIComponent(mappingId)}`,
+  );
+}
