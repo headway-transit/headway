@@ -129,6 +129,28 @@ export const copy = {
     submit: "Sign in",
     unknownRole: (role: string) =>
       `Your account has a role this version of Headway does not recognize (“${role}”). Please contact your Headway administrator.`,
+    /* Single sign-on (handoff 0046). The provider is whatever the agency
+       configured — Entra ID, Google, Okta or Keycloak — so nothing here
+       names one or draws its logo, and no wording implies a particular
+       product. The words ON the button are the administrator's own
+       (`button_label`); `button` below is only the fallback for an
+       installation that left them blank, and it matches the server's own
+       default so the two never disagree. */
+    sso: {
+      button: "Sign in with single sign-on",
+      /* The break-glass promise, restated where someone would need it. */
+      hint: "Your Headway username and password above always work too, whether or not your agency uses single sign-on.",
+      starting: "Taking you to your identity provider to sign in.",
+      finishingHeading: "Signing you in",
+      finishing: "Finishing your sign-in with your identity provider.",
+      /* Shown when the sign-in cannot even be attempted: nothing usable came
+         back from the provider, or this browser is not the one that started
+         it. A refusal from the API carries the API's own message instead,
+         shown verbatim — ONE generic sentence for every federated failure,
+         on purpose, with the real reason in Headway's audit trail. */
+      failed:
+        "Headway could not sign you in with single sign-on. Please try again, or sign in with your Headway username and password.",
+    },
   },
 
   /**
@@ -2730,8 +2752,12 @@ export const copy = {
         `'${claim}' no longer grants any access. Accounts it already created are unchanged — manage them under Users.`,
       certifyingOfficialNote:
         "Certifying official is deliberately missing from this list. Certifying is a legal attestation that figures sent to the federal government are correct, so who may do it is decided here in Headway and recorded in Headway's audit trail — not by a group membership changed elsewhere. Map people to another role here, then make the specific people who certify into certifying officials under Users. They still sign in through your identity provider.",
-      loginButtonPending:
-        "The sign-in page does not offer this button yet — wiring it into the sign-in screen is a separate, recorded piece of work. Everything on this page is live: the settings, the test, and the group mappings.",
+      /* Was an honest "not wired up yet" note while the sign-in screen had
+         no button. The sign-in screen has one now, so the note says what
+         turning single sign-on on actually changes for staff — including
+         the half that does not change. */
+      loginButtonLive:
+        "While single sign-on is on, the sign-in page shows this button under the Headway username and password fields. Both ways in keep working: nobody is forced through your identity provider, and a Headway password is still the way back in if this configuration ever stops working.",
     },
 
     users: {

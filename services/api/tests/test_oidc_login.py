@@ -609,6 +609,58 @@ def test_a_deactivated_federated_account_is_refused(client, fake_db, sso):
     assert any("deactivated" in x for x in _reasons(fake_db))
 
 
+@pytest.mark.parametrize(
+    "forged_username",
+    [
+        "sso:anonymous",       # the actor Headway writes for an anonymous
+                              # single-sign-on failure — see _audit_login_failure
+        "machine:harvester",  # the machine-key actor prefix
+        "system:calc",        # actions Headway takes on its own behalf
+        "audra imposter",     # whitespace, which no column here forbids
+    ],
+)
+def test_a_username_that_could_forge_an_audit_actor_provisions_nothing(
+    client, fake_db, sso, forged_username
+):
+    """End to end, with a group that WOULD have been granted a role.
+
+    Everything else about this sign-in is genuine: real RSA signature, real
+    PKCE exchange, a mapping that matches. The only thing wrong is the name
+    the directory sent, and a directory that lets a user edit their own
+    ``email`` claim is an ordinary directory. So the refusal has to happen
+    before the account exists — once an ``auth.users`` row named
+    ``sso:anonymous`` exists, every audit entry that account ever writes is
+    indistinguishable from the ones Headway writes for a stranger's failed
+    sign-in, and the trail can no longer be read.
+    """
+    before = set(fake_db.users)
+    r = sso_sign_in(
+        client, sso, username=forged_username, groups=["transit-data-stewards"]
+    )
+    assert r.status_code == 401
+    assert set(fake_db.users) == before, "no account may be created"
+    assert forged_username not in fake_db.users
+    # The wire says only the one generic thing; the real reason is recorded.
+    assert "could not sign you in" in r.json()["detail"]
+    assert any("username" in reason for reason in _reasons(fake_db))
+
+
+def test_an_ordinary_federated_username_is_untouched_by_that_check(
+    client, fake_db, sso
+):
+    """The check is narrow on purpose. An agency's usernames are email
+    addresses and UPNs, and a rule that refused those would be an outage
+    dressed as a security control."""
+    for username in ("firstname.lastname@agency.gov", "jdoe", "j.doe+transit@agency.gov"):
+        r = sso_sign_in(
+            client, sso, username=username, groups=["transit-data-stewards"],
+            sub=f"idp-subject-{username}",
+        )
+        assert r.status_code == 200, f"{username} -> {r.text}"
+        assert r.json()["username"] == username
+        assert fake_db.users[username]["auth_source"] == "oidc"
+
+
 # ---------------------------------------------------------------------------
 # No-leak errors, and no audit amplification
 # ---------------------------------------------------------------------------
@@ -791,3 +843,117 @@ def test_the_group_claim_name_itself_is_configurable(client, fake_db, fake_idp):
     )
     assert matched.status_code == 200
     assert matched.json()["role"] == "data_steward"
+
+
+# ---------------------------------------------------------------------------
+# The unauthenticated sign-in surface has a budget of its own
+# ---------------------------------------------------------------------------
+#
+# `/auth/oidc/start` and `/auth/oidc/callback` take no credential, and both are
+# expensive: start opens an outbound connection to the identity provider and
+# INSERTs a row, and callback makes Headway POST to the provider's token
+# endpoint. Every endpoint in this API is synchronous, so each in-flight
+# request holds a worker thread — and the request that must never queue behind
+# a flood of these is POST /auth/login, the break-glass path this whole wave
+# promises keeps working when single sign-on does not.
+
+#: A deliberately tiny budget, so the bucket empties in three requests instead
+#: of thirty-one. The production default is Settings.sso_requests_per_minute.
+SSO_BUDGET = 2
+
+
+@pytest.fixture
+def sso_limited_client(fake_db, fake_store, fake_producer, fake_webhook_sender,
+                       test_signer, fake_calc_launcher, fake_payload_reader,
+                       oidc_metadata):
+    """A factory for API clients whose SSO bucket holds ``SSO_BUDGET`` requests.
+
+    A FACTORY rather than one client, because each call builds a separate app
+    with its own limiter: that is what lets a test show that
+    ``/auth/oidc/callback`` spends the budget itself, rather than merely
+    inheriting a bucket ``/auth/oidc/start`` had already emptied.
+    """
+    from fastapi.testclient import TestClient
+
+    from conftest import TEST_SECRET, TEST_SECRET_ENCRYPTION_KEY
+    from headway_api.app import Settings, create_app
+
+    clients = []
+
+    def build():
+        application = create_app(
+            settings=Settings(
+                session_secret=TEST_SECRET,
+                token_ttl_seconds=600,
+                sso_requests_per_minute=SSO_BUDGET,
+            ),
+            db=fake_db,
+            object_store=fake_store,
+            producer=fake_producer,
+            webhook_sender=fake_webhook_sender,
+            calc_run_launcher=fake_calc_launcher,
+            raw_payload_reader=fake_payload_reader,
+            oidc_metadata=oidc_metadata,
+        )
+        application.state.secret_key = TEST_SECRET_ENCRYPTION_KEY
+        application.state.signer = test_signer
+        c = TestClient(application)
+        c.__enter__()
+        clients.append(c)
+        return c
+
+    yield build
+    for c in clients:
+        c.__exit__(None, None, None)
+
+
+def test_starting_a_sign_in_is_rate_limited_with_a_retry_after(
+    sso_limited_client, fake_db, sso
+):
+    api = sso_limited_client()
+    for attempt in range(SSO_BUDGET):
+        assert api.post("/auth/oidc/start").status_code == 200, attempt
+
+    limited = api.post("/auth/oidc/start")
+    assert limited.status_code == 429
+    # Retry-After, so a browser (or a well-behaved script) is TOLD how long to
+    # wait rather than left to guess and hammer.
+    assert int(limited.headers["Retry-After"]) >= 1
+    assert "rate limit" in limited.json()["detail"]
+
+
+def test_the_callback_is_rate_limited_too(sso_limited_client, fake_db, sso):
+    """Limiting only `start` would leave the more expensive half open: a
+    caller who reaches the code exchange makes Headway POST to the agency's
+    own identity provider, which turns this box into an amplifier pointed at
+    it."""
+    api = sso_limited_client()
+    forged = {"code": "x", "state": "invented", "browser_token": "y"}
+    for attempt in range(SSO_BUDGET):
+        assert api.post("/auth/oidc/callback", json=forged).status_code == 401, attempt
+
+    limited = api.post("/auth/oidc/callback", json=forged)
+    assert limited.status_code == 429
+    assert int(limited.headers["Retry-After"]) >= 1
+
+
+def test_local_login_still_works_when_the_sso_budget_is_exhausted(
+    sso_limited_client, fake_db, sso
+):
+    """The entire reason single sign-on gets a bucket of its OWN.
+
+    A flood against the federated surface must not spend the budget that
+    serves the break-glass path. If these two shared a limiter, the way to
+    lock an agency out of its own installation would be to hammer
+    /auth/oidc/start — no credential required, and no way in afterwards.
+    """
+    api = sso_limited_client()
+    for _ in range(SSO_BUDGET + 2):
+        api.post("/auth/oidc/start")
+    assert api.post("/auth/oidc/start").status_code == 429
+
+    local = api.post(
+        "/auth/login", json={"username": "cora", "password": "certifier-pass-1"}
+    )
+    assert local.status_code == 200, local.text
+    assert local.json()["role"] == "certifying_official"

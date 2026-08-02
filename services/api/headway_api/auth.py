@@ -78,6 +78,13 @@ class PasswordTooLong(ValueError):
     """Raised instead of silently truncating a >72-byte password."""
 
 
+#: A real bcrypt hash of a value nothing can be, so that a refusal for an
+#: account that does not exist — or one that has no local password — costs the
+#: same wall-clock as a refusal for a wrong password. Generated once at import,
+#: never compared against anything a caller controls the other side of.
+_DUMMY_HASH = bcrypt.hashpw(secrets.token_hex(32).encode("ascii"), bcrypt.gensalt())
+
+
 def hash_password(password: str) -> str:
     raw = password.encode("utf-8")
     if len(raw) > _BCRYPT_MAX_BYTES:
@@ -95,8 +102,16 @@ def verify_password(password: str, password_hash: str | None) -> bool:
     no password, so no password can ever match it. Returning False here (and
     not raising) keeps the login surface's single generic refusal intact —
     the caller cannot tell a federated account from a wrong password.
+
+    The comparison against ``_DUMMY_HASH`` in that case is NOT dead work. A
+    generic message and a fast answer are not the same guarantee: bcrypt at
+    this cost takes a few hundred milliseconds, so returning early would let
+    anyone sort usernames into "local account" and "everything else" with a
+    stopwatch — and the local accounts are the break-glass administrators.
+    Every refusal on this path costs the same as a real check.
     """
     if password_hash is None:
+        bcrypt.checkpw(password.encode("utf-8")[:_BCRYPT_MAX_BYTES], _DUMMY_HASH)
         return False
     raw = password.encode("utf-8")
     if len(raw) > _BCRYPT_MAX_BYTES:
@@ -305,7 +320,13 @@ def login(body: LoginRequest, request: Request, db=Depends(get_db)) -> LoginResp
     settings = request.app.state.settings
     row = db.execute(_SELECT_USER, (body.username,)).fetchone()
     if row is None:
-        # Same message as a wrong password: do not reveal which usernames exist.
+        # Same message as a wrong password, and the same cost. The message was
+        # always generic; without this the clock was not, and a username that
+        # exists locally could be told from one that does not by timing a
+        # single request. Nothing is audited here on purpose: there is no
+        # account to attribute it to, and an unauthenticated caller must not
+        # be able to write rows into audit.events by guessing names.
+        verify_password(body.password, None)
         raise _BAD_CREDENTIALS
     user_id, username, password_hash, role, is_active = row
     if not verify_password(body.password, password_hash):

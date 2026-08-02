@@ -95,6 +95,19 @@ def role_label(role: str) -> str:
     return ROLE_LABELS.get(role, role)
 
 
+def a_role(role: str) -> str:
+    """``role_label`` with the right indefinite article in front of it.
+
+    "a auditor" in a refusal message reads as a system that was assembled
+    rather than written, in the one place a user is already annoyed. Every
+    other label is consonant-initial today; deriving the article rather than
+    hardcoding it means the next role added is correct without anyone
+    remembering this.
+    """
+    label = role_label(role)
+    return f"{'an' if label[:1].lower() in 'aeiou' else 'a'} {label}"
+
+
 def may_read_sensitivity(role: str, minimum_role: str) -> bool:
     """Does ``role`` reach the read breadth that ``minimum_role`` names?
 
@@ -143,7 +156,7 @@ def require_at_least(minimum_role: str):
             raise HTTPException(
                 status_code=403,
                 detail=(
-                    f"Your account is signed in as an {role_label(identity.role)}, "
+                    f"Your account is signed in as {a_role(identity.role)}, "
                     f"which can read Headway but cannot change anything in it. "
                     f"This action requires the {role_label(minimum_role)} role "
                     f"or above. An auditor account is read-only on purpose, so "
@@ -167,7 +180,7 @@ def require_at_least(minimum_role: str):
             raise HTTPException(
                 status_code=403,
                 detail=(
-                    f"Your account is signed in as a {role_label(identity.role)}, "
+                    f"Your account is signed in as {a_role(identity.role)}, "
                     f"which cannot perform this action. It requires the "
                     f"{role_label(minimum_role)} role or above. Please ask your "
                     f"Headway administrator if you believe you need this access."
@@ -181,15 +194,25 @@ def require_at_least(minimum_role: str):
 def require_certifying_official(
     identity: Identity = Depends(get_current_identity),
 ) -> Identity:
-    """Certification is gated to exactly the certifying_official role."""
+    """Gated to exactly the certifying_official role — certification AND admin.
+
+    The message must stay true of every endpoint behind this gate, and only a
+    minority of them are certification. In v0 this role is also Headway's
+    administrator (accounts, machine keys, webhooks, branding, settings, the
+    SSO configuration), so a refusal that says "you cannot certify figures"
+    is factually wrong on ``GET /users`` and sends the reader looking for the
+    wrong problem. Name the role, not one of its powers.
+    """
     if identity.role != "certifying_official":
         raise HTTPException(
             status_code=403,
             detail=(
-                f"Your account is signed in as a {role_label(identity.role)}, "
-                f"which cannot certify figures. Only a certifying official may "
-                f"certify, because certification is a legal attestation that "
-                f"the figures are correct."
+                f"Your account is signed in as {a_role(identity.role)}. This "
+                f"is reserved for a certifying official, which in this version "
+                f"of Headway is also the administrator role — it covers "
+                f"certifying figures and managing accounts, keys and settings. "
+                f"Please ask your Headway administrator if you believe you "
+                f"need this access."
             ),
         )
     return identity

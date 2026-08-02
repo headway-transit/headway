@@ -544,14 +544,21 @@ describe("/admin — single sign-on", () => {
   // Honesty and gating
   // -----------------------------------------------------------------------
 
-  it("says plainly that the sign-in button is not wired up yet", async () => {
+  it("says plainly what turning single sign-on on changes on the sign-in page", async () => {
     signInAs("certifying_official");
     await openSso({
       "GET /auth/oidc/config": { status: 200, body: CONFIGURED },
       "GET /auth/oidc/mappings": { status: 200, body: MAPPINGS },
     });
+    // Where the button appears, AND that Headway passwords keep working:
+    // an administrator deciding whether to switch this on needs both.
     expect(
-      await screen.findByText(/The sign-in page does not offer this button yet/),
+      await screen.findByText(
+        /the sign-in page shows this button under the Headway username and password fields/,
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/a Headway password is still the way back in/),
     ).toBeInTheDocument();
   });
 

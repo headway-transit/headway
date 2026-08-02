@@ -377,3 +377,105 @@ Audited and confirmed:
 6. `GET /users` and `GET /machine/keys` remain certifying-official only; an
    auditor does not see the account roster. Deliberate, and worth revisiting
    if 0045 needs separation-of-duties evidence.
+
+## Coordinator verification — two adversarial reviews (2026-08-02)
+
+Wave F was not merged on its own report. Two independent adversarial reviews
+were run against the branch before merge — one on the OIDC token and session
+surface, one on whether the `auditor` role can reach a write — alongside the
+suites, typecheck, lint, static migration checks, and the integration suite
+against a real PostgreSQL with every migration applied to a fresh database.
+
+**The wave's own account held up.** Both reviews confirmed the parts that
+matter most: signature verified before any claim is trusted, the asymmetric-
+only algorithm allow-list applied at the header so `none` and
+HS256-with-the-public-key never reach a verifier, PKCE S256-only with
+single-use state consumed by `UPDATE … WHERE consumed_at IS NULL … RETURNING`,
+a fresh session on login, deny-by-default claim mapping, AES-256-GCM with a
+fresh nonce per call, and `certifying_official` unreachable from the IdP in
+three independent places. The auditor review enumerated **all 39 write routes**
+and found no path an auditor can reach: the unsafe-method refusal at the
+authentication choke point stops it before any role gate runs, and the role's
+absence from `ROLE_RANK` fails every rank comparison by construction.
+
+### Fixed before merge
+
+1. **The unauthenticated sign-in surface could starve local login.**
+   `/auth/oidc/start` and `/auth/oidc/callback` had no rate limit, discovery
+   failures were not cached, and the network budget was 10s. Every endpoint in
+   this API is synchronous, so requests waiting on an unreachable provider hold
+   worker threads — and the request that must never queue behind them is
+   `POST /auth/login`. The break-glass guarantee was logically sound and
+   operationally reachable. Now: a dedicated per-IP bucket
+   (`sso_requests_per_minute`, separate instance so an SSO flood cannot spend
+   the public endpoint's budget), a 15s negative cache on discovery failures,
+   and a 4s timeout.
+2. **A federated username could forge an audit actor.** JIT provisioning wrote
+   the IdP's string into `auth.users.username` and `audit.events.actor` with
+   no validation, so a directory that lets a user edit their own `email` claim
+   could mint an account named `sso:anonymous` — the exact actor this module
+   writes for anonymous failures. Now validated against a rule wide enough for
+   UPNs and emails, narrow enough to exclude `:`, whitespace, control and
+   zero-width characters, and any reserved actor prefix.
+3. **`azp` was only checked when `aud` had more than one entry.** OIDC Core
+   3.1.3.7 requires it whenever present; without it, a second client in the
+   same tenant able to request Headway's audience could sign its users in.
+4. **Clearing the client secret while enabling SSO was permitted.** The guard
+   consulted the stored secret as well as the one being written, so
+   `{"client_secret": "", "is_enabled": true}` wrote NULL and enabled SSO in one
+   statement — degrading a confidential client to a public one, from a screen
+   that reported success.
+5. **`key_available()` created the at-rest encryption key as a side effect of
+   a GET**, and raised `PermissionError` through to a 500 on the read-only
+   secret mounts that Docker and Kubernetes normally provide. A read must not
+   mint the key every secret is then encrypted under.
+6. **Discovery documents could name `http://` endpoints.** The discovery URL
+   itself was pinned to HTTPS; the addresses inside it — including the
+   `token_endpoint` the client secret is sent to — were not.
+7. **Local login was a username-existence oracle by timing** (~240ms for a
+   real local account, immediate otherwise). Pre-existing for missing rows;
+   this wave added a second fast path for federated accounts. Both now cost a
+   full bcrypt round. The message was always generic; the clock was not.
+8. **Reading the audit trail was the one unlogged read in the system.** An
+   oversight surface that can be swept invisibly lets the reviewed party watch
+   the reviewer. Now audited with the filters and the row count.
+9. **The full webhook URL was written into `audit.events`.** Harmless while
+   that table needed database access to read; the `auditor` role is the first
+   credential that reads it over HTTP, and for Slack, Teams and Zapier
+   receivers the URL *is* the credential. Now the origin only — which is what
+   this module's own rule, stated ninety lines above the offending line,
+   already required.
+10. **`require_certifying_official` refused 26 endpoints with a message about
+    certifying**, only six of which certify — so `GET /users` told the reader
+    they could not certify figures. Also `role_label` rendered "a auditor".
+
+`services/api/openapi.json` was also regenerated: the wave added eight
+endpoints and left the published integration contract describing the API
+without them (ADR-0006), which CI would have caught.
+
+### Accepted as the wave shipped them
+
+- **The `certifying_official` non-revocation decision.** Escalated by the wave
+  as beyond its brief, and correct: if a group membership could strip the role,
+  the set of people who may sign a federal submission would still be controlled
+  from the directory, by subtraction. The brief specified the grant half only;
+  the wave found the mirror and reasoned it out. Ratified.
+- **`auditor` does not read the account roster** (deferred item 6). The wave
+  decided this deliberately and disclosed it. Left as shipped — 0045 is where
+  separation-of-duties evidence will say whether it needs revisiting. Only the
+  refusal messages were wrong, and those are fixed.
+
+### Still open
+
+- **Failure-audit throttling buckets on `request.client.host`**, which behind
+  the documented reverse proxy is one value for every user, so a flood of
+  forged callbacks can suppress the record of genuine failures sharing a reason
+  for the 60s window. The same argument that gave OIDC its own throttle
+  instance applies inside the OIDC surface.
+- **A demotion to `auditor` is not immediate** — the target's existing token
+  keeps its old role until expiry (30 min). Disclosed in the response body; no
+  revocation list exists.
+- **The single-use state `UPDATE` is exercised only against the in-memory fake.**
+  The SQL reads correctly and the semantics are right, but no test proves the
+  concurrency claim on a real engine. The integration suite is where that
+  belongs.

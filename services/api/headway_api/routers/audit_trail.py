@@ -23,6 +23,16 @@ column already carries only ids and attestation text by construction
 (``audit.write_event`` refuses secrets and PII by convention, enforced in
 review). If that ever changes, the withholding belongs at the writer, not
 here — a redaction at the reader is a filter someone can forget.
+
+READING THE TRAIL IS ITSELF AUDITED
+-----------------------------------
+Every other content read in this API records that it happened, and this one
+is the read that most needs to. The trail names every actor and every action
+across the installation; an oversight surface that can be swept invisibly
+lets the reviewed party watch the reviewer, and lets a reviewer scope a
+search that nobody can later reconstruct. The recorded event carries the
+filters and the number of rows returned — not the rows, which are already
+in the table being read.
 """
 
 from __future__ import annotations
@@ -33,6 +43,7 @@ import json
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
+from ..audit import write_event
 from ..auth import Identity
 from ..authz import require_audit_trail_reader
 from ..db import get_db
@@ -149,6 +160,32 @@ def list_audit_events(
     rows = db.execute(sql, tuple(params)).fetchall()
     has_more = len(rows) > limit
     rows = rows[:limit]
+    with db.transaction():
+        write_event(
+            db,
+            actor=identity.username,
+            action="audit_trail_read",
+            subject_kind="audit.events",
+            subject_id=None,
+            # The filters, so a later reader can tell a scoped lookup from a
+            # sweep of the whole installation, and the count, so a truncated
+            # page is not mistaken for the end of the record. Never the rows.
+            detail={
+                "filters": {
+                    k: v
+                    for k, v in (
+                        ("actor", actor),
+                        ("action", action),
+                        ("subject_kind", subject_kind),
+                        ("subject_id", subject_id),
+                    )
+                    if v is not None
+                },
+                "limit": limit,
+                "returned": len(rows),
+                "paged": before_event_id is not None,
+            },
+        )
     events = [
         AuditEvent(
             event_id=r[0],

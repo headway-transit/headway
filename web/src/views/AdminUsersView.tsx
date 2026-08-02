@@ -32,11 +32,17 @@ import { copy } from "../copy";
 
 const t = copy.admin.users;
 
+// The ladder, then `auditor` — which is deliberately last and deliberately
+// not a rung on it (handoff 0046). It reads broadly and writes nothing, so it
+// sorts below the roles that can act rather than above the one that can act
+// most. An administrator picking from this list is choosing a job, not a
+// level, and ordering it by rank would suggest otherwise.
 const ROLES = [
   "viewer",
   "data_steward",
   "report_preparer",
   "certifying_official",
+  "auditor",
 ] as const;
 
 function roleLabel(role: string): string {

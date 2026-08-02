@@ -11,8 +11,9 @@
  *   screen: provider settings, an encrypted show-once client secret, the
  *   group-to-role mappings, and a test action that proves the round trip
  *   before anyone depends on it. The honesty rule did not change — the
- *   status line states what is actually true right now, and the screen
- *   still says plainly which piece is not wired up yet.
+ *   status line states what is actually true right now, and the screen says
+ *   plainly what turning it on changes on the sign-in page, where the
+ *   button now really appears.
  * - Updates — an honest card, NO buttons that act: updating happens on
  *   the server by an administrator; the two commands are shown verbatim.
  *   A web session must never be able to replace the software it runs in.
@@ -687,11 +688,11 @@ function SsoSection({
           <ProviderSettingsForm config={config} onSaved={onChanged} />
           <TestConfiguration />
           <MappingsPanel mappings={mappings} onChanged={onChanged} />
-          {/* Honest to the last: the settings, the test and the mappings are
-              live; putting the button on the sign-in screen is separate,
-              recorded work, and this page says so rather than implying a
-              sign-in flow that is not wired up yet. */}
-          <p className="field-hint">{s.loginButtonPending}</p>
+          {/* Honest to the last: the sign-in screen offers this button as
+              soon as single sign-on is on, so this line says what turning it
+              on actually changes for staff — including the half that does
+              not change, which is that Headway passwords keep working. */}
+          <p className="field-hint">{s.loginButtonLive}</p>
         </>
       )}
     </section>

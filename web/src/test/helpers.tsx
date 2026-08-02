@@ -139,6 +139,15 @@ const DEFAULT_ROUTES: Record<string, RouteHandler> = {
     },
   },
   "GET /auth/oidc/mappings": { status: 200, body: [] },
+  // The SIGN-IN screen asks whether to offer a single-sign-on button
+  // (handoff 0046). Default: off — a fresh installation, and the state every
+  // pre-existing login test assumes. The sign-in tests override it, and the
+  // local form must render identically whatever this call does (or does not)
+  // answer.
+  "GET /auth/oidc/status": {
+    status: 200,
+    body: { enabled: false, button_label: "" },
+  },
   // The dashboard fetches its sparkline history on every mount (handoff
   // 0024 #2); the default is an EMPTY series (no trend rendered), so the
   // many pre-existing dashboard tests keep exercising exactly what they

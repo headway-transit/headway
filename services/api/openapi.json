@@ -4375,7 +4375,7 @@
           "sso"
         ],
         "summary": "Start Login",
-        "description": "Begin an authorization-code + PKCE sign-in.\n\nGenerates ``state``, ``nonce``, a PKCE verifier and a browser binding\ntoken, stores everything but the browser token server-side, and hands\nback the provider URL to send the browser to.",
+        "description": "Begin an authorization-code + PKCE sign-in.\n\nGenerates ``state``, ``nonce``, a PKCE verifier and a browser binding\ntoken, stores everything but the browser token server-side, and hands\nback the provider URL to send the browser to.\n\nRATE LIMITED because it is unauthenticated AND expensive: it can open an\noutbound connection to the identity provider and it INSERTs a row. Every\nendpoint in this API is synchronous, so a request waiting on an\nunreachable provider is holding a worker thread \u2014 and the request that\nmust never queue behind it is ``POST /auth/login``, the break-glass path\nthis whole wave promises keeps working when the IdP does not.",
         "operationId": "start_login_auth_oidc_start_post",
         "responses": {
           "200": {
@@ -4397,7 +4397,7 @@
           "sso"
         ],
         "summary": "Oidc Callback",
-        "description": "Finish a sign-in: consume the state, exchange the code, validate the\nID token in full, map claims onto a role, provision if needed, and issue\na Headway session.\n\nEvery refusal below returns the SAME message. The reason is in the audit\ntrail; the wire never says whether the account exists, whether it was\nmapped, or which check failed.",
+        "description": "Finish a sign-in: consume the state, exchange the code, validate the\nID token in full, map claims onto a role, provision if needed, and issue\na Headway session.\n\nEvery refusal below returns the SAME message. The reason is in the audit\ntrail; the wire never says whether the account exists, whether it was\nmapped, or which check failed.\n\nRATE LIMITED for the same reason as ``start_login``, plus one of its own:\na caller who reaches the code exchange makes Headway POST to the agency's\nidentity provider, so an unlimited callback turns this box into a traffic\namplifier pointed at the agency's own IdP.",
         "operationId": "oidc_callback_auth_oidc_callback_post",
         "requestBody": {
           "content": {

@@ -80,6 +80,7 @@ import base64
 import datetime as dt
 import hashlib
 import os
+import re
 import secrets
 import time
 from dataclasses import dataclass, field
@@ -111,13 +112,23 @@ LOGIN_STATE_TTL_SECONDS = 10 * 60
 _DISCOVERY_TTL_SECONDS = 3600.0
 _JWKS_TTL_SECONDS = 3600.0
 
+#: How long a FAILED discovery is remembered as failed. Short enough that a
+#: provider coming back is noticed within seconds; long enough that a provider
+#: which is down does not cost one full network timeout per sign-in attempt.
+_DISCOVERY_FAILURE_TTL_SECONDS = 15.0
+
 #: Floor between JWKS refetches triggered by an unrecognized ``kid``. Without
 #: it, forged ``kid`` values turn this API into an amplifier pointed at the
 #: provider.
 _MIN_REFRESH_INTERVAL = 30.0
 
 #: Response/network budget. A provider that hangs must not hang Headway.
-_HTTP_TIMEOUT_SECONDS = 10.0
+#: Every endpoint in this API is synchronous, so each waiting request holds a
+#: worker thread; the budget is what an outage costs the box, multiplied by
+#: however many people click "sign in" before someone notices. Four seconds
+#: is far above any healthy provider's response time and far below the point
+#: where waiting on a dead one starves local login.
+_HTTP_TIMEOUT_SECONDS = 4.0
 
 #: A discovery document must be an HTTPS URL. The single exception is
 #: loopback, so a developer can point at a Keycloak on their own machine —
@@ -352,6 +363,21 @@ def validate_discovery_url(url: str) -> None:
         )
 
 
+def _is_secure_endpoint(url: str) -> bool:
+    """HTTPS, or loopback http for a developer's local provider.
+
+    The same rule ``validate_discovery_url`` applies to the address an admin
+    types, applied to the addresses the fetched document names — which the
+    admin never sees and did not choose.
+    """
+    parsed = urlparse(url)
+    if parsed.scheme == "https":
+        return True
+    if parsed.scheme == "http":
+        return (parsed.hostname or "").lower() in _LOOPBACK_HOSTS
+    return False
+
+
 def validate_ca_bundle_path(path: str | None) -> None:
     """A configured trust store must exist and be readable NOW.
 
@@ -398,6 +424,7 @@ class ProviderMetadata:
         self._http_factory = http_factory or (lambda ca: HttpxOidcClient(ca))
         self._clock = clock
         self._discovery: dict[str, _CacheEntry] = {}
+        self._discovery_failed_at: dict[str, float] = {}
         self._jwks: dict[str, _CacheEntry] = {}
         self._last_forced_refresh: dict[str, float] = {}
 
@@ -413,14 +440,40 @@ class ProviderMetadata:
         document that names a different issuer than the URL it was served
         from is either a misconfiguration or an issuer-confusion attack, and
         the two are indistinguishable from here, so both are refused.
+
+        FAILURES ARE CACHED TOO, briefly. Caching only successes means that
+        while the provider is unreachable EVERY sign-in pays the full network
+        timeout — the moment the cache is least able to help is the moment it
+        stops working. Each of those waits holds a worker thread on a
+        single-box installation, so an outage at the IdP degrades local login
+        as well, which is precisely the coupling this wave promises does not
+        exist. Remembering "this was down a moment ago" for a few seconds
+        turns a slow failure into a fast one.
         """
         url = config.discovery_url
         entry = self._discovery.get(url)
         now = self._clock()
         if entry is not None and not force and (now - entry.fetched_at) < _DISCOVERY_TTL_SECONDS:
             return entry.value
-        document = self.http(config).get_json(url)
-        _validate_discovery_document(document, url)
+        recent_failure = self._discovery_failed_at.get(url)
+        if (
+            recent_failure is not None
+            and not force
+            and (now - recent_failure) < _DISCOVERY_FAILURE_TTL_SECONDS
+        ):
+            raise OidcConfigurationError(
+                "Headway could not reach your identity provider a moment ago "
+                "and is not retrying yet. If the provider is back, try again "
+                "shortly; the administrator can test the connection from "
+                "Admin -> Single sign-on."
+            )
+        try:
+            document = self.http(config).get_json(url)
+            _validate_discovery_document(document, url)
+        except Exception:
+            self._discovery_failed_at[url] = now
+            raise
+        self._discovery_failed_at.pop(url, None)
         self._discovery[url] = _CacheEntry(document, now)
         return document
 
@@ -478,8 +531,14 @@ class ProviderMetadata:
 
     def forget(self, discovery_url: str) -> None:
         """Drop cached documents for one provider — used when the admin saves
-        a new configuration, so a test action never reports on stale data."""
+        a new configuration, so a test action never reports on stale data.
+
+        The negative cache goes too: an admin who has just fixed the address
+        is entitled to an immediate retry, not to be told for another fifteen
+        seconds that the provider they no longer point at was unreachable.
+        """
         self._discovery.pop(discovery_url, None)
+        self._discovery_failed_at.pop(discovery_url, None)
 
 
 def _validate_discovery_document(document: dict, url: str) -> None:
@@ -492,11 +551,25 @@ def _validate_discovery_document(document: dict, url: str) -> None:
             f"/.well-known/openid-configuration."
         )
     for required in ("authorization_endpoint", "token_endpoint", "jwks_uri"):
-        if not document.get(required):
+        value = document.get(required)
+        if not value:
             raise OidcConfigurationError(
                 f"Your identity provider's configuration document is missing "
                 f"'{required}', so Headway cannot complete a sign-in with "
                 f"it. This is a problem at the provider, not in Headway."
+            )
+        # The discovery URL itself is pinned to HTTPS at save time, but the
+        # addresses INSIDE the document are chosen by whatever answered it.
+        # Headway sends the client secret to token_endpoint, so a document
+        # naming an http:// address is a request to transmit that secret in
+        # the clear — refuse rather than assume the network is trusted.
+        if not _is_secure_endpoint(str(value)):
+            raise OidcConfigurationError(
+                f"Your identity provider's configuration document gives an "
+                f"insecure address for '{required}'. Headway will not send "
+                f"sign-in traffic or its client secret over an unencrypted "
+                f"connection. This is a problem at the provider, not in "
+                f"Headway."
             )
     # Issuer-confusion guard: the document must belong to the address it came
     # from. Every mainstream provider satisfies this — Entra ID
@@ -755,14 +828,17 @@ def validate_id_token(
     except jwt.InvalidTokenError as exc:
         raise OidcError(f"id_token rejected: {type(exc).__name__}") from exc
 
-    # aud as a list requires azp to name this client (OIDC Core 3.1.3.7).
-    audience = claims.get("aud")
-    if isinstance(audience, list) and len(audience) > 1:
-        if claims.get("azp") != config.client_id:
-            raise OidcError(
-                "id_token has multiple audiences and its authorized party "
-                "is not this Headway client"
-            )
+    # azp names the client the token was actually issued TO. OIDC Core
+    # 3.1.3.7 requires checking it whenever it is present — not only when the
+    # audience is plural. A single-entry `aud` of this client with an `azp`
+    # naming a DIFFERENT client is a token minted for someone else that
+    # happens to be addressed here: in a tenant with a second registered
+    # client able to request Headway's audience (Entra ID and Keycloak both
+    # allow it), that client could otherwise sign its users into Headway.
+    if "azp" in claims and claims.get("azp") != config.client_id:
+        raise OidcError(
+            "id_token's authorized party is not this Headway client"
+        )
 
     # Skew works both ways: a token issued further in the future than the
     # tolerance is not a clock difference.
@@ -793,6 +869,7 @@ def validate_id_token(
             f"id_token carries no username: neither the configured claim "
             f"'{config.username_claim}' nor a fallback was present"
         )
+    _reject_unusable_username(username)
 
     return VerifiedClaims(
         issuer=issuer,
@@ -818,6 +895,49 @@ def _username_from(claims: dict, username_claim: str) -> str | None:
         if isinstance(value, str) and value.strip():
             return value.strip()
     return None
+
+
+#: What a federated username may contain. Deliberately WIDER than the local
+#: rule in routers/users.py (which forbids '@'), because the ordinary value
+#: here is an Entra ID UPN or an email address and rejecting those would
+#: refuse the common case. Deliberately NARROWER than "any string": no
+#: whitespace, no control or zero-width characters, and no ':'.
+_FEDERATED_USERNAME_RE = re.compile(r"^[A-Za-z0-9._%+@-]{1,128}$")
+
+#: Prefixes this API already uses to name non-human actors in audit.events.
+#: A federated username is not permitted to impersonate one.
+_RESERVED_ACTOR_PREFIXES = ("sso:", "machine:", "system:")
+
+
+def _reject_unusable_username(username: str) -> None:
+    """Refuse a username the audit trail could not honestly carry.
+
+    This value is chosen by the identity provider, lands in
+    ``auth.users.username``, and becomes the ``actor`` on every audit row the
+    person ever generates. Neither column constrains it, and the local
+    account path's validation is never reached from here — so without this,
+    a directory that lets a user edit their own ``email`` claim can mint an
+    account whose audit entries are indistinguishable from the ones this
+    module writes for anonymous SSO failures (``sso:anonymous``) or from a
+    machine key's. An audit trail whose actor column can be forged by the
+    subject of the audit is not an audit trail.
+
+    Refusing is safe: the account has not been created yet, and the caller
+    turns this into the same generic sign-in refusal as every other failure,
+    with the real reason recorded server-side for the administrator.
+    """
+    lowered = username.lower()
+    for prefix in _RESERVED_ACTOR_PREFIXES:
+        if lowered.startswith(prefix):
+            raise OidcError(
+                f"id_token username starts with {prefix!r}, which Headway "
+                f"reserves for its own non-human actors in the audit trail"
+            )
+    if not _FEDERATED_USERNAME_RE.fullmatch(username):
+        raise OidcError(
+            "id_token username contains characters Headway will not put in "
+            "an audit trail, or is longer than 128 characters"
+        )
 
 
 def _groups_from(claims: dict, groups_claim: str) -> tuple[str, ...]:

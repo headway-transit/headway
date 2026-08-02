@@ -19,6 +19,8 @@ masked by another:
 from __future__ import annotations
 
 import datetime as dt
+import json
+import re
 
 import pytest
 
@@ -145,6 +147,73 @@ def test_audit_trail_filters_and_pages_without_skipping_rows(client, fake_db):
     assert {e["actor"] for e in only_cora["events"]} == {"cora"}
 
 
+def test_reading_the_audit_trail_is_itself_recorded_in_the_audit_trail(
+    client, fake_db
+):
+    """Every other content read in this API records that it happened, and this
+    is the read that most needs to.
+
+    The trail names every actor and every action across the installation. An
+    oversight surface that can be swept invisibly lets the reviewed party
+    watch the reviewer, and lets a reviewer scope a search that nobody can
+    later reconstruct. So the recorded event carries the FILTERS and the
+    number of rows — enough to tell a scoped lookup from a sweep of the whole
+    installation — and never the rows themselves, which are already in the
+    table being read.
+    """
+    add_auditor(fake_db)
+    for i in range(1, 4):
+        fake_db.audit_events.append({
+            "event_id": i, "at": dt.datetime(2026, 8, 1, 10, i, tzinfo=UTC),
+            "actor": "cora", "action": "certify",
+            "subject_kind": "cert.certifications", "subject_id": f"c-{i}",
+            "detail": {"attestation": "June figures are accurate."},
+        })
+    fake_db._next_event_id = 4
+
+    read = client.get(
+        "/audit/events?actor=cora&action=certify&limit=25",
+        headers=auth_header(fake_db, "audra"),
+    )
+    assert read.status_code == 200
+    assert len(read.json()["events"]) == 3
+
+    written = [e for e in fake_db.audit_events if e["action"] == "audit_trail_read"]
+    assert len(written) == 1, "one read, one record — no more and no fewer"
+    assert written[0]["actor"] == "audra"
+    assert written[0]["subject_kind"] == "audit.events"
+
+    detail = _as_dict(written[0]["detail"])
+    assert detail["filters"] == {"actor": "cora", "action": "certify"}
+    assert detail["limit"] == 25
+    assert detail["returned"] == 3
+    assert detail["paged"] is False
+
+    # Never the rows. Copying what was read into the record of the reading
+    # doubles the trail's size on every sweep and duplicates content that is
+    # already one row away.
+    serialized = json.dumps(detail)
+    assert "June figures are accurate." not in serialized
+    for i in range(1, 4):
+        assert f"c-{i}" not in serialized
+
+
+def test_an_unfiltered_sweep_is_distinguishable_from_a_scoped_lookup(
+    client, fake_db
+):
+    """What the recorded filters are FOR: 'who read what' is only a useful
+    question if a targeted lookup and a wholesale export look different
+    afterwards."""
+    add_auditor(fake_db)
+    client.get("/audit/events", headers=auth_header(fake_db, "audra"))
+    detail = _as_dict(
+        [e for e in fake_db.audit_events if e["action"] == "audit_trail_read"][0]
+        ["detail"]
+    )
+    assert detail["filters"] == {}
+    assert detail["limit"] == 100  # audit_trail.DEFAULT_LIMIT
+
+
 # ---------------------------------------------------------------------------
 # 3. Changes nothing — the method-level ban
 # ---------------------------------------------------------------------------
@@ -197,6 +266,118 @@ def test_auditor_is_refused_the_read_shaped_posts_too(client, fake_db):
     assert preview.status_code == 403
     verify = client.post("/raw/records/abc/verify", headers=headers)
     assert verify.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# 3b. The same claim, made about EVERY route rather than a hand-written list
+# ---------------------------------------------------------------------------
+#
+# WRITE_ATTEMPTS above is a list somebody maintains, which means it is a list
+# somebody forgets. The guarantee this role rests on is "an auditor cannot do
+# any of the things every other role can do", including the ones written after
+# this file was. That claim can only be tested by asking the application which
+# routes it has.
+
+#: The two families of route an auditor's token is not the right question for.
+#: Deliberately explicit and deliberately short — every entry here is a route
+#: this sweep stops covering, so adding one should feel expensive.
+ROUTES_NOT_REACHED_BY_A_SESSION_TOKEN = {
+    # The sign-in surface itself. These take NO session token (that is the
+    # point of them), so `get_current_identity` — the choke point that refuses
+    # unsafe methods for a read-only role — never runs. An auditor calling
+    # /auth/login gets the ordinary login response, not a 403.
+    "/auth/login",
+    "/auth/oidc/start",
+    "/auth/oidc/callback",
+    # Machine-key ingest. These authenticate with an `hw_` API key through
+    # machine_auth, not with a person's session at all, so a session token of
+    # any role is refused there as "not a machine key" rather than by role.
+    "/ingest/tides/passenger-events",
+    "/ingest/dr/trips",
+}
+
+#: GET/HEAD/OPTIONS: what "reads everything" means.
+SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+
+#: Substituted for `{path_parameters}`. A 403 must be decided by the role gate
+#: BEFORE any lookup, so the value only has to be syntactically plausible —
+#: but it is made plausible per-parameter anyway, because a 422 from a type
+#: coercion would hide the very thing this test is asking about.
+PATH_PARAMETER_DUMMIES = {"service_date": "2026-06-01"}
+DEFAULT_PATH_PARAMETER = "00000000-0000-0000-0000-000000000000"
+
+
+def _walk_routes(routes):
+    """Every ``(path, methods)`` the app can serve, wrappers unwrapped.
+
+    FastAPI 0.139 keeps an included router as a ``_IncludedRouter`` entry in
+    ``app.routes`` rather than flattening its routes into it, so this recurses
+    through those. Asking the app rather than listing paths by hand is the
+    whole point: an endpoint added next year is covered on the day it is
+    written, by someone who has never read this file.
+    """
+    for route in routes:
+        included = getattr(route, "original_router", None)
+        if included is not None:
+            yield from _walk_routes(included.routes)
+            continue
+        path = getattr(route, "path", None)
+        methods = getattr(route, "methods", None)
+        if path and methods:
+            yield path, methods
+
+
+def _unsafe_routes(app):
+    found = set()
+    for path, methods in _walk_routes(app.routes):
+        if path in ROUTES_NOT_REACHED_BY_A_SESSION_TOKEN:
+            continue
+        for method in set(methods) - SAFE_METHODS:
+            found.add((method, path))
+    return sorted(found)
+
+
+def test_the_route_walk_really_finds_the_write_surface(app):
+    """A guard on the guard below. If the walk ever stops seeing routes — a
+    FastAPI upgrade changing how included routers are stored would do it —
+    the sweep would pass with nothing to check, which is the one way a test
+    like this fails silently."""
+    found = _unsafe_routes(app)
+    assert len(found) >= 30, found
+    assert ("POST", "/certifications") in found
+    assert ("PUT", "/settings/{setting_key}") in found
+    assert ("DELETE", "/webhooks/{subscription_id}") in found
+    # And the skip list is doing what it says, no more.
+    assert ("POST", "/auth/login") not in found
+    assert ("POST", "/ingest/dr/trips") not in found
+
+
+def test_an_auditor_is_refused_every_unsafe_route_this_app_has(client, app, fake_db):
+    """The whole write surface, swept.
+
+    Any 403 here comes from ``auth.get_current_identity`` — before routing has
+    decided whether the record exists, before a body is validated, before an
+    endpoint runs. So a 404 or a 422 from one of these is not a cosmetic
+    difference: it means the request got PAST the role gate, and the reason it
+    changed nothing was the dummy id rather than the auditor's role. Every
+    offender is collected and reported together, because the second one is
+    worth knowing about while fixing the first.
+    """
+    add_auditor(fake_db)
+    headers = auth_header(fake_db, "audra")
+    offenders = []
+    for method, path in _unsafe_routes(app):
+        concrete = re.sub(
+            r"\{([^}]+)\}",
+            lambda m: PATH_PARAMETER_DUMMIES.get(
+                m.group(1).split(":")[0], DEFAULT_PATH_PARAMETER
+            ),
+            path,
+        )
+        response = client.request(method, concrete, headers=headers)
+        if response.status_code != 403:
+            offenders.append((method, path, response.status_code, response.text[:120]))
+    assert not offenders, offenders
 
 
 def test_auditor_write_refusal_is_403_not_404_and_never_leaks_the_path(

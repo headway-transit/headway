@@ -188,6 +188,46 @@ def test_multiple_audiences_require_azp_to_name_this_client(
     assert _validate(good, config, oidc_metadata).subject == "idp-subject-0001"
 
 
+def test_azp_is_checked_whenever_it_is_present_not_only_when_aud_is_plural(
+    fake_idp, config, oidc_metadata
+):
+    """OIDC Core 3.1.3.7 says to check ``azp`` WHENEVER it is present, and the
+    reason is not pedantry.
+
+    ``aud`` names who the token is addressed to; ``azp`` names the client it
+    was actually issued TO. A token with a single-valued ``aud`` of this
+    Headway client and an ``azp`` naming a DIFFERENT client is a token minted
+    for someone else that happens to be addressed here — and in a tenant with
+    a second registered client able to request Headway's audience (Entra ID
+    and Keycloak both allow exactly that), that second client could otherwise
+    sign its own users into Headway with a token this API would accept.
+
+    Checking only when ``len(aud) > 1`` reads like the specification and is
+    not: it leaves the single-audience shape, which is the one every provider
+    emits by default, entirely unchecked.
+    """
+    forged = fake_idp.id_token(
+        nonce="the-nonce",
+        aud=fake_idp.client_id,  # a SINGLE audience, and it is ours
+        azp="the-other-app-in-this-tenant",
+    )
+    with pytest.raises(oidc.OidcError) as exc:
+        _validate(forged, config, oidc_metadata)
+    assert "authorized party is not this Headway client" in exc.value.reason
+
+
+def test_the_ordinary_azp_shapes_still_sign_in(fake_idp, config, oidc_metadata):
+    """The other half, so the check above cannot be satisfied by refusing
+    everything. Most providers omit ``azp`` for a single-audience token, and
+    the ones that send it send this client's own id."""
+    absent = fake_idp.id_token(nonce="the-nonce")
+    assert "azp" not in pyjwt.decode(absent, options={"verify_signature": False})
+    assert _validate(absent, config, oidc_metadata).subject == "idp-subject-0001"
+
+    ours = fake_idp.id_token(nonce="the-nonce", azp=fake_idp.client_id)
+    assert _validate(ours, config, oidc_metadata).subject == "idp-subject-0001"
+
+
 # ---------------------------------------------------------------------------
 # exp / iat and the STATED clock skew
 # ---------------------------------------------------------------------------
@@ -315,6 +355,87 @@ def test_the_subject_is_never_used_as_a_username(fake_idp, config, oidc_metadata
     claims = _validate(token, config, oidc_metadata)
     assert claims.username == "sso.official@example.gov"
     assert claims.subject == "00000000-1111-2222-3333-444444444444"
+
+
+# ---------------------------------------------------------------------------
+# The username the provider chose becomes the audit trail's `actor`
+# ---------------------------------------------------------------------------
+#
+# This value is picked by the identity provider, lands in
+# ``auth.users.username``, and is then the ``actor`` on every audit row the
+# person ever generates. Neither column constrains it, and the local-account
+# validation in routers/users.py is never reached from the federated path — so
+# a directory that lets a user edit their own ``email`` claim is, without the
+# check below, a way to mint an account whose audit entries are
+# indistinguishable from the ones Headway writes for itself. An audit trail
+# whose actor column can be forged by the subject of the audit is not an audit
+# trail.
+
+
+@pytest.mark.parametrize(
+    "forged",
+    [
+        # The exact actor headway_api/routers/oidc.py writes for an anonymous
+        # SSO failure. Someone signing in under this name makes their own
+        # sign-ins indistinguishable from failed ones by a stranger.
+        "sso:anonymous",
+        # The machine-key actor prefix (machine_auth.py).
+        "machine:something",
+        # The prefix Headway keeps for actions it takes on its own behalf.
+        "system:x",
+    ],
+)
+def test_a_username_impersonating_a_headway_actor_is_refused(
+    fake_idp, config, oidc_metadata, forged
+):
+    token = fake_idp.id_token(nonce="the-nonce", username=forged)
+    with pytest.raises(oidc.OidcError) as exc:
+        _validate(token, config, oidc_metadata)
+    assert "reserves for its own non-human actors" in exc.value.reason
+
+
+@pytest.mark.parametrize(
+    "forged",
+    [
+        "first last",          # whitespace: two columns' worth of ambiguity
+        "actor:subject",       # ':' is how every reserved prefix is spelled
+        "audra\x07",           # a control character
+        "audra\u200bimposter",  # a zero-width space — invisible in every UI
+        "a" * 129,             # longer than the 128 characters we will store
+    ],
+)
+def test_a_username_the_audit_trail_could_not_carry_honestly_is_refused(
+    fake_idp, config, oidc_metadata, forged
+):
+    """Whitespace and zero-width characters are the interesting ones: both
+    produce a username that LOOKS like somebody else's in every rendering an
+    investigator would use to read the trail."""
+    token = fake_idp.id_token(nonce="the-nonce", username=forged)
+    with pytest.raises(oidc.OidcError) as exc:
+        _validate(token, config, oidc_metadata)
+    assert "will not put in an audit trail" in exc.value.reason
+
+
+@pytest.mark.parametrize(
+    "ordinary",
+    [
+        # An email-shaped username: the single most common Entra ID / Okta
+        # value, and the one a rule copied from routers/users.py would refuse.
+        "firstname.lastname@agency.gov",
+        # A bare directory account name.
+        "jdoe",
+        # A UPN with a plus — legal in an address and used by real people.
+        "j.doe+transit@agency.gov",
+    ],
+)
+def test_ordinary_federated_usernames_still_sign_in(
+    fake_idp, config, oidc_metadata, ordinary
+):
+    """The half that matters more in the field. A rule tight enough to refuse
+    the forgeries above and tight enough to refuse an ordinary member of staff
+    is not a security control, it is an outage."""
+    token = fake_idp.id_token(nonce="the-nonce", username=ordinary)
+    assert _validate(token, config, oidc_metadata).username == ordinary
 
 
 # ---------------------------------------------------------------------------
@@ -446,6 +567,80 @@ def test_a_provider_without_s256_pkce_is_refused(fake_idp, config, oidc_metadata
     with pytest.raises(oidc.OidcConfigurationError) as exc:
         oidc_metadata.discovery(config, force=True)
     assert "does not support PKCE" in exc.value.public_message
+
+
+class _InjectedClock:
+    """A monotonic clock a test moves by hand, so a cache TTL is asserted
+    rather than waited for."""
+
+    def __init__(self, now: float = 1_000.0):
+        self.now = now
+
+    def __call__(self) -> float:
+        return self.now
+
+    def advance(self, seconds: float) -> None:
+        self.now += seconds
+
+
+def test_a_failed_discovery_fetch_is_remembered_as_failed_for_a_few_seconds(
+    fake_idp, config, fake_oidc_http
+):
+    """Caching only SUCCESSES means the cache stops working at the exact
+    moment it is most needed.
+
+    While the provider is unreachable, every sign-in would otherwise pay the
+    full network timeout, and every endpoint in this API is synchronous — so
+    each of those waits holds a worker thread on a single-box installation.
+    An outage at the identity provider would then degrade LOCAL login too,
+    which is precisely the coupling this wave promises does not exist.
+    Remembering "this was down a moment ago" turns a slow failure into a fast
+    one.
+    """
+    clock = _InjectedClock()
+    metadata = oidc.ProviderMetadata(
+        http_factory=lambda ca: fake_oidc_http, clock=clock
+    )
+    reachable = fake_oidc_http.get_json
+    attempts: list[str] = []
+
+    def unreachable(url):
+        attempts.append(url)
+        raise oidc.OidcConfigurationError(
+            "Headway could not reach https://idp.example.gov (ConnectError)."
+        )
+
+    fake_oidc_http.get_json = unreachable
+
+    with pytest.raises(oidc.OidcConfigurationError):
+        metadata.discovery(config)
+    assert len(attempts) == 1
+
+    # The second caller is refused WITHOUT a second network attempt — and is
+    # still refused, because a fast failure is a failure.
+    with pytest.raises(oidc.OidcConfigurationError) as second:
+        metadata.discovery(config)
+    assert len(attempts) == 1, "a cached failure must not re-dial the provider"
+    assert "not retrying yet" in second.value.public_message
+
+    # ...and the memory is short. A provider that comes back is noticed within
+    # seconds, not at the next restart.
+    clock.advance(oidc._DISCOVERY_FAILURE_TTL_SECONDS + 1)
+    with pytest.raises(oidc.OidcConfigurationError):
+        metadata.discovery(config)
+    assert len(attempts) == 2
+
+    # A success clears the negative entry outright, so one failure cannot go
+    # on suppressing retries after the provider is healthy again.
+    fake_oidc_http.get_json = reachable
+    clock.advance(oidc._DISCOVERY_FAILURE_TTL_SECONDS + 1)
+    assert metadata.discovery(config)["issuer"] == fake_idp.issuer
+    assert config.discovery_url not in metadata._discovery_failed_at
+
+    # And from here it is served from the POSITIVE cache: no further fetches.
+    fetches = fake_idp.discovery_fetches
+    assert metadata.discovery(config)["issuer"] == fake_idp.issuer
+    assert fake_idp.discovery_fetches == fetches
 
 
 def test_a_ca_bundle_path_is_checked_when_it_is_saved(tmp_path):

@@ -47,6 +47,56 @@ def test_create_subscription_audited_and_secret_never_returned(client, fake_db):
     assert r.status_code == 200 and SECRET not in r.text
 
 
+def test_the_subscribe_audit_records_the_origin_and_not_the_whole_url(
+    client, fake_db
+):
+    """For a Slack, Teams or Zapier receiver the URL *is* the credential:
+    anyone holding it can post as the agency, and the secret lives in the path
+    or the query string.
+
+    Writing the full URL into audit.events contradicted this module's own rule
+    (``_audit_delivery``: "never the URL's secret query strings") and was
+    harmless only while reading audit.events required database access. The
+    ``auditor`` role (handoff 0046) is the first credential that reads that
+    table over HTTP, so it stopped being harmless. The origin says WHERE an
+    agency is sending its figures, which is the thing an audit needs; the
+    subscription id is already this row's subject, so nothing traceable is
+    lost.
+    """
+    url = "https://hooks.example.com/services/T000/B000/SECRETPATH?token=SECRETTOKEN"
+    r = client.post(
+        "/webhooks",
+        json={
+            "url": url,
+            "event_types": ["certification.created"],
+            "secret": SECRET,
+        },
+        headers=auth_header(fake_db, "cora"),
+    )
+    assert r.status_code == 201
+
+    events = [e for e in fake_db.audit_events if e["action"] == "webhook_subscribed"]
+    assert len(events) == 1
+    detail = json.loads(events[0]["detail"])
+    assert detail["url_origin"] == "https://hooks.example.com"
+    assert detail["event_types"] == ["certification.created"]
+
+    # Nowhere in the serialized event — not under another key, not in the
+    # subject, not folded into a message.
+    serialized = json.dumps({k: str(v) for k, v in events[0].items()})
+    assert "SECRETPATH" not in serialized
+    assert "SECRETTOKEN" not in serialized
+
+    # The subscription itself is untouched: deliveries still go to the full
+    # address, and the admin screen still shows the administrator what they
+    # typed. Only the audit trail is redacted.
+    sub_id = r.json()["subscription_id"]
+    assert r.json()["url"] == url
+    assert fake_db.webhook_subscriptions[sub_id]["url"] == url
+    listed = client.get("/webhooks", headers=auth_header(fake_db, "cora"))
+    assert [s["url"] for s in listed.json()] == [url]
+
+
 def test_subscription_crud_is_admin_only(client, fake_db):
     body = {
         "url": "https://x.example/h",

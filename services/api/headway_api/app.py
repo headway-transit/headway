@@ -52,6 +52,14 @@ class Settings:
     # key for ingest, per client IP for the public open-data endpoint.
     machine_requests_per_minute: int = 60
     public_requests_per_minute: int = 60
+    # Per client IP for the UNAUTHENTICATED single-sign-on surface. Lower than
+    # the others on purpose: starting a sign-in makes Headway open an outbound
+    # connection to the identity provider, so an unlimited /auth/oidc/start is
+    # a way to spend this box's request workers — and the worker that cannot
+    # be spent is the one serving local login, the break-glass path. A person
+    # signs in once or twice a day; 30 a minute is generous even for a whole
+    # agency arriving behind one reverse-proxy address.
+    sso_requests_per_minute: int = 30
 
 
 class MissingSessionSecret(RuntimeError):
@@ -154,6 +162,12 @@ def create_app(
     app.state.oidc_metadata = oidc_metadata
     app.state.public_rate_limiter = RateLimiter(
         app.state.settings.public_requests_per_minute
+    )
+    # Its own bucket, for the same reason login_audit_throttle is its own
+    # instance: a flood against single sign-on must not exhaust the budget
+    # that serves the public transparency endpoint, or the reverse.
+    app.state.sso_rate_limiter = RateLimiter(
+        app.state.settings.sso_requests_per_minute
     )
     # CORS: off by default (production serves web same-origin / behind a
     # reverse proxy). Set HEADWAY_CORS_ORIGINS to a comma-separated origin

@@ -140,14 +140,57 @@ def load_key(environ=os.environ) -> bytes:
             f"lives only in the environment or that file — never in the "
             f"database and never in the Headway repository."
         )
-    if os.path.exists(key_file):
-        with open(key_file, "r", encoding="ascii") as fh:
-            return _key_from_hex(fh.read(), f"the key file {key_file!r}")
+    existing = _read_key_file(key_file)
+    if existing is not None:
+        return existing
     key = os.urandom(32)
-    fd = os.open(key_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        fd = os.open(key_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        # Another worker generated it between our check and our create. Its
+        # key is as good as ours; read theirs rather than racing to overwrite,
+        # which would strand every secret the winner already encrypted.
+        raced = _read_key_file(key_file)
+        if raced is None:  # pragma: no cover — created then removed
+            raise SecretKeyUnavailable(
+                f"The at-rest encryption key file {key_file!r} appeared and "
+                f"vanished while Headway was generating one. Try again."
+            )
+        return raced
+    except OSError as exc:
+        # A read-only mount is the ordinary shape of a Docker or Kubernetes
+        # secret, not a bug. Say so as a refusal the caller already handles,
+        # rather than a 500 from deep in the crypto layer.
+        raise SecretKeyUnavailable(
+            f"Headway cannot create the at-rest encryption key file "
+            f"{key_file!r} ({exc.strerror}). If that path is a read-only "
+            f"mount, generate the key yourself with `openssl rand -hex 32` "
+            f"and mount it there, or set {ENV_KEY} in the environment "
+            f"instead. The key is never logged."
+        ) from exc
     with os.fdopen(fd, "w", encoding="ascii") as fh:
         fh.write(key.hex() + "\n")
     return key
+
+
+def _read_key_file(key_file: str) -> bytes | None:
+    """The key in ``key_file``, or None if it is not there yet.
+
+    An unreadable file is a refusal, not a missing one: silently generating a
+    second key beside a file we merely failed to open would leave every
+    already-encrypted secret undecryptable.
+    """
+    try:
+        with open(key_file, "r", encoding="ascii") as fh:
+            return _key_from_hex(fh.read(), f"the key file {key_file!r}")
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        raise SecretKeyUnavailable(
+            f"Headway cannot read the at-rest encryption key file "
+            f"{key_file!r} ({exc.strerror}). Check the file's permissions and "
+            f"that it is mounted. The key is never logged."
+        ) from exc
 
 
 def encrypt(plaintext: str, *, associated_data: bytes, key: bytes | None = None) -> str:
@@ -206,12 +249,36 @@ def decrypt(stored: str, *, associated_data: bytes, key: bytes | None = None) ->
 def key_available(environ=os.environ) -> bool:
     """Is an at-rest key configured? Used to tell an admin BEFORE they type a
     secret that Headway has nowhere to put it — a 503 after the fact is a
-    worse experience than a warning before."""
+    worse experience than a warning before.
+
+    THIS NEVER GENERATES A KEY. It answers a question asked by a GET on the
+    admin screen, and a read that mints a persistent encryption key as a side
+    effect is a read that changed the installation — one that would then be
+    the key every secret is encrypted under, created by someone loading a
+    page. It also never raises: a broken key configuration must render the
+    "no secret storage" banner this function exists to produce, not a 500.
+    """
+    key_hex = environ.get(ENV_KEY, "").strip()
+    if key_hex:
+        try:
+            _key_from_hex(key_hex, f"the {ENV_KEY} environment variable")
+        except SecretKeyUnavailable:
+            return False
+        return True
+    key_file = environ.get(ENV_KEY_FILE, "").strip()
+    if not key_file:
+        return False
     try:
-        load_key(environ)
+        if _read_key_file(key_file) is not None:
+            return True
     except SecretKeyUnavailable:
         return False
-    return True
+    # Configured but not yet generated. It will be created at first use, so
+    # the honest answer is "yes, provided the directory can be written" —
+    # checked rather than assumed, because the alternative is telling an
+    # admin storage is ready and refusing their secret one screen later.
+    parent = os.path.dirname(os.path.abspath(key_file)) or "."
+    return os.path.isdir(parent) and os.access(parent, os.W_OK)
 
 
 def get_key(app) -> bytes:

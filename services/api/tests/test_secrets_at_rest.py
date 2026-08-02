@@ -10,6 +10,8 @@ rather than falling back to plaintext.
 from __future__ import annotations
 
 import base64
+import os
+import re
 
 import pytest
 
@@ -121,6 +123,101 @@ def test_environment_variable_wins_over_the_key_file(tmp_path):
     assert key == bytes.fromhex("ab" * 32)
 
 
+def test_an_operator_supplied_key_file_is_read_never_regenerated(tmp_path):
+    """The mounted-secret shape: the file was put there by someone else, and
+    Headway's job is to read it.
+
+    Overwriting it — or generating a second key beside it — would strand every
+    secret already encrypted under the first one, with no way back and no
+    error at the moment it happened.
+    """
+    path = tmp_path / "operator.key"
+    path.write_text("ab" * 32 + "\n")
+    before = path.read_bytes()
+
+    first = sar.load_key({sar.ENV_KEY_FILE: str(path)})
+    second = sar.load_key({sar.ENV_KEY_FILE: str(path)})
+    assert first == second == bytes.fromhex("ab" * 32)
+    assert path.read_bytes() == before, "the key file must not be rewritten"
+
+
+@pytest.mark.skipif(
+    os.geteuid() == 0,
+    reason="running as root, which ignores the directory permission this tests",
+)
+def test_a_key_file_that_cannot_be_created_is_a_refusal_not_an_oserror(tmp_path):
+    """A read-only mount is the ORDINARY shape of a Docker or Kubernetes
+    secret, not a bug.
+
+    Every caller of this module already handles ``SecretKeyUnavailable`` by
+    refusing the action in plain language. A bare ``PermissionError`` escaping
+    from here instead becomes a 500 from deep in the crypto layer — the same
+    outcome for the user, minus the sentence telling an operator what to do
+    about it.
+    """
+    directory = tmp_path / "read-only-mount"
+    directory.mkdir()
+    path = directory / "at-rest.key"
+    directory.chmod(0o500)
+    try:
+        with pytest.raises(sar.SecretKeyUnavailable) as exc:
+            sar.load_key({sar.ENV_KEY_FILE: str(path)})
+    finally:
+        # Restored regardless, or pytest cannot clean up its own tmp_path.
+        directory.chmod(0o700)
+
+    message = str(exc.value)
+    assert "cannot create the at-rest encryption key file" in message
+    assert "read-only mount" in message
+    assert "openssl rand -hex 32" in message
+    # A key WAS generated in memory before the write failed. None of it, and
+    # nothing else key-shaped, may appear in a message that will be logged.
+    assert re.search(r"[0-9a-fA-F]{32,}", message) is None
+    assert not path.exists()
+
+
 def test_key_available_reports_honestly(tmp_path):
     assert sar.key_available({}) is False
     assert sar.key_available({sar.ENV_KEY: "ab" * 32}) is True
+
+
+def test_key_available_never_creates_the_key_file_it_reports_on(tmp_path):
+    """A GET on the admin screen asks this question. A read that MINTS a
+    persistent encryption key as a side effect is a read that changed the
+    installation — and the key it minted would then be the one every secret in
+    the database is encrypted under, created by somebody loading a page.
+
+    Worse, on a deployment that generates into an ephemeral container path,
+    the key created by rendering a screen is gone at the next restart, taking
+    the stored secret with it.
+    """
+    path = tmp_path / "not-generated-yet.key"
+    assert sar.key_available({sar.ENV_KEY_FILE: str(path)}) is True
+    assert not path.exists(), (
+        "asking whether a key is available must never create one"
+    )
+    # Asked twice, still nothing — no "first call is free" loophole either.
+    assert sar.key_available({sar.ENV_KEY_FILE: str(path)}) is True
+    assert not path.exists()
+
+
+def test_key_available_answers_false_rather_than_raising_on_a_broken_setup(
+    tmp_path,
+):
+    """This function exists to render the "no secret storage" banner. A
+    configuration so broken that it throws must still produce that banner, not
+    a 500 on the screen that was going to explain the problem."""
+    # A directory that is not there: the key could not be generated at first
+    # use either, so "yes, it will work" would be a lie told one screen early.
+    assert sar.key_available(
+        {sar.ENV_KEY_FILE: str(tmp_path / "no-such-directory" / "at-rest.key")}
+    ) is False
+
+    # A file that is there and is not a key.
+    malformed = tmp_path / "malformed.key"
+    malformed.write_text("this is not a 64-character hexadecimal string")
+    assert sar.key_available({sar.ENV_KEY_FILE: str(malformed)}) is False
+
+    # And the same for a malformed value in the environment variable.
+    assert sar.key_available({sar.ENV_KEY: "not-hex-at-all"}) is False
+    assert sar.key_available({sar.ENV_KEY: "abcd"}) is False

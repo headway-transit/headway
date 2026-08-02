@@ -110,6 +110,15 @@ const NETWORK_ERROR_MESSAGE =
 const UNREADABLE_ERROR_MESSAGE =
   "The server reported an error but the message could not be read.";
 
+/**
+ * The unauthenticated sign-in endpoints. A 401 from either means "that
+ * sign-in attempt failed", never "your session expired", so neither one
+ * clears a session or triggers the login redirect: doing so would take the
+ * sign-in screen out from under its own error message before it could be
+ * read. The screen that made the call owns the outcome.
+ */
+const SIGN_IN_PATHS = new Set(["/auth/login", "/auth/oidc/callback"]);
+
 let unauthorizedHandler: (() => void) | null = null;
 
 /**
@@ -172,7 +181,7 @@ async function request<T>(
     throw new ApiError(NETWORK_ERROR_STATUS, NETWORK_ERROR_MESSAGE);
   }
 
-  if (response.status === 401 && path !== "/auth/login") {
+  if (response.status === 401 && !SIGN_IN_PATHS.has(path)) {
     // Session invalid or expired: clear it and send the user to sign in.
     const message = await extractErrorMessage(response);
     clearSession();

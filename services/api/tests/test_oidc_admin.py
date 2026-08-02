@@ -159,6 +159,80 @@ def test_turning_sso_on_without_a_secret_is_refused_in_plain_language(
     assert "cannot show you the old one" in r.json()["detail"]
 
 
+def test_clearing_the_secret_while_enabling_sso_is_refused_and_changes_nothing(
+    client, fake_db
+):
+    """The same refusal when a secret IS already stored — the case a guard
+    written as "no new secret AND no stored secret" lets through.
+
+    Clearing and enabling in one request is a single statement that writes
+    NULL into the secret column and true into the enabled column. It degrades
+    a confidential client to a public one, and the screen reports success
+    while every sign-in afterwards fails at the token endpoint with an
+    ``invalid_client`` nobody looking at Headway can explain. What the request
+    will STORE is the only thing worth testing against, and what it will store
+    here is nothing.
+    """
+    saved = client.put(
+        "/auth/oidc/config", json=VALID, headers=auth_header(fake_db, "cora")
+    )
+    assert saved.status_code == 200, saved.text
+    stored = fake_db.oidc_provider["client_secret_encrypted"]
+    assert stored, "the fixture for this test needs a secret already stored"
+
+    cleared = client.put(
+        "/auth/oidc/config",
+        json=dict(VALID, client_secret="", is_enabled=True),
+        headers=auth_header(fake_db, "cora"),
+    )
+    assert cleared.status_code == 422
+    assert "cannot be turned on without a client secret" in cleared.json()["detail"]
+    # Refused means refused: the stored credential is untouched and sign-in is
+    # still configured exactly as it was.
+    assert fake_db.oidc_provider["client_secret_encrypted"] == stored
+    assert fake_db.oidc_provider["is_enabled"] is True
+
+
+def test_clearing_the_secret_while_leaving_sso_off_is_allowed(client, fake_db):
+    """The guard is about turning single sign-on ON without a credential, not
+    about forbidding an administrator from removing one. Deleting the secret
+    and switching the feature off in the same request is a coherent thing to
+    want — decommissioning — and is permitted."""
+    client.put("/auth/oidc/config", json=VALID, headers=auth_header(fake_db, "cora"))
+    r = client.put(
+        "/auth/oidc/config",
+        json=dict(VALID, client_secret="", is_enabled=False),
+        headers=auth_header(fake_db, "cora"),
+    )
+    assert r.status_code == 200, r.text
+    assert fake_db.oidc_provider["client_secret_encrypted"] is None
+    assert fake_db.oidc_provider["is_enabled"] is False
+
+
+def test_enabling_sso_without_touching_the_stored_secret_still_succeeds(
+    client, fake_db
+):
+    """The behaviour the guard must not break: an admin editing the group
+    claim, or switching sign-on back on, leaves the secret field ALONE (null,
+    not empty string) and keeps the credential they were shown once."""
+    client.put(
+        "/auth/oidc/config",
+        json=dict(VALID, is_enabled=False),
+        headers=auth_header(fake_db, "cora"),
+    )
+    stored = fake_db.oidc_provider["client_secret_encrypted"]
+
+    unchanged = dict(VALID, is_enabled=True)
+    unchanged.pop("client_secret")
+    r = client.put(
+        "/auth/oidc/config", json=unchanged, headers=auth_header(fake_db, "cora")
+    )
+    assert r.status_code == 200, r.text
+    assert fake_db.oidc_provider["client_secret_encrypted"] == stored
+    assert fake_db.oidc_provider["is_enabled"] is True
+    assert _details(fake_db, "sso_config_changed")[-1]["client_secret_changed"] is False
+
+
 # ---------------------------------------------------------------------------
 # Validation, written for a zero-SQL reader
 # ---------------------------------------------------------------------------

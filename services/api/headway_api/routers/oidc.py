@@ -52,6 +52,7 @@ from ..audit import write_event
 from ..auth import Identity, issue_token, new_session_id
 from ..authz import ROLE_LABELS, require_certifying_official, role_label
 from ..db import get_db
+from ..machine_auth import enforce_rate_limit
 
 router = APIRouter(tags=["sso"])
 
@@ -303,6 +304,19 @@ class TestConfigResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+def _limit_sso(request: Request) -> None:
+    """Token-bucket the unauthenticated sign-in surface, per client IP.
+
+    Absent in tests that build the app without ``sso_rate_limiter``; those
+    exercise the sign-in logic, not the limiter, and must not fail because a
+    fixture predates it.
+    """
+    limiter = getattr(request.app.state, "sso_rate_limiter", None)
+    if limiter is None:
+        return
+    enforce_rate_limit(limiter, request.client.host if request.client else "unknown")
+
+
 def _throttle_gate(request: Request, reason: str) -> Optional[int]:
     """Failure-audit coalescing for the unauthenticated sign-in surface.
 
@@ -450,7 +464,15 @@ def start_login(request: Request, db=Depends(get_db)) -> StartLoginResponse:
     Generates ``state``, ``nonce``, a PKCE verifier and a browser binding
     token, stores everything but the browser token server-side, and hands
     back the provider URL to send the browser to.
+
+    RATE LIMITED because it is unauthenticated AND expensive: it can open an
+    outbound connection to the identity provider and it INSERTs a row. Every
+    endpoint in this API is synchronous, so a request waiting on an
+    unreachable provider is holding a worker thread — and the request that
+    must never queue behind it is ``POST /auth/login``, the break-glass path
+    this whole wave promises keeps working when the IdP does not.
     """
+    _limit_sso(request)
     row = _load_provider_row(db)
     if row is None or not row[9] or _env_disabled(request):
         _audit_login_failure(db, request, reason="sso not enabled")
@@ -501,7 +523,13 @@ def oidc_callback(
     Every refusal below returns the SAME message. The reason is in the audit
     trail; the wire never says whether the account exists, whether it was
     mapped, or which check failed.
+
+    RATE LIMITED for the same reason as ``start_login``, plus one of its own:
+    a caller who reaches the code exchange makes Headway POST to the agency's
+    identity provider, so an unlimited callback turns this box into a traffic
+    amplifier pointed at the agency's own IdP.
     """
+    _limit_sso(request)
     row = _load_provider_row(db)
     if row is None or not row[9] or _env_disabled(request):
         _audit_login_failure(db, request, reason="callback while sso not enabled")
@@ -870,7 +898,14 @@ def put_config(
     else:
         encrypted = stored_secret
 
-    if body.is_enabled and not encrypted and not stored_secret:
+    # `encrypted` is already the secret this request will STORE: the old one
+    # when unchanged, the new one when supplied, None when explicitly cleared.
+    # Consulting `stored_secret` as well would let "" + is_enabled=true past
+    # this guard on the strength of the secret being deleted in the same
+    # statement — writing NULL and enabling SSO at once, which degrades a
+    # confidential client to a public one and fails every sign-in afterwards
+    # with a screen that reported success.
+    if body.is_enabled and not encrypted:
         raise HTTPException(
             status_code=422,
             detail=(
