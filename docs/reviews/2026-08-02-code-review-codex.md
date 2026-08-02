@@ -38,3 +38,78 @@ Reviewed `ca3c801..b402c93` on `main`; `git rev-parse --short HEAD` returned `b4
 - I did not exhaustively review unchanged ingestion, transform, calc, signing, retention, object-store download, or machine-key cryptography outside paths needed to answer the five requested areas.
 - The MCP service was traced to its machine-authenticated HTTP client and searched for trip/geometry exposure, but I did not run its separate test suite or exercise a live MCP transport.
 - A temporary failing regression test for the `parse_error` disclosure could not be applied because the supplied sandbox fails before filesystem patching. No source or test files were changed; only this review document was written via the approved execution fallback.
+
+---
+
+## Verification and disposition — appended by the maintainer, 2026-08-02
+
+Every claim above was checked against the code before anything was changed.
+Reviewer conclusions are treated as hypotheses, not verdicts — the same rule
+applied to the 2026-07-31 external pass, where one of four findings was
+refuted on inspection.
+
+### The finding: UPHELD in substance, corrected in three particulars
+
+**Upheld.** The layer divergence is real. Migration 0028 withholds
+`parse_error` from the `headway_readonly` analyst SQL role and states the
+reason in its own header — parser output "can quote fragments of a malformed
+payload verbatim … **content, not metadata**". The API carried no matching
+rule, so the column that is unreadable over psql was served over HTTP to every
+signed-in role, `auditor` included, for records whose payload is withheld. One
+privacy decision, two enforcement layers, drifted apart, with the API as the
+weaker side. That is exactly the class this review was commissioned to find.
+
+**Correction 1 — the failure scenario is not producible.** The report describes
+a `parse_error` reading `'CSV parse error near row dr-1,42.35991117,…'`. No
+writer produces such a string. `routers/ingest.py:_check_header` carries the
+comment "never inspects data rows" and emits only missing column names drawn
+from a constant tuple; the Go connectors' `checkHeader` (`connectors/dr/dr.go`)
+behaves identically. The example was constructed rather than traced. The report
+marked the finding *Plausible* and was correct to.
+
+**Correction 2 — the location is incomplete.** The finding is filed against
+`evidence.py`, but the bundle only inherited the behaviour.
+`GET /raw/records/{id}` has returned `parse_error` unconditionally since the
+raw-record inspector shipped (`routers/raw_records.py`, `RawRecordLabel`).
+Anchoring on the file the reviewer was pointed at understated the scope.
+
+**Correction 3 — severity.** High overstates it. Nothing leaks today, and
+nothing has. It is a latent divergence, not an active disclosure.
+
+### Fixed anyway, and why
+
+The invariant that keeps this safe — *parser output never quotes data rows* —
+lives in two languages, is held by convention, and is enforced by nothing. A
+new connector, an adapter, or a library upgrade could break it without anyone
+touching the privacy code, producing precisely the leak migration 0028 already
+anticipated. Closing it at the READ side means it stays closed regardless of
+what any future writer does, and that is where 0028 had already drawn the line.
+
+`raw_payloads.visible_parse_error()` now substitutes `PARSE_ERROR_WITHHELD`
+wherever the caller may not read the record's contents, applied at both the
+label endpoint and the bundle. `parse_status` is deliberately **not** withheld:
+"this file was malformed" is a fact about the record, and hiding it would leave
+a broken record looking healthy with its reason quietly gone.
+
+Two regression tests, each seeding a restricted record with a `parse_error`
+full of synthetic coordinates — one on the label endpoint, one on the bundle.
+The pre-existing bundle test seeded `parse_error=None`, which is why this
+survived earlier review: it searched the response for the payload fixture, and
+the payload was never the only place content could appear.
+
+API suite 725 → 727. No `openapi.json` drift.
+
+### On the negative results
+
+The "things I checked that appear correct" section is the more valuable half of
+this report. The route-enumeration answer is the one this round most needed: the
+reviewer constructed the app and walked every included router's resolved
+dependency graph rather than reasoning from the source, which is the right
+method and the question the previous reviewer never reached. Spot-checks of the
+OIDC claims against the code agree.
+
+The stated limits are believed and are the honest ones: no live Postgres, no
+live IdP, and — the item worth carrying forward — **the 5,000-label cap bounds
+labels but not figure queries or lineage walks**, so the bundle's cost under a
+certification covering thousands of figures remains unmeasured rather than
+cleared. That is the strongest candidate for the next round.
