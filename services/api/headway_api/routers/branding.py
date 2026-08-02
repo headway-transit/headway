@@ -47,6 +47,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Request, Response, 
 from pydantic import BaseModel
 
 from ..audit import write_event
+from ..client_identity import client_address
 from ..auth import Identity
 from ..authz import require_certifying_official
 from ..branding import (
@@ -370,7 +371,7 @@ def get_logo(request: Request, db=Depends(get_db)) -> Response:
     same per-IP token bucket as the public open-data endpoint. The logo is
     the least sensitive object in the system: a public image the agency
     chose to publish."""
-    client_ip = request.client.host if request.client else "unknown"
+    client_ip = client_address(request)
     enforce_rate_limit(request.app.state.public_rate_limiter, client_ip)
 
     content_type, logo_version = _logo_meta(db)
@@ -424,7 +425,7 @@ def get_branding(request: Request, db=Depends(get_db)) -> BrandingResponse:
     colors (contrast-guaranteed at write time), and whether a logo exists.
     UNAUTHENTICATED by design, per-IP rate limited — the shell brands itself
     before sign-in, and nothing here is sensitive."""
-    client_ip = request.client.host if request.client else "unknown"
+    client_ip = client_address(request)
     enforce_rate_limit(request.app.state.public_rate_limiter, client_ip)
     chrome_values = {key: _setting_value(db, key) for key in CHROME_KEYS}
     chrome = (

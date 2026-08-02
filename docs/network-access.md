@@ -218,6 +218,24 @@ whatever proxy/VPN your organization standardizes on.
 - **If you split web and API across origins instead**, set
   `HEADWAY_CORS_ORIGINS` (comma-separated browser origins) in
   `deploy/compose/.env` so the API answers cross-origin browser calls.
+- **If you put your own proxy in front, tell the API about it.** Set
+  `HEADWAY_TRUSTED_PROXIES` in `deploy/compose/.env` to your proxy's
+  address or CIDR block (`127.0.0.1` for a proxy on the Headway host
+  itself). Without it the API sees your proxy as the caller for every
+  request, which has three consequences worth knowing about: everyone
+  shares one rate-limit allowance, so whoever spends it first locks out
+  the rest of the agency; everyone shares one failed-sign-in audit
+  bucket, so one person's typos suppress the record of everybody else's;
+  and every audit row records the proxy rather than the person. The
+  bundled `lan` profile is already configured — this is only for proxies
+  you run yourself.
+
+  Your proxy must set `X-Forwarded-For` (Caddy, nginx and most others do
+  by default). The API only reads it from addresses you list here, and
+  reads it right-to-left, so a caller cannot pick their own identity by
+  sending the header themselves. An address that is not a valid IP or
+  CIDR stops the API from starting rather than being skipped — a typo
+  here would otherwise look exactly like it was working.
 - **A ready-made internal option exists:** the Compose profile `lan` runs
   a pinned Caddy (Apache-2.0) that terminates HTTPS with a local CA and
   proxies `/` → web and `/api/*` → API. `install/install.sh

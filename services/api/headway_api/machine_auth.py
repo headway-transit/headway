@@ -33,6 +33,7 @@ from typing import Optional
 from fastapi import Depends, HTTPException, Request
 
 from .audit import write_event
+from .client_identity import client_address
 from .auth import Identity, get_current_identity
 from .db import get_db
 
@@ -289,6 +290,12 @@ class RateLimiter:
         if bucket.tokens >= 1.0:
             bucket.tokens -= 1.0
             return None
+        if self.refill_per_second <= 0:
+            # requests_per_minute=0 means "refuse everything". Without this
+            # the next line divides by zero and the endpoint answers 500 —
+            # a configuration value turning a refusal into a crash. A minute
+            # is the honest Retry-After: the bucket never refills.
+            return 60.0
         return (1.0 - bucket.tokens) / self.refill_per_second
 
 
@@ -383,7 +390,7 @@ def _failure_audit_gate(request: Request, reason: str) -> Optional[int]:
     throttle = getattr(request.app.state, "machine_audit_throttle", None)
     if throttle is None:
         return 0
-    bucket = request.client.host if request.client else "unknown"
+    bucket = client_address(request)
     return throttle.on_failure(bucket, reason)
 
 

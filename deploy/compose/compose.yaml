@@ -508,6 +508,21 @@ services:
       # (install/install.sh --reconfigure-access); empty = CORS off, correct
       # for the default same-origin/localhost layout.
       HEADWAY_CORS_ORIGINS: ${HEADWAY_CORS_ORIGINS:-}
+      # Whose X-Forwarded-For the API believes (services/api/headway_api/
+      # client_identity.py). WITHOUT this, every request through the `lan`
+      # profile's Caddy arrives as Caddy's own container address, so the whole
+      # office shares ONE rate-limit bucket and ONE failure-audit bucket, and
+      # every audit row records the proxy instead of the person.
+      #
+      # The default is Docker's private address pool, which is safe HERE
+      # because of the port mapping above: the API binds 127.0.0.1:8000 only,
+      # so nothing on the office network can reach it directly to forge the
+      # header — the only possible peers are this box and containers on the
+      # headway network. Change the binding and this default must be
+      # revisited. A host-side proxy instead of Caddy needs 127.0.0.1 added.
+      # An invalid value refuses to start rather than silently trusting
+      # nothing, which would look identical to working.
+      HEADWAY_TRUSTED_PROXIES: ${HEADWAY_TRUSTED_PROXIES:-172.16.0.0/12}
     healthcheck:
       # python:3.12-slim ships no curl/wget; the interpreter probes the
       # unauthenticated OpenAPI document.
