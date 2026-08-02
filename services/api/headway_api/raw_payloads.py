@@ -173,6 +173,47 @@ def _refusal(sensitivity_reason: str) -> str:
     )
 
 
+#: Stand-in served instead of ``parse_error`` when a record's contents are
+#: withheld from the caller.
+PARSE_ERROR_WITHHELD = (
+    "A parser message was recorded for this record, but it is withheld from "
+    "your account along with the contents. Parser output can quote fragments "
+    "of the payload it failed on, so it is treated as content rather than as "
+    "a label. The record's parse status above still tells you the file was "
+    "malformed."
+)
+
+
+def visible_parse_error(
+    parse_error: Optional[str], *, readable: bool
+) -> Optional[str]:
+    """``parse_error`` for a caller who may not read this record's contents.
+
+    Migration 0028 already withholds this column from the read-only analyst
+    SQL role, and says why in its own header: it is "populated from parser
+    output that can quote fragments of a malformed payload verbatim —
+    **content, not metadata**". The API had no matching rule, so the same
+    column that is unreadable over psql was served over HTTP to every
+    signed-in role, including ``auditor``, for records whose payload is
+    withheld. Two enforcement layers for one privacy decision had drifted
+    apart, and the weaker one was this side. (External review, 2026-08-02.)
+
+    No live leak was found: every writer today — ``routers/ingest.py``'s
+    ``_check_header`` ("never inspects data rows") and the Go connectors'
+    ``checkHeader`` — reports only missing column names taken from a
+    constant. That invariant is held by convention across two languages and
+    nothing enforces it, so this closes the hole at the read side, where it
+    stays closed no matter what a future connector writes.
+
+    ``parse_status`` is deliberately NOT withheld: "this file was malformed"
+    is a fact about the record, and hiding it would turn a withheld reason
+    into an apparently healthy record.
+    """
+    if parse_error is None or readable:
+        return parse_error
+    return PARSE_ERROR_WITHHELD
+
+
 def classify(record: RawRecord) -> Sensitivity:
     """The withholding rule, decided from the record's own ingest metadata.
 

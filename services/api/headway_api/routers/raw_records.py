@@ -455,7 +455,13 @@ def raw_record_label(
         fetched_at=record.fetched_at,
         landed_at=record.landed_at,
         parse_status=record.parse_status,
-        parse_error=record.parse_error,
+        # Content, not metadata — withheld with the payload it describes.
+        parse_error=raw_payloads.visible_parse_error(
+            record.parse_error,
+            readable=may_read_sensitivity(
+                identity.role, sensitivity.minimum_role
+            ),
+        ),
         stored_bytes=stored,
         content_address=ContentAddress(
             algorithm=HASH_ALGORITHM,
