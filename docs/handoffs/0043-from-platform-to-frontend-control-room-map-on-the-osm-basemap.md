@@ -383,3 +383,367 @@ confined to that one block. `web/src/styles.css`, `web/src/components/**`,
 the map styles deliberately define their own colors internally rather than
 consuming or adding design tokens. `scripts/check-contrast.mjs` was also left
 alone for the same reason — the map's gate lives in its own file.
+
+---
+
+## Response — frontend, wave 2 of 3: mode-aware marks, the flagged-findings layer, the relationship inspector
+
+**Scope of this wave: design points 4, 6 and 7.** Wave 1 (above) landed the
+two authored basemap styles and the map-theme toggle. This wave lands the
+overlay on top of them. Points **8 and 9 are explicitly NOT in this wave** —
+no `shapes.txt` ingestion, no rail diagram view, no demand-responsive zones
+or O–D flows, and no demand-density heatmap at all. Nothing outside
+`web/src/map/**`, `web/src/views/MapView.tsx`, the `map` block of
+`web/src/copy.ts`, `web/scripts/overlay-preview/`, the web tests,
+`docs/basemap.md` and this file was touched.
+
+### The sprite question, answered: we did not add one
+
+Wave 1 left this note for whoever took the overlay: *"the styles currently
+declare no `sprite`, and the POI layer is dropped precisely because none is
+vendored; adding one is a deliberate, gated change, not a default."* Design
+point 4 had assumed a sprite sheet ("circle layer + symbol layer over a
+self-hosted sprite").
+
+**No sprite was added, and none is needed.** The shapes come out of the SDF
+glyph stack this installation already vendors and already draws every street
+name with — `web/public/basemap-fonts/Noto Sans Regular/` (SIL OFL 1.1,
+already through the ADR-0001 gate). Its `9472-9727` range carries the whole
+Unicode *Geometric Shapes* block, so a `symbol` layer whose `text-field` is a
+data-driven `match` over `mode` gives:
+
+- **zero new assets, zero new licences, zero new download-pipeline steps**,
+  and no `sprite` key on either style — wave 1's recorded posture is intact;
+- **fully data-driven paint**: `text-color`, `text-halo-color` and
+  `text-opacity` are all data-driven properties in the MapLibre style spec,
+  so mode colour, the ground-contrast halo and the mode filter are one
+  expression each, evaluated on the GPU over the whole source;
+- **a gate against silent rot**: `src/test/map-marks.test.ts` parses the
+  actual vendored `.pbf` and asserts every codepoint we draw is in it. A
+  re-vendored font subset that dropped these characters fails the build
+  instead of quietly erasing the fleet from the map.
+
+The considered alternative was generating an SDF sprite in-repo and
+`addImage()`-ing it at runtime. It was rejected as strictly more machinery
+for the same result: a shape channel we can already draw, licensed, with an
+existing gate.
+
+| | drawn as | reserved for |
+|---|---|---|
+| road (bus, trolleybus) | ● | |
+| rail (rail, subway, tram, monorail) | ■ | |
+| water (ferry) | ◆ | |
+| cable (cable tram, funicular, aerial lift) | ▬ | |
+| mode not known | ○ | a vehicle we were **not told** about |
+| — | ▲ | **findings only** — never a mode |
+
+### `mode` does not exist on the vehicles payload — so we joined it, and said so
+
+`GET /ops/vehicles/latest` has no `mode` field. `GET /geometry/routes` — which
+this page already fetches — carries `mode` on every route feature (the
+canonical string the transform derived from the agency's own GTFS
+`route_type`). The mark's mode is therefore a **client-side join through the
+route the feed named**, and nothing else:
+
+- no route_id reported → `unknown`, drawn as the hollow ring, **counted** on
+  screen ("N vehicles reported no route, so no mode could be looked up");
+- a route_id we hold no schedule data for → also `unknown`, but a **different
+  sentence**, because it means something different: the feed and the schedule
+  disagree, which is worth someone's time;
+- a mode string outside the canonical vocabulary is still **drawn** (as the
+  ring) and still **named verbatim** in the vehicle list, so a vocabulary that
+  grows is visible rather than silently dropped.
+
+**Backend follow-up (not done here, per the lane rules):** if a future
+`/ops/vehicles/latest` grows a server-side `mode`, it should win outright and
+this join should become the fallback. The derivation is a *display* attribute
+only — no figure is computed client-side.
+
+### Colour is the second channel, and that claim is measured
+
+Ten canonical modes cannot be told apart by hue by anyone, least of all by a
+viewer with a colour-vision deficiency. So shape carries the **family**, and
+colour only has to separate modes drawn with the **same glyph** — and those
+pairs are gated:
+
+- the palette is **generated** from (hue anchor × luminance tier), not typed
+  as hex, which makes "every mark clears its bar" true by construction;
+- hue anchors are **Okabe & Ito's** CVD-safe qualitative set **minus its two
+  oranges**, because signal-orange is the one non-semantic identity accent
+  and a mode must never be mistaken for it;
+- every same-glyph pair is separated under a **Viénot/Brettel (1999)
+  protanopia and deuteranopia simulation** (ΔE ≥ 15, CIE76) **and** by
+  relative luminance (≥ 1.35:1) — a channel no colour-vision deficiency
+  removes, and the one that carries the pairs tritanopia would flatten;
+- a **control test** proves the simulation is not a no-op (pure red and pure
+  green must collapse under deuteranopia);
+- and nothing is colour-only anyway: the legend draws the same glyph in the
+  same colour the canvas does, and the **vehicle list gained a Mode column**
+  naming every vehicle's mode in words.
+
+### Measured contrast — marks on both grounds
+
+Full table: `docs/images/handoff-0043/mark-contrast-measurements.txt`
+(`cd web && npm run check:map-marks`). Bar: **3:1**, WCAG 2.1 SC 1.4.11 — a
+vehicle you cannot see is a vehicle that is not on the map.
+
+| | **Light ground** | **Dark ground** |
+|---|---|---|
+| Worst mark, any ground or its own halo | **3.07:1** (monorail / aerial lift `#7B7522`) | **3.39:1** (funicular `#95597A`) |
+| Best mark | 11.36:1 (subway `#001B2B`) | 12.73:1 (monorail `#E9DE40`) |
+| Bus | 8.07:1 (`#003755`) | 5.43:1 (`#4196C5`) |
+| Mode not known (ring) | 8.18:1 (`#303338`) | 5.44:1 (`#878F97`) |
+| Finding flag (`--status-alert`) | 5.12:1 (`#9f1b1b`) | 5.24:1 (`#f5514e`) |
+| Selection / related (`--signal`) | 3.88:1 (`#a84400`) | 6.84:1 (`#ff7a1a`) |
+| Worst same-glyph CVD separation | ΔE 16.9 deutan (rail/tram), luminance 1.38:1 (subway/tram) | ΔE 22.9 deutan (rail/tram), luminance 1.49:1 (rail/monorail) |
+
+Each mark is measured against **three grounds** — the style's `earth`, its
+`background` (outside the extracted region) and the app's `--map-bg` canvas
+for the no-basemap state — **and against its own halo**, so the outline is a
+real edge rather than a suggestion.
+
+**Plus the generated all-surfaces sweep — 1,155 checks, 0 failures.** Wave 1
+learned by measuring a rendered frame that checking against bare `earth`
+passes things that are not legible (a shoreline over woodland measured
+2.80:1). A mark has the same problem, and worse: the basemap layers all draw
+*below* it, so a mark can land on a bright motorway fill or a place label as
+easily as on grass. The sweep is flattened straight out of each authored
+palette — 54 light surfaces, 51 dark — and requires that **either the ink or
+the halo** clears 3:1 over each, with both numbers always reported so a weak
+ink cannot hide behind a strong halo. It is generated, so a surface added to
+a style later is gated the day it appears.
+
+**Two colours are quoted from the shipped token set rather than invented**
+(`--status-alert` for the flag, `--signal` for "this is what you are pointing
+at"), one value per **ground** rather than per app theme. They are literals in
+`marks.ts` because a canvas cannot resolve a CSS custom property — so a test
+parses `src/styles.css` and asserts each still matches, and the same test pins
+`--map-bg`. **`src/styles.css` was not edited and no token was added.**
+
+### Honesty rules, as shipped
+
+- **Positions observed, never interpolated.** Each poll replaces the whole
+  collection, so a mark **jumps** to its newly observed position. Nothing
+  tweens, eases, or carries a previous position forward, and a test asserts
+  the feature lands on the feed's exact coordinates.
+- **A gap is drawn as a gap.** The existing staleness treatment (the
+  live/quiet chip, the verbatim server note, the per-vehicle age) is
+  unchanged; this wave added no bridging of any kind.
+- **The glow says "look here" and nothing else.** It is a *ring* — `circle`
+  layer, transparent fill — so it can never sit behind a figure. It is fed
+  only by `status=open` **and** `severity=blocking` and then capped at 12
+  drawn flags, because a pulse only means anything while it is rare. There is
+  no "all-clear" green glow anywhere.
+- **The glow is an amplifier, never the signal.** Every flagged item also
+  carries the reserved ▲ shape, a text label on the canvas, a row in the
+  "needs investigation" list, and its severity in words.
+- **`prefers-reduced-motion` collapses the pulse to a static ring at full
+  strength** — never a slower one, and never no ring, because the ring is part
+  of the mark. Pinned by test.
+- **The rAF loop never touches the fleet.** It repaints one paint property on
+  the findings ring layer, which holds at most 12 features; a test asserts no
+  `circle-radius` set ever names another layer.
+- **A finding has no location, and this surface does not invent one.** A flag
+  is anchored to a vertex of the schematic line of a route the finding itself
+  names; the position *along* that line means nothing and the legend says so
+  in those words. Anchoring is deterministic, so a re-poll never reshuffles
+  the flags and two findings on one route stay separately clickable.
+- **The map's drawing limits never shrink the worklist.** A finding that names
+  no route, names a route we hold no line for, is about a run rather than
+  about trips, or fell past the flag cap is in the list anyway, each with the
+  reason it has no flag. The count line states both numbers ("2 findings need
+  a person. 1 of them is drawn on the map.").
+- **The mode filter dims, it does not filter.** One paint expression each on
+  `routes-line` and the mark layer; a test asserts **zero** additional
+  requests and that the vehicle counts are unchanged. Dim opacity is 0.22 —
+  a real reduction, never zero.
+- **Labels are never dropped to avoid a collision.** `text-allow-overlap` and
+  `text-ignore-placement` are set on every mark layer and pinned by test:
+  MapLibre's default collision handling would silently hide vehicles in a
+  busy depot, which is precisely the kind of quiet gap this product exists to
+  refuse.
+
+### The relationship inspector
+
+`src/map/RelationshipInspector.tsx` — a **react-aria** panel (`useDialog` for
+the dialog semantics and label wiring, `FocusScope` with `restoreFocus` so
+focus returns to whatever opened it). It deliberately does **not** `contain`
+focus: it is a read-only readout beside a live map and a worklist, and
+trapping a keyboard user inside one would be a keyboard trap with no purpose.
+Escape closes it.
+
+It renders **finding → block → route → calculation → data-quality owner**,
+entirely from what the API served:
+
+- **finding** — title, description, severity, status, raised-at and issue id
+  verbatim from the queue's own record;
+- **block** — the agency's *operational* block name (`block_label`, e.g.
+  "225-4") from the finding's own frozen `subject_context`, with the trip
+  count and the departure window;
+- **route** — the routes that context names, each with the mode joined from
+  the schedule data, and marked when we hold no line for it;
+- **calculation** — the calc runs whose own outcome rows name this exact
+  issue id, with `calc_name`, version, metric and whether the calculation
+  **refused** over it. When none is found it says so rather than inventing
+  one ("this page reads the most recent runs only");
+- **owner** — or, for an open finding with none, the sentence that says an
+  unowned finding is nobody's job until someone takes it;
+- **provenance** — the finding's `source_record_ids` from
+  `GET /dq/issues/{id}`, in monospace, plus a door into the DQ queue.
+
+Where the subject context capped its own lists it says so and shows the true
+count beside the sample; trips it could not attribute to a block are counted,
+never dropped.
+
+Opening a finding sets `feature-state {related:true}` on each named route
+(the source carries `promoteId: "route_id"`) and `{selected:true}` on the
+flag — the routes light in the identity accent **in place**, with no data
+re-sent and no re-render of the map.
+
+### Accessibility
+
+- **The canvas cannot be read, so the list is the entry point.** Every
+  flagged finding is a real `<button>` in a "needs investigation" region,
+  ranked, with `aria-pressed`; opening one from the keyboard does exactly
+  what clicking its flag does. Pinned by a test that focuses the row and
+  presses Enter.
+- **Never colour alone**: shape + label on the canvas, severity in words with
+  the existing `SeverityIcon` shape encoding, and the new Mode column.
+- **Contrast**: 3:1 for every mark on every ground it can appear on, gated.
+- **Plain language**: no jargon reached the screen — "Recorded miles stop
+  part-way through block 225-4", "No owner yet. An open finding with no owner
+  is nobody's job until someone takes it."
+- **Reduced motion**: the pulse collapses to a static ring; nothing else on
+  the surface animates.
+- **axe green** on `/map` with the marks, the mode filter, the worklist and
+  the inspector open.
+- The mode filter reuses the house filter-bar pattern (labeled `role="group"`,
+  real `<button>`s, `aria-pressed`) rather than being rebuilt on
+  react-aria-components — the existing control already meets AA.
+
+### One thing worth recording: the preview cannot flatter the app
+
+Wave 1's rule was that the developer preview imports the **shipped**
+`basemapLayerSpecs()` "so a preview cannot flatter a style the app does not
+draw". This wave's screenshots show marks, a flag and the panel, so the same
+rule had to cover the overlay — which meant the layer stack could not stay
+inline in the view. It now lives in `src/map/overlayLayers.ts`, and `/map` and
+`web/scripts/overlay-preview/` both build their layers from it. The preview
+also renders the **real** `<RelationshipInspector>` with the **real**
+stylesheet. Only the vehicles, routes and findings are fixture data (no API
+and no credentials exist in this environment) and the page says so on screen
+and in the caption.
+
+### Screenshots — marks, a flagged finding and the inspector, on both grounds
+
+`docs/images/handoff-0043/`, 1400×900, over this installation's real
+`region.pmtiles` (Boston extract, `-71.0700, 42.1894`):
+
+| File | What it shows |
+|---|---|
+| `overlay-light-inspector.png` | Light street map, z14 — mode marks, two flagged findings (▲ in a ring, labelled), route 39 lit as "related", inspector open |
+| `overlay-dark-inspector.png` | Dark street map, z14 — the same frame; marks and flags legible against the bright street network |
+| `marks-light-street.png` | Light, z15 — the marks and a flag without the panel |
+| `marks-dark-street.png` | Dark, z15 — the same frame |
+
+Each caption is computed live from `markContrastResults()`, so the number in
+the image and the number in the gate are the same number.
+
+### Zero external requests — re-verified
+
+Nothing was added that could make a request: the shapes are characters from a
+font this installation already vendors, and no sprite, image or CDN URL
+entered the style. **One honest change to record:** a symbol layer now exists
+even with **no basemap downloaded**, so glyph ranges are fetched in that state
+where previously nothing was. That fetch is `/basemap-fonts/…` — an
+app-artifact path on this origin. The module header was corrected to say so.
+
+1. **Rendered with every non-localhost host made unresolvable** and compared
+   byte-for-byte, three runs each:
+   ```
+   google-chrome --headless --host-resolver-rules="MAP * ~NOTFOUND, EXCLUDE localhost" \
+       --virtual-time-budget=45000 --window-size=1400,900 \
+       --screenshot=… "http://localhost:5199/scripts/overlay-preview/index.html?style=dark…"
+
+   dark   normal   3/3  b9068bc347083d39916231d90bf075d9
+          airgapped 3/3 b9068bc347083d39916231d90bf075d9   IDENTICAL
+   light  settled frame 0d617cb37e9caa1477f39aebd52f4c5f — produced by BOTH
+          normal (2/3) and airgapped (2/3) runs
+   ```
+   The light style also produced a second hash, `4e2b25d5…`, in one normal run
+   **and** one airgapped run: decoding it shows a pre-paint frame (panel
+   drawn, WebGL frame not yet composited). It is a capture-timing artifact of
+   `--virtual-time-budget`, not an airgap effect — recorded rather than
+   quietly re-rolled until the numbers looked tidy.
+2. **The app-level pin still holds**: the existing test that every request
+   `/map` makes is a same-origin relative path is unchanged and green, in both
+   the basemap-absent and basemap-present states.
+3. **Unit level**: the mark layers are asserted to carry no `icon-image`, to
+   name exactly the one vendored glyph stack, and both authored styles are
+   asserted to still declare **no `sprite`**.
+4. **License gate**: `python3 scripts/license_gate.py --ecosystem node` →
+   **PASS, 164 dependencies**. No dependency was added.
+
+### Verification run (commands + output)
+
+```
+cd web
+npx tsc -b                    → exit 0
+npx vitest run                → Test Files 43 passed (43) · Tests 396 passed (396)
+npm run build                 → ✓ built in 606ms, no errors
+npx oxlint                    → exit 0, 0 warnings
+npm run check:map-contrast    → 27 passed (27)   (wave 1's gate, still green)
+npm run check:map-marks       → 26 passed (26)   (this wave's gate; tables recorded)
+python3 scripts/license_gate.py --ecosystem node → PASS (164 deps)
+grep -rl "overlay-preview\|basemap-preview" dist/ → no matches
+```
+
+The suite went **337 → 396**: 26 in `src/test/map-marks.test.ts`, 21 in
+`src/test/map-findings.test.ts`, 12 new `/map` view tests. Nothing skipped,
+nothing disabled.
+
+**Two tests earned their keep during the build.** The token-drift gate first
+failed with "no `--status-alert` in the light block" — `styles.css` opens with
+a comment that mentions both `:root` selectors, so slicing on the first
+textual occurrence silently read the wrong region; the check now matches the
+selectors at the start of a line. And the palette generator's exactness
+assertion failed only at the brightest tier, which is 8-bit sRGB quantization
+being worth more luminance near white than near black — the tolerance is now
+proportional and says why.
+
+### Lane discipline
+
+- **`web/src/styles.css` was NOT edited and no token was added.** The overlay's
+  own chrome lives in `web/src/map/overlay.css`, which consumes the shipped
+  tokens only (`--color-bg`, `--color-border`, `--signal`, `--signal-soft`,
+  `--font-mono`, the spacing scale). No new token was needed.
+- **`services/api/**`, `db/migrations/**` and `docs/handoffs/0040-*` were not
+  touched**, and no review-queue view was created or edited. The missing
+  `mode` field was derived client-side rather than added to the API, and the
+  API-side follow-up is recorded above instead of taken.
+- **`web/src/copy.ts`** was appended to **inside the existing `map` block
+  only** (four new sub-blocks: `marks`, `modeFilter`, `findings`,
+  `inspector`). No other block was touched or reformatted.
+- **`web/src/test/helpers.tsx`** gained two default mock routes (`GET
+  /dq/issues`, `GET /calc/runs`) so the pre-existing `/map` tests keep
+  exercising what they exercised instead of silently rendering an error
+  banner — the same precedent as the existing `GET /dq/issues/counts` default.
+  `web/package.json` gained one script line.
+
+### Deferred (explicitly not attempted here)
+
+- **`shapes.txt` street-level route geometry** (point 8, open question) —
+  still not ingested; route lines remain schematic, the legend still says so,
+  and the flags are anchored to those schematic lines with the caveat stated.
+- **The rail diagram view** (point 8) and **demand-responsive zones and O–D
+  flows** (points 8, 9). Demand-density heatmaps remain **out of scope
+  entirely**.
+- **The temporal replay scrubber** — the separate TOC dashboard's signature,
+  blocked on the retention decision. Not forced in here.
+- **Heading on marks** (survey open question 1): GTFS-RT `bearing` is on the
+  payload but often absent or stale; rendering a rotation from it would be a
+  fabricated heading. Left as a non-directional mark, deliberately.
+- **Zoom-progressive label disclosure** for vehicle marks — the marks carry no
+  canvas label at all today; the vehicle list is the readable equivalent.
+- **A server-side `mode` on `/ops/vehicles/latest`** — a backend follow-up,
+  not a frontend workaround.
