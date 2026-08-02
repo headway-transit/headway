@@ -218,6 +218,14 @@ class FakeConn:
             )
             return FakeCursor(rows)
 
+        if q.startswith("SELECT role, is_active FROM auth.users WHERE username"):
+            # auth._live_account — run on EVERY authenticated request so that a
+            # demotion or a deactivation takes effect immediately instead of
+            # when the token expires. Modelled honestly: a username with no row
+            # returns no row, which is how a deleted account ends its session.
+            u = self.users.get(params[0])
+            return FakeCursor([(u["role"], u["is_active"])] if u else [])
+
         # -- users admin (handoff 0025 / migration 0032) ---------------------
         if q.startswith(
             "SELECT user_id, role, is_active, created_at FROM auth.users "
