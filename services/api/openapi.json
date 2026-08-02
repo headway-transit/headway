@@ -949,7 +949,7 @@
           "certification"
         ],
         "summary": "Downloadable evidence bundle for one certification",
-        "description": "A self-describing evidence bundle for one certification.\n\nOpen to any signed-in role. The bundle is ROLE-SENSITIVE: content\nsensitivity is evaluated for the calling account through\n``authz.may_read_sensitivity``, so an auditor \u2014 who reads at viewer\nbreadth on purpose (``raw_payloads.RESTRICTED_MINIMUM_ROLE``) \u2014 receives a\nbundle whose ``withheld`` list names the rider-location records it does not\ncarry, with Headway's refusal in full. Nothing withheld appears anywhere\nelse in the response.\n\nGenerating a bundle is audited. Nothing in this endpoint changes a figure,\na certification, or a raw record.",
+        "description": "A self-describing evidence bundle for one certification.\n\nOpen to any signed-in role. The bundle is ROLE-SENSITIVE: content\nsensitivity is evaluated for the calling account through\n``authz.may_read_sensitivity``, so an auditor \u2014 who reads at viewer\nbreadth on purpose (``raw_payloads.RESTRICTED_MINIMUM_ROLE``) \u2014 receives a\nbundle whose ``withheld`` list names the rider-location records it does not\ncarry, with Headway's refusal in full. Nothing withheld appears anywhere\nelse in the response.\n\nThe response is BOUNDED. A bundle builds at most ``MAX_LINEAGE_NODES``\nprovenance entries across all its figures and labels at most\n``MAX_RAW_RECORD_LABELS`` raw records; a certification large enough to pass\neither limit still returns 200 with every figure and every receipt, and says\nin ``gaps`` exactly what was left out and where to fetch it. Nothing is\nsilently truncated.\n\nGenerating a bundle is audited. Nothing in this endpoint changes a figure,\na certification, or a raw record.",
         "operationId": "certification_evidence_certifications__certification_id__evidence_get",
         "parameters": [
           {
@@ -8137,6 +8137,11 @@
               }
             ],
             "title": "Lineage Error"
+          },
+          "lineage_omitted": {
+            "type": "boolean",
+            "title": "Lineage Omitted",
+            "default": false
           },
           "raw_record_ids": {
             "items": {

@@ -45,6 +45,17 @@ scope. Per-record verification stays the auditor's own deliberate action:
 ``POST /raw/records/{id}/verify``, which handoff 0047 made reachable by the
 auditor role precisely so this is possible.
 
+**Provenance past the bundle's budget.** A certified figure's lineage is a
+two-level star, and the bundle builds one per covered figure, so the cost is
+``figures x leaves_per_figure`` — and until ``MAX_LINEAGE_NODES`` neither factor
+was bounded. Measured at handoff 0035's live leaf count, a 360-figure annual
+filing produced a 100 MB response and 776 MB of peak allocation in a single
+request, on an endpoint every signed-in role may call. Past the budget, figures
+still carry their receipts — what the signature covers — and say
+``lineage_omitted: true``, with a ``gaps`` entry naming the count and the
+one-request-away alternative. Same treatment as the label cap, for the same
+reason: bound the work, then say exactly what that cost the reader.
+
 **Withheld payloads, for anyone.** Content sensitivity is evaluated through
 ``authz.may_read_sensitivity``, which puts an ``auditor`` at VIEWER breadth on
 purpose — a paratransit pickup coordinate is a rider's home address, and an ADA
@@ -118,6 +129,46 @@ BUNDLE_VERSION = 1
 #: when the cap bites the bundle says so in ``gaps`` with the exact number
 #: omitted and where to fetch them one at a time.
 MAX_RAW_RECORD_LABELS = 5000
+
+#: How many lineage-tree NODES one bundle will build, across all its figures.
+#:
+#: The label cap above bounds the label list and nothing else, which turns out
+#: not to bound the bundle at all. A certified figure's lineage is a two-level
+#: star — ``services/calc/headway_calc/persist.py`` writes one edge straight
+#: from ``computed.metric_values`` to each input ``raw.records`` id, so a walk
+#: never reaches the ``canonical.*`` layer and never fans out — but the bundle
+#: builds one of those stars per covered figure, and figures computed from the
+#: same month's data cite the SAME records. So the cost is
+#: ``figures x leaves_per_figure`` while the label cap only ever sees the
+#: DISTINCT records, which stops growing almost immediately.
+#:
+#: Measured (tests/bench_evidence_cost.py, at handoff 0035's live count of
+#: 1,138 leaves per figure) with the 5,000-label cap already in force:
+#:
+#:     figures   lineage nodes   distinct records   body     peak     time
+#:           1           1,138              1,138   2.1 MB    12 MB   0.3 s
+#:          12          13,656             13,656  11.3 MB    69 MB   1.9 s
+#:          60          68,280             13,656  23.5 MB   166 MB   4.7 s
+#:         360         409,680             13,656  99.7 MB   776 MB  22.6 s
+#:
+#: 776 MB of peak allocation for one request, on an endpoint every signed-in
+#: role may call — including ``auditor``, the lowest-privilege role, which this
+#: endpoint exists to serve — is a denial-of-service surface, and a 100 MB JSON
+#: file is not a usable artifact for the human it was built for either.
+#:
+#: With this bound in place the same ladder flattens — 360 figures now costs
+#: what 60 does, 20.1 MB and 141.5 MB peak in 4.3 s, because the cost stops
+#: tracking the figure count at all:
+#:
+#:     figures   lineage nodes   body      peak      time
+#:          60          50,072   19.5 MB   134 MB    3.9 s
+#:         360          50,072   20.1 MB   142 MB    4.3 s
+#:
+#: The budget is checked BEFORE each walk, not during, so the last walk admitted
+#: may carry the total past the limit by its own size — the bound is on work
+#: STARTED, which is what protects the process. (Hence 50,072 above, not
+#: 50,000.)
+MAX_LINEAGE_NODES = 50_000
 
 CANONICALIZATION = (
     "json.dumps(bundle, sort_keys=True, separators=(',', ':'), "
@@ -245,6 +296,13 @@ class FigureEvidence(BaseModel):
     lineage: Optional[LineageNode] = None
     lineage_sha256: Optional[str] = None
     lineage_error: Optional[str] = None
+    #: True when the walk was NOT ATTEMPTED because this bundle had already
+    #: spent its lineage budget (``MAX_LINEAGE_NODES``). A separate field from
+    #: ``lineage_error`` on purpose: "not in this copy, fetch it per figure" and
+    #: "this figure has no recorded provenance" are opposite findings, and a
+    #: reader who confuses them writes up an agency for a defect it does not
+    #: have. Both are also listed in ``gaps``, under different kinds.
+    lineage_omitted: bool = False
     #: The raw-record leaves this figure's walk bottoms out in, de-duplicated
     #: and sorted. Each id is the SHA-256 of that record's bytes.
     raw_record_ids: list[str] = []
@@ -364,6 +422,16 @@ def _sha256_text(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+def _tree_size(node: LineageNode) -> int:
+    """Nodes in one lineage walk — what the bundle's lineage budget spends.
+
+    Nodes rather than leaves: a node is what gets built as a Pydantic object,
+    serialized into the response, and canonicalized again for the seal, so it
+    is the thing the cost is actually proportional to.
+    """
+    return 1 + sum(_tree_size(child) for child in node.inputs)
+
+
 def _leaf_record_ids(node: LineageNode, into: set[str]) -> None:
     """Every ``raw.records`` id under one lineage node. Raw records are the
     bottom of the graph (migration 0005), so these are the leaves."""
@@ -439,6 +507,13 @@ def certification_evidence(
     carry, with Headway's refusal in full. Nothing withheld appears anywhere
     else in the response.
 
+    The response is BOUNDED. A bundle builds at most ``MAX_LINEAGE_NODES``
+    provenance entries across all its figures and labels at most
+    ``MAX_RAW_RECORD_LABELS`` raw records; a certification large enough to pass
+    either limit still returns 200 with every figure and every receipt, and says
+    in ``gaps`` exactly what was left out and where to fetch it. Nothing is
+    silently truncated.
+
     Generating a bundle is audited. Nothing in this endpoint changes a figure,
     a certification, or a raw record.
     """
@@ -494,6 +569,10 @@ def certification_evidence(
 
     figures: list[FigureEvidence] = []
     all_leaf_ids: set[str] = set()
+    #: Spent across ALL figures, not per figure: the unbounded quantity is the
+    #: product of the two, so a per-figure cap would not bound anything.
+    lineage_nodes_built = 0
+    omitted_lineage_ids: list[str] = []
     for metric_value_id in sorted(receipts):
         receipt = receipts[metric_value_id]
         signed_digest = signed_receipts.get(metric_value_id)
@@ -522,23 +601,33 @@ def certification_evidence(
 
         tree: Optional[LineageNode] = None
         lineage_error: Optional[str] = None
-        try:
-            tree = lineage_tree(db, metric_value_id)
-        except HTTPException as exc:
-            # Never swallowed: the reason is carried verbatim on the figure
-            # AND listed as a gap. One figure without lineage must not blank a
-            # whole bundle the auditor needs for the others.
-            lineage_error = str(exc.detail)
-            gaps.append(
-                BundleGap(
-                    kind="lineage_unavailable",
-                    id=metric_value_id,
-                    what="A covered figure's provenance could not be walked",
-                    detail=lineage_error,
+        lineage_omitted = False
+        if lineage_nodes_built >= MAX_LINEAGE_NODES:
+            # The budget is spent. Do not START another walk: the walk is the
+            # cost, so refusing after building it would protect nothing. The
+            # figure still carries its receipt — which is the evidence the
+            # signature actually covers — and the walk stays one request away.
+            lineage_omitted = True
+            omitted_lineage_ids.append(metric_value_id)
+        else:
+            try:
+                tree = lineage_tree(db, metric_value_id)
+            except HTTPException as exc:
+                # Never swallowed: the reason is carried verbatim on the figure
+                # AND listed as a gap. One figure without lineage must not blank
+                # a whole bundle the auditor needs for the others.
+                lineage_error = str(exc.detail)
+                gaps.append(
+                    BundleGap(
+                        kind="lineage_unavailable",
+                        id=metric_value_id,
+                        what="A covered figure's provenance could not be walked",
+                        detail=lineage_error,
+                    )
                 )
-            )
         leaves: set[str] = set()
         if tree is not None:
+            lineage_nodes_built += _tree_size(tree)
             _leaf_record_ids(tree, leaves)
             all_leaf_ids |= leaves
 
@@ -564,7 +653,39 @@ def certification_evidence(
                     None if tree is None else _sha256_json(tree.model_dump(mode="json"))
                 ),
                 lineage_error=lineage_error,
+                lineage_omitted=lineage_omitted,
                 raw_record_ids=sorted(leaves),
+            )
+        )
+
+    if omitted_lineage_ids:
+        gaps.append(
+            BundleGap(
+                kind="lineage_walks_capped",
+                id=None,
+                what="Not every covered figure's provenance walk is in this bundle",
+                detail=(
+                    f"This certification covers {len(figures):,} figures. "
+                    f"Walking every one of them would have built far more "
+                    f"provenance than one file can carry, so this bundle walked "
+                    f"figures until it had built {lineage_nodes_built:,} "
+                    f"provenance entries (the limit is "
+                    f"{MAX_LINEAGE_NODES:,}) and then stopped. "
+                    f"{len(omitted_lineage_ids):,} figures therefore have no "
+                    f"'lineage' in this copy and are marked "
+                    f"lineage_omitted: true. Nothing is lost and nothing is "
+                    f"wrong with those figures: each one still carries its full "
+                    f"receipt above — that is what the certification's signature "
+                    f"covers — and its provenance is one request away at "
+                    f"GET /metrics/values/{{metric_value_id}}/lineage, which "
+                    f"serves the identical walk this bundle would have embedded. "
+                    f"A certification covering fewer figures produces a bundle "
+                    f"that carries all of them. One consequence to read "
+                    f"carefully: the labelled raw-record list in this bundle is "
+                    f"drawn from the figures that WERE walked, so it is not a "
+                    f"complete inventory of every record behind this "
+                    f"certification."
+                ),
             )
         )
 
@@ -791,6 +912,11 @@ def certification_evidence(
                 "figure_count": len(figures),
                 "raw_record_count": len(raw_record_evidence),
                 "raw_record_leaf_count": len(leaf_ids),
+                # What this bundle actually cost to build, and what it left
+                # out for that reason. On the record so a capped bundle can be
+                # told apart from a small one long after the fact.
+                "lineage_nodes_built": lineage_nodes_built,
+                "lineage_omitted_figure_count": len(omitted_lineage_ids),
                 "withheld_count": len(withheld),
                 "withheld_record_ids": [w.id for w in withheld],
                 "withheld_classifications": sorted(
