@@ -812,7 +812,9 @@ gap naming the exact number omitted and the endpoint to fetch them from.
 
 Content sensitivity is evaluated for the **calling account** through
 `authz.may_read_sensitivity`, which puts an `auditor` at *viewer* breadth on
-purpose (migration 0028). So two accounts asking for the same certification
+purpose (`raw_payloads.RESTRICTED_MINIMUM_ROLE` — the API's own rule, not
+migration 0028, which is the parallel SQL-layer rule for the analyst role).
+So two accounts asking for the same certification
 legitimately get different `withheld` lists — a data steward's copy carries the
 demand-response record's label with `readable_by_this_account: true`, an
 auditor's copy carries the same label plus a `withheld` entry with the refusal

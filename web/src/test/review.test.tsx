@@ -316,7 +316,9 @@ describe("/review — what the room says out loud", () => {
   });
 
   /**
-   * The one that matters most. Migration 0028's rider-location withholding
+   * The one that matters most. Rider-location withholding (the API's own
+   * rule — raw_payloads.RESTRICTED_MINIMUM_ROLE, not migration 0028, which
+   * is the parallel SQL-layer grant for the analyst role)
    * is NOT waived for an auditor, on purpose — and an auditor who sees a
    * blank where contents should be records MISSING DATA, a false finding
    * against an agency that did nothing wrong. So the refusal is drawn, in

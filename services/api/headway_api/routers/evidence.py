@@ -47,9 +47,11 @@ auditor role precisely so this is possible.
 
 **Withheld payloads, for anyone.** Content sensitivity is evaluated through
 ``authz.may_read_sensitivity``, which puts an ``auditor`` at VIEWER breadth on
-purpose (migration 0028: a paratransit pickup coordinate is a rider's home
-address, and an ADA trip record discloses disability status by existing). That
-withholding is NOT waived for an auditor, so the bundle is **role-sensitive**:
+purpose — a paratransit pickup coordinate is a rider's home address, and an ADA
+trip record discloses disability status by existing. (The API's rule is
+``raw_payloads.classify`` + ``RESTRICTED_MINIMUM_ROLE``; migration 0028 is the
+separate SQL-layer rule for the analyst role. Same decision, two boundaries.)
+That withholding is NOT waived for an auditor, so the bundle is **role-sensitive**:
 two accounts asking for the same certification can legitimately get different
 ``withheld`` lists. Which account it was generated for is recorded ON the
 bundle, so a reader can never mistake "withheld from this reader" for "not in
@@ -432,9 +434,10 @@ def certification_evidence(
     Open to any signed-in role. The bundle is ROLE-SENSITIVE: content
     sensitivity is evaluated for the calling account through
     ``authz.may_read_sensitivity``, so an auditor — who reads at viewer
-    breadth on purpose (migration 0028) — receives a bundle whose ``withheld``
-    list names the rider-location records it does not carry, with Headway's
-    refusal in full. Nothing withheld appears anywhere else in the response.
+    breadth on purpose (``raw_payloads.RESTRICTED_MINIMUM_ROLE``) — receives a
+    bundle whose ``withheld`` list names the rider-location records it does not
+    carry, with Headway's refusal in full. Nothing withheld appears anywhere
+    else in the response.
 
     Generating a bundle is audited. Nothing in this endpoint changes a figure,
     a certification, or a raw record.
