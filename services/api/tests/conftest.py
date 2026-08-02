@@ -89,6 +89,12 @@ class FakeConn:
         self.metric_values: dict[str, dict] = {}
         self.dq_issues: dict[str, dict] = {}
         self.lineage_edges: list[dict] = []
+        # Stands in for migration 0005's ``edges_output_idx``. Without it the
+        # walk below is a sequential scan per frontier node, which is
+        # quadratic in the edge count — so a test that seeds a realistically
+        # large lineage graph measures this double's scan instead of the
+        # product. Invalidated by ``add_edge``.
+        self._lineage_by_output: dict[tuple[str, str], list[dict]] | None = None
         self.certifications: list[dict] = []
         self.audit_events: list[dict] = []
         self.api_keys: dict[str, dict] = {}
@@ -1899,24 +1905,28 @@ class FakeConn:
         return rows
 
     def _walk_lineage(self, root_id):
+        if self._lineage_by_output is None:
+            index: dict[tuple[str, str], list[dict]] = {}
+            for e in self.lineage_edges:
+                index.setdefault((e["output_kind"], e["output_id"]), []).append(e)
+            self._lineage_by_output = index
         rows = []
         frontier = [("computed.metric_values", str(root_id))]
         seen = set()
         while frontier:
-            kind, node_id = frontier.pop(0)
-            if (kind, node_id) in seen:
+            key = frontier.pop(0)
+            if key in seen:
                 continue
-            seen.add((kind, node_id))
-            for e in self.lineage_edges:
-                if e["output_kind"] == kind and e["output_id"] == node_id:
-                    rows.append(
-                        (
-                            e["output_kind"], e["output_id"],
-                            e["transform_name"], e["transform_version"],
-                            e["input_kind"], e["input_id"],
-                        )
+            seen.add(key)
+            for e in self._lineage_by_output.get(key, ()):
+                rows.append(
+                    (
+                        e["output_kind"], e["output_id"],
+                        e["transform_name"], e["transform_version"],
+                        e["input_kind"], e["input_id"],
                     )
-                    frontier.append((e["input_kind"], e["input_id"]))
+                )
+                frontier.append((e["input_kind"], e["input_id"]))
         return rows
 
     # -- seeding helpers ----------------------------------------------------
@@ -2401,6 +2411,7 @@ class FakeConn:
 
     def add_edge(self, output_kind, output_id, transform_name, transform_version,
                  input_kind, input_id):
+        self._lineage_by_output = None
         self.lineage_edges.append(
             {
                 "output_kind": output_kind,

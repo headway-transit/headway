@@ -685,6 +685,108 @@ def test_the_raw_record_label_list_is_capped_and_says_so(
     assert "GET /raw/records/{record_id}" in gap["detail"]
 
 
+def _many_figures(fake_db, *, figures, leaves_per_figure):
+    """N figures over the production lineage shape: one edge from each figure
+    straight to each raw record it was computed from (calc's persist.py), and
+    the SAME records under every figure — which is what a month's VRM and VRH
+    actually share."""
+    record_ids = [f"{i:064d}" for i in range(leaves_per_figure)]
+    for record_id in record_ids:
+        fake_db.add_raw_record(record_id=record_id)
+    metric_value_ids = []
+    for _ in range(figures):
+        mv = fake_db.add_metric_value()
+        metric_value_ids.append(mv["metric_value_id"])
+        for record_id in record_ids:
+            fake_db.add_edge(
+                "computed.metric_values", mv["metric_value_id"], "vrm_v0",
+                "0.1.0", "raw.records", record_id,
+            )
+    return metric_value_ids
+
+
+def test_the_lineage_walks_are_capped_across_all_figures(
+    client, fake_db, fake_store, monkeypatch
+):
+    """The label cap bounds labels and NOTHING ELSE.
+
+    Measured before this bound existed (tests/bench_evidence_cost.py): a
+    360-figure certification produced a 99.7 MB response and 776 MB of peak
+    allocation in one request, WITH the 5,000-label cap already in force — the
+    labels stopped growing at the distinct-record count while the per-figure
+    lineage trees did not stop at all. So the thing that must be bounded is the
+    total across figures, not anything per figure.
+    """
+    monkeypatch.setattr(evidence, "MAX_LINEAGE_NODES", 7)
+    # 3 nodes each (root + 2 leaves): the third walk starts at 6 and is
+    # admitted, the fourth is not.
+    metric_value_ids = _many_figures(fake_db, figures=5, leaves_per_figure=2)
+    r = client.post(
+        "/certifications",
+        json={
+            "metric_value_ids": metric_value_ids,
+            "attestation": "I certify these figures are accurate.",
+            "signer_full_name": "Cora Certifier",
+            "signer_title": "Chief Executive Officer",
+        },
+        headers=auth_header(fake_db, "cora"),
+    )
+    assert r.status_code == 201, r.text
+    bundle = client.get(
+        f"/certifications/{r.json()['certification_id']}/evidence",
+        headers=auth_header(fake_db, "cora"),
+    ).json()
+
+    # EVERY covered figure is still present with its receipt — the receipt is
+    # what the signature covers, and a bundle that dropped figures would be
+    # unusable as evidence.
+    assert len(bundle["figures"]) == 5
+    assert all(f["receipt_sha256"] for f in bundle["figures"])
+
+    walked = [f for f in bundle["figures"] if f["lineage"] is not None]
+    omitted = [f for f in bundle["figures"] if f["lineage_omitted"]]
+    assert len(walked) == 3
+    assert len(omitted) == 2
+    assert not any(f["lineage_omitted"] for f in walked)
+    # Omission is NOT an error: lineage_error means "this figure has no
+    # recorded provenance", which is the opposite finding.
+    assert all(f["lineage_error"] is None for f in omitted)
+
+    gap = [g for g in bundle["gaps"] if g["kind"] == "lineage_walks_capped"][0]
+    assert "2 figures therefore have no" in gap["detail"]
+    assert "GET /metrics/values/{metric_value_id}/lineage" in gap["detail"]
+    # The consequence a reader would otherwise get wrong.
+    assert "not a complete inventory" in gap["detail"]
+
+    event = [
+        e for e in fake_db.audit_events
+        if e["action"] == "evidence_bundle_generated"
+    ][-1]
+    detail = (
+        json.loads(event["detail"])
+        if isinstance(event["detail"], str)
+        else event["detail"]
+    )
+    assert detail["lineage_nodes_built"] == 9
+    assert detail["lineage_omitted_figure_count"] == 2
+
+
+def test_an_uncapped_bundle_never_claims_anything_was_omitted(
+    client, fake_db, certified
+):
+    """The bound must be invisible until it bites. A bundle under the limit
+    carries no omission flag and no cap gap — otherwise every ordinary bundle
+    would read as incomplete."""
+    _, certification_id = certified
+    bundle = client.get(
+        f"/certifications/{certification_id}/evidence",
+        headers=auth_header(fake_db, "cora"),
+    ).json()
+    assert not any(f["lineage_omitted"] for f in bundle["figures"])
+    assert not any(g["kind"] == "lineage_walks_capped" for g in bundle["gaps"])
+    assert all(f["lineage"] is not None for f in bundle["figures"])
+
+
 def test_a_figure_edited_since_signing_is_a_gap_the_bundle_names(
     client, fake_db, fake_store, certified
 ):
