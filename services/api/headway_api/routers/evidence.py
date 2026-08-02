@@ -434,10 +434,10 @@ def certification_evidence(
     Open to any signed-in role. The bundle is ROLE-SENSITIVE: content
     sensitivity is evaluated for the calling account through
     ``authz.may_read_sensitivity``, so an auditor — who reads at viewer
-    breadth on purpose (``raw_payloads.RESTRICTED_MINIMUM_ROLE``) — receives
-    a bundle whose ``withheld``
-    list names the rider-location records it does not carry, with Headway's
-    refusal in full. Nothing withheld appears anywhere else in the response.
+    breadth on purpose (``raw_payloads.RESTRICTED_MINIMUM_ROLE``) — receives a
+    bundle whose ``withheld`` list names the rider-location records it does not
+    carry, with Headway's refusal in full. Nothing withheld appears anywhere
+    else in the response.
 
     Generating a bundle is audited. Nothing in this endpoint changes a figure,
     a certification, or a raw record.

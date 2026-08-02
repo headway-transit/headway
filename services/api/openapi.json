@@ -949,7 +949,7 @@
           "certification"
         ],
         "summary": "Downloadable evidence bundle for one certification",
-        "description": "A self-describing evidence bundle for one certification.\n\nOpen to any signed-in role. The bundle is ROLE-SENSITIVE: content\nsensitivity is evaluated for the calling account through\n``authz.may_read_sensitivity``, so an auditor \u2014 who reads at viewer\nbreadth on purpose (migration 0028) \u2014 receives a bundle whose ``withheld``\nlist names the rider-location records it does not carry, with Headway's\nrefusal in full. Nothing withheld appears anywhere else in the response.\n\nGenerating a bundle is audited. Nothing in this endpoint changes a figure,\na certification, or a raw record.",
+        "description": "A self-describing evidence bundle for one certification.\n\nOpen to any signed-in role. The bundle is ROLE-SENSITIVE: content\nsensitivity is evaluated for the calling account through\n``authz.may_read_sensitivity``, so an auditor \u2014 who reads at viewer\nbreadth on purpose (``raw_payloads.RESTRICTED_MINIMUM_ROLE``) \u2014 receives a\nbundle whose ``withheld`` list names the rider-location records it does not\ncarry, with Headway's refusal in full. Nothing withheld appears anywhere\nelse in the response.\n\nGenerating a bundle is audited. Nothing in this endpoint changes a figure,\na certification, or a raw record.",
         "operationId": "certification_evidence_certifications__certification_id__evidence_get",
         "parameters": [
           {
