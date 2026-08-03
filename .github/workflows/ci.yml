@@ -320,6 +320,19 @@ jobs:
         if: steps.guard.outputs.present == 'true'
         working-directory: web
         run: npm ci
+      - name: npm audit (advisories, reported not gated)
+        # NOTHING checked npm advisories before 2026-08-03. The source SBOM
+        # scan gates at CRITICAL and Syft reads lockfiles, but npm's own
+        # advisory database is where JS ecosystem findings actually land
+        # first — react-router's open high advisory was invisible here until
+        # someone ran `npm audit` by hand while reviewing a Dependabot PR.
+        #
+        # `|| true` on purpose, matching the source-scan job's reasoning:
+        # blocking every PR on a high with no fixed release trains people to
+        # bypass the gate. Releases gate hard (release.yml, >= HIGH). This
+        # makes the queue VISIBLE on every run so nothing accumulates unseen.
+        run: npm audit --audit-level=high || true
+
       - name: lint
         if: steps.guard.outputs.present == 'true'
         working-directory: web
