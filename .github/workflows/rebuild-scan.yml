@@ -104,7 +104,7 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: "grype scan of the published image (gate: fixable >= high)"
-        uses: anchore/scan-action@v6
+        uses: anchore/scan-action@v7
         with:
           image: ghcr.io/headway-transit/${{ matrix.image }}:${{ needs.release-tag.outputs.tag }}
           fail-build: true
