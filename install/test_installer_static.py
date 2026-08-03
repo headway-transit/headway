@@ -94,6 +94,71 @@ def test_the_closing_summary_does_not_tell_the_operator_to_start_the_app(source)
     )
 
 
+def test_the_installer_names_a_command_for_the_distro_it_is_run_on(source):
+    """"Follow the upstream docs" is the wrong amount of help for an audience
+    with one week of Linux and zero SQL. A person who has to work out which of
+    five package managers they have has been handed the problem the installer
+    exists to remove.
+
+    ID_LIKE as well as ID, so derivatives (Linux Mint, Rocky, Pop!_OS) are
+    covered by their parent rather than falling through to the generic link.
+    """
+    body = _function_body(source, "docker_install_hint")
+    assert "/etc/os-release" in body
+    assert "ID_LIKE" in body
+    for family in ("ubuntu", "debian", "fedora", "rhel", "arch"):
+        assert family in body, f"no install command for the {family} family"
+    # A distro we do not know must still get the generic advice, never a
+    # confidently wrong command.
+    assert "printf '%s' \"\"" in body, (
+        "docker_install_hint must return empty for an unrecognized system so "
+        "check_docker falls back to the upstream docs link"
+    )
+
+
+def test_the_distro_command_is_printed_and_never_executed(source):
+    """The standing posture, at the one place it is most tempting to break:
+    the operator is stuck, the command is right there, and running it would be
+    'helpful'. Installing Docker needs root, and an installer that silently
+    escalates is one no IT department should accept."""
+    body = _function_body(source, "docker_install_hint")
+    # The hint is built with printf and returned; nothing evaluates it.
+    for forbidden in ("eval", "$(sudo", "| sh", "| bash", "sh -c"):
+        assert forbidden not in body, (
+            f"docker_install_hint contains {forbidden!r} — it must compose a "
+            f"string for a human to run, never run anything itself."
+        )
+    check = _function_body(source, "check_docker")
+    assert "never uses them on your behalf" in check, (
+        "check_docker no longer tells the operator why it will not install "
+        "Docker for them. The refusal has to be explained or it reads as a gap."
+    )
+
+
+def test_the_owned_port_parser_understands_ranges(source):
+    """MinIO publishes ``127.0.0.1:9000-9001->9000-9001/tcp`` — a RANGE. The
+    first version of this parser only matched single ports, silently dropped
+    both of MinIO's, and reported them as somebody else's conflict. The stack
+    contains both shapes, so both have to be handled."""
+    body = _function_body(source, "headway_owned_ports")
+    assert "9000-9001" in body, (
+        "the range shape is no longer documented in the parser; it is the "
+        "case that was missed the first time"
+    )
+    assert "for (p = r[1]; p <= r[2]; p++)" in body, (
+        "headway_owned_ports no longer expands published port RANGES, so "
+        "MinIO's two ports will be reported as a foreign conflict on every "
+        "running installation."
+    )
+
+
+def test_check_ports_does_not_call_docker_once_per_port(source):
+    """Eight subprocesses to answer one question is the kind of thing that
+    reads fine and makes --check feel broken on a slow machine."""
+    body = _function_body(source, "check_ports")
+    assert body.count("headway_owned_ports") == 1
+
+
 def test_every_access_mode_is_handled_somewhere(source):
     """--help documents three modes. A fourth added without wiring would fall
     into the else branch silently."""

@@ -365,14 +365,64 @@ docker_is_snap() {
   command -v snap >/dev/null 2>&1 && snap list docker >/dev/null 2>&1
 }
 
+# The exact command to install Docker on THIS computer, printed and never
+# run. Detected from /etc/os-release (ID and ID_LIKE, so derivatives such as
+# Linux Mint or Rocky are covered by their parent), because "follow the
+# upstream docs" is the wrong amount of help for the audience this installer
+# is written for: one week of Linux, zero SQL. A person who has to work out
+# which of five package managers they have has already been handed the
+# problem the installer exists to remove.
+#
+# PRINTED, NEVER RUN. Installing Docker needs root, and this installer's
+# standing posture is that it never runs sudo for you (see
+# print_firewall_guidance). An installer that silently escalates is one no IT
+# department should accept, and `curl | sudo sh` is precisely the pattern
+# ADR-0001's posture rejects.
+docker_install_hint() {
+  local id="" like=""
+  if [ -r /etc/os-release ]; then
+    # shellcheck disable=SC1091
+    id="$(. /etc/os-release 2>/dev/null && printf '%s' "${ID:-}")"
+    like="$(. /etc/os-release 2>/dev/null && printf '%s' "${ID_LIKE:-}")"
+  fi
+  case " $id $like " in
+    *" ubuntu "*|*" debian "*|*" linuxmint "*|*" pop "*|*" raspbian "*)
+      printf '%s' "sudo apt-get update && sudo apt-get install -y docker.io docker-compose-v2 docker-buildx" ;;
+    *" fedora "*)
+      printf '%s' "sudo dnf install -y docker docker-compose-plugin docker-buildx-plugin" ;;
+    *" rhel "*|*" centos "*|*" rocky "*|*" almalinux "*)
+      printf '%s' "sudo dnf install -y docker docker-compose-plugin docker-buildx-plugin" ;;
+    *" opensuse"*|*" suse "*|*" sles "*)
+      printf '%s' "sudo zypper install -y docker docker-compose docker-buildx" ;;
+    *" arch "*|*" manjaro "*)
+      printf '%s' "sudo pacman -S --needed docker docker-compose docker-buildx" ;;
+    *)
+      printf '%s' "" ;;
+  esac
+}
+
 check_docker() {
   if ! command -v docker >/dev/null 2>&1; then
+    local hint
+    hint="$(docker_install_hint)"
     fail "Docker is not installed. Headway runs inside Docker containers,"
     fixln "so Docker is required."
-    fixln "To fix: install Docker for your Linux distribution by following"
-    fixln "https://docs.docker.com/engine/install/ then run this installer"
-    fixln "again. (On Ubuntu, 'sudo snap install docker' also works; this"
-    fixln "installer knows how to guide you through snap's extra setup.)"
+    if [ -n "$hint" ]; then
+      fixln "To fix on this computer, run this ONE line, then run the"
+      fixln "installer again:"
+      fixln ""
+      fixln "    $hint"
+      fixln "    sudo usermod -aG docker \$USER   # then log out and back in"
+      fixln ""
+      fixln "Headway will not run that for you: it needs administrator"
+      fixln "rights, and this installer never uses them on your behalf."
+      fixln "Other options: https://docs.docker.com/engine/install/"
+    else
+      fixln "To fix: install Docker for your Linux distribution by following"
+      fixln "https://docs.docker.com/engine/install/ then run this installer"
+      fixln "again. (On Ubuntu, 'sudo snap install docker' also works; this"
+      fixln "installer knows how to guide you through snap's extra setup.)"
+    fi
     return
   fi
   ok "Docker is installed ($(docker --version 2>/dev/null || echo 'version unknown'))."
@@ -388,6 +438,25 @@ check_docker() {
     fixln "Then run this installer again."
   else
     ok "Docker Compose is installed ($(docker compose version --short 2>/dev/null || echo 'version unknown'))."
+  fi
+
+  # A WARNING, not a failure: the build genuinely succeeds without buildx —
+  # Compose falls back to the classic builder and says so. Found live
+  # 2026-08-02 on a clean Ubuntu 26.04 install, where apt's `docker.io` ships
+  # no buildx and every `up --build` printed "Docker Compose is configured to
+  # build using Bake, but buildx isn't installed". Harmless, and alarming to
+  # someone on their first install who has no way to tell harmless from not.
+  if ! docker buildx version >/dev/null 2>&1; then
+    local buildx_hint
+    buildx_hint="$(docker_install_hint)"
+    note "Docker's 'buildx' builder is not installed. Headway builds fine"
+    fixln "without it — Docker falls back to its older builder — but every"
+    fixln "build prints a warning about it. To silence that, install the"
+    fixln "buildx package for your system (it is included in the one-line"
+    fixln "command above on a fresh install)."
+    if [ -n "$buildx_hint" ]; then
+      fixln "Nothing is wrong if you skip this."
+    fi
   fi
 
   if docker info >/dev/null 2>&1; then
@@ -493,14 +562,60 @@ check_docker() {
   fixln "install/README.md, section 'Getting help'."
 }
 
+# Ports published by THIS installation's own containers, one per line.
+# Empty when Docker is unavailable or nothing is running — callers treat that
+# as "no port is ours", which is the pre-install case and the safe default.
+headway_owned_ports() {
+  # Docker prints published ports two ways, and BOTH occur in this stack:
+  #     127.0.0.1:8000->8000/tcp          a single port
+  #     127.0.0.1:9000-9001->9000-9001/tcp   a RANGE (MinIO publishes one)
+  # A parser that only understands the first shape silently drops MinIO's two
+  # ports and then reports them as somebody else's conflict — which is what the
+  # first version of this function did.
+  docker ps --filter "name=^/${COMPOSE_PROJECT}-" --format '{{.Ports}}' 2>/dev/null \
+    | tr ',' '\n' \
+    | awk -F'->' '/->/ {
+        split($1, a, ":"); spec = a[length(a)]
+        if (spec ~ /^[0-9]+-[0-9]+$/) {
+          split(spec, r, "-")
+          for (p = r[1]; p <= r[2]; p++) print p
+        } else if (spec ~ /^[0-9]+$/) {
+          print spec
+        }
+      }' \
+    | sort -un
+}
+
 check_ports() {
-  local busy=0
+  local busy=0 ours=0
+  # Read once: `docker ps` per port would be eight subprocesses for no reason.
+  local owned
+  owned="$(headway_owned_ports)"
   for port in "${REQUIRED_PORTS[@]}"; do
     if port_in_use "$port"; then
+      # A port held by Headway's OWN container is not a conflict, it is
+      # Headway running. Reporting it as a problem told an operator with a
+      # perfectly healthy installation that their computer was "NOT ready" —
+      # found live 2026-08-02 by running --check on a working install, which
+      # is exactly when a worried operator reaches for it.
+      if printf '%s\n' "$owned" | grep -qx "$port"; then
+        ours=$((ours + 1))
+        continue
+      fi
       fail "Port $port is already in use. Headway needs it for $(port_label "$port")."
       busy=1
     fi
   done
+  if [ "$ours" -gt 0 ] && [ "$busy" -eq 0 ]; then
+    ok "All the network ports Headway needs are either free or already in use"
+    fixln "by this Headway installation ($ours of ${#REQUIRED_PORTS[@]} in use by"
+    fixln "Headway itself, which is what a running installation looks like)."
+    return
+  fi
+  if [ "$ours" -gt 0 ]; then
+    note "$ours of the ports listed above are in use by this Headway"
+    fixln "installation itself, which is expected while it is running."
+  fi
   if [ "$busy" -eq 1 ]; then
     fixln "A 'port' is a numbered door programs use to talk on this computer;"
     fixln "two programs cannot use the same one. Something already running is"
