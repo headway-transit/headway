@@ -119,6 +119,8 @@ class FakeConn:
         self.vehicle_positions: list[dict] = []
         # Sources status (handoff 0025): the raw.records ingest registry.
         self.raw_records: list[dict] = []
+        # app.reported_datasets (migration 0045), keyed by dataset_key.
+        self.reported_datasets: dict[str, dict] = {}
         # Calc runs dispatched from the UI (handoff 0026 / migration 0033).
         self.calc_runs: dict[str, dict] = {}
         self.stops: dict[str, dict] = {}
@@ -434,6 +436,48 @@ class FakeConn:
                     )
             rows.sort(key=lambda r: str(r[0]))
             return FakeCursor(rows)
+
+        if q.startswith("SELECT dataset_key, display_name, owner"):
+            rows = sorted(
+                self.reported_datasets.values(), key=lambda d: d["display_name"]
+            )
+            return FakeCursor(
+                [
+                    (
+                        d["dataset_key"], d["display_name"], d["owner"],
+                        d["system_of_record"], d["expected_interval"],
+                        d["ntd_forms"], d["headway_sources"], d["notes"],
+                        d["updated_by"], d["updated_at"],
+                    )
+                    for d in rows
+                ]
+            )
+
+        if q.startswith("SELECT source, max(landed_at) FROM raw.records"):
+            # The OBSERVED half, from the same rows GET /sources/status reads.
+            wanted = set(params[0])
+            seen: dict[str, dt.datetime] = {}
+            for r in self.raw_records:
+                if r["source"] in wanted:
+                    prev = seen.get(r["source"])
+                    if prev is None or r["landed_at"] > prev:
+                        seen[r["source"]] = r["landed_at"]
+            return FakeCursor(sorted(seen.items()))
+
+        if q.startswith("INSERT INTO app.reported_datasets"):
+            (key, name, owner, sor, interval, forms, sources, notes, by) = params
+            now = dt.datetime.now(UTC)
+            self.reported_datasets[key] = {
+                "dataset_key": key, "display_name": name, "owner": owner,
+                "system_of_record": sor, "expected_interval": interval,
+                "ntd_forms": list(forms), "headway_sources": list(sources),
+                "notes": notes, "updated_by": by, "updated_at": now,
+            }
+            return FakeCursor([(now,)])
+
+        if q.startswith("DELETE FROM app.reported_datasets"):
+            existing = self.reported_datasets.pop(str(params[0]), None)
+            return FakeCursor([(existing["display_name"],)] if existing else [])
 
         if q.startswith("SELECT metric_value_id FROM computed.metric_values"):
             mv = self.metric_values.get(str(params[0]))
