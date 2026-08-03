@@ -1,0 +1,116 @@
+"""Static checks on install/install.sh — the front door, and the least tested.
+
+The installer is 3,496 lines and is the ONE path every first-time operator
+takes, including every stranger who tries this project because it is open
+source. Nothing automated has ever run it, and on 2026-08-02 the first cold
+machine install found out what that costs:
+
+``write_access_env`` added the ``app`` compose profile only inside the ``lan``
+branch, so the DEFAULT access mode ('local') and the 'it' mode brought up the
+database, message queue, object storage and dashboards — and no Headway. No
+website, no API, no feed collector. The installer then reported "All services
+are healthy" (true of the ones it started), printed "Only web browsers on this
+machine can reach it", and exited 0.
+
+WHAT THIS FILE IS, AND IS NOT
+-----------------------------
+These are static assertions over the script's text. They are cheap, they need
+no Docker, and they would have caught the specific defect above. They are NOT
+a substitute for running the installer: the real regression test is a smoke
+job that installs onto a throwaway machine and then asks the API for a 200.
+That job does not exist yet and is the honest follow-up — a static check can
+only prove a line is in the right place, never that the thing works.
+
+Same posture as ``db/test_migrations_static.py``: stdlib only, no service
+imports, so it runs anywhere pytest does.
+"""
+
+from __future__ import annotations
+
+import re
+from pathlib import Path
+
+import pytest
+
+INSTALLER = Path(__file__).resolve().parent / "install.sh"
+
+
+@pytest.fixture(scope="module")
+def source() -> str:
+    return INSTALLER.read_text(encoding="utf-8")
+
+
+def _function_body(source: str, name: str) -> str:
+    """The text of one shell function, from ``name() {`` to the closing brace
+    in column 1. Every function in this script is written that way."""
+    start = source.index(f"{name}() {{")
+    end = source.index("\n}\n", start)
+    return source[start:end]
+
+
+def test_the_app_profile_is_added_in_every_access_mode(source):
+    """THE REGRESSION. The access mode answers WHO may reach Headway; it must
+    never decide WHETHER Headway runs.
+
+    Asserted structurally rather than by string match: the call has to sit
+    outside the mode conditional, which is exactly where it was not.
+    """
+    body = _function_body(source, "write_access_env")
+    assert "add_compose_profile app" in body, (
+        "write_access_env no longer enables the app profile at all — a "
+        "successful install would leave no website, API or collector running."
+    )
+    # Everything from the mode branch's `if` to its matching `fi` is
+    # conditional. The call must not be in there.
+    conditional = body[body.index('if [ "$ACCESS_MODE" = "lan" ]') : body.rindex("  fi")]
+    assert "add_compose_profile app" not in conditional, (
+        "add_compose_profile app is inside the access-mode conditional again. "
+        "That is the 2026-08-02 defect: the default 'local' install starts the "
+        "database, queue, storage and dashboards and no Headway, then reports "
+        "success. The app profile belongs after the conditional, unconditionally."
+    )
+
+
+def test_the_lan_profile_is_still_conditional(source):
+    """The mirror of the above, so a fix in the wrong direction is caught too:
+    the office doorway (Caddy) genuinely IS mode-specific, and starting it for
+    a 'local' install would publish ports 80 and 443 nobody asked for."""
+    body = _function_body(source, "write_access_env")
+    conditional = body[body.index('if [ "$ACCESS_MODE" = "lan" ]') : body.rindex("  fi")]
+    assert "add_compose_profile lan" in conditional
+    assert "remove_compose_profile lan" in conditional
+
+
+def test_the_closing_summary_does_not_tell_the_operator_to_start_the_app(source):
+    """The messaging half of the same defect. The summary used to hand the
+    operator a `--profile app up -d --build` command as step 2, which read as
+    optional feed-collection setup rather than 'your application is not
+    running'. With the app profile always on, that instruction is not just
+    unnecessary — repeating it would teach the wrong mental model."""
+    body = _function_body(source, "print_summary")
+    assert "--profile app up -d --build" not in body, (
+        "print_summary tells the operator to start the app services by hand. "
+        "They are started by the installer now; this instruction contradicts it."
+    )
+
+
+def test_every_access_mode_is_handled_somewhere(source):
+    """--help documents three modes. A fourth added without wiring would fall
+    into the else branch silently."""
+    for mode in ("local", "lan", "it"):
+        assert re.search(rf"\b{mode}\b", source), f"access mode {mode} is undocumented"
+
+
+def test_the_installer_never_runs_sudo_for_the_operator(source):
+    """A standing posture stated in the script itself ("Firewall help is
+    PRINTED, never run — this installer never runs sudo commands for you").
+    Pinned because it is the kind of convenience that gets added later, and an
+    installer that silently escalates is one nobody should run."""
+    offenders = [
+        line.strip()
+        for line in source.splitlines()
+        # Mentions inside printed guidance are fine; an actual invocation is not.
+        if re.match(r"^\s*(sudo|.*\|\s*sudo)\s", line)
+        and not re.match(r"^\s*(#|say|fixln|note|warn|echo)", line.strip())
+    ]
+    assert offenders == [], f"installer would run sudo itself: {offenders}"

@@ -931,7 +931,6 @@ write_access_env() {
     # browser on this box working against the same rebuilt website.
     set_env_value HEADWAY_CORS_ORIGINS "https://$LAN_ADDRESS,http://localhost:8080"
     set_env_value VITE_API_BASE_URL "https://$LAN_ADDRESS/api"
-    add_compose_profile app
     add_compose_profile lan
   else
     set_env_value HEADWAY_LAN_ADDRESS ""
@@ -939,6 +938,14 @@ write_access_env() {
     set_env_value VITE_API_BASE_URL "http://localhost:8000"
     remove_compose_profile lan
   fi
+  # EVERY mode, not just lan. Until 2026-08-02 this lived inside the lan
+  # branch, so the DEFAULT install ('local') brought up the database, queue,
+  # storage and dashboards and no Headway: no website, no API, no collector.
+  # The installer then reported "All services are healthy" (true of the ones
+  # it started), said "Only web browsers on this machine can reach it", and
+  # exited 0. Found on the first cold-machine install, 2026-08-02 — the
+  # access mode answers WHO may reach Headway, never WHETHER it runs.
+  add_compose_profile app
   log "network access wired in .env (mode: $ACCESS_MODE; values not logged: none are secret, but passwords never are)"
 }
 
@@ -1077,10 +1084,11 @@ start_stack() {
   say "--- Starting Headway ---"
   say "Docker will now download and start Headway's building blocks: the"
   say "database, the message queue, file storage, metrics and dashboards."
+  say "The Headway website, its sign-in service and the feed collector are"
+  say "built from source on this computer and started too."
   if [ "$ACCESS_MODE" = "lan" ]; then
-    say "Because you chose office access, the Headway website, its sign-in"
-    say "service and the secure office doorway are also built and started"
-    say "now — that adds some one-time build work."
+    say "Because you chose office access, the secure office doorway is"
+    say "started alongside them."
   fi
   say "The first start downloads about 2 GB of software, so this can take"
   say "10 to 20 minutes depending on your internet connection."
@@ -2849,13 +2857,13 @@ print_summary() {
     say "     '$ADMIN_USERNAME' at https://$LAN_ADDRESS — and see"
     say "     deploy/compose/README.md for what each service is."
   else
-    say "  2. To start collecting your agency's live feed data, see"
-    say "     deploy/compose/README.md (the 'app' services, which include the"
-    say "     feed collector, are started with:"
-    say "     docker compose --project-directory $COMPOSE_DIR --profile app up -d --build )"
-    say "  3. The Headway sign-in website/API ships with the app services;"
-    say "     your administrator account ('$ADMIN_USERNAME') is already set up"
-    say "     and ready for it."
+    say "  2. The Headway website, sign-in service and feed collector are"
+    say "     already running. Sign in as '$ADMIN_USERNAME' at"
+    say "     http://localhost:8080 — and see deploy/compose/README.md for"
+    say "     what each service is."
+    say "  3. To start collecting your agency's live feed data, put your feed"
+    say "     addresses in $ENV_FILE (GTFS_STATIC_URL and the GTFS_RT_* ones)"
+    say "     and restart: docker compose --project-directory $COMPOSE_DIR up -d"
   fi
   say ""
   say "Everything above was recorded (without passwords) in:"
