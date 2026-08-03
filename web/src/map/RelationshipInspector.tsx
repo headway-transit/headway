@@ -111,6 +111,20 @@ export function RelationshipInspector({
         <h3>{t.chainHeading}</h3>
         <p className="chart-desc">{t.chainIntro}</p>
 
+        {/* Caveats about how COMPLETE the chain can be, stated before it
+            rather than inside it. They are not links in the chain, and a
+            paragraph is not a list item: an <ol> may only directly contain
+            <li>, and putting these inside it produced invalid markup that
+            axe's `list` rule caught on main. */}
+        {chain.unmatchedTripCount > 0 && (
+          <p className="chart-desc">
+            {t.unmatchedTrips(String(chain.unmatchedTripCount))}
+          </p>
+        )}
+        {chain.subjectCapped && (
+          <p className="chart-desc">{t.subjectCapped}</p>
+        )}
+
         {/* The chain as a CHAIN. Every link below was already rendered; the
             list draws the spine that says they are consecutive. */}
         <ol className="chain-trail">
@@ -142,15 +156,6 @@ export function RelationshipInspector({
             </ul>
           </ChainStep>
         )}
-        {chain.unmatchedTripCount > 0 && (
-          <p className="chart-desc">
-            {t.unmatchedTrips(String(chain.unmatchedTripCount))}
-          </p>
-        )}
-        {chain.subjectCapped && (
-          <p className="chart-desc">{t.subjectCapped}</p>
-        )}
-
         {/* --- route --- */}
         {chain.routes.length > 0 && (
           <ChainStep marker="R" heading={t.routesHeading}>
