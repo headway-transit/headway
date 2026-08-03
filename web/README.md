@@ -69,9 +69,20 @@ Unset, requests go to the same origin (for co-hosting or a dev proxy).
 
 ### Sessions
 
-The bearer token from `POST /auth/login` is held **in memory only** (module
-state, `src/auth/session.ts`): nothing is written to localStorage, and a page
-reload signs you out. The hardening increment is a server-set `httpOnly`,
+The bearer token from `POST /auth/login` is held in **sessionStorage**
+(`src/auth/session.ts`, key `headway-session-v1`): it survives a page reload
+and dies with the tab. It was in memory only until 2026-08-03, when a reload
+signed you out — an annoyance on a desktop and unusable on a phone, where
+pull-to-refresh is a gesture people make by accident.
+
+What that trades, stated plainly: an XSS payload on this origin could read the
+token. It is bounded by the 30-minute expiry, by the server re-reading the
+account on **every** request (so a stolen token dies the moment the account is
+deactivated, rather than running to expiry), and by the fact that an XSS can
+already act as the user for as long as the page is open. Nothing is written to
+localStorage, which would outlive the tab and every other tab.
+
+The hardening increment is unchanged — a server-set `httpOnly`,
 `Secure`, `SameSite` cookie session, which removes the token from JS reach
 entirely. Any 401 clears the session and returns you to `/login`.
 
