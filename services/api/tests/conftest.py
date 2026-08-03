@@ -375,6 +375,13 @@ class FakeConn:
                         r["computed_at"], str(r["metric_value_id"]),
                     )
                 )
+            elif "ORDER BY period_start, metric, computed_at DESC" in q:
+                # /metrics/values: newest FIRST within one metric/period/scope,
+                # so "which of these is current?" has an answer. Two stable
+                # sorts rather than one composite key, because only the last
+                # term is descending.
+                rows.sort(key=lambda r: r["computed_at"], reverse=True)
+                rows.sort(key=lambda r: (r["period_start"], r["metric"]))
             else:
                 rows.sort(key=lambda r: (r["period_start"], r["metric"]))
             if "LIMIT %s" in q:
@@ -395,6 +402,38 @@ class FakeConn:
 
         if "WITH RECURSIVE walk" in q:
             return FakeCursor(self._walk_lineage(params[0]))
+
+        if q.startswith(
+            "SELECT older.metric_value_id, older.metric, older.scope, older.value"
+        ):
+            # certify._SELECT_SUPERSEDED — every named figure that has a NEWER
+            # figure for the same metric, scope and period. Modelled with the
+            # SAME join keys and the SAME ordering (newest first) as the SQL,
+            # so a test cannot pass here against semantics Postgres would not
+            # produce.
+            wanted = {str(i) for i in params[0]}
+            rows = []
+            for older in self.metric_values.values():
+                if str(older["metric_value_id"]) not in wanted:
+                    continue
+                newer = [
+                    n for n in self.metric_values.values()
+                    if n["metric"] == older["metric"]
+                    and n["scope"] == older["scope"]
+                    and n["period_start"] == older["period_start"]
+                    and n["period_end"] == older["period_end"]
+                    and n["computed_at"] > older["computed_at"]
+                ]
+                for n in sorted(newer, key=lambda r: r["computed_at"], reverse=True):
+                    rows.append(
+                        (
+                            older["metric_value_id"], older["metric"],
+                            older["scope"], older["value"],
+                            n["metric_value_id"], n["value"],
+                        )
+                    )
+            rows.sort(key=lambda r: str(r[0]))
+            return FakeCursor(rows)
 
         if q.startswith("SELECT metric_value_id FROM computed.metric_values"):
             mv = self.metric_values.get(str(params[0]))
