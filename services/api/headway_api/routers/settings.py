@@ -29,6 +29,7 @@ agencies have one audited place to set policy.
 from __future__ import annotations
 
 import datetime as dt
+import zoneinfo
 from decimal import Decimal, InvalidOperation
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -92,6 +93,12 @@ def _setting_from_row(r) -> Setting:
     )
 
 
+#: The agency's local timezone (migration 0044, ADR-0015). Empty means
+#: UNDECLARED, and undeclared keeps refusing — a guessed zone would date a
+#: federal figure to the wrong day.
+SERVICE_DAY_TIMEZONE_KEY = "service_day_timezone"
+
+
 def validate_value(value: str, value_type: str, setting_key: str) -> None:
     """Refuse (plain-language 422) any value that is not a valid instance of
     the setting's declared type. The stored value stays the caller's exact
@@ -125,6 +132,28 @@ def validate_value(value: str, value_type: str, setting_key: str) -> None:
     # 'text' accepts any non-empty string (the request model enforces
     # non-empty). value_type is CHECK-constrained in the database, so no
     # other branch can exist.
+
+    # The service-day timezone (migration 0044) is 'text', but not any text:
+    # it has to be a zone THIS INSTALLATION can actually resolve. Checking it
+    # against the platform's own tz database is the only honest test —
+    # accepting 'Pacific' or 'PST' and failing hours later inside the
+    # normalizer, where the only evidence is a container log, is exactly the
+    # failure this setting exists to end (ADR-0015).
+    if setting_key == SERVICE_DAY_TIMEZONE_KEY and value.strip():
+        try:
+            zoneinfo.ZoneInfo(value)
+        except (zoneinfo.ZoneInfoNotFoundError, ValueError, KeyError):
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"'{value}' is not a timezone this computer recognizes. "
+                    f"Headway needs an IANA timezone name, which looks like "
+                    f"Region/City — for example America/Los_Angeles, "
+                    f"America/Denver, America/Chicago or America/New_York. "
+                    f"Abbreviations like 'PST' or 'Pacific' are ambiguous "
+                    f"across daylight saving and are not accepted."
+                ),
+            )
 
     # Branding keys (migration 0015) carry EXTRA rules beyond their 'text'
     # type — the accessibility guardrail (handoff 0008: you can brand it;
