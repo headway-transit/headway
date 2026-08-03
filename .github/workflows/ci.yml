@@ -37,6 +37,7 @@ jobs:
       client: ${{ steps.filter.outputs.client }}
       web: ${{ steps.filter.outputs.web }}
       integration: ${{ steps.filter.outputs.integration }}
+      installer: ${{ steps.filter.outputs.installer }}
       adapters: ${{ steps.filter.outputs.adapters }}
       notebooks: ${{ steps.filter.outputs.notebooks }}
     steps:
@@ -71,6 +72,7 @@ jobs:
             echo "client=$(hit '^clients/python/|^\.github/workflows/')"
             echo "web=$(hit '^web/|^scripts/license|^\.github/workflows/')"
             echo "integration=$(hit '^services/api/|^db/|^tests/integration/|^\.github/workflows/')"
+            echo "installer=$(hit '^install/|^deploy/compose/|^\.github/workflows/')"
             echo "adapters=$(hit '^adapters/|^contracts/|^services/transform/|^\.github/workflows/')"
             echo "notebooks=$(hit '^notebooks/|^\.github/workflows/')"
           } >> "$GITHUB_OUTPUT"
@@ -221,9 +223,13 @@ jobs:
           git diff --exit-code web/src/regulatory/quotes.json
 
   db-static:
-    name: python / db migrations (static)
+    name: python / static checks (migrations, installer)
     needs: changes
-    if: needs.changes.outputs.python == 'true'
+    # `installer` is in this filter too: install/install.sh is the front door
+    # every first-time operator uses, and until 2026-08-02 nothing automated
+    # touched it — which is how a default install that started no application
+    # shipped.
+    if: needs.changes.outputs.python == 'true' || needs.changes.outputs.installer == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -234,8 +240,8 @@ jobs:
         # db/test_migrations_static.py is stdlib-only static analysis of the
         # migration SQL; no live database and no psycopg needed.
         run: python -m pip install pytest
-      - name: pytest (static migration checks)
-        run: python -m pytest -q db/test_migrations_static.py
+      - name: pytest (static migration + installer checks)
+        run: python -m pytest -q db/test_migrations_static.py install/test_installer_static.py
 
   integration-postgres:
     # Standing protection for the 2026-07-10 autocommit bug class: the API
