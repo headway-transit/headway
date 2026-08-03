@@ -477,7 +477,14 @@ h3 {
    the shell's height never changes under the content. */
 .nav-strip {
   padding: 0 var(--space-4) var(--space-2);
-  overflow-x: auto;
+  /* NO overflow here, deliberately. `overflow-x: auto` makes the OTHER axis
+     compute to `auto` as well (CSS Overflow 3 §3.2 — a scroll container is
+     never one-dimensional), which turned this strip into a scroll box in both
+     directions and CLIPPED the open nav-group panel to the strip's own
+     height. Found live 2026-08-03 on the UAT box: the Reports, Records and
+     Tools menus opened correctly, showed a ~20px sliver, and put a stray
+     vertical scrollbar in the header. The menus were never broken; they were
+     inside a box the height of a nav row. */
 }
 .nav-strip ul {
   display: flex;
@@ -488,7 +495,11 @@ h3 {
   padding: 0;
 }
 .nav-strip > ul {
-  flex-wrap: nowrap;
+  /* Wraps rather than scrolling. Grouping (handoff 0044) cut seventeen links
+     to eleven items, so this only wraps on a genuinely narrow window — and a
+     second visible row beats a horizontal scrollbar nobody discovers. */
+  flex-wrap: wrap;
+  row-gap: var(--space-1);
 }
 .app-header nav a {
   display: inline-block;
