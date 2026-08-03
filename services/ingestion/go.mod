@@ -4,11 +4,11 @@ go 1.25.10
 
 require (
 	github.com/MobilityData/gtfs-realtime-bindings/golang/gtfs v1.0.0
-	github.com/jackc/pgx/v5 v5.9.2
+	github.com/jackc/pgx/v5 v5.10.0
 	github.com/microsoft/go-mssqldb v1.10.0
 	github.com/minio/minio-go/v7 v7.2.1
 	github.com/twmb/franz-go v1.21.5
-	github.com/twmb/franz-go/pkg/kadm v1.16.1
+	github.com/twmb/franz-go/pkg/kadm v1.18.0
 	google.golang.org/protobuf v1.36.11
 )
 
