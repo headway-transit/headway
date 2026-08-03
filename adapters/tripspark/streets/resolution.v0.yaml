@@ -1,0 +1,135 @@
+# TripSpark Streets APC -> the agency's GTFS schedule: per-agency trip
+# resolution (handoff 0031). This file is CONFIGURATION, validated against
+# contracts/adapter-resolution.v0.schema.json — nothing agency-specific lives
+# in Python.
+#
+# What it declares: the export's TripName is "route - pattern - start time"
+# (e.g. "12 - 12WD - 21:30"); the route part matches GTFS route_short_name,
+# the start-time part matches the trip's first scheduled departure, the
+# export's DirectionKey column (position 17, previously unmapped) matches
+# GTFS direction_id, and candidates are limited to the services running on
+# the row's service date. That four-part key was MEASURED, not assumed, on
+# the agency's live published feed — see provenance.
+#
+# DIRECTION IS NOW CONFIRMED (2026-07-31); ONE SETTING REMAINS UNCONFIRMED,
+# and it changes behavior in a stated way rather than silently:
+#
+#   direction.confirmed: true — the export's DirectionKey values were
+#     derived against GTFS direction_id from the agency's own APC export +
+#     published GTFS (27,907 records, zero disagreement) and ACCEPTED by the
+#     agency's ITS manager on 2026-07-31. GTFS gives 0 and 1 no inherent
+#     meaning, so the mapping is an agency fact, recorded under
+#     trip.match.direction.values with confirmed_by/confirmed_on. CCW (code
+#     8) was unobserved and is left unmapped — a CCW/NULL/out-of-range row
+#     resolves UNMATCHED with the reason stated, never guessed.
+#
+#   service_day_rollover: not_confirmed — the verified sample is an evening
+#     window; how the export dates a trip that runs past midnight is not
+#     derivable from it (adapter README caveat 3). Until a real export
+#     spanning midnight settles it, only the calendar-date reading is
+#     matched, and a row that WOULD match as an after-midnight trip of the
+#     previous service day is reported unmatched with exactly that stated.
+resolution_spec_version: 0
+source_label: tripspark_streets
+target_contract: tides_passenger_events
+
+trip:
+  vendor_identifier:
+    # The mapped record's trip_id_performed carries TripName verbatim
+    # (mapping.v0.yaml). Reading the mapped field rather than the raw column
+    # keeps the two specs pointing at one value by construction.
+    from_field: trip_id_performed
+  parse:
+    separator: " - "
+    components: [route, pattern, start_time]
+    strip: true
+  match:
+    route:
+      component: route
+      # Matches canonical.routes.short_name. In this agency's live feed
+      # route_id and route_short_name are identical on all 23 routes — a
+      # coincidence this config does not rely on: short name is what the
+      # export's trip name carries.
+      gtfs_field: route_short_name
+    start_time:
+      component: start_time
+      format: "%H:%M"
+    direction:
+      from_column: DirectionKey
+      confirmed: true
+      # DirectionKey -> GTFS direction_id, DERIVED from the agency's own APC
+      # export and published GTFS (27,907 matched records across 19 routes,
+      # zero disagreement) and then ACCEPTED by the agency. Keys are the
+      # agency's Direction table: 1=North 2=South 3=East 4=West 5=Inbound
+      # 6=Outbound 7=Clockwise 8=Counter-clockwise. In words: North, West,
+      # Outbound, Clockwise -> 0; South, East, Inbound -> 1. Code 8 (CCW) did
+      # not appear in the evidence and is deliberately LEFT UNMAPPED, so a CCW
+      # row resolves UNMATCHED with the reason stated rather than being
+      # guessed; the same holds for NULL/blank and any out-of-range value.
+      values:
+        "1": 0
+        "2": 1
+        "3": 1
+        "4": 0
+        "5": 1
+        "6": 0
+        "7": 0
+      confirmed_by: >-
+        The operating agency's ITS manager, accepting the DirectionKey ->
+        GTFS direction_id mapping Headway derived from the agency's own APC
+        export and its published GTFS feed (27,907 matched records, zero
+        disagreement; Counter-clockwise unobserved, left unmapped).
+      confirmed_on: "2026-07-31"
+    service:
+      from_field: service_date
+      service_day_rollover: not_confirmed
+
+stop:
+  # StopCode is the rider-facing code on the sign. Checked against GTFS
+  # stop_code FIRST, then stop_id — the declared order, per handoff 0031
+  # design point 4. In this agency's live feed stop_id equals stop_code on
+  # all 851 stops, which makes the fallback a no-op TODAY; the order is
+  # still declared so the next agency's feed cannot inherit the coincidence
+  # as an assumption. v0 writes nothing onto the row (the canonical
+  # passenger_events subset has no stop column yet — handoff 0011 gap); an
+  # unknown stop becomes a finding instead of a silence.
+  from_column: StopCode
+  match_order: [stop_code, stop_id]
+
+provenance:
+  verified_against:
+    schedule_feed:
+      # The agency's PUBLISHED GTFS feed, fetched live. Feed version
+      # "0626 Fixed Rev 1", validity 2026-06-14..2026-12-12: 2,704 trips,
+      # 23 routes, 851 stops, 3 service_ids, 3 calendar exceptions.
+      retrieved: "2026-07-29"
+      trips: 2704
+      key_uniqueness: >-
+        Measured on the live feed, 2026-07-29: the key (service, route
+        short name, first-departure time) alone collides on 500 keys
+        covering 1,000 of 2,704 trips (37% ambiguous — unusable); adding
+        direction_id leaves exactly 1 colliding key covering 2 trips
+        (route 64, 06:30:00, direction 1, weekday service — two variants
+        with different headsigns and blocks). Those 2 trips will resolve
+        as AMBIGUOUS by design; every other trip is uniquely identified.
+        stop_code is populated on 851 of 851 stops and equals stop_id on
+        all of them.
+    vendor_export:
+      status: none_available
+      note: >-
+        No real TripSpark export has ever been run through this
+        configuration: the agency-provided sample is agency-identifiable
+        and stays gitignored, and it predates this config. Exercised
+        against synthetic rows in the sample's proven 18-column shape
+        combined with the agency's real published GTFS. When the real
+        export arrives, re-check: the DirectionKey vocabulary (then
+        confirm the direction mapping), the exact TripName separator and
+        start-time format across a full day, the service-day rollover on
+        an export spanning midnight, and whether StopCode always matches
+        the schedule.
+  verification_date: "2026-07-29"
+  notes: >-
+    Derived from the agency's own export shape and its own published GTFS
+    feed only — no vendor documentation is quoted, excerpted, cited, or
+    paraphrased (handoff 0015 Addendum, BINDING, applied to resolution
+    configs by handoff 0031).

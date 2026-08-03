@@ -71,7 +71,11 @@ describe("/login", () => {
     expect(
       await screen.findByRole("heading", { name: "Today" }),
     ).toBeInTheDocument();
-    expect(calls[0].body).toEqual({
+    // By path, not by index: the screen also asks whether to offer a
+    // single-sign-on button (handoff 0046), and that call must never be
+    // able to change what this one asserts.
+    const loginCall = calls.find((c) => c.path === "/auth/login");
+    expect(loginCall?.body).toEqual({
       username: "maria.ops",
       password: "pw123",
     });

@@ -151,16 +151,49 @@ def test_compare_with_machine_key_relays_server_401(transport):
 
 def test_dq_issues_and_counts_with_session(transport):
     with session_client(transport) as hw:
-        issues = hw.dq_issues()
-        open_issues = hw.dq_issues(status="open")
+        page = hw.dq_issues()
+        open_page = hw.dq_issues(status="open")
         counts = hw.dq_issue_counts()
-    assert len(issues) == 2
-    assert [i.status for i in open_issues] == ["open"]
+    # One bounded PAGE (API handoff 0030), stating the whole-queue total.
+    assert len(page.issues) == 2
+    assert page.total == 2
+    assert page.has_more is False and page.next_cursor is None
+    assert [i.status for i in open_page.issues] == ["open"]
+    assert open_page.total == 1  # the total follows the filter
+    issues = page.issues
     assert issues[0].resolution_minutes is None  # unmeasured stays None
     assert issues[1].resolution_minutes == 12
+    # The queue row carries NO provenance array — that moved to dq_issue().
+    assert not hasattr(issues[0], "source_record_ids")
     assert counts.total == 2
     assert counts.by_severity["blocking"] == 1
     assert counts.by_status["resolved"] == 1
+    # The whole-queue effort sum rides the counts (API handoff 0030).
+    assert counts.resolution_minutes_total == 12
+
+
+def test_dq_issues_pages_walk_without_gap_or_repeat(transport):
+    with session_client(transport) as hw:
+        first = hw.dq_issues(limit=1)
+        assert first.has_more is True and first.next_cursor is not None
+        second = hw.dq_issues(limit=1, cursor=first.next_cursor)
+        walked = list(hw.iter_dq_issues(page_size=1))
+    assert len(first.issues) == len(second.issues) == 1
+    assert first.issues[0].issue_id != second.issues[0].issue_id
+    # iter_dq_issues covers every row exactly once, lazily.
+    assert [i.issue_id for i in walked] == [
+        first.issues[0].issue_id,
+        second.issues[0].issue_id,
+    ]
+
+
+def test_dq_issue_detail_serves_the_complete_provenance_array(transport):
+    with session_client(transport) as hw:
+        page = hw.dq_issues()
+        detail = hw.dq_issue(page.issues[0].issue_id)
+    # The array moved HERE (API handoff 0030): complete, never truncated.
+    assert detail.issue_id == page.issues[0].issue_id
+    assert detail.source_record_ids == ["sha256-raw-a", "sha256-raw-b"]
 
 
 def test_dq_unknown_status_relays_plain_language_422(transport):

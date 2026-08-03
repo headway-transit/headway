@@ -185,6 +185,34 @@ _SELECT_FIGURES = (
     "FROM computed.metric_values WHERE metric_value_id = ANY(%s)"
 )
 
+#: Every named figure that has a NEWER figure for the same metric, scope and
+#: period — i.e. a recomputation happened and this one is stale.
+#:
+#: ``computed.metric_values`` is APPEND-ONLY on purpose: ``persist.py`` reuses a
+#: row only when every field including the value matches, so recomputing over
+#: more data writes a NEW row rather than mutating a figure someone may already
+#: have read. That is correct, and it leaves two answers on record for one
+#: question with nothing to tell them apart. Found live 2026-08-02: a partial
+#: day computed 263.57 VRM, the same day recomputed later gave 340.20, and both
+#: sat in the list equally certifiable. Nothing stopped the stale one being
+#: signed.
+#:
+#: A plain self-join rather than a LATERAL: it can return several newer rows per
+#: older one, and taking the first per id after ordering costs nothing and keeps
+#: the query simple enough to be modelled honestly by the test double.
+_SELECT_SUPERSEDED = (
+    "SELECT older.metric_value_id, older.metric, older.scope, older.value, "
+    "newer.metric_value_id, newer.value "
+    "FROM computed.metric_values AS older "
+    "JOIN computed.metric_values AS newer "
+    "  ON newer.metric = older.metric AND newer.scope = older.scope "
+    " AND newer.period_start = older.period_start "
+    " AND newer.period_end = older.period_end "
+    " AND newer.computed_at > older.computed_at "
+    "WHERE older.metric_value_id = ANY(%s) "
+    "ORDER BY older.metric_value_id, newer.computed_at DESC"
+)
+
 _INSERT_CERTIFICATION = (
     "INSERT INTO cert.certifications (certification_id, metric_value_ids, "
     "certified_by, certified_at, attestation, canonical_document, "
@@ -242,6 +270,37 @@ def _figure_receipt(row) -> dict:
     }
     figure["receipt_sha256"] = receipt_sha256(figure)
     return figure
+
+
+
+def _certifier_block(identity: Identity, body) -> dict:
+    """Who signed, inside the signed bytes.
+
+    A LOCAL certifier's block is byte-for-byte what it always was — the four
+    keys below and nothing else — so documents signed before federation
+    existed and after it stay directly comparable, and no previously signed
+    certification is retrospectively a different shape.
+
+    A FEDERATED certifier's block gains the IdP issuer and subject
+    (handoff 0046). This is the point of recording both: "an SSO user" is not
+    a signer, and a signature whose signer cannot be resolved years later —
+    after the person has left, after the username has been reused, after the
+    tenant has been migrated — is not a signature. The subject is the one
+    identifier a provider promises never to reuse; the username is what a
+    human recognises. Both go inside the signed document, so neither can be
+    changed afterwards without breaking the Ed25519 verification.
+    """
+    block = {
+        "username": identity.username,
+        "role": identity.role,
+        "typed_full_name": body.signer_full_name,
+        "typed_title": body.signer_title,
+    }
+    if identity.is_federated:
+        block["authenticated_via"] = "oidc"
+        block["idp_issuer"] = identity.idp_issuer
+        block["idp_subject"] = identity.idp_subject
+    return block
 
 
 def _signer_identity_from_document(
@@ -476,6 +535,33 @@ def certify(
                     "certified: " + ", ".join(already)
                 ),
             )
+        # A figure that has been recomputed is not the agency's answer any
+        # more, and signing it would attest to a number the installation
+        # itself has superseded. Refused rather than warned: the whole point
+        # of a certification is that it is the deliberate act, and "you
+        # signed the old one" is discovered by an auditor, not by the signer.
+        superseded: dict[str, tuple] = {}
+        for row in db.execute(_SELECT_SUPERSEDED, (ids,)).fetchall():
+            superseded.setdefault(str(row[0]), row)  # ORDER BY put the newest first
+        if superseded:
+            lines = [
+                f"{row[1]} ({row[2]}) — you selected {row[3]}, but "
+                f"{row[5]} was computed later for the same period "
+                f"(newer figure id {row[4]})"
+                for row in superseded.values()
+            ]
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Certification refused: some of the figures you selected "
+                    "have been recomputed since, so they are no longer this "
+                    "installation's answer for their period. Certifying one "
+                    "would attest to a number Headway itself has already "
+                    "replaced. Nothing was signed. Select the newer figures "
+                    "and certify those instead. " + "; ".join(lines) + "."
+                ),
+            )
+
         # --- assemble and sign the canonical document (handoff 0019) -----
         figure_rows = db.execute(_SELECT_FIGURES, (ids,)).fetchall()
         figures = sorted(
@@ -497,12 +583,7 @@ def certify(
             "document_version": DOCUMENT_VERSION,
             "certification_id": certification_id,
             "certified_at": certified_at.isoformat(),
-            "certifier": {
-                "username": identity.username,
-                "role": identity.role,
-                "typed_full_name": body.signer_full_name,
-                "typed_title": body.signer_title,
-            },
+            "certifier": _certifier_block(identity, body),
             "intent_statement": INTENT_STATEMENT,
             "scope_statement": SIGNATURE_SCOPE_STATEMENT,
             "attestation_text": body.attestation,
@@ -549,6 +630,7 @@ def certify(
                 "metric_value_ids": ids,
                 "attestation": body.attestation,
                 "certified_by_role": identity.role,
+                **identity.audit_actor_detail(),
                 "signer_full_name": body.signer_full_name,
                 "signer_title": body.signer_title,
                 "key_fingerprint": signer.key_fingerprint,

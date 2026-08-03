@@ -16,6 +16,7 @@ import {
 import {
   blockingIssue,
   dashboardValues,
+  dqCountsFor,
   resolvedIssue,
   warningIssue,
 } from "./fixtures";
@@ -27,11 +28,16 @@ import {
 } from "../reports/granularity";
 
 function mockDashboard() {
+  const issues = [blockingIssue, warningIssue, resolvedIssue];
   return mockApi({
     "GET /metrics/values": { status: 200, body: dashboardValues },
-    "GET /dq/issues": {
-      status: 200,
-      body: [blockingIssue, warningIssue, resolvedIssue],
+    // The DQ card reads the server's whole-queue counts (handoff 0030) —
+    // one call per unresolved status; the queue itself is never downloaded.
+    "GET /dq/issues/counts": (call) => {
+      const status = new URL(call.url, "http://test").searchParams.get(
+        "status",
+      );
+      return { status: 200, body: dqCountsFor(issues, status) };
     },
   });
 }
@@ -120,8 +126,10 @@ describe("/dashboard", () => {
         name: "Unresolved data-quality issues by severity",
       })
       .closest("section") as HTMLElement;
+    // findBy: the tallies land on their own counts request (handoff 0030),
+    // not with the figures — never assume which response painted first.
     expect(
-      within(dqCard).getByRole("img", { name: "Blocking: 1 open issue" }),
+      await within(dqCard).findByRole("img", { name: "Blocking: 1 open issue" }),
     ).toBeInTheDocument();
     expect(
       within(dqCard).getByRole("img", { name: "Warning: 1 owned issue" }),
@@ -354,9 +362,10 @@ describe("/dashboard", () => {
     expect(within(serviceCard).queryByText("11111.10")).not.toBeInTheDocument();
     expect(within(serviceCard).getByText("12345.60")).toBeInTheDocument();
 
-    // DQ card: the warning issue (created 2026-03-06) is outside the slice.
-    // It is NOT silently gone — the held-back count is stated — and the
-    // blocking issue inside the slice still shows.
+    // DQ card (handoff 0030): the tallies are the server's whole-queue
+    // counts and the date slice does NOT apply to them — with a date
+    // filter active the card SAYS so, instead of a client-side slice that
+    // could only have counted downloaded rows.
     const dqCard = screen
       .getByRole("heading", {
         name: "Unresolved data-quality issues by severity",
@@ -366,11 +375,9 @@ describe("/dashboard", () => {
       within(dqCard).getByRole("img", { name: "Blocking: 1 open issue" }),
     ).toBeInTheDocument();
     expect(
-      within(dqCard).queryByRole("img", { name: "Warning: 1 owned issue" }),
-    ).not.toBeInTheDocument();
-    expect(dqCard).toHaveTextContent(
-      copy.dashboard.filters.dqOutsideRange("1"),
-    );
+      within(dqCard).getByRole("img", { name: "Warning: 1 owned issue" }),
+    ).toBeInTheDocument();
+    expect(dqCard).toHaveTextContent(copy.dashboard.dq.wholeQueueNote);
 
     await expectNoAxeViolations();
   });
@@ -379,7 +386,7 @@ describe("/dashboard", () => {
     signInAs("viewer");
     mockApi({
       "GET /metrics/values": { status: 200, body: dashboardValues },
-      "GET /dq/issues": {
+      "GET /dq/issues/counts": {
         status: 503,
         body: { detail: "The data-quality service is unavailable." },
       },

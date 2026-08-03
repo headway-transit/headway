@@ -12,6 +12,10 @@ This directory is the **single connector boundary** (ADR-0006): every connector 
 | `demand-response-trip.v0.md` | Field semantics, regulatory pointers, and the worked Via-style CSV export mapping example for `demand_response_trip` v0. |
 | `adapter-mapping.v0.schema.json` | The machine-validated format of vendor adapter mapping specs (`adapters/<vendor>/<product>/mapping.v0.yaml`, handoff 0015) — declarative vendor-export → open-contract mappings. |
 | `adapter-mapping.v0.md` | Field semantics of the mapping-spec format, the declared-timezone and provenance rules (agency-sample-only, never vendor documentation), and the runtime guarantees. |
+| `adapter-resolution.v0.schema.json` | The machine-validated format of per-agency trip-resolution specs (`adapters/<vendor>/<product>/resolution.v0.yaml`, handoff 0031) — how a vendor export's own trip identifier is matched against the agency's GTFS schedule, declaratively. |
+| `adapter-resolution.v0.md` | Field semantics of the resolution-spec format: the measured join key, the three explicit outcomes (resolved / ambiguous / unmatched), the direction refusal rule, the service-day rollover declaration, and the vendor-identifier preservation guarantee. |
+| `fleet-telematics.v0.schema.json` | One vehicle-day measurement series (distance or engine time, on one explicit measurement basis) from a fleet-telematics system — the canonical record derived from `raw.telematics.vehicle_stats` (handoff 0028). |
+| `fleet-telematics.v0.md` | Field semantics, the honesty wall (telematics distance is NOT revenue miles, engine/duty time is NOT revenue hours), the Samsara adapter derived from the vendor's published OpenAPI spec, and the vendor-neutrality argument. |
 
 ## Invariants (binding on every connector)
 

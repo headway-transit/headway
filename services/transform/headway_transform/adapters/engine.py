@@ -25,7 +25,10 @@ normalizers:
   the raw vendor record PLUS an adapter edge (transform_name
   ``adapter:<source_label>``, transform_version = the mapping spec's content
   hash) — "explain this number" can name the exact spec version that mapped
-  the row;
+  the row; a row whose trip was RESOLVED against the schedule carries a third
+  edge to the canonical trip it resolved to, stamped with the resolution
+  config's content hash, because a resolved trip id is a derived fact and
+  must be traceable to the schedule and the configuration that produced it;
 - **determinism**: same file bytes + same spec bytes => byte-identical
   output, so Kafka redelivery re-derives identical rows/edges/findings and
   the migration-0023 idempotent writes add nothing new.
@@ -38,6 +41,7 @@ nonexistent (DST spring-forward) in that zone quarantines the row.
 from __future__ import annotations
 
 import csv
+import dataclasses
 import io
 from dataclasses import dataclass, field as dc_field
 from datetime import date, datetime, timezone
@@ -53,7 +57,22 @@ from ..model import (
     LineageEdge,
 )
 from ..row_guard import field_problems, iter_rows
-from .spec import DR_CONTRACT_VALIDATOR, TARGET_DR, TARGET_TIDES, FieldDef, MappingSpec
+from .resolution import (
+    RESOLVED,
+    StopOutcome,
+    TripOutcome,
+    TripResolver,
+    resolution_findings,
+)
+from .spec import (
+    ASSIGNED_CLASSIFICATION,
+    DR_CONTRACT_VALIDATOR,
+    TARGET_DR,
+    TARGET_TIDES,
+    UNASSIGNED_CLASSIFICATION,
+    FieldDef,
+    MappingSpec,
+)
 
 #: Exact distance conversion factors to statute miles. 1 international mile =
 #: 1609.344 m exactly (NIST SP 811 Appendix B — verify against the published
@@ -78,6 +97,10 @@ _TIDES_COLUMNS = (
     "vehicle_id",
     "trip_id_performed",
     "event_count",
+    # Handoff 0040: the assignment status carried on the one-row contract CSV
+    # so the tides_passenger_events normalizer stamps it onto the canonical
+    # row ('assigned' | 'unassigned'; absent = NULL, the pre-0040 rows).
+    "revenue_classification",
 )
 _DR_COLUMNS = (
     "dr_trip_id",
@@ -127,6 +150,10 @@ class AdapterRunResult:
     mapped_count: int = 0
     quarantined_count: int = 0
     filtered_count: int = 0
+    #: Trip-resolution outcome per MAPPED ROW (empty when no resolver ran).
+    #: One entry per row, not per emitted record: a stop visit resolves once.
+    trip_outcomes: list[TripOutcome] = dc_field(default_factory=list)
+    stop_outcomes: list[StopOutcome] = dc_field(default_factory=list)
     #: True when a file-level defect (undecodable bytes, missing source
     #: columns) blocked the whole file before row accounting began.
     file_refused: bool = False
@@ -147,6 +174,13 @@ class AdapterRunResult:
     def emitted_count(self) -> int:
         """Contract records emitted (== mapped rows for specs without emit)."""
         return len(self.records)
+
+    def resolution_counts(self) -> dict[str, int]:
+        """Rows per trip-resolution outcome (empty when none ran)."""
+        counts: dict[str, int] = {}
+        for outcome in self.trip_outcomes:
+            counts[outcome.status] = counts.get(outcome.status, 0) + 1
+        return counts
 
 
 def rfc3339(dt: datetime) -> str:
@@ -272,16 +306,24 @@ def _map_row(
     fields: tuple[FieldDef, ...],
     row: dict,
     problems: list[str],
+    drop_fields: frozenset[str] = frozenset(),
 ) -> dict[str, object]:
     """Map one kept vendor row to a typed contract record (may add problems).
 
     ``fields`` is the field set to apply: ``spec.fields`` for classic
     one-record specs, or an emission's merged effective fields under ``emit``
-    fan-out.
+    fan-out. ``drop_fields`` (handoff 0040) names target fields dropped for a
+    no-run row — a ghost boarding has no trip, stop or stop-sequence to map,
+    so those fields are left absent (NULL), never guessed. Dropping is atomic
+    with the ``revenue_classification`` stamp the caller injects: the two
+    together are what makes a no-run row a valid unassigned event instead of
+    a quarantine.
     """
     typed: dict[str, object] = {}
 
     for fd in fields:
+        if fd.target in drop_fields:
+            continue  # no-run row: this run-identity field is absent (handoff 0040)
         if fd.kind == "from":
             raw = (row.get(fd.source) or "").strip()
             if raw == "":
@@ -293,7 +335,7 @@ def _map_row(
             typed[fd.target] = fd.const
 
     for fd in fields:
-        if fd.kind != "derived":
+        if fd.kind != "derived" or fd.target in drop_fields:
             continue
         if fd.derived == "concat":
             parts = [(row.get(col) or "").strip() for col in fd.sources]
@@ -377,8 +419,30 @@ def _validate_record(
     return rows, edges, None
 
 
+def _drop_optional_header(reader, columns: tuple[str, ...]):
+    """Yield rows from a headerless DictReader, dropping a first row whose
+    values are exactly the declared ``columns`` (an optional column-name
+    header). Only the literal header is skipped: a real data row is never
+    dropped, because its values would not all equal the column names. A
+    header-only file yields nothing (handled downstream as "no data rows").
+
+    csv.Error raised while pulling a row propagates unchanged, so the
+    row_guard.iter_rows per-row error capture still applies to every row."""
+    try:
+        first = next(reader)
+    except StopIteration:
+        return
+    if not all((first.get(c) or "").strip() == c for c in columns):
+        yield first
+    yield from reader
+
+
 def run_adapter(
-    spec: MappingSpec, file_bytes: bytes, record_id: str, source: str
+    spec: MappingSpec,
+    file_bytes: bytes,
+    record_id: str,
+    source: str,
+    resolver: Optional[TripResolver] = None,
 ) -> AdapterRunResult:
     """Execute one mapping spec over one vendor file's original bytes.
 
@@ -387,12 +451,39 @@ def run_adapter(
     be the label the spec is registered under — the caller (registry lookup)
     guarantees it, and the engine refuses a mismatch rather than mislabel
     provenance.
+
+    ``resolver`` is the optional per-agency trip resolver (handoff 0031),
+    bound to a schedule index by the caller. Without one — the default, and
+    the state of every adapter before an agency configures resolution — the
+    vendor's trip identifier is carried through exactly as before. With one
+    that is not yet confirmed by the agency, nothing resolves and the refusal
+    is recorded once for the file.
     """
     if source != spec.source_label:
         raise ValueError(
             f"envelope source {source!r} does not match the spec's registered "
             f"source_label {spec.source_label!r} — refusing to mislabel provenance"
         )
+    if resolver is not None and resolver.spec.source_label != source:
+        raise ValueError(
+            f"resolution config for {resolver.spec.source_label!r} was handed "
+            f"a {source!r} file — refusing to resolve one vendor's rows with "
+            "another's key"
+        )
+    if resolver is not None and spec.target_contract != TARGET_TIDES:
+        raise ValueError(
+            f"trip resolution is configured for {source!r} but its mapping "
+            f"spec targets {spec.target_contract!r}; only "
+            f"{TARGET_TIDES!r} carries a performed-trip identifier"
+        )
+    if resolver is not None and not resolver.active:
+        # The agency has not confirmed the direction convention. Refusing is
+        # the specified behaviour (handoff 0031, design point 5): map the
+        # file exactly as before and say once, in plain words, what is
+        # missing. Never a half-configured resolution.
+        result = run_adapter(spec, file_bytes, record_id, source, None)
+        result.findings.append(resolver.refusal_finding(record_id, source))
+        return result
 
     result = AdapterRunResult(
         source_label=source,
@@ -450,9 +541,14 @@ def run_adapter(
             stream, delimiter=spec.delimiter, quotechar=spec.quotechar
         )
         header = reader.fieldnames or []
-        missing = sorted(
-            spec.source_columns() - {(h or "").strip() for h in header}
-        )
+        # The resolution config reads raw source columns too (the direction
+        # key, the stop code). They are part of "does this file match the
+        # registered export format?" — a file missing them would resolve
+        # nothing for a reason no one could see.
+        needed = spec.source_columns()
+        if resolver is not None:
+            needed = needed | resolver.spec.required_source_columns()
+        missing = sorted(needed - {(h or "").strip() for h in header})
         if missing:
             return _refuse_file(
                 "adapter_source_mismatch",
@@ -475,12 +571,73 @@ def run_adapter(
             delimiter=spec.delimiter,
             quotechar=spec.quotechar,
         )
+        if spec.skip_optional_header:
+            # Tolerate an optional column-name header: an SSMS/warehouse
+            # export made WITH the header row and one made WITHOUT it both
+            # process. Only a FIRST row that IS exactly the declared columns
+            # is dropped — a real data row is never lost (its values would
+            # not all equal the column names).
+            reader = _drop_optional_header(reader, spec.columns)
 
     filtered_by: dict[int, int] = {}
     # (emission index, predicate index) -> suppressed-emission count.
     suppressed_by: dict[tuple[int, int], int] = {}
+    # Handoff 0040: rows emitted as no-run 'unassigned' boardings (never
+    # filtered, never quarantined) — counted so the ~3.3% ghost share is
+    # visible at a glance, the aggregated info finding at the file's end.
+    unassigned_rows = 0
 
-    def _accept(record: dict, rows: list, edges: list[LineageEdge]) -> None:
+    def _classification(row: dict) -> Optional[str]:
+        """The assignment status for one kept row (handoff 0040), or None.
+
+        None when the spec declares no ``unassigned`` block (pre-0040
+        behavior — revenue_classification left absent on every row). With the
+        block: 'unassigned' when ALL its ``when`` predicates hold (a no-run
+        row), else 'assigned' (a normal row explicitly marked as such — the
+        spec that classifies no-run rows also states the rest are assigned).
+        """
+        if spec.unassigned is None:
+            return None
+        if all(pred.keeps(row) for pred in spec.unassigned.when):
+            return UNASSIGNED_CLASSIFICATION
+        return ASSIGNED_CLASSIFICATION
+
+    def _resolve(row: dict, record: dict) -> Optional[TripOutcome]:
+        """Resolve ONE mapped vendor row's trip and stop, once."""
+        if resolver is None:
+            return None
+        outcome = resolver.resolve_trip(row, record)
+        result.trip_outcomes.append(outcome)
+        stop_outcome = resolver.resolve_stop(row)
+        if stop_outcome is not None:
+            result.stop_outcomes.append(stop_outcome)
+        return outcome
+
+    def _accept(
+        record: dict,
+        rows: list,
+        edges: list[LineageEdge],
+        outcome: Optional[TripOutcome] = None,
+    ) -> None:
+        if outcome is not None:
+            # Resolution is a NORMALIZATION step, applied to the canonical
+            # row after the target contract validated the record the vendor
+            # actually gave us. The contract record keeps the vendor's
+            # trip_id_performed — that IS what the operator performed — and
+            # the canonical row records what Headway made of it.
+            rows = [
+                dataclasses.replace(
+                    row_obj,
+                    trip_id=(
+                        outcome.trip_id
+                        if outcome.status == RESOLVED
+                        else row_obj.trip_id
+                    ),
+                    vendor_trip_ref=outcome.vendor_ref or row_obj.trip_id,
+                    trip_resolution=outcome.status,
+                )
+                for row_obj in rows
+            ]
         result.records.append(record)
         if spec.target_contract == TARGET_DR:
             result.dr_trips.extend(rows)
@@ -498,6 +655,18 @@ def run_adapter(
                     input_id=record_id,
                 )
             )
+            if outcome is not None and outcome.status == RESOLVED:
+                assert resolver is not None and outcome.trip_id is not None
+                result.edges.append(
+                    LineageEdge(
+                        output_kind=edges[0].output_kind,
+                        output_id=row_obj.output_id,
+                        transform_name=resolver.spec.transform_name,
+                        transform_version=resolver.spec.spec_sha12,
+                        input_kind="canonical.trips",
+                        input_id=outcome.trip_id,
+                    )
+                )
 
     for index, row, parse_error in iter_rows(reader):
         result.total_rows += 1
@@ -541,20 +710,49 @@ def run_adapter(
         if not kept:
             continue
 
+        # Handoff 0040: classify the row's assignment status before mapping.
+        # A no-run row is 'unassigned' — its run-identity fields are dropped
+        # and it does NOT resolve (there is no trip to resolve); a normal row
+        # is 'assigned'. None when the spec declares no unassigned block.
+        classification = _classification(row)
+        drop_fields = (
+            frozenset(spec.unassigned.drop_fields)
+            if classification == UNASSIGNED_CLASSIFICATION
+            and spec.unassigned is not None
+            else frozenset()
+        )
+        if classification == UNASSIGNED_CLASSIFICATION:
+            unassigned_rows += 1
+
+        def _stamp(record: dict) -> dict:
+            """Inject the assignment status onto a mapped record (handoff
+            0040), leaving the record untouched when the spec has no
+            unassigned block — the pre-0040 output is byte-identical."""
+            if classification is None:
+                return record
+            return {**record, "revenue_classification": classification}
+
         if not spec.emissions:
             # Classic path: exactly one contract record per kept row.
             problems: list[str] = []
-            typed = _map_row(spec, spec.fields, row, problems)
+            typed = _map_row(spec, spec.fields, row, problems, drop_fields)
             if problems:
                 _quarantine(index, problems)
                 continue
-            record = _json_record(typed)
+            record = _stamp(_json_record(typed))
             rows, edges, reject = _validate_record(spec, record, record_id, source)
             if reject is not None:
                 _quarantine(index, [reject])
                 continue
             result.mapped_count += 1
-            _accept(record, rows, edges)
+            # A no-run row has no trip to resolve — resolution is skipped, so
+            # trip_id stays absent and no false 'unmatched' finding is raised.
+            outcome = (
+                None
+                if classification == UNASSIGNED_CLASSIFICATION
+                else _resolve(row, record)
+            )
+            _accept(record, rows, edges, outcome)
             continue
 
         # Fan-out (`emit`): zero or more records per kept row, one per
@@ -578,14 +776,14 @@ def run_adapter(
             all_suppressed = False
             emission_problems: list[str] = []
             typed = _map_row(
-                spec, emission.effective_fields, row, emission_problems
+                spec, emission.effective_fields, row, emission_problems, drop_fields
             )
             if emission_problems:
                 problems.extend(
                     f"emission {emission.name!r}: {p}" for p in emission_problems
                 )
                 continue
-            record = _json_record(typed)
+            record = _stamp(_json_record(typed))
             rows, edges, reject = _validate_record(spec, record, record_id, source)
             if reject is not None:
                 problems.append(f"emission {emission.name!r}: {reject}")
@@ -603,8 +801,18 @@ def run_adapter(
             _quarantine(index, problems)
             continue
         result.mapped_count += 1
+        # Resolution is per ROW, not per emission: a boarding and an
+        # alighting recorded at the same stop visit are the same trip, and
+        # resolving twice could not disagree without being a bug. A no-run
+        # ('unassigned') row has no trip to resolve — skip resolution so
+        # trip_id stays absent and no false 'unmatched' finding is raised.
+        outcome = (
+            None
+            if classification == UNASSIGNED_CLASSIFICATION
+            else _resolve(row, pending[0][0])
+        )
         for record, rows, edges in pending:
-            _accept(record, rows, edges)
+            _accept(record, rows, edges, outcome)
 
     for (e_idx, p_idx), count in sorted(suppressed_by.items()):
         emission = spec.emissions[e_idx]
@@ -652,6 +860,51 @@ def run_adapter(
                     "recorded — never a silent drop."
                 ),
                 source_record_ids=[record_id],
+            )
+        )
+
+    if unassigned_rows and spec.unassigned is not None:
+        # Handoff 0040: the no-run boardings are EMITTED, marked 'unassigned',
+        # never dropped — the ~3.3% ghost share the earlier quarantine lost.
+        # Aggregated (one finding per file, not per row) with the count so the
+        # share is visible at a glance; the calc library, not the transform,
+        # decides which of these are non-revenue prep and which are real
+        # catch-up riders.
+        result.findings.append(
+            DQFinding(
+                issue_type="adapter_unassigned_boardings_emitted",
+                severity=SEVERITY_INFO,
+                title=(
+                    f"Adapter {source} emitted {unassigned_rows} no-run "
+                    "boarding row(s) for revenue classification"
+                ),
+                description=(
+                    f"Record {record_id} (adapter {source}, spec "
+                    f"{spec.spec_sha12}): {unassigned_rows} of "
+                    f"{result.total_rows} row(s) carried no run assignment at "
+                    "all and were emitted as passenger events marked "
+                    f"revenue_classification 'unassigned' — {spec.unassigned.reason} "
+                    "These are NOT dropped and NOT silently counted: a vehicle "
+                    "not logged into a run is not in revenue service (2026 NTD "
+                    "Policy Manual p. 128), so the calc library excludes the "
+                    "non-revenue prep/pull-in boardings from Unlinked "
+                    "Passenger Trips and routes the genuinely ambiguous "
+                    "mid-service ones to a human — never the transform, which "
+                    "records the assignment status only, never the reported "
+                    "number."
+                ),
+                source_record_ids=[record_id],
+            )
+        )
+
+    if resolver is not None:
+        result.findings.extend(
+            resolution_findings(
+                resolver.spec,
+                source,
+                record_id,
+                result.trip_outcomes,
+                result.stop_outcomes,
             )
         )
 

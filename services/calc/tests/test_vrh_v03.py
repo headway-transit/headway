@@ -121,7 +121,11 @@ def test_within_trip_gap_excludes_the_whole_block_group():
     assert len(result.warnings) == 1
     warning = result.warnings[0]
     assert warning.issue_type == "telemetry_gap_excluded"
-    assert "block blk-1" in warning.title
+    # Route, vehicle, when (handoff 0032): the title leads with the vehicle
+    # handle; block and trip ids stay in the description and subject.
+    assert "Vehicle veh-1" in warning.title
+    assert "telemetry silence" in warning.title
+    assert "block blk-1" in warning.description
     # ALL of the block group's records are cited, both trips.
     assert set(warning.source_record_ids) == {p.source_record_id for p in positions}
 
@@ -151,7 +155,9 @@ def test_block_unavailable_infos_group_per_vehicle_day():
     assert [i.issue_type for i in result.infos] == ["block_unavailable"] * 3
     assert all(i.severity == "info" for i in result.infos)
     by_title = {
-        ("veh-1" in i.title, "2026-01-15" in i.title, "2026-01-16" in i.title): i
+        # Titles read 'Jan 15' (handoff 0032 house style); the ISO date
+        # stays in the description.
+        ("veh-1" in i.title, "Jan 15" in i.title, "Jan 16" in i.title): i
         for i in result.infos
     }
     veh1_day1 = by_title[(True, True, False)]

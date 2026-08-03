@@ -67,6 +67,12 @@ class Envelope:
     parse_error: str | None = None
     agency_id: str | None = None
     feed_url: str | None = None
+    #: Additive (handoff 0036): the object-store key where the payload bytes
+    #: are ALSO durably stored. Present on base64 envelopes whose connector
+    #: landed the bytes before producing (GTFS-Realtime store-before-produce);
+    #: the raw.records row for such an envelope registers the durable address
+    #: (payload_encoding='object_ref', payload_ref=<this key>).
+    payload_ref: str | None = None
 
     def decode_payload(self) -> bytes:
         """Return the raw payload bytes for a base64-encoded envelope.
@@ -118,6 +124,7 @@ def validate_envelope(document: object) -> Envelope:
         parse_error=document.get("parse_error"),
         agency_id=document.get("agency_id"),
         feed_url=document.get("feed_url"),
+        payload_ref=document.get("payload_ref"),
     )
 
 

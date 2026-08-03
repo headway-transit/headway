@@ -27,12 +27,15 @@ from . import (
     dr_trips,
     gtfs_rt_positions,
     gtfs_static,
+    telematics_vehicle_days,
     tides_passenger_events,
     trip_updates,
 )
 from .adapters import AdapterRegistry, run_adapter
+from .adapters.resolution import TripResolver
 from .envelope import Envelope, EnvelopeValidationError, parse_envelope
 from .model import SEVERITY_BLOCKING, SEVERITY_WARNING, DQFinding
+from .schedule_index import load_schedule_index
 from .writer import DbWriter
 
 logger = logging.getLogger(__name__)
@@ -43,6 +46,7 @@ TOPIC_GTFS_STATIC_FEED = "raw.gtfs_static.feed"
 TOPIC_TIDES_PASSENGER_EVENTS = "raw.tides.passenger_events"
 TOPIC_DR_TRIPS = "raw.dr.trips"
 TOPIC_VENDOR_FILES = "raw.vendor.files"
+TOPIC_TELEMATICS_VEHICLE_STATS = "raw.telematics.vehicle_stats"
 
 # Fetches object-store bytes for payload_encoding='object_ref' envelopes
 # (GTFS static zips, TIDES passenger_events CSVs). Injected; the consumer
@@ -173,14 +177,24 @@ def _handle_gtfs_static(
     else:
         zip_bytes = envelope.decode_payload()
 
-    routes, trips, stops, stop_times, agencies, edges, findings = (
-        gtfs_static.normalize(zip_bytes, envelope.record_id)
-    )
+    (
+        routes,
+        trips,
+        stops,
+        stop_times,
+        agencies,
+        service_calendars,
+        service_calendar_dates,
+        edges,
+        findings,
+    ) = gtfs_static.normalize(zip_bytes, envelope.record_id)
     writer.upsert_routes(routes)
     writer.upsert_trips(trips)
     writer.upsert_stops(stops)
     writer.upsert_stop_times(stop_times)
     writer.upsert_agencies(agencies)
+    writer.upsert_service_calendars(service_calendars)
+    writer.upsert_service_calendar_dates(service_calendar_dates)
     writer.insert_lineage_edges(edges)
     writer.insert_dq_issues(findings)
 
@@ -363,11 +377,60 @@ def _handle_vendor_file(
     if file_bytes is None:
         return
 
-    result = run_adapter(spec, file_bytes, envelope.record_id, envelope.source)
+    # Trip resolution (handoff 0031): opt-in per agency via a
+    # resolution.v0.yaml next to the mapping spec. The schedule index is
+    # read PER FILE from the same connection the writer holds — a static
+    # feed upserted five minutes ago must be what this file resolves
+    # against, never a stale process-lifetime cache. An adapter without a
+    # resolution config maps exactly as before (resolver None); one whose
+    # direction convention the agency has not confirmed refuses inside
+    # run_adapter with a finding, never a guess.
+    resolver = None
+    resolution_spec = adapter_registry.lookup_resolution(envelope.source)
+    if resolution_spec is not None:
+        resolver = TripResolver(
+            resolution_spec, load_schedule_index(writer.connection)
+        )
+
+    result = run_adapter(
+        spec, file_bytes, envelope.record_id, envelope.source, resolver
+    )
     writer.insert_passenger_events(result.passenger_events)
     writer.insert_dr_trips(result.dr_trips)
     writer.insert_lineage_edges(result.edges)
     writer.insert_dq_issues(result.findings)
+
+
+def _handle_telematics_vehicle_stats(
+    writer: DbWriter,
+    envelope: Envelope,
+    object_fetcher: Optional[ObjectFetcher],
+    service_day_tz: Optional[str],
+) -> None:
+    """Route a raw.telematics.vehicle_stats page through its normalizer.
+
+    Two fail-closed refusals live in the normalizer, not here, so they are
+    recorded as dq.issues rows against the raw record: an UNREGISTERED source
+    label (handoff 0015 rule) and an UNDECLARED service-day timezone (a
+    service date is a local wall date and is never derived from a guessed
+    zone). Both leave the raw record retained and write zero canonical rows.
+    """
+    page_bytes = _fetch_file_payload(
+        writer, envelope, object_fetcher, "Telematics page"
+    )
+    if page_bytes is None:
+        return
+
+    rows, edges, findings = telematics_vehicle_days.normalize(
+        page_bytes,
+        envelope.record_id,
+        envelope.source,
+        envelope.fetched_at,
+        service_day_tz,
+    )
+    writer.insert_telematics_days(rows)
+    writer.insert_lineage_edges(edges)
+    writer.insert_dq_issues(findings)
 
 
 def process_message(
@@ -376,6 +439,7 @@ def process_message(
     value: bytes,
     object_fetcher: Optional[ObjectFetcher] = None,
     adapter_registry: Optional[AdapterRegistry] = None,
+    telematics_service_day_tz: Optional[str] = None,
 ) -> None:
     """Process one message: validate, land raw record, route, normalize, write.
 
@@ -405,6 +469,10 @@ def process_message(
         _handle_dr_trips(writer, envelope, object_fetcher)
     elif topic == TOPIC_VENDOR_FILES:
         _handle_vendor_file(writer, envelope, object_fetcher, adapter_registry)
+    elif topic == TOPIC_TELEMATICS_VEHICLE_STATS:
+        _handle_telematics_vehicle_stats(
+            writer, envelope, object_fetcher, telematics_service_day_tz
+        )
     else:
         logger.warning("no normalizer for topic %s", topic)
         writer.insert_dq_issues(
@@ -430,6 +498,7 @@ def run_loop(
     object_fetcher: Optional[ObjectFetcher] = None,
     max_messages: Optional[int] = None,
     adapter_registry: Optional[AdapterRegistry] = None,
+    telematics_service_day_tz: Optional[str] = None,
 ) -> int:
     """Consume messages until the source yields None (or max_messages).
 
@@ -444,7 +513,14 @@ def run_loop(
             break
         topic, _key, value = polled
         try:
-            process_message(writer, topic, value, object_fetcher, adapter_registry)
+            process_message(
+                writer,
+                topic,
+                value,
+                object_fetcher,
+                adapter_registry,
+                telematics_service_day_tz,
+            )
             writer.connection.commit()
         except Exception as exc:  # noqa: BLE001 — quarantine path, never a bare pass
             logger.exception("message on %s failed; quarantining", topic)

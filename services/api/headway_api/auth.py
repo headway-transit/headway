@@ -1,19 +1,30 @@
-"""Local-account authentication (ADR-0011).
+"""Authentication: local accounts, and the session token both paths mint.
 
-This slice ships LOCAL ACCOUNTS only. The native OIDC relying party
-(authorization-code + PKCE, per ADR-0011) is the NEXT increment and slots in
-behind the exact same normalized claim set this module produces:
+ADR-0011 chose a native OIDC relying party PLUS local accounts. Both now
+exist. This module owns local accounts and the normalized claim set; the
+relying party lives in ``oidc.py`` + ``routers/oidc.py`` and produces the
+SAME claim set, so nothing downstream can tell the two apart:
 
-    {sub, username, role}
+    {sub, username, role, jti, idp_issuer?, idp_subject?}
 
 Everything downstream (authz.py, the routers, audit actor attribution)
-consumes only that claim set, so adding the OIDC RP is a new token *source*,
-not a rework of authorization.
+consumes only that claim set, so OIDC is a new token *source*, not a rework
+of authorization.
+
+LOCAL ACCOUNTS SURVIVE, PERMANENTLY (handoff 0046). OIDC is beside them,
+never instead of them: an installation with no internet or an IdP having a
+bad morning must still be operable; the first OIDC configuration attempt will
+be wrong and there must be a way in that does not depend on it; and
+``install.sh --reset-admin-password`` keeps working. Nothing in the OIDC path
+can disable this one.
 
 NOTE — auth.users is NOT part of handoff 0001's schema contract. It is added
 by migration ``db/migrations/0009_auth_users.sql`` with an explicit
 ``## Response — backend-engineer`` section appended to that handoff (schema
-handoffs require explicit responses, not silent extension).
+handoffs require explicit responses, not silent extension). Migration 0043
+adds the federation columns and makes ``password_hash`` nullable, because a
+federated account has no password and a dummy hash would be a lie a future
+reader could mistake for a credential.
 
 Password hashing: **bcrypt** (the ``bcrypt`` PyPI package, Apache-2.0 license
 — OSI-approved permissive, satisfies ADR-0001). Session tokens: PyJWT (MIT),
@@ -24,7 +35,9 @@ expiry (30 minutes by default).
 from __future__ import annotations
 
 import datetime as dt
-from dataclasses import dataclass
+import re
+import secrets
+from dataclasses import dataclass, replace
 
 import bcrypt
 import jwt
@@ -37,7 +50,60 @@ from .db import get_db
 ALGORITHM = "HS256"
 DEFAULT_TOKEN_TTL_SECONDS = 30 * 60
 
-VALID_ROLES = ("viewer", "data_steward", "report_preparer", "certifying_official")
+#: Every role a session token may carry. ``auditor`` (handoff 0046 /
+#: migration 0042) reads broadly and writes nothing; it is NOT a rung on the
+#: authz ladder — see authz.py.
+VALID_ROLES = (
+    "viewer",
+    "data_steward",
+    "report_preparer",
+    "certifying_official",
+    "auditor",
+)
+
+#: Roles that may never perform a state-changing request, enforced below at
+#: the single authentication choke point. Kept here rather than imported from
+#: authz.py because authz imports this module (and because the ban must hold
+#: even if a future authz refactor forgets it).
+_NO_WRITE_ROLES = frozenset({"auditor"})
+
+#: HTTP methods that cannot change state. Everything else is a write.
+_SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+
+#: The ONLY state-changing routes a read-only role may still call. Deny-by-
+#: default still holds: a route absent from this tuple is refused, so a new
+#: endpoint cannot fall outside the guard by being forgotten — it can only be
+#: let out deliberately. ``test_auditor_role`` pins the membership COUNT, so
+#: adding an entry has to survive a review rather than ride along in a rebase.
+#:
+#: ``POST /raw/records/{id}/verify`` re-reads the stored bytes and compares
+#: their SHA-256 against the content address they are filed under. The write
+#: guard exists so that an auditor's account cannot alter WHAT THE AUDITOR IS
+#: REVIEWING — and verification alters nothing under review. Its side effects
+#: are an audit event and, on a mismatch, a blocking data-quality finding:
+#: both are records of an observation, never edits to the thing observed.
+#:
+#: An auditor who finds that stored bytes no longer match their content
+#: address has produced the most valuable finding this system is capable of.
+#: ``raw_payloads.py`` already promises them, in writing, that they "can
+#: still see this record's label and prove its bytes are unaltered"; refusing
+#: this POST made that promise false, for the one role whose whole job is
+#: verification (handoff 0047).
+#:
+#: ``/sandbox/preview`` is deliberately NOT here. Computing a what-if is not
+#: part of reviewing what already exists.
+_READ_ONLY_ROLE_WRITE_ALLOWLIST: tuple[tuple[str, re.Pattern[str]], ...] = (
+    # Path params never contain "/", so this cannot widen past the one route.
+    ("POST", re.compile(r"/raw/records/[^/]+/verify")),
+)
+
+
+def _is_allowlisted_write(method: str, path: str) -> bool:
+    """True only for a route this module names explicitly. Default is False."""
+    return any(
+        method == allowed_method and pattern.fullmatch(path) is not None
+        for allowed_method, pattern in _READ_ONLY_ROLE_WRITE_ALLOWLIST
+    )
 
 # bcrypt only reads the first 72 bytes of a password; longer input must be
 # rejected loudly, never silently truncated.
@@ -46,6 +112,13 @@ _BCRYPT_MAX_BYTES = 72
 
 class PasswordTooLong(ValueError):
     """Raised instead of silently truncating a >72-byte password."""
+
+
+#: A real bcrypt hash of a value nothing can be, so that a refusal for an
+#: account that does not exist — or one that has no local password — costs the
+#: same wall-clock as a refusal for a wrong password. Generated once at import,
+#: never compared against anything a caller controls the other side of.
+_DUMMY_HASH = bcrypt.hashpw(secrets.token_hex(32).encode("ascii"), bcrypt.gensalt())
 
 
 def hash_password(password: str) -> str:
@@ -58,7 +131,24 @@ def hash_password(password: str) -> str:
     return bcrypt.hashpw(raw, bcrypt.gensalt()).decode("ascii")
 
 
-def verify_password(password: str, password_hash: str) -> bool:
+def verify_password(password: str, password_hash: str | None) -> bool:
+    """Verify a password against a stored bcrypt hash.
+
+    ``password_hash is None`` is a FEDERATED account (migration 0043): it has
+    no password, so no password can ever match it. Returning False here (and
+    not raising) keeps the login surface's single generic refusal intact —
+    the caller cannot tell a federated account from a wrong password.
+
+    The comparison against ``_DUMMY_HASH`` in that case is NOT dead work. A
+    generic message and a fast answer are not the same guarantee: bcrypt at
+    this cost takes a few hundred milliseconds, so returning early would let
+    anyone sort usernames into "local account" and "everything else" with a
+    stopwatch — and the local accounts are the break-glass administrators.
+    Every refusal on this path costs the same as a real check.
+    """
+    if password_hash is None:
+        bcrypt.checkpw(password.encode("utf-8")[:_BCRYPT_MAX_BYTES], _DUMMY_HASH)
+        return False
     raw = password.encode("utf-8")
     if len(raw) > _BCRYPT_MAX_BYTES:
         # A password this long can never have been stored, so it can never match.
@@ -68,25 +158,83 @@ def verify_password(password: str, password_hash: str) -> bool:
 
 @dataclass(frozen=True)
 class Identity:
-    """The normalized claim set — identical for local accounts and, in the
-    next increment, for OIDC RP logins (ADR-0011)."""
+    """The normalized claim set — identical for local accounts and for OIDC
+    relying-party logins (ADR-0011).
 
-    sub: str  # auth.users.user_id (or, later, the OIDC subject)
+    ``idp_issuer`` / ``idp_subject`` are present ONLY for a federated
+    session, and they exist for the certification guardrail: under SSO the
+    audit trail must record who signed with at least the fidelity it had
+    before, which means the IdP subject AND the Headway username, never just
+    "an SSO user". A signature whose signer cannot be resolved years later —
+    after the person has left, the username has been reused, the tenant has
+    been migrated — is not a signature.
+
+    ``jti`` is this session's identifier. A fresh one is minted on every
+    login, which is what makes session fixation impossible: nothing the
+    browser held before signing in carries any authority afterwards.
+    """
+
+    sub: str  # auth.users.user_id (the Headway account, for both auth paths)
     username: str
     role: str
+    jti: str | None = None
+    idp_issuer: str | None = None
+    idp_subject: str | None = None
+
+    @property
+    def is_federated(self) -> bool:
+        return self.idp_subject is not None
+
+    def audit_actor_detail(self) -> dict:
+        """The signer/actor attribution to fold into an audit ``detail``.
+
+        Local sessions add nothing (the actor column already names them).
+        Federated sessions add BOTH IdP identifiers, so the trail answers
+        "who signed" without a lookup in a directory Headway does not own.
+        """
+        if not self.is_federated:
+            return {"authenticated_via": "local"}
+        return {
+            "authenticated_via": "oidc",
+            "idp_issuer": self.idp_issuer,
+            "idp_subject": self.idp_subject,
+        }
+
+
+def new_session_id() -> str:
+    """A fresh session identifier (JWT ``jti``). Minted per login, never reused."""
+    return secrets.token_urlsafe(24)
 
 
 def issue_token(
-    *, secret: str, sub: str, username: str, role: str, ttl_seconds: int
+    *,
+    secret: str,
+    sub: str,
+    username: str,
+    role: str,
+    ttl_seconds: int,
+    jti: str | None = None,
+    idp_issuer: str | None = None,
+    idp_subject: str | None = None,
 ) -> str:
+    """Mint a session token.
+
+    A NEW ``jti`` is generated whenever one is not supplied, so every call to
+    this function is a new session — there is no code path that re-issues a
+    caller's existing session identifier after authentication.
+    """
     now = dt.datetime.now(dt.timezone.utc)
     claims = {
         "sub": sub,
         "username": username,
         "role": role,
+        "jti": jti or new_session_id(),
         "iat": now,
         "exp": now + dt.timedelta(seconds=ttl_seconds),
     }
+    if idp_subject is not None:
+        claims["idp_issuer"] = idp_issuer
+        claims["idp_subject"] = idp_subject
     return jwt.encode(claims, secret, algorithm=ALGORITHM)
 
 
@@ -115,11 +263,124 @@ def decode_token(token: str, *, secret: str) -> Identity:
             detail="Your session is missing required account information. "
             "Please sign in again.",
         )
-    return Identity(sub=claims["sub"], username=claims["username"], role=role)
+    return Identity(
+        sub=claims["sub"],
+        username=claims["username"],
+        role=role,
+        jti=claims.get("jti"),
+        idp_issuer=claims.get("idp_issuer"),
+        idp_subject=claims.get("idp_subject"),
+    )
 
 
-def get_current_identity(request: Request) -> Identity:
-    """FastAPI dependency: the verified caller. 401 when absent/invalid."""
+#: The account as it is RIGHT NOW, not as it was when the token was minted.
+#: Keyed on username because that is how every account change in this API is
+#: addressed (``routers/users.py`` updates role, activation and password by
+#: username, and nothing renames one).
+_SELECT_LIVE_ACCOUNT = "SELECT role, is_active FROM auth.users WHERE username = %s"
+
+_ACCOUNT_GONE = HTTPException(
+    status_code=401,
+    detail=(
+        "The account this session belongs to no longer exists. Please sign in "
+        "again."
+    ),
+)
+
+_ACCOUNT_DEACTIVATED = HTTPException(
+    status_code=401,
+    detail=(
+        "This account has been deactivated, so the session it was using has "
+        "ended. If you believe this is a mistake, ask your Headway "
+        "administrator."
+    ),
+)
+
+
+def _live_account(db, identity: "Identity") -> "Identity":
+    """Re-read role and activation from the database on EVERY request.
+
+    THE WINDOW THIS CLOSES (handoff 0046, "still open"). A session token is a
+    signed snapshot of an account taken at sign-in, and nothing downstream ever
+    looked at the account again. So for the token's whole lifetime — thirty
+    minutes by default:
+
+    - **Deactivating an account did not end its session.** ``is_active`` was
+      read once, at login (see ``login`` below). Revoking access to someone who
+      has just left, or to an outside auditor whose engagement ended, appeared
+      to work and did not.
+    - **A demotion did not take effect.** Handoff 0046 disclosed this in the
+      response body and left it open; the token kept its old role.
+    - A promotion did not take effect either, which is only an annoyance, but
+      it has the same cause.
+
+    Reading the account per request is what makes all three immediate. The cost
+    is one indexed lookup on a request that is already going to the database —
+    every authenticated router in this API takes ``db`` — and correctness about
+    who someone is now is not a place to trade accuracy for a round trip.
+
+    THE DATABASE IS AUTHORITATIVE. When the stored role differs from the token's
+    the stored one is used, rather than refusing the request: a demotion should
+    narrow what someone can do, not log them out mid-form. The browser may
+    briefly offer an action the server will now refuse — a stale menu, and the
+    refusal that follows is the correct one.
+    """
+    row = db.execute(_SELECT_LIVE_ACCOUNT, (identity.username,)).fetchone()
+    if row is None:
+        raise _ACCOUNT_GONE
+    role, is_active = row[0], row[1]
+    if not is_active:
+        raise _ACCOUNT_DEACTIVATED
+    if role not in VALID_ROLES:
+        # A role this build does not know about is not a role to guess at.
+        raise HTTPException(
+            status_code=401,
+            detail=(
+                "This account's role is not one this version of Headway "
+                "recognizes, so the session cannot be trusted. Ask your "
+                "Headway administrator to check the account."
+            ),
+        )
+    if role == identity.role:
+        return identity
+    return replace(identity, role=role)
+
+
+def _enforce_human_rate_limit(request: Request, identity: "Identity") -> None:
+    """Bound how fast ONE signed-in account can drive this installation.
+
+    Absent limiter → no limit, matching how every other control in this API
+    tolerates a bare test app that builds no state (``machine_rate_limiter``,
+    ``login_audit_throttle``): fixtures that predate a control must exercise
+    the logic under test, not fail on the control.
+
+    Imported lazily to keep ``auth`` free of a machine_auth import cycle —
+    machine_auth already imports Identity from here.
+    """
+    limiter = getattr(request.app.state, "human_rate_limiter", None)
+    if limiter is None:
+        return
+    from .machine_auth import enforce_rate_limit
+
+    enforce_rate_limit(limiter, identity.username)
+
+
+def get_current_identity(request: Request, db=Depends(get_db)) -> Identity:
+    """FastAPI dependency: the verified caller. 401 when absent/invalid.
+
+    THE READ-ONLY-ROLE CHOKE POINT. Every authenticated endpoint in this API
+    resolves its caller here, so this is the one place that can refuse a
+    write for a read-only role and be certain nothing routes around it. An
+    ``auditor`` may issue GET/HEAD/OPTIONS, and beyond that only the routes
+    named in ``_READ_ONLY_ROLE_WRITE_ALLOWLIST``.
+
+    Handoff 0046 shipped this with NO allow-list, reasoning that refusing
+    purely by method is deny-by-default that a future endpoint cannot fall
+    outside of. That reasoning is sound and mostly survives: the allow-list
+    is closed, its membership is pinned by a test, and ``/sandbox/preview``
+    is still refused. What it got wrong was the integrity check — see the
+    allow-list above, and handoff 0047 for the argument.
+    """
     header = request.headers.get("Authorization", "")
     scheme, _, token = header.partition(" ")
     if scheme.lower() != "bearer" or not token.strip():
@@ -128,7 +389,46 @@ def get_current_identity(request: Request) -> Identity:
             detail="You are not signed in. Please sign in to use Headway.",
         )
     settings = request.app.state.settings
-    return decode_token(token.strip(), secret=settings.session_secret)
+    identity = decode_token(token.strip(), secret=settings.session_secret)
+    # The token says who this WAS at sign-in. The database says who they are
+    # now — and that is the answer every check below uses.
+    identity = _live_account(db, identity)
+    # PER ACCOUNT, not per address: a signed-in caller has a name, and a name
+    # is the thing worth bounding. Keying on the address instead would merge
+    # everyone behind one office router into a single allowance and let one
+    # account multiply itself across addresses. Placed here, at the one choke
+    # point every authenticated endpoint resolves through, so an endpoint
+    # added later cannot be added outside it.
+    _enforce_human_rate_limit(request, identity)
+    method = request.method.upper()
+    if (
+        identity.role in _NO_WRITE_ROLES
+        and method not in _SAFE_METHODS
+        # `request.url.path`, and NOTHING ELSE. Two properties make it the
+        # only safe argument, and both are load-bearing:
+        #   1. It is ALREADY PERCENT-DECODED by the ASGI server, so a
+        #      smuggled `%2F` is a real `/` by the time it arrives and
+        #      `[^/]+` refuses it. Hand this matcher an undecoded string —
+        #      scope["raw_path"], an X-Forwarded-Uri header — and
+        #      "..%2F..%2Fsandbox" is one slash-free segment that MATCHES,
+        #      opening every write in the API to a read-only role. Pinned by
+        #      test_the_allowlist_matcher_assumes_an_ALREADY_DECODED_path.
+        #   2. No root_path is configured on this app, so it is the route
+        #      path exactly as written in the routers.
+        and not _is_allowlisted_write(method, request.url.path)
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                f"Your account is signed in as an {identity.role}, which can "
+                f"read everything in Headway and change nothing in it. This "
+                f"action would change something, so Headway refuses it. That "
+                f"is deliberate: an auditor's account cannot alter what the "
+                f"auditor is reviewing. If your work also needs to change "
+                f"data, ask your Headway administrator for a separate account."
+            ),
+        )
+    return identity
 
 
 # ---------------------------------------------------------------------------
@@ -164,13 +464,29 @@ _BAD_CREDENTIALS = HTTPException(
 
 @router.post("/auth/login", response_model=LoginResponse)
 def login(body: LoginRequest, request: Request, db=Depends(get_db)) -> LoginResponse:
+    """Sign in with a local Headway account.
+
+    THIS PATH NEVER STOPS WORKING. It does not consult the OIDC
+    configuration, so a misconfigured provider, an unreachable IdP, or an
+    installation with no internet at all leaves it untouched — the
+    break-glass guarantee of handoff 0046.
+    """
     settings = request.app.state.settings
     row = db.execute(_SELECT_USER, (body.username,)).fetchone()
     if row is None:
-        # Same message as a wrong password: do not reveal which usernames exist.
+        # Same message as a wrong password, and the same cost. The message was
+        # always generic; without this the clock was not, and a username that
+        # exists locally could be told from one that does not by timing a
+        # single request. Nothing is audited here on purpose: there is no
+        # account to attribute it to, and an unauthenticated caller must not
+        # be able to write rows into audit.events by guessing names.
+        verify_password(body.password, None)
         raise _BAD_CREDENTIALS
     user_id, username, password_hash, role, is_active = row
     if not verify_password(body.password, password_hash):
+        # Covers a wrong password AND a federated account with no password
+        # (password_hash IS NULL, migration 0043) — one generic refusal, so
+        # the login surface never reveals how an account signs in.
         with db.transaction():
             write_event(
                 db,
@@ -178,7 +494,13 @@ def login(body: LoginRequest, request: Request, db=Depends(get_db)) -> LoginResp
                 action="login_failed",
                 subject_kind="auth.users",
                 subject_id=str(user_id),
-                detail={"reason": "wrong password"},
+                detail={
+                    "reason": (
+                        "no local password (federated account)"
+                        if password_hash is None
+                        else "wrong password"
+                    )
+                },
             )
         raise _BAD_CREDENTIALS
     if not is_active:
@@ -196,12 +518,16 @@ def login(body: LoginRequest, request: Request, db=Depends(get_db)) -> LoginResp
                 detail={"reason": "account deactivated"},
             )
         raise _BAD_CREDENTIALS
+    # A NEW session identifier for a NEW session — session fixation has no
+    # purchase here because no identifier survives the login.
+    session_id = new_session_id()
     token = issue_token(
         secret=settings.session_secret,
         sub=str(user_id),
         username=username,
         role=role,
         ttl_seconds=settings.token_ttl_seconds,
+        jti=session_id,
     )
     with db.transaction():
         write_event(
@@ -210,7 +536,7 @@ def login(body: LoginRequest, request: Request, db=Depends(get_db)) -> LoginResp
             action="login",
             subject_kind="auth.users",
             subject_id=str(user_id),
-            detail={"role": role},
+            detail={"role": role, "authenticated_via": "local"},
         )
     return LoginResponse(
         access_token=token,

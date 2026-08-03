@@ -160,7 +160,15 @@ describe("/admin — the hub", () => {
     await expectNoAxeViolations();
   });
 
-  it("SSO card is honest: designed-not-available, cites ADR-0011, and has NO toggle or setup control", async () => {
+  /**
+   * This test used to assert the card was HONEST about not existing
+   * ("designed, ADR-0011, not built"). Handoff 0046 built it, so the card
+   * is real — and the honesty rule now bites in a different place: the
+   * status line must be the LIVE state read from the server, never a claim,
+   * and the card must still say that local sign-in keeps working.
+   * The screen itself is covered in admin-sso.test.tsx.
+   */
+  it("SSO card shows the LIVE state and promises local sign-in keeps working", async () => {
     signInAs("certifying_official");
     mockApi({});
     renderApp("/admin");
@@ -169,17 +177,17 @@ describe("/admin — the hub", () => {
       name: "Single sign-on",
     });
     const card = ssoHeading.closest("section")!;
+    // The default fixture is a fresh installation: nothing configured.
+    expect(card).toHaveTextContent("Not set up yet");
     expect(card).toHaveTextContent(
-      "Single sign-on with Entra ID, Google, or Okta is designed for Headway but not available yet.",
+      "Headway accounts keep working alongside single sign-on, always.",
     );
-    expect(card).toHaveTextContent("ADR-0011");
-    expect(card).toHaveTextContent(
-      "every account is a local Headway account",
-    );
-    // Nothing pretends: no button, no checkbox, no switch, no input.
-    expect(within(card).queryAllByRole("button")).toEqual([]);
+    // Exactly one control, and it only opens the settings — nothing on the
+    // hub card acts on the configuration itself.
+    const controls = within(card).getAllByRole("button");
+    expect(controls).toHaveLength(1);
+    expect(controls[0]).toHaveAttribute("aria-expanded", "false");
     expect(within(card).queryAllByRole("checkbox")).toEqual([]);
-    expect(within(card).queryAllByRole("switch")).toEqual([]);
     expect(within(card).queryAllByRole("textbox")).toEqual([]);
   });
 

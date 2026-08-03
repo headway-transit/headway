@@ -49,6 +49,11 @@ export const copy = {
     data_steward: "data steward",
     report_preparer: "report preparer",
     certifying_official: "certifying official",
+    // Named explicitly rather than left to the `?? session.role` fallback in
+    // Layout.tsx. "auditor" happens to read correctly as a bare enum string;
+    // the next role added might not, and would reach a user looking like
+    // `certifying_official` (handoff 0047).
+    auditor: "auditor",
   } as Record<string, string>,
 
   nav: {
@@ -64,16 +69,160 @@ export const copy = {
     safety: "Safety & security",
     sampling: "PMT sampling",
     dq: "Data quality",
+    /** The revenue review queue (handoff 0040): every signed-in role can
+     *  read it; classifying is data-steward-grade (UX only — the API
+     *  enforces the role on the classify call). */
+    revenueReview: "Boardings to review",
     sandbox: "Settings sandbox",
     attestations: "Attestations",
     certifications: "Certifications",
     certify: "Certify",
+    /** The reviewer's own room (handoff 0047): shown to read-only roles,
+     *  who land there instead of /today. Any signed-in role may open it —
+     *  it is composed entirely of reads the API already allows everyone. */
+    review: "Review",
     /** The admin hub (handoff 0025): certifying official only (UX; the API
      *  enforces the role on every admin call). */
     admin: "Admin",
     /** Visible signed-in AND signed-out: the public page needs no account. */
     publicData: "Public data",
     signIn: "Sign in",
+  },
+
+  /**
+   * THE CONTROL-ROOM SHELL (handoff 0044, outputs 1 and 5).
+   *
+   * A compact command bar — brand, agency, the room you are in, and an "as
+   * computed" run stamp — over ONE dense navigation row. The long tail of
+   * rooms sits in named groups rather than in a command palette: the
+   * handoff's open question weighed a palette against grouped menus for an
+   * audience one week into Linux, and grouped menus won on discoverability.
+   *
+   * Every group is a real disclosure button (aria-expanded + aria-controls)
+   * over a list of ordinary links, so the keyboard path is the same one
+   * everything else in this app uses.
+   */
+  shell: {
+    /** The room you are in, named in the bar (screen-reader prefix only —
+     *  sighted users read the page's own h1). */
+    contextLabel: "Current page",
+    /** Named groups for the navigation tail. */
+    groups: {
+      reports: "Reports",
+      records: "Records",
+      tools: "Tools",
+    } as Record<string, string>,
+    groupHint: (group: string) => `${group} pages`,
+    groupCurrentHint: (group: string) =>
+      `${group} pages, and the page you are on is in this group`,
+    /**
+     * The "as computed" stamp: the newest calculation run on record, read
+     * from GET /calc-runs. It is a STAMP, never a figure — it says when
+     * this installation last computed, and says plainly when it cannot
+     * tell rather than showing a comforting blank.
+     */
+    stamp: {
+      label: "As computed",
+      checking: "reading the run record…",
+      /** No run has ever been recorded on this installation. */
+      none: "no calculation run on record",
+      /** A run is queued or running right now. */
+      inProgress: "a calculation run is in progress",
+      /** The run record could not be read — said, never hidden. */
+      unavailable: "run record unavailable",
+      /** Accessible description of the whole stamp. */
+      describe: (state: string) => `Last calculation run: ${state}`,
+      statusLabels: {
+        succeeded: "succeeded",
+        refused: "refused",
+        failed: "failed",
+        running: "running",
+        queued: "queued",
+      } as Record<string, string>,
+    },
+  },
+
+  /**
+   * Progressive disclosure (handoff 0044, output 5).
+   *
+   * The rule this app follows: an EXPLANATION may fold away behind a
+   * closed-by-default disclosure — it is never shortened when it moves —
+   * but an ADMISSION never folds. A refusal, a held or excluded count, a
+   * cap, a staleness warning, a scope receipt, an "operations metrics are
+   * not an NTD reported figure" boundary: those stay on screen at all
+   * times, whatever is open or closed.
+   */
+  disclosure: {
+    what: "What this shows",
+    how: "How this works",
+    /** Screen-reader suffix so the control's purpose is never ambiguous. */
+    expandHint: (label: string) => `${label} — full explanation`,
+  },
+
+  /**
+   * THE PROVENANCE TERMINAL (handoff 0044, output 4).
+   *
+   * A dense, monospace stream of what this installation actually did.
+   * EVERY ROW IS A REAL RECORDED EVENT, read from endpoints that already
+   * exist: GET /calc-runs (runs and their per-figure outcomes) and
+   * GET /dq/issues (findings raised). Nothing here is synthesised, and no
+   * decorative tick is ever emitted to make the panel look busy — when
+   * there is nothing on record the panel says so.
+   *
+   * A row says WHAT HAPPENED. It never says a figure is good or bad: a
+   * computed figure carries the neutral rail, and the semantic ok/watch/
+   * alert set is used only where the platform itself assigned a severity.
+   */
+  terminal: {
+    heading: "Provenance terminal",
+    live: "Live",
+    /** The cadence, labelled (handoff 0044 open question: v0 POLLS the
+     *  existing endpoints and says how often, rather than adding a
+     *  streaming surface before the composition is proven). */
+    cadence: (seconds: string) =>
+      `Polls the calculation-run and data-quality records every ${seconds} seconds.`,
+    sources: "Every line is an event Headway recorded — a calculation run, a figure computed or refused, or a finding raised. Nothing on this panel is generated to fill space.",
+    loading: "Reading the event record…",
+    /** The honest empty state: no invented activity, ever. */
+    empty:
+      "No events on record yet. Headway would rather show an empty stream than invent activity — the first calculation run or data-quality finding appears here.",
+    error: (message: string) =>
+      `The event record could not be read: ${message}`,
+    /** Row tags — the word carries the meaning; the rail only echoes it. */
+    tags: {
+      computed: "COMPUTED",
+      refused: "REFUSED",
+      raised: "RAISED",
+      failed: "FAILED",
+      running: "RUNNING",
+      queued: "QUEUED",
+      stale: "STALE",
+    } as Record<string, string>,
+    /** Row messages. Ids and figures are the server's strings, verbatim. */
+    rows: {
+      figureComputed: (metric: string, scope: string, value: string) =>
+        `${metric} · ${scope} · ${value}`,
+      figureRefused: (metric: string, scope: string, blocking: string) =>
+        `${metric} · ${scope} · refused over ${blocking} blocking finding${blocking === "1" ? "" : "s"}`,
+      runFinished: (period: string, persisted: string, refused: string) =>
+        `run ${period} · ${persisted} computed, ${refused} refused`,
+      runFailed: (period: string, error: string) =>
+        `run ${period} · ${error}`,
+      runOpen: (period: string) => `run ${period}`,
+      runStale: (period: string) =>
+        `run ${period} · state unknown past the staleness bound`,
+      findingRaised: (severity: string, title: string) =>
+        `${severity} · ${title}`,
+    },
+    /** Column headers for the readable table equivalent of the stream. */
+    columns: {
+      time: "Time",
+      event: "Event",
+      kind: "Kind",
+    },
+    /** The stream is capped so the panel stays readable — cap stated. */
+    cap: (cap: string) =>
+      `The newest ${cap} events are shown. Older events stay on their own pages: the calculation runs room and the data-quality queue.`,
   },
 
   theme: {
@@ -125,6 +274,28 @@ export const copy = {
     submit: "Sign in",
     unknownRole: (role: string) =>
       `Your account has a role this version of Headway does not recognize (“${role}”). Please contact your Headway administrator.`,
+    /* Single sign-on (handoff 0046). The provider is whatever the agency
+       configured — Entra ID, Google, Okta or Keycloak — so nothing here
+       names one or draws its logo, and no wording implies a particular
+       product. The words ON the button are the administrator's own
+       (`button_label`); `button` below is only the fallback for an
+       installation that left them blank, and it matches the server's own
+       default so the two never disagree. */
+    sso: {
+      button: "Sign in with single sign-on",
+      /* The break-glass promise, restated where someone would need it. */
+      hint: "Your Headway username and password above always work too, whether or not your agency uses single sign-on.",
+      starting: "Taking you to your identity provider to sign in.",
+      finishingHeading: "Signing you in",
+      finishing: "Finishing your sign-in with your identity provider.",
+      /* Shown when the sign-in cannot even be attempted: nothing usable came
+         back from the provider, or this browser is not the one that started
+         it. A refusal from the API carries the API's own message instead,
+         shown verbatim — ONE generic sentence for every federated failure,
+         on purpose, with the real reason in Headway's audit trail. */
+      failed:
+        "Headway could not sign you in with single sign-on. Please try again, or sign in with your Headway username and password.",
+    },
   },
 
   /**
@@ -287,6 +458,10 @@ export const copy = {
     },
     outcomePersisted: "Figure produced",
     outcomeRefused: "Refused",
+    /** Identical re-run (persist dedupe): the figure was NOT duplicated —
+     *  say so, or a re-run reads as a second figure on the record. */
+    outcomeAlreadyOnRecord:
+      "Same result as the figure already on record — not duplicated",
     coverageLine: (coverage: string) => `Coverage: ${coverage}`,
     /** Refusal detail: name the count and link the EXACT issues. */
     refusedIssuesLead: (count: number) =>
@@ -538,6 +713,117 @@ export const copy = {
   },
 
   /**
+   * THE REVIEW SURFACE (/review — handoff 0047).
+   *
+   * Where a read-only role lands instead of /today. The control room asks
+   * "what should I do now?"; a reviewer asks a different question — "what
+   * was filed, and does it hold up?" — so this room is a WORKLIST OF
+   * CERTIFICATIONS and nothing else. No queue, no tallies waiting to be
+   * cleared, nothing asking to be acted on: a reviewer has no work to clear
+   * in someone else's system, and a screen that implies otherwise teaches
+   * them to distrust it.
+   *
+   * Three things are said out loud here that a reader would otherwise have
+   * to discover by hitting a wall: that their own reading is recorded, what
+   * this account cannot open and why, and that a withheld record is drawn as
+   * withheld rather than left blank.
+   */
+  review: {
+    heading: "Review",
+    intro:
+      "Every certification this agency has made, in the order Headway recorded them. A certification is the moment a named person put their name to a set of figures, so it is where a review starts. Open one to see the figures it covers, each figure's receipt, and the trail from any figure back to the raw records it was built from.",
+    loading: "Reading the certifications on record…",
+    loadErrorLead: "Headway could not load the certifications. The server said:",
+    /** No records is a fact about a young installation, not a gap. */
+    empty:
+      "No certifications are on record yet. When a certifying official signs a set of figures, the record appears here and stays permanently.",
+
+    tableLabel: "Certifications on record",
+    tableCaption:
+      "Certifications on record, oldest first — the order Headway serves them in, unchanged.",
+    columns: {
+      certification: "Certification",
+      period: "Period covered",
+      signer: "Signed by",
+      signedAt: "Signed at",
+      figures: "Figures covered",
+      verification: "Signature check",
+    },
+    rowLink: (id: string) => `Certification ${id}`,
+    signerLine: (name: string, title: string) => `${name}, ${title}`,
+    /** A record with no typed name says so rather than showing a blank. */
+    signerAccountOnly: (username: string) =>
+      `The account ${username} — no typed name on this record.`,
+
+    /** Period and verdict both arrive with the certificate itself. */
+    detailChecking: "Reading this certificate…",
+    periodUnknown:
+      "Not recorded. This certification predates the signed document that carries each figure's period.",
+    /** The certificate itself could not be read — said, never left blank,
+     *  and worded apart from the signature verdict beside it. */
+    periodUnavailable: "Could not be read",
+    /** A signed document that lists no figures: an anomaly, not history. */
+    periodNoFigures: "The signed document lists no figures.",
+    /** The four verdicts the server can return, plus the honest fifth: the
+     *  check could not be made at all, which is never shown as a pass. */
+    verdictLabels: {
+      verified: "Signature verified",
+      failed: "SIGNATURE CHECK FAILED",
+      key_mismatch: "Cannot be checked with the current key",
+      unsigned_legacy: "No digital signature",
+    } as Record<string, string>,
+    verdictUnknown: "Unrecognised result",
+    verdictUnavailable: "Could not be checked",
+    verdictNote:
+      "Every result in the signature-check column is the server's own. Headway re-reads each stored certificate and re-checks its signature while this page loads; nothing here is worked out in your browser.",
+
+    /** The reader is told they are recorded — plainly, once, on entry. */
+    recordHeading: "You are on the record here",
+    recordBody:
+      "Headway records reading, not only changing. Every time the audit trail is read, Headway writes down who read it, which filters they used and how many entries came back — never the entries themselves. Those notes cannot be edited or deleted by anyone, including an administrator.",
+    recordWhy:
+      "This protects you as much as the agency: the care you took is on the record too.",
+    recordNoWrites:
+      "This account cannot change what it is reviewing. Headway refuses changes from it at the server, not merely on this screen.",
+    /**
+     * The ONE exception, named here rather than discovered. The rule above is
+     * no longer absolute — handoff 0047 opened a single route to this role —
+     * and an unstated exception is precisely the shape of contradiction this
+     * surface was built to remove.
+     */
+    recordVerify:
+      "There is one deliberate exception, and it is the reason this account exists: you may ask Headway to re-read a raw record's stored bytes and re-check its fingerprint. Doing so alters nothing under review. It records that you checked, and — if the bytes no longer match what was received — raises a data-quality finding for the agency to answer. That finding is the most valuable thing a review can produce, so it goes on the record where the people who must act on it will see it, under your name.",
+
+    /** What this account cannot open, said here instead of in a 403. */
+    scopeHeading: "What this account cannot open",
+    scopeIntro:
+      "Three parts of Headway are limited to the certifying official. This is not a gap in the record — it is the line between reviewing the figures and running the installation:",
+    scopeItems: [
+      "The list of Headway accounts and the role each one has.",
+      "Single sign-on settings — how the agency connects Headway to its identity provider.",
+      "Machine keys — the credentials other systems use to send data into Headway.",
+    ],
+    scopeAsk:
+      "If your review needs any of these, ask the agency's certifying official. Headway refuses the whole page rather than showing a partial version of it.",
+    /** The withholding rule, stated before a reader meets it in the wild. */
+    scopeWithheldHeading: "Withheld contents are marked, never blank",
+    scopeWithheld:
+      "Raw records that carry rider pickup and dropoff addresses stay closed to every role below data steward, this one included — a paratransit trip record can disclose a rider's home and their disability status. Where that applies, the record shows the reason in place of its contents. A withheld record is never drawn as an empty one, because an empty one reads as missing data.",
+
+    /** Orientation, not a call to action: where the rest of it lives. */
+    moreHeading: "Where the rest of the record is",
+    moreCalcRuns:
+      "Which calculation produced a figure, which version of it ran, and what it refused to compute",
+    moreCalcRunsLink: "Calculation runs",
+    moreDq:
+      "Every data-quality finding Headway has raised — open, resolved, and closed under a statistician attestation",
+    moreDqLink: "Data quality",
+    moreMetrics:
+      "Every computed figure, each with its receipt and its trail back to raw records",
+    moreMetricsLink: "Metrics",
+  },
+
+  /**
    * Statistician attestations (/attestations — handoff 0019, design A).
    * The p. 146 rule permits factoring beyond the 2% missing-trip line only
    * under a statistician-approved method; this room records that approval
@@ -642,7 +928,13 @@ export const copy = {
     toggleInputs: (label: string) => `Inputs of ${label}`,
     madeBy: (name: string, version: string) =>
       `made by ${name} (version ${version})`,
-    rawLeaf: "raw source record as received — the end of the trail",
+    /**
+     * The end of the trail, but no longer a dead end (handoff 0035). It used
+     * to read "raw source record as received — the end of the trail", and a
+     * UAT auditor's verdict on that was exact: "It doesn't really provide any
+     * data to validate or verify." The leaf now opens.
+     */
+    rawLeaf: "raw source record, exactly as Headway received it",
     /** The visual lineage graph (handoff 0007, pillar 2). */
     graph: {
       viewToggleLabel: "How to show the trail",
@@ -674,6 +966,75 @@ export const copy = {
     } as Record<string, string>,
   },
 
+  /**
+   * The raw-record inspector (handoff 0035): the label, the integrity
+   * button and the window on the last link in the chain of custody. Plain
+   * language throughout — the reader is an auditor or an operations
+   * manager, not a data engineer.
+   */
+  rawRecord: {
+    openLabel: (id: string) => `Open the raw source record ${id}`,
+    open: "Open this record",
+    close: "Close this record",
+    loading: "Reading this record's label…",
+    /** Field labels on the label itself. */
+    source: "Source",
+    connector: "Collected by",
+    fetchedAt: "Received",
+    landedAt: "Stored",
+    contentType: "File type",
+    size: "Size",
+    parseStatus: "Read on arrival",
+    parseOk: "Read successfully",
+    parseMalformed: "Could not be read",
+    storedAt: "Bytes held",
+    sizeUnknown: "measured when you open the contents",
+    /** The hash: still here, deliberately demoted to a footnote. */
+    fingerprintHeading: "Fingerprint (SHA-256)",
+    inspect: "Look inside",
+    hideInspect: "Hide the contents",
+    verify: "Verify integrity",
+    verifying: "Re-reading the bytes and re-computing the fingerprint…",
+    download: "Download the exact bytes",
+    downloading: "Preparing the download…",
+    verdictMatch: "Integrity verified",
+    verdictMismatch: "INTEGRITY CHECK FAILED",
+    verdictMissing: "The bytes are missing",
+    verdictUnavailable: "Could not be checked",
+    verdictDigests: "Fingerprints compared",
+    verdictExpected: "This record's id (the fingerprint of the bytes as received)",
+    verdictActual: "The fingerprint of the bytes stored right now",
+    verdictIssue: (id: string) => `Data-quality finding raised: ${id}`,
+    verdictIssueLink: "Open the finding",
+    verifiedAt: (when: string) => `Checked ${when}`,
+    withheldHeading: "Contents withheld",
+    previewHeading: "Inside this record",
+    previewLoading: "Reading the contents…",
+    entitiesHeading: "Vehicles and updates in this message",
+    feedHeading: "Feed message",
+    feedVersion: "GTFS-Realtime version",
+    feedIncrementality: "Message type",
+    feedTimestamp: "Feed timestamp",
+    feedEntities: "Records inside",
+    entityVehicle: "Vehicle",
+    entityRoute: "Route",
+    entityTrip: "Trip",
+    entityPosition: "Position",
+    entityTime: "Reported at",
+    entityStatus: "Status",
+    entityStop: "Stop",
+    entityOccupancy: "Occupancy",
+    entityDelay: "Delay (seconds)",
+    entityStopUpdates: "Stop updates",
+    entityAlert: "Service alert",
+    absent: "not reported",
+    rowsHeading: "First rows of the file",
+    linesHeading: "First lines of the file",
+    noColumns: "Columns are shown without names",
+    undecodedHeading: "Headway cannot show this file's contents",
+    error: "Headway could not read this record.",
+  },
+
   dq: {
     heading: "Data-quality issues",
     intro:
@@ -701,12 +1062,19 @@ export const copy = {
       attested: "Attested",
     } as Record<string, string>,
     /**
-     * The queue-at-a-glance chips (2026-07-11 click-through, finding 2).
+     * The queue-at-a-glance cards (2026-07-11 click-through, finding 2).
      * Counts are of ISSUES IN THE QUEUE — workflow tallies, not regulatory
-     * figures — counted client-side from the full list GET /dq/issues
-     * serves (the endpoint returns every issue; no pagination today).
+     * figures. Since handoff 0024 they come from GET /dq/issues/counts,
+     * which counts in the database over the WHOLE queue; since handoff
+     * 0030 the list beneath them serves one page at a time, so the copy
+     * has to keep that distinction visible in words. A card that silently
+     * meant "of the 50 issues loaded" would be exactly the kind of quiet
+     * lie this project refuses.
      */
     summaryHeading: "Queue at a glance",
+    /** Said once, under the cards, so the distinction is never implied. */
+    summaryScope: (total: string) =>
+      `These counts cover all ${total} issues in the queue, not just the page shown below.`,
     /** Summary-card labels (handoff 0017 #2): the count is the card's big
      *  figure; severity counts cover OPEN (unresolved) issues. */
     cardLabels: {
@@ -719,16 +1087,22 @@ export const copy = {
     statusFilterLabel: "Show issues by status",
     filterAllSeverities: "All severities",
     filterAllStatuses: "All statuses",
-    showingCount: (shown: string, total: string) =>
-      `Showing ${shown} of ${total} issues. The counts above always cover the whole queue.`,
     /**
-     * The render cap (2026-07-14 live click-through finding: the live queue
-     * held 35,456 issues and rendering every card hung the browser). The
-     * cap is STATED, never silent — no issue leaves the queue or the
-     * counts; the filters narrow to what matters.
+     * The page line (handoff 0030). The queue is read one page at a time —
+     * before this, /dq downloaded all 98,497 issues (850 MB, 17 seconds,
+     * and a frozen tab). Three facts, always together: which issues are on
+     * screen, how many match in total, and that the counts above are the
+     * whole queue rather than this page.
      */
-    renderCap: (cap: string, matching: string) =>
-      `Only the first ${cap} of ${matching} matching issues are drawn on this page — drawing them all would freeze the browser. Nothing is dropped: the counts above cover the whole queue, and the filter cards narrow the list to what you need.`,
+    showingRange: (from: string, to: string, matching: string) =>
+      `Showing issues ${from}–${to} of ${matching} that match. The rest are still in the queue — use Next to read on, or the cards above to narrow it.`,
+    showingRangeUnfiltered: (from: string, to: string, total: string) =>
+      `Showing issues ${from}–${to} of ${total} in the queue. The rest are still there — use Next to read on, or the cards above to narrow it.`,
+    /** Plain page controls: no infinite scroll, no hidden loading. */
+    pageNext: "Next page",
+    pagePrevious: "Previous page",
+    pageNavLabel: "Data-quality queue pages",
+    pageLoading: "Loading the next page…",
     noMatch: (total: string) =>
       `No issues match these filters. The queue still holds ${total} issue(s) — filtering hides nothing from the counts above, and no issue is resolved by being filtered out.`,
     clearFilters: "Show all issues",
@@ -740,6 +1114,90 @@ export const copy = {
     resolvedLabel: "Resolved",
     resolutionLabel: "Resolution",
     sourceRecordsLabel: "Source records",
+
+    /**
+     * The provenance disclosure (handoff 0030). The raw-record ids are the
+     * lineage chain from a finding back to the feed messages it was raised
+     * over — they did not go anywhere, they moved off the queue listing
+     * (716 MB of an 850 MB response) onto the finding itself, fetched when
+     * someone actually asks for them. Every row keeps the path.
+     */
+    sourceRecords: {
+      toggle: "Source records: the raw data behind this finding",
+      intro:
+        "The exact raw records Headway raised this finding over. Fetched for this finding only — copy them when you are working a ticket or querying the data directly.",
+      loading: "Loading the source records for this finding…",
+      count: (count: string) =>
+        `${count} raw ${count === "1" ? "record" : "records"}`,
+      /** A finding about a run as a whole cites no individual record. */
+      none:
+        "This finding is about the calculation run as a whole, so it cites no individual raw records.",
+      failed:
+        "The source records for this finding could not be loaded. The finding itself is unchanged.",
+      retry: "Try loading the source records again",
+    },
+
+    /**
+     * What the finding is ABOUT, said the way the agency says it (handoff
+     * 0029). First-agency UAT, on a real blocking finding: "staff/users
+     * will need an easier way to know what exact block they are looking
+     * for that had the issue." So the headline is blocks, routes and times
+     * of day; the raw identifiers move into a collapsed disclosure where
+     * they stay copyable for anyone working a ticket.
+     *
+     * NOTHING here invents a label. Where the feed carries no block, no
+     * route name, or no scheduled time, the copy SAYS that — it never
+     * substitutes a plausible-looking stand-in.
+     */
+    subject: {
+      heading: "Which trips this affects",
+      intro: (total: string, groups: string) =>
+        `${total} affected ${total === "1" ? "trip" : "trips"}, grouped into ${groups} ${groups === "1" ? "block" : "blocks"}. Blocks are listed in the order their first trip is scheduled to leave.`,
+      /** Stated cap — the count above always covers everything. */
+      groupCap: (shown: string, total: string) =>
+        `Showing the first ${shown} of ${total} blocks. Nothing is dropped: the trip and block counts above cover every affected trip, and the full list of identifiers is in the technical detail below.`,
+      columns: {
+        block: "Block",
+        trips: "Trips",
+        routes: "Route(s)",
+        span: "Scheduled times",
+      },
+      tableCaption: "Affected trips grouped by block",
+      /** The feed carries no block for these trips — a fact, not a gap
+       *  we paper over with a made-up id. */
+      blockAbsent: "No block in the schedule feed",
+      blockAbsentHint:
+        "These trips run without a block identifier in the agency's published schedule. Headway shows no block for them rather than guessing one.",
+      /** A route with no short name: the id is all that exists. */
+      routeIdOnly: (routeId: string) => `${routeId} (route id — the feed carries no route name)`,
+      routesNone: "No route in the schedule feed",
+      routesMore: (shown: string, total: string) =>
+        `${shown} of ${total} routes`,
+      spanAbsent: "No scheduled time in the feed",
+      /** GTFS counts from the start of the service day, so 25:10 means
+       *  1:10 a.m. the next morning — said plainly, not wrapped silently. */
+      spanNote:
+        "Times are from the published schedule, counted within the service day: an hour of 24 or more means after midnight.",
+      tripCount: (count: string) =>
+        `${count} ${count === "1" ? "trip" : "trips"}`,
+      /** Trips Headway saw operating that are not in the schedule feed. */
+      unmatchedHeading: "Trips not in the schedule feed",
+      unmatchedBody: (count: string) =>
+        `${count} affected ${count === "1" ? "trip is" : "trips are"} not in the published schedule, so Headway has no block, route, or time for ${count === "1" ? "it" : "them"}. That usually means the trip was added by dispatch after the schedule was published.`,
+      /**
+       * A block the agency's own mapping names (handoff 0038): the
+       * operational name is the headline in the table, and the feed's
+       * identifier stays one disclosure away — the 0032 vehicle-label
+       * presentation. Never shown unless the mapping stated it.
+       */
+      technicalBlockLabeled: (label: string, blockId: string) =>
+        `${label} — feed block id ${blockId}`,
+      /** The forensic disclosure: collapsed, never removed. */
+      technicalToggle: "Technical detail: trip identifiers",
+      technicalIntro: (cap: string) =>
+        `The internal trip identifiers behind the blocks above — useful when working a ticket or querying the data directly. Up to ${cap} identifiers are listed per block; each block's trip count above is the real total.`,
+      technicalIdsLabel: (block: string) => `Trip identifiers for ${block}`,
+    },
     resolveButton: (title: string) => `Resolve: ${title}`,
     resolutionInputLabel: "How was this issue resolved?",
     resolutionHint:
@@ -803,6 +1261,156 @@ export const copy = {
       cancel: "Cancel",
       success: (title: string) =>
         `“${title}” is closed as attested. The resolution names the attestation permanently.`,
+    },
+  },
+
+  /**
+   * The revenue review queue (handoff 0040): the boardings Headway refused to
+   * guess about, and the note an analyst writes when they decide one.
+   *
+   * Written for someone who runs a transit agency, not a database. No
+   * sentence here says "unassigned", "no-run", "revenue_classification" or
+   * "passenger event" — it says what happened on a bus and what it means for
+   * a number the agency has to report. The two things every screen must make
+   * unmissable: nothing here is counted until somebody decides it, and
+   * deciding it does not change any figure until the figures are worked out
+   * again.
+   */
+  revenueReview: {
+    heading: "Boardings to review",
+    intro:
+      "These riders were counted by a bus while nobody was logged into a run. That usually means staff getting on during prep or clean-up, which is not public ridership — but it can also mean an extra bus sent out to catch up a late route, carrying real riders. Headway will not guess between the two, so it is holding these out of your ridership figure until you say which they are.",
+    /** The inviting empty state — the queue being empty is GOOD news. */
+    empty: {
+      heading: "Nothing is waiting on you",
+      body: "Every boarding Headway could not work out on its own has been decided. Your ridership figure is not holding anything back for review.",
+      hint: "If a future day has boardings recorded off-run, they will appear here after the figures are worked out for that period.",
+    },
+    /** The header cards. Rows and boardings are different numbers. */
+    cards: {
+      pending: "Waiting on a decision",
+      pendingBoardings: "Riders held out of the figure",
+      classified: "Decided so far",
+      classifiedRevenue: "Ruled real ridership",
+      classifiedNonRevenue: "Ruled not ridership",
+    },
+    cardsScope: (rows: string) =>
+      `Counted across the whole queue (${rows}), not just this page.`,
+    /** The two tabs. */
+    filterPending: "Waiting on a decision",
+    filterClassified: "Already decided",
+    filterLabel: "Which boardings to show",
+    showingRange: (from: string, to: string, total: string) =>
+      `Showing ${from}–${to} of ${total}.`,
+    pageNext: "Next page",
+    pagePrevious: "Previous page",
+    pageNavLabel: "Review queue pages",
+    pageLoading: "Loading the next page…",
+    loadFailed:
+      "The review queue could not be loaded. Nothing was changed.",
+    retry: "Try again",
+
+    /** One row's heading and facts. */
+    rowHeading: (vehicle: string, when: string) =>
+      `${vehicle} — ${when}`,
+    vehicleLabel: (vehicle: string) => `Vehicle ${vehicle}`,
+    vehicleUnknown: "Vehicle not recorded",
+    ridersLabel: "Riders counted",
+    ridersValue: (count: string) =>
+      count === "1" ? "1 rider" : `${count} riders`,
+    serviceDayLabel: "Service day",
+    recordedAtLabel: "Recorded at",
+    routeLabel: "Route and run",
+    routeNone:
+      "None — that is exactly why this boarding is here. The bus was not logged into a run, so there is no route, no trip and no stop on this record.",
+    whyLabel: "Why Headway could not decide",
+    suggestionLabel: "Headway's own reading",
+    suggestionPending:
+      "No suggestion. Headway will not guess this one — the federal manual has no rule that tells prep apart from a catch-up bus, so only a person who knows what dispatch did that day can say.",
+    heldNote:
+      "Held out of the ridership figure while it waits. It is not counted, and it is not thrown away.",
+    flaggedByLabel: "Flagged by",
+    flaggedByValue: (calc: string, version: string, when: string) =>
+      `${calc} ${version}, first flagged ${when}`,
+    periodLabel: "Reporting period",
+    technicalToggle: "Show the record identifiers",
+    technicalIntro:
+      "The identifiers below are the provenance — they are what an auditor follows back to the original file. You do not need them to make the decision.",
+    technicalEventLabel: "Boarding record",
+    technicalSourceLabel: "Original source record",
+
+    /** The decision form. */
+    decideButton: (vehicle: string, when: string) =>
+      `Decide: ${vehicle}, ${when}`,
+    decideHeading: "What were these riders?",
+    verdictLabel: "Your decision",
+    verdictRevenue: "Real ridership — count them",
+    verdictRevenueHint:
+      "Choose this when the bus was carrying the public, even though it was not logged into a run — an extra bus sent to recover a late route is the usual case.",
+    verdictNonRevenue: "Not ridership — leave them out",
+    verdictNonRevenueHint:
+      "Choose this when the count was staff, maintenance, prep or clean-up, a bus running empty to reposition, or a counter that misfired.",
+    verdictRequired: "Choose one of the two decisions before saving.",
+    justificationLabel: "Why (required)",
+    justificationHint:
+      "Write what you checked and what you found, in your own words. This becomes part of the figure's receipt: it is what lets the agency defend the correction in a federal review instead of just asserting it. Example: “Extra bus sent at 15:10 to recover the route after the 14:40 ran late; dispatch confirms these are real riders.”",
+    justificationRequired:
+      "Write down why. A decision with no reason cannot be defended later, so Headway will not record one.",
+    submit: "Record this decision",
+    cancel: "Cancel",
+    /** Said at the moment of deciding, not buried in a footnote. */
+    recomputeWarning:
+      "Saving this records your decision. It does not change any figure that has already been worked out — the ridership number moves the next time the figures are worked out for a period that includes this day.",
+    recomputeLink: "Go and work the figures out again",
+    success: (vehicle: string) =>
+      `Decision recorded for ${vehicle}. The ridership figure will reflect it the next time the figures are worked out.`,
+    failed: "The decision was not recorded. Nothing was changed.",
+
+    /** The decided rows (the history, and the receipt trail). */
+    decidedRevenue: "Ruled real ridership",
+    decidedNonRevenue: "Ruled not ridership",
+    decidedByLabel: "Decided by",
+    decidedByValue: (who: string, when: string) => `${who}, ${when}`,
+    decidedWhyLabel: "Reason given",
+    decidedFindingLabel: "Data-quality finding closed",
+    decidedFindingNone:
+      "No open data-quality finding was found for this boarding, so none was closed.",
+    /** Shown on the "already decided" tab so nobody expects a live figure. */
+    decidedRecomputeNote:
+      "These decisions apply to figures worked out after they were made. A figure computed earlier still shows what it showed then — that is on purpose, so a number never changes quietly under a signature.",
+    /** The refusal a certified period earns, restated for the list. */
+    certifiedRefusalHint:
+      "If a boarding falls inside a period somebody has already certified, Headway will refuse the decision and say so. A certified number keeps meaning what it meant when it was signed.",
+
+    /**
+     * The receipt side (handoff 0040, design point 2). A corrected ridership
+     * figure has to be DEFENSIBLE, and a correction is only defensible if
+     * you can see who made each judgment call, when, and why. These strings
+     * put the human decisions inside "explain this number".
+     */
+    receipt: {
+      heading: "Judgment calls behind this number",
+      intro:
+        "Some boardings were recorded while no bus was logged into a run, and Headway could not tell prep activity from real riders. It did not guess. A person decided each one and wrote down why, and that is recorded here permanently.",
+      countedLine: (riders: string) =>
+        `${riders} counted into this figure because a person ruled they were real ridership.`,
+      excludedLine: (riders: string) =>
+        `${riders} left out of this figure because a person ruled they were not ridership.`,
+      heldLine: (riders: string) =>
+        `${riders} still waiting on a decision, and held OUT of this figure until somebody makes one.`,
+      autoExcludedLine: (riders: string) =>
+        `${riders} left out automatically: recorded outside the hours the schedule says this service ran, which is prep, pull-out or pull-in rather than ridership.`,
+      policyLine:
+        "Headway's rule while a boarding is undecided: leave it out. A boarding nobody has classified must never quietly inflate or deflate a number an agency signs for.",
+      verdictRevenue: "Counted as ridership",
+      verdictNonRevenue: "Not ridership",
+      entrySummary: (vehicle: string, when: string, riders: string) =>
+        `${vehicle}, ${when} — ${riders}`,
+      decidedBy: (who: string, when: string) => `Decided by ${who}, ${when}`,
+      /** No paraphrase, ever: the analyst's words are the evidence. */
+      reasonLabel: "In their words",
+      frozenNote:
+        "These decisions were read when this figure was worked out and were written into it. Decisions made since then apply to the next time the figures are worked out, not to this one — so a number never changes quietly under a signature.",
     },
   },
 
@@ -1375,8 +1983,18 @@ export const copy = {
    */
   dashboard: {
     heading: "Dashboard",
+    /** Handoff 0044: the always-visible one-liner. `intro` below moves,
+     *  VERBATIM and unshortened, into the "What this shows" disclosure. */
+    summary:
+      "Figures shown exactly as computed — the charts scale the picture, never the figures.",
     intro:
       "The agency's computed figures at a glance. Every number here is shown exactly as the calculation service computed it — the charts scale the picture, never the figures.",
+    /** Handoff 0044: the compact control strip that replaces three stacked
+     *  paragraph-wrapped blocks above the figures. */
+    controls: {
+      label: "Figure controls",
+      explain: "How these controls work",
+    },
     /** Teaching empty state (handoff 0021 #4): warm + the first action —
      *  since handoff 0026, the Compute figures room, not a CLI line. */
     empty:
@@ -1444,6 +2062,23 @@ export const copy = {
         open: "Open",
         owned: "Owned",
       } as Record<string, string>,
+      /**
+       * Handoff 0030: the tallies are the server's whole-queue counts (the
+       * same ones /dq and /today read). The date filter slices the charts,
+       * not this card — said in words whenever a date filter is active, so
+       * the card is never read as "issues in the selected dates".
+       */
+      wholeQueueNote:
+        "These tallies always cover the whole data-quality queue. The date filter above narrows the charts, not this card — go to the data-quality queue to work the list.",
+      /**
+       * The honest attention flag (handoff 0041): the card FRAME carries an
+       * alert rail when a blocking issue is open, because that is the one
+       * thing on this page that genuinely needs a human. It is a shape + a
+       * sentence + a rail — never a rail alone, and never a treatment on a
+       * figure (glow says "look here", not "this number is big").
+       */
+      blockingFlag: (count: string) =>
+        `${count} blocking issue${count === "1" ? "" : "s"} ${count === "1" ? "is" : "are"} open. Blocking issues stop certification — this card needs a person.`,
       segmentLabel: (severity: string, count: string, status: string) =>
         `${severity}: ${count} ${status} issue${count === "1" ? "" : "s"}`,
       totalColumn: "Total",
@@ -1529,6 +2164,63 @@ export const copy = {
       groupingIntro: "How the grouping works, in the server's own words:",
       historyUnavailable: (message: string) =>
         `The trend history could not be loaded: ${message}`,
+    },
+
+    /**
+     * The Mode selector (handoff 0041, design points 1–4). Binding rules
+     * restated where the copy lives:
+     *
+     * - DATA-DRIVEN: the options are the distinct `mode:*` scopes that
+     *   actually carry persisted figures. No mode is named in this catalog
+     *   as an option — a hardcoded mode that could only ever show zero
+     *   would be a lie.
+     * - RE-SCOPE, NEVER DERIVE: picking a mode filters to that mode's own
+     *   persisted rows, verbatim, each with its metric_value_id receipt.
+     *   Nothing on this page adds, averages, or synthesizes a per-mode
+     *   number — not even a total across the modes.
+     * - INVITING EMPTY STATES: a mode with nothing computed yet says so
+     *   warmly and says why. A fabricated zero is never shown.
+     */
+    mode: {
+      rowLabel: "Mode",
+      allModes: "All modes (agency)",
+      /** The lowercase-vocabulary bucket for a record with no mode. */
+      unknownMode: "Mode not identified",
+      tosLabel: (mode: string, tos: string) => `${mode} — ${tos}`,
+      intro:
+        "Pick a mode to read that mode's own figures. Headway shows the rows the calculation service already stored for that mode, exactly as computed — it never adds the modes up, averages them, or makes a per-mode number of its own.",
+      /** Why the list is short — said out loud, so it never reads as a bug. */
+      dataDrivenNote:
+        "Only modes that already have computed figures are listed here. A mode joins the list the day its calculation wave lands; a mode that could only ever show a zero is never offered.",
+      /** The scope receipt: the persisted scope string, shown verbatim. */
+      scopeReceipt: (scope: string) => `Figure scope: ${scope}`,
+      agencyNote:
+        "Showing the agency-wide rollup — the figure the calculation service stored at scope “agency”, not a total this page added up from the modes.",
+      selectedNote: (modeLabel: string, scope: string) =>
+        `Showing ${modeLabel} only. Every figure below is a stored figure at scope “${scope}”, exactly as computed, and every one still opens its own receipt.`,
+      /** A mode with no figures at all in the current dates. */
+      emptyHeading: (modeLabel: string) => `No figures for ${modeLabel} yet`,
+      emptyBody: (modeLabel: string) =>
+        `Nothing has been computed for ${modeLabel} in the selected dates. Figures appear here the moment the calculation service stores one for this mode — Headway would rather show you an empty page than a number nobody computed.`,
+      emptyWiden:
+        "Widening the date range above, or switching back to all modes, will show what does exist.",
+      /** One card with nothing for this mode (the mode itself has data). */
+      cardEmpty: (what: string, modeLabel: string) =>
+        `No ${what} for ${modeLabel} in these dates yet. Headway shows a mode's figures only once they have been computed and stored — never a zero standing in for one.`,
+      cardEmptyWhat: {
+        upt: "unlinked passenger trips",
+        service: "vehicle revenue miles or hours",
+        coverage: "coverage information",
+      } as Record<string, string>,
+      /** Operations metrics carry no mode dimension — stated, never faked. */
+      opsNote: (modeLabel: string) =>
+        `Operations metrics are computed per route, not per mode, so this section is NOT narrowed to ${modeLabel} — it keeps showing every route. Narrowing it here would mean inventing a per-mode operations figure nobody computed.`,
+      /** DQ tallies count issues, not figures — also no mode dimension. */
+      dqNote: (modeLabel: string) =>
+        `These tallies always cover the whole data-quality queue. They are NOT narrowed to ${modeLabel}: the queue counts issues, and no issue tally has been counted per mode.`,
+      /** The tiles' heading gains the scope so a mode slice never passes
+       *  for the whole agency. */
+      tilesFor: (modeLabel: string) => `Latest certified figures — ${modeLabel}`,
     },
 
     /**
@@ -1709,8 +2401,43 @@ export const copy = {
    */
   map: {
     heading: "Live map",
+    /** Handoff 0044: the always-visible one-liner. `intro` below moves,
+     *  VERBATIM and unshortened, into the "What this shows" disclosure. */
+    summary:
+      "Positions observed, never interpolated. Nothing on this page is fetched from outside this installation.",
+    /** The eyebrow over the hero — what this canvas is. */
+    eyebrow: "Network",
     intro:
       "Your system, drawn from your own data: every stop and route from the agency's schedule, and each vehicle's last reported position. Nothing on this page comes from an outside map service — no tiles, no external fonts, and no request ever leaves this installation.",
+    /** Handoff 0044: the compact control strip in the map chrome. */
+    controls: {
+      label: "Map controls",
+      /** Named so the disclosure holding the control explanations reads as
+       *  being about the controls, not about the figures. */
+      explain: "How these controls work",
+    },
+    /** Handoff 0044: the persistent rail beside the canvas. */
+    rail: {
+      label: "Map readout",
+      noticesLabel: "What the server said about this data",
+      readoutHeading: "Fleet readout",
+      /** Readout cards — counts of what is on this canvas right now. Each
+       *  is the server's own count, shown verbatim, never a figure this
+       *  page derived. */
+      vehicles: "Vehicles reporting",
+      vehiclesUnit: "with a position",
+      findings: "Open blocking findings",
+      findingsUnit: "need a person",
+      modes: "Modes on this map",
+      modesUnit: "from schedule data",
+      /** Every readout card states the window or scope it counted over. */
+      windowReceipt: (label: string) => `Window: ${label}`,
+      findingsReceipt: "Scope: open, blocking, whole queue",
+      modesReceipt: "Joined from this agency's own routes",
+      /** No number yet — said, never drawn as a zero. */
+      pending: "—",
+      pendingNote: "Not read yet",
+    },
     /** The canvas' accessible name; the readable equivalents (chip, counts,
      *  vehicle list) live outside the canvas. */
     canvasLabel:
@@ -1833,9 +2560,26 @@ export const copy = {
       /** ON the canvas whenever tiles render (ODbL requires the credit;
        *  Protomaps built the archive format + daily extract source). */
       attribution: "© OpenStreetMap contributors · Protomaps",
+      /** Street style — deliberately INDEPENDENT of the app theme (first
+       *  agency UAT 2026-07-29: dark streets under dark chrome were hard
+       *  to read). Light is the default in both themes; the choice is the
+       *  user's and persists in this browser. Handoff 0043 re-authored
+       *  BOTH styles against a measured contrast bar, so the note now
+       *  says what the dark option actually promises. */
+      style: {
+        label: "Street style",
+        light: "Light",
+        dark: "Dark",
+        note: "The street background has its own setting, separate from the light/dark theme of the rest of Headway — pick whichever makes streets, routes and vehicles easiest for you to see. Both settings are contrast-checked before release: street lines are held to at least 3:1 against the ground behind them and every place and street name to at least 4.5:1, so the network stays readable either way. Light is the starting point; the dark map is drawn with light streets on a near-black ground for low-light control rooms. Saved in this browser.",
+      },
       /** Legend entries for the basemap-present state. */
       legendLine:
         "Street map background — OpenStreetMap data stored on this computer; no request leaves this installation to draw it.",
+      /** Names the street style actually drawing and the legibility
+       *  promise it keeps (handoff 0043 — the ITS manager's report that a
+       *  dark theme buried the streets is answered here, in the legend). */
+      legendStyleLine: (styleName: string) =>
+        `Street style in use: ${styleName}. Both street styles are drawn by Headway, not taken as-is from the map data, and both are measured before release — street lines to at least 3:1 contrast against the ground they sit on and every name to at least 4.5:1, with a halo behind each name so it never dissolves into the map.`,
       legendCredit:
         "Map data © OpenStreetMap contributors (Open Database License), extracted via Protomaps. Full credit: openstreetmap.org/copyright",
       /** The recorded v0 limitation, stated where people look (sprites are
@@ -1850,6 +2594,159 @@ export const copy = {
        *  be used. Stated plainly, never silently ignored. */
       unusable:
         "A basemap file exists on this installation but could not be used: the server did not answer a byte-range request with the expected map-archive format. The map falls back to the plain canvas. An administrator can re-run ./install/install.sh --download-basemap to replace the file.",
+    },
+
+    /**
+     * Mode-aware vehicle marks (handoff 0043, design point 4).
+     *
+     * The vehicle-positions feed does not report a mode; the mode shown
+     * here is joined from the agency's OWN schedule data through the route
+     * the feed named. Every string below has to survive that: the map may
+     * never imply it knows a mode it was not told.
+     */
+    marks: {
+      /** Plain-language mode names. They mirror the GTFS Schedule
+       *  Reference's routes.txt route_type descriptions (gtfs.org) as the
+       *  transform's route_type→mode map applies them — the UI never
+       *  invents a mode definition. A mode string outside this list is
+       *  shown verbatim rather than renamed. */
+      modeLabels: {
+        bus: "Bus",
+        trolleybus: "Trolleybus",
+        rail: "Rail",
+        subway: "Subway or metro",
+        tram: "Tram, streetcar or light rail",
+        monorail: "Monorail",
+        ferry: "Ferry",
+        cable_tram: "Cable tram",
+        funicular: "Funicular",
+        aerial_lift: "Aerial lift (gondola or cable car)",
+        unknown: "Mode not known",
+      } as Record<string, string>,
+      legendHeading: "Vehicle marks by mode",
+      /** The honesty line under the mode legend: what a mode IS here. */
+      legendNote:
+        "The position feed does not say what kind of vehicle is reporting. Each mark takes its mode from the agency's own schedule data, through the route the feed named for that vehicle — so the mode is the ROUTE's mode, never a guess about the vehicle.",
+      /** Shape before colour, said in words. */
+      legendChannels:
+        "The shape of a mark is the kind of service; the colour separates modes of the same kind. Nothing on this map is signalled by colour alone — the vehicle list below names every vehicle's mode in words.",
+      legendKey: (label: string, glyph: string) => `${glyph} ${label}`,
+      /** Vehicles the join could not resolve, counted and explained. */
+      unknownNoRoute: (count: string) =>
+        `${count} vehicle${count === "1" ? "" : "s"} reported no route, so no mode could be looked up. Drawn as a hollow ring and listed as “not assigned”.`,
+      unknownRouteMissing: (count: string) =>
+        `${count} vehicle${count === "1" ? "" : "s"} named a route this installation holds no schedule data for, so no mode could be looked up. Drawn as a hollow ring — worth checking, because the feed and the schedule disagree.`,
+      /** The list column added for the mode (the readable equivalent). */
+      listColumn: "Mode",
+      listUnknown: "Not known",
+    },
+
+    /**
+     * The mode filter (handoff 0043, design point 6). Highlighting only:
+     * it repaints what is already on the map and never asks the server
+     * again, and it never removes anything from the map or the counts.
+     */
+    modeFilter: {
+      label: "Highlight one mode",
+      all: "All modes",
+      note: "Highlighting dims the other modes so one stands out. Nothing is removed from the map, the counts, or the list, and nothing is fetched again — this only changes how the map is painted.",
+      empty:
+        "No route in this agency's schedule data carries a mode yet, so there is nothing to highlight.",
+    },
+
+    /**
+     * The flagged-findings layer + its accessible entry point (handoff
+     * 0043, design points 6 and 7).
+     */
+    findings: {
+      legendKey: "Open blocking data-quality finding",
+      /** The single most important honesty line on this surface. */
+      legendNote:
+        "A data-quality finding has no recorded location — it is about a set of trips, not a place. A flag is drawn ON the schematic line of a route the finding names, so you can find the route; where it sits along that line means nothing.",
+      listHeading: "Needs investigation",
+      listIntro:
+        "Open findings that are blocking a certifiable figure and that nobody has taken on yet. This list is the way to reach every flag from the keyboard — the map canvas itself cannot be read by a screen reader.",
+      listEmpty:
+        "Nothing is flagged for investigation right now: no open finding is blocking a figure. That is the honest state, not an empty screen.",
+      listLoading: "Checking for findings that need a person…",
+      /** The meta line under a flag that IS on the map: which route it was
+       *  anchored to, and how many other routes it also names. */
+      onMap: (label: string) => `Flagged on route ${label} — drawn on the map`,
+      onMapAlso: (count: string) =>
+        ` · also on ${count} other route${count === "1" ? "" : "s"}`,
+      countLine: (flagged: string, drawn: string) =>
+        `${flagged} finding${flagged === "1" ? "" : "s"} need a person. ${drawn} of them are drawn on the map.`,
+      capNote: (cap: string) =>
+        `The map draws at most ${cap} flags at once so the flagged marks stay meaningful. Every finding is in the list above, whether or not it has a flag.`,
+      /** Why a finding has no flag — one honest sentence each. */
+      gapNoSubject:
+        "No flag: this finding is about the calculation run as a whole, not about identifiable trips, so there is no route to anchor it to.",
+      gapNoRoute:
+        "No flag: this finding's trips are not attributed to any route, so there is no line to anchor it to.",
+      gapRouteNotDrawn:
+        "No flag: the routes this finding names have no line on this map — the schedule data has no drawn geometry for them.",
+      gapOverCap:
+        "No flag: the map's flag limit was already reached. The finding is fully readable here.",
+      error: (message: string) =>
+        `Headway could not load the findings for this map: ${message}`,
+    },
+
+    /**
+     * The relationship inspector (handoff 0043, design point 7): the
+     * finding, and everything the API can honestly connect it to.
+     */
+    inspector: {
+      label: "Finding details",
+      heading: (title: string) => title,
+      close: "Close finding details",
+      /** The visible label; the full sentence above is the accessible name,
+       *  so the control is never an unlabeled icon and never a wrapped
+       *  three-line block in a narrow panel. */
+      closeShort: "Close",
+      openedFromMap: "Opened from the map.",
+      severityLabel: "Severity",
+      statusLabel: "Status",
+      raisedLabel: "Raised",
+      idLabel: "Finding id",
+      chainHeading: "What this finding connects to",
+      chainIntro:
+        "Everything below was served by Headway — the blocks and routes come from the finding's own record of what it was about, frozen when it was raised, and the calculations are the runs that named this finding themselves. Nothing here is inferred.",
+      blocksHeading: "Blocks",
+      blockLine: (label: string, trips: string) =>
+        `Block ${label} — ${trips} trip${trips === "1" ? "" : "s"}`,
+      blockUnnamed: "Trips with no block in the feed",
+      blockWindow: (first: string, last: string) =>
+        `First departure ${first}; last departure ${last}.`,
+      routesHeading: "Routes",
+      routeLine: (name: string, mode: string) => `${name} — ${mode}`,
+      routeNotDrawn: "no line on this map",
+      routeModeUnknown: "mode not known",
+      calcsHeading: "Calculations that named this finding",
+      calcLine: (calc: string, version: string, metric: string) =>
+        `${calc} ${version} — ${metric}`,
+      calcOutcomeRefused:
+        "The calculation refused to produce this figure over this finding.",
+      calcOutcomePersisted:
+        "The calculation produced this figure and recorded this finding alongside it.",
+      calcPeriod: (start: string, end: string) =>
+        `Period ${start} up to (not including) ${end}.`,
+      calcsEmpty:
+        "No calculation run on record names this finding. That does not mean none did — this page reads the most recent runs only.",
+      ownerHeading: "Owner",
+      ownerNone:
+        "No owner yet. An open finding with no owner is nobody's job until someone takes it — that is what this list is for.",
+      ownerNamed: (owner: string) => `Owned by ${owner}.`,
+      recordsHeading: "Raw records behind this finding",
+      recordsNone:
+        "This finding records no source-record ids. Findings raised about a run as a whole often do not have any.",
+      recordsLoading: "Loading the raw-record ids…",
+      queueLink: "Work this finding in the data-quality queue",
+      relatedNote:
+        "The routes named above are lit on the map while this panel is open.",
+      subjectCapped:
+        "The finding's own record of what it covered is capped — it lists a sample of trips, and states the true count beside it. Both are shown exactly as served.",
+      unmatchedTrips: (count: string) =>
+        `${count} trip${count === "1" ? "" : "s"} in this finding could not be attributed to a block. Counted, never dropped.`,
     },
   },
 
@@ -2013,13 +2910,22 @@ export const copy = {
       },
       sso: {
         title: "Single sign-on",
-        /* HONEST CARD (binding): SSO is designed (ADR-0011), not built.
-           No toggle, no setup button — nothing pretends. */
-        body: [
-          "Single sign-on with Entra ID, Google, or Okta is designed for Headway but not available yet. The design is recorded as ADR-0011: Headway will sign users in directly against your identity provider (native OIDC), alongside the local accounts that exist today.",
-          "Until then, every account is a local Headway account, managed under Users on this page. When SSO ships, it will be set up here.",
-        ],
-        status: "Designed, not yet available (ADR-0011)",
+        /* This card was an HONEST CARD for weeks: "designed (ADR-0011), not
+           built". Handoff 0046 built it, so the card is now real — a live
+           status and a way into the configuration below. The honesty rule is
+           unchanged: the status line says what is actually true right now,
+           and nothing here pretends to work before it has been tested. */
+        description:
+          "Let people sign in with your agency's own identity provider — Microsoft Entra ID, Google, Okta, or Keycloak. Their accounts, passwords and multi-factor sign-in stay where your IT team already manages them.",
+        localAlwaysWorks:
+          "Headway accounts keep working alongside single sign-on, always. If your identity provider is unreachable, or the settings below are wrong, you can still sign in here with a Headway username and password.",
+        statusNotConfigured: "Not set up yet",
+        statusOff: "Set up, but turned off",
+        statusOn: "On",
+        statusDisabledByServer: "Turned off on the server",
+        configure: "Set up single sign-on",
+        hide: "Hide single sign-on settings",
+        link: "Set up single sign-on",
       },
       updates: {
         title: "Updates",
@@ -2040,6 +2946,119 @@ export const copy = {
           "There is deliberately no update button here: a web session must never be able to replace the software it runs in.",
         status: "Updated on the server by an administrator",
       },
+    },
+
+    /* ------------------------------------------------------------------
+       Single sign-on (handoff 0046). Written for someone who has never
+       configured OIDC and has no database access: every field says where
+       to find its value, and every refusal says what to do next.
+       ------------------------------------------------------------------ */
+    sso: {
+      heading: "Single sign-on",
+      intro:
+        "Headway signs people in directly against your identity provider. You register Headway there once, paste three values here, then say which of your groups gets which Headway role.",
+      loadError: "Could not load the single sign-on settings.",
+      /* Role names live here rather than in the shared label list, so this
+         screen owns its own words (Wave F does not edit shared blocks). */
+      roleLabels: {
+        viewer: "Viewer",
+        data_steward: "Data steward",
+        report_preparer: "Report preparer",
+        certifying_official: "Certifying official",
+        auditor: "Auditor",
+      } as Record<string, string>,
+      settingsHeading: "Your identity provider",
+      discoveryLabel: "Discovery address",
+      discoveryHint:
+        "The address your provider publishes for its own settings. It almost always ends in /.well-known/openid-configuration. Microsoft Entra ID: use the one containing your tenant id, not the shared 'common' address.",
+      clientIdLabel: "Application (client) id",
+      clientIdHint:
+        "The id your provider gave Headway when you registered it as an application.",
+      clientSecretLabel: "Client secret",
+      clientSecretHintUnset:
+        "The secret your provider gave Headway. It is stored encrypted and never shown again — keep your own copy until sign-in works.",
+      clientSecretHintSet:
+        "A client secret is stored. Leave this blank to keep it. Type a new one only to replace it — Headway cannot show you the stored one, because it is encrypted and never displayed again.",
+      clientSecretPlaceholderSet: "Stored — leave blank to keep it",
+      clientSecretUnavailable:
+        "This server has nowhere safe to keep a secret yet, so Headway will refuse to save one. Ask whoever runs the server to set HEADWAY_SECRET_ENCRYPTION_KEY (or HEADWAY_SECRET_ENCRYPTION_KEY_FILE) and restart Headway.",
+      redirectLabel: "Sign-in return address",
+      redirectHint:
+        "Where your provider sends people back to after they sign in. Register this exact address at your provider — every character must match, including https:// and the path.",
+      groupsClaimLabel: "Group claim",
+      groupsClaimHint:
+        "The name of the field your provider uses to list a person's groups. Entra ID, Okta and Keycloak usually call it 'groups'; some installations use 'roles' or 'wids'. Whatever yours is called, type it here — nothing is assumed.",
+      usernameClaimLabel: "Username field",
+      usernameClaimHint:
+        "The field Headway reads to get a person's name. Usually 'preferred_username'; Entra ID installations sometimes use 'upn'. This is the name that appears in the audit trail beside everything they do.",
+      skewLabel: "Clock difference allowed (seconds)",
+      skewHint:
+        "How far apart this server's clock and your provider's clock may be before a sign-in is refused. 120 seconds suits almost everyone. Raise it only if sign-ins fail with clock errors — the real fix is to run a time service on this server.",
+      caBundleLabel: "Certificate authority file (optional)",
+      caBundleHint:
+        "Leave blank unless your network inspects encrypted traffic. If it does, put your organisation's certificate file on the Headway server and give its full path here. Headway will not skip certificate checking: that would let anyone on the network impersonate your provider.",
+      buttonLabelLabel: "Words on the sign-in button",
+      buttonLabelHint:
+        "What staff will see on the sign-in page — for example 'Sign in with County SSO'.",
+      enabledLabel: "Turn single sign-on on",
+      enabledHint:
+        "Leave this off until the test below passes. Turning it on only adds a button to the sign-in page; Headway usernames and passwords keep working either way.",
+      save: "Save settings",
+      saved: "Settings saved.",
+      test: "Test this configuration",
+      testing: "Testing…",
+      testHeading: "Test results",
+      testIntro:
+        "Headway just did everything a real sign-in does, short of opening your provider's sign-in page: it read your provider's settings, read its signing keys, and proved your client id and secret are accepted. Nobody was signed in.",
+      testPassed: "Everything Headway can check by itself is working.",
+      testFailed:
+        "Something is not right yet. Each step below says what to do about it.",
+      stepOk: "Working",
+      stepFailed: "Needs attention",
+      mappingsHeading: "Who gets which role",
+      mappingsIntro:
+        "A person is allowed in only if one of their groups appears below. If none of them do, they are refused and no account is created for them — Headway never guesses. Use the groups your directory already has; there is no group Headway expects to find, and no name it requires.",
+      mappingsEmpty:
+        "No groups are mapped yet. Until at least one is, every single sign-on attempt is refused and no accounts are created.",
+      mappingsTable: {
+        claim: "Group from your provider",
+        role: "Headway role",
+        note: "Note",
+        addedBy: "Added by",
+        actions: "Actions",
+      },
+      addMappingHeading: "Add a group",
+      claimValueLabel: "Group value",
+      claimValueHint:
+        "Exactly as your provider sends it — no wildcards, and capital letters matter. Microsoft Entra ID usually sends a group's object id (a long code); Okta and Keycloak usually send the group's name.",
+      /* An EXAMPLE, labelled as one. Deliberately a name an agency might
+         already have in its own directory, and deliberately NOT anything
+         that looks like a naming convention this product requires: use the
+         groups you already have, do not create new ones for us. */
+      claimValueExample:
+        "Example: transit-data-stewards — but use whatever your groups are already called. Headway does not require any particular naming, and you never need to create a group for it.",
+      claimValuePlaceholder: "your-directory-group-name",
+      mappingRoleLabel: "Headway role for this group",
+      mappingRoleHint:
+        "What everyone in this group may do in Headway. 'Auditor' can read everything and change nothing.",
+      noteLabel: "Note (optional)",
+      noteHint:
+        "For your own reference — for example 'Finance team' beside a group code that means nothing to a human.",
+      addMapping: "Add group",
+      mappingAdded: (claim: string, role: string) =>
+        `Anyone in '${claim}' will sign in as a ${role} from now on.`,
+      removeMapping: "Remove",
+      removeMappingLabel: (claim: string) => `Remove the mapping for ${claim}`,
+      mappingRemoved: (claim: string) =>
+        `'${claim}' no longer grants any access. Accounts it already created are unchanged — manage them under Users.`,
+      certifyingOfficialNote:
+        "Certifying official is deliberately missing from this list. Certifying is a legal attestation that figures sent to the federal government are correct, so who may do it is decided here in Headway and recorded in Headway's audit trail — not by a group membership changed elsewhere. Map people to another role here, then make the specific people who certify into certifying officials under Users. They still sign in through your identity provider.",
+      /* Was an honest "not wired up yet" note while the sign-in screen had
+         no button. The sign-in screen has one now, so the note says what
+         turning single sign-on on actually changes for staff — including
+         the half that does not change. */
+      loginButtonLive:
+        "While single sign-on is on, the sign-in page shows this button under the Headway username and password fields. Both ways in keep working: nobody is forced through your identity provider, and a Headway password is still the way back in if this configuration ever stops working.",
     },
 
     users: {

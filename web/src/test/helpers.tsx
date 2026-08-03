@@ -85,6 +85,69 @@ const DEFAULT_ROUTES: Record<string, RouteHandler> = {
       has_logo: false,
     },
   },
+  // The dashboard (and /certify's blockers panel) read the DQ tallies from
+  // GET /dq/issues/counts (handoff 0030 — the list endpoint pages, so
+  // nothing downloads the queue to count it). Default: an empty queue, so
+  // tests not about DQ need no route. DQ tests override with real counts.
+  "GET /dq/issues/counts": {
+    status: 200,
+    body: {
+      total: 0,
+      by_severity: { blocking: 0, warning: 0, info: 0 },
+      by_status: { open: 0, owned: 0, resolved: 0, attested: 0 },
+      resolution_minutes_total: 0,
+    },
+  },
+  // /map's flagged-findings layer asks for the OPEN BLOCKING findings on
+  // every mount (handoff 0043, design point 6), and looks through recent
+  // calculation runs for the ones that named a finding. Defaults: an empty
+  // queue and no runs, so the many pre-existing map tests keep exercising
+  // exactly what they exercised. Findings tests override both.
+  "GET /dq/issues": {
+    status: 200,
+    body: {
+      issues: [],
+      total: 0,
+      limit: 50,
+      next_cursor: null,
+      has_more: false,
+    },
+  },
+  "GET /calc/runs": { status: 200, body: [] },
+  // The admin hub reads the single-sign-on state on mount (handoff 0046) so
+  // its status line is the LIVE state rather than a claim. Defaults: nothing
+  // configured and no group mappings — the state a fresh installation is in,
+  // and the one the pre-existing admin tests assume.
+  "GET /auth/oidc/config": {
+    status: 200,
+    body: {
+      configured: false,
+      discovery_url: null,
+      client_id: null,
+      client_secret_set: false,
+      redirect_uri: null,
+      groups_claim: "groups",
+      username_claim: "preferred_username",
+      clock_skew_seconds: 120,
+      ca_bundle_path: null,
+      button_label: "Sign in with single sign-on",
+      is_enabled: false,
+      updated_by: null,
+      updated_at: null,
+      secret_storage_available: true,
+      disabled_by_environment: false,
+    },
+  },
+  "GET /auth/oidc/mappings": { status: 200, body: [] },
+  // The SIGN-IN screen asks whether to offer a single-sign-on button
+  // (handoff 0046). Default: off — a fresh installation, and the state every
+  // pre-existing login test assumes. The sign-in tests override it, and the
+  // local form must render identically whatever this call does (or does not)
+  // answer.
+  "GET /auth/oidc/status": {
+    status: 200,
+    body: { enabled: false, button_label: "" },
+  },
   // The dashboard fetches its sparkline history on every mount (handoff
   // 0024 #2); the default is an EMPTY series (no trend rendered), so the
   // many pre-existing dashboard tests keep exercising exactly what they

@@ -14,12 +14,21 @@ from dataclasses import dataclass
 from decimal import ROUND_HALF_EVEN, Decimal
 from typing import Iterable
 
+from headway_calc._vocabulary import (
+    duration_phrase,
+    group_vehicle_ref,
+    route_names,
+    subject_phrase,
+    window_phrase,
+)
 from headway_calc.types import (
     SEVERITY_BLOCKING,
     SEVERITY_WARNING,
+    SUBJECT_TRIPS,
     BlockingIssue,
     CoverageDetail,
     Finding,
+    SubjectRef,
     VehiclePosition,
 )
 
@@ -184,15 +193,20 @@ def apply_gap_exclusion_policy(
             continue
         for pos in pts:
             excluded_record_ids.setdefault(pos.source_record_id, None)
-        largest = max(delta_s for _, _, delta_s in gaps)
+        largest_prev, largest_curr, largest = max(gaps, key=lambda g: g[2])
         first_prev, first_curr, first_delta = gaps[0]
+        vehicle_ref = group_vehicle_ref(vehicle_id, pts)
         warnings.append(
             Finding(
                 issue_type="telemetry_gap_excluded",
                 severity=SEVERITY_WARNING,
+                # Route, vehicle, when — the order a dispatcher scans
+                # (handoff 0032); the largest gap is the headline, the
+                # exact seconds and full ids stay in the description.
                 title=(
-                    f"Group excluded over telemetry gap of {largest:.0f}s: "
-                    f"vehicle {vehicle_id} trip {trip_id}"
+                    f"{subject_phrase(route_names(pts), vehicle_id, vehicle_ref.label)}: "
+                    f"{duration_phrase(largest)} telemetry silence "
+                    f"({window_phrase(largest_prev.time, largest_curr.time)})"
                 ),
                 description=(
                     f"Group (vehicle_id={vehicle_id!r}, trip_id={trip_id!r}) "
@@ -207,6 +221,13 @@ def apply_gap_exclusion_policy(
                     f"exclusion is reported via coverage."
                 ),
                 source_record_ids=tuple(p.source_record_id for p in pts),
+                # The excluded trip, as structured data: /dq can then name
+                # its block, route and time of day (handoff 0029) instead of
+                # showing a bare id — and the vehicle, with its fleet label
+                # when the feed broadcast one (handoff 0032).
+                subject=SubjectRef(
+                    kind=SUBJECT_TRIPS, ids=(trip_id,), vehicle=vehicle_ref
+                ),
             )
         )
 

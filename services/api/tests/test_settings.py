@@ -3,9 +3,12 @@ certifying official writes, values validated against value_type (Decimal —
 never float), old→new in the audit detail, unknown key 404 (seeded, never
 client-creatable)."""
 
+import datetime as dt
 import json
 
-from conftest import auth_header
+import pytest
+
+from conftest import UTC, auth_header
 
 SEEDED = {
     # (value, value_type, seeding migration)
@@ -127,3 +130,59 @@ def test_unknown_key_is_404_settings_are_not_client_creatable(client, fake_db):
     assert r.status_code == 404
     assert "cannot be created" in r.json()["detail"]
     assert "brand_new_knob" not in fake_db.settings
+
+
+# ---------------------------------------------------------------------------
+# The service-day timezone (migration 0044, ADR-0015)
+# ---------------------------------------------------------------------------
+
+
+def test_the_timezone_setting_accepts_a_real_iana_zone(client, fake_db):
+    fake_db.settings["service_day_timezone"] = {
+        "setting_key": "service_day_timezone",
+        "setting_value": "",
+        "value_type": "text",
+        "description": "the agency's local timezone",
+        "updated_by": "migration-0044",
+        "updated_at": dt.datetime(2026, 8, 3, tzinfo=UTC),
+    }
+    r = client.put(
+        "/settings/service_day_timezone",
+        json={"value": "America/Los_Angeles"},
+        headers=auth_header(fake_db, "cora"),
+    )
+    assert r.status_code == 200, r.text
+    assert fake_db.settings["service_day_timezone"]["setting_value"] == (
+        "America/Los_Angeles"
+    )
+
+
+@pytest.mark.parametrize("bad", ["PST", "Pacific", "UTC-8", "America/Nowhere", "-08:00"])
+def test_an_abbreviation_or_invented_zone_is_refused_here_not_hours_later(
+    client, fake_db, bad
+):
+    """Checked against THIS INSTALLATION's own tz database.
+
+    Accepting 'PST' and failing hours later inside the normalizer — where the
+    only evidence is a container log the next update destroys — is precisely
+    the failure this setting exists to end. Abbreviations are also ambiguous
+    across daylight saving, so they are refused even where they parse.
+    """
+    fake_db.settings["service_day_timezone"] = {
+        "setting_key": "service_day_timezone",
+        "setting_value": "",
+        "value_type": "text",
+        "description": "the agency's local timezone",
+        "updated_by": "migration-0044",
+        "updated_at": dt.datetime(2026, 8, 3, tzinfo=UTC),
+    }
+    r = client.put(
+        "/settings/service_day_timezone",
+        json={"value": bad},
+        headers=auth_header(fake_db, "cora"),
+    )
+    assert r.status_code == 422, r.text
+    detail = r.json()["detail"]
+    assert "IANA" in detail and "America/Los_Angeles" in detail
+    # Nothing was written: a refused value must not half-apply.
+    assert fake_db.settings["service_day_timezone"]["setting_value"] == ""

@@ -139,6 +139,32 @@ class Emission:
     effective_fields: tuple[FieldDef, ...]
 
 
+#: The assignment status a matched no-run row is stamped with (handoff 0040).
+#: The only value the ``unassigned`` block's revenue_classification can take —
+#: the block exists to name the no-run case — and the value the assigned path
+#: is stamped with when the block is present.
+UNASSIGNED_CLASSIFICATION = "unassigned"
+ASSIGNED_CLASSIFICATION = "assigned"
+
+
+@dataclass(frozen=True)
+class UnassignedRule:
+    """The no-run classification block (``unassigned``) — handoff 0040.
+
+    A kept row all of whose ``when`` predicates hold carried NO run
+    assignment at all (the "ghost" boarding). Such a row is MAPPED (never
+    filtered, never quarantined) with ``drop_fields`` dropped and every
+    emitted record stamped ``revenue_classification`` = 'unassigned'; a row
+    that does not match is a normal assigned row, stamped 'assigned'. This is
+    the transform's assignment STATUS, never the revenue verdict — the calc
+    library decides revenue vs non-revenue.
+    """
+
+    when: tuple[Filter, ...]
+    drop_fields: tuple[str, ...]
+    reason: str
+
+
 @dataclass(frozen=True)
 class MappingSpec:
     """A validated mapping.v0.yaml, ready for the engine."""
@@ -157,11 +183,21 @@ class MappingSpec:
     header: bool
     #: Positional column names for headerless exports (empty when header).
     columns: tuple[str, ...]
+    #: Headerless only. When True, a first row whose values equal the
+    #: declared ``columns`` is dropped as an optional column-name header, so
+    #: an export made WITH or WITHOUT the header row both process (an operator
+    #: need not know to disable "include column headers"). Only the exact
+    #: header is ever skipped; a real data row is never dropped.
+    skip_optional_header: bool
     timezone_name: str
     filters: tuple[Filter, ...]
     fields: tuple[FieldDef, ...]
     #: Fan-out emissions (empty tuple = classic one-record-per-kept-row).
     emissions: tuple[Emission, ...]
+    #: No-run classification (handoff 0040); None when the spec declares no
+    #: ``unassigned`` block (the pre-0040 behavior — revenue_classification
+    #: left absent on every row).
+    unassigned: UnassignedRule | None
     synthetic: bool
     #: SHA-256 (first 12 hex chars) of the spec file's exact bytes — the
     #: content-addressed spec version stamped into adapter lineage edges.
@@ -175,6 +211,8 @@ class MappingSpec:
     def source_columns(self) -> set[str]:
         """Every source column the spec reads (for the header check)."""
         needed: set[str] = {f.column for f in self.filters}
+        if self.unassigned is not None:
+            needed.update(f.column for f in self.unassigned.when)
         field_defs = list(self.fields)
         for emission in self.emissions:
             needed.update(f.column for f in emission.when)
@@ -408,10 +446,36 @@ def load_spec(path: Path | str) -> MappingSpec:
     else:
         problems.extend(_field_semantics_problems(fields, "fields"))
 
+    # No-run classification block (handoff 0040). drop_fields must reference
+    # fields the spec actually maps (base fields or an emission override) — a
+    # drop of a field the spec never maps is a no-op that hides a config
+    # error, so it is refused loudly at load time.
+    unassigned_rule: UnassignedRule | None = None
+    unassigned_doc = document.get("unassigned")
+    if unassigned_doc is not None:
+        mapped_targets = {fd.target for fd in fields}
+        for emission in emissions:
+            mapped_targets.update(fd.target for fd in emission.effective_fields)
+        drop_fields = tuple(unassigned_doc.get("drop_fields") or ())
+        unmapped_drops = sorted(set(drop_fields) - mapped_targets)
+        if unmapped_drops:
+            problems.append(
+                "unassigned/drop_fields: "
+                + ", ".join(repr(f) for f in unmapped_drops)
+                + " is not a target field this spec maps — dropping a field "
+                "the spec never maps is a no-op that would hide a config error"
+            )
+        unassigned_rule = UnassignedRule(
+            when=tuple(_build_filter(f) for f in unassigned_doc["when"]),
+            drop_fields=drop_fields,
+            reason=unassigned_doc["reason"],
+        )
+
     source_format = document["source_format"]
     csv_opts = source_format.get("csv") or {}
     header = csv_opts.get("header", True)
     columns = tuple(csv_opts.get("columns") or ())
+    skip_optional_header = bool(csv_opts.get("skip_optional_header", False))
     filters = tuple(_build_filter(f) for f in document.get("filters") or ())
 
     if not header:
@@ -421,6 +485,12 @@ def load_spec(path: Path | str) -> MappingSpec:
                 "source_format/csv/columns: duplicate positional column "
                 "name(s) " + ", ".join(repr(d) for d in duplicates)
             )
+    if skip_optional_header and header:
+        problems.append(
+            "source_format/csv/skip_optional_header: only valid for a "
+            "headerless format (header: false) — a header:true format "
+            "already consumes its column-name row"
+        )
 
     if problems:
         raise SpecError(path, problems)
@@ -437,10 +507,12 @@ def load_spec(path: Path | str) -> MappingSpec:
         skip_leading_rows=csv_opts.get("skip_leading_rows", 0),
         header=header,
         columns=columns,
+        skip_optional_header=skip_optional_header,
         timezone_name=tz_name,
         filters=filters,
         fields=fields,
         emissions=tuple(emissions),
+        unassigned=unassigned_rule,
         synthetic=synthetic,
         spec_sha12=hashlib.sha256(spec_bytes).hexdigest()[:12],
         raw=document,

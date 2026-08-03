@@ -178,11 +178,18 @@ class LineageTrail:
 
 
 @dataclass(frozen=True)
-class DqIssue:
-    """One data-quality issue: a surfaced gap, conflict, or validation
-    failure with a type, severity, owner, and resolution workflow state.
-    Nothing here is ever coalesced — an unmeasured ``resolution_minutes``
-    is ``None``, never zero."""
+class DqIssueSummary:
+    """One data-quality issue as the QUEUE serves it: a surfaced gap,
+    conflict, or validation failure with a type, severity, owner, and
+    resolution workflow state. Nothing here is ever coalesced — an
+    unmeasured ``resolution_minutes`` is ``None``, never zero.
+
+    What is deliberately NOT here is ``source_record_ids`` — the
+    content-addressed provenance array moved to the per-issue endpoint
+    (:meth:`~headway_client.HeadwayClient.dq_issue`) when the queue gained
+    pagination (API handoff 0030): on a real deployment those ids were 716
+    MB of an 850 MB whole-queue response. They are one call away per
+    issue, complete and untruncated, not gone."""
 
     issue_id: str
     issue_type: str
@@ -191,15 +198,18 @@ class DqIssue:
     owner: Optional[str]
     title: str
     description: str
-    source_record_ids: Optional[list[str]]
     created_at: _dt.datetime
     resolved_at: Optional[_dt.datetime]
     resolution: Optional[str]
     resolution_minutes: Optional[int]
 
     @classmethod
-    def from_json(cls, raw: dict[str, Any]) -> "DqIssue":
-        return cls(
+    def from_json(cls, raw: dict[str, Any]) -> "DqIssueSummary":
+        return cls(**cls._summary_kwargs(raw))
+
+    @classmethod
+    def _summary_kwargs(cls, raw: dict[str, Any]) -> dict[str, Any]:
+        return dict(
             issue_id=raw["issue_id"],
             issue_type=raw["issue_type"],
             severity=raw["severity"],
@@ -207,13 +217,56 @@ class DqIssue:
             owner=raw.get("owner"),
             title=raw["title"],
             description=raw["description"],
-            source_record_ids=raw.get("source_record_ids"),
             created_at=_datetime(raw["created_at"]),
             resolved_at=(
                 _datetime(raw["resolved_at"]) if raw.get("resolved_at") else None
             ),
             resolution=raw.get("resolution"),
             resolution_minutes=raw.get("resolution_minutes"),
+        )
+
+
+@dataclass(frozen=True)
+class DqIssue(DqIssueSummary):
+    """One issue WITH its provenance, as ``GET /dq/issues/{id}`` serves it:
+    everything the queue row carries plus ``source_record_ids`` — the
+    complete, never-truncated list of content-addressed raw records the
+    finding was raised over. ``None`` means the finding is about a run as
+    a whole and cites no individual record — an honest absence, never a
+    truncation."""
+
+    source_record_ids: Optional[list[str]] = None
+
+    @classmethod
+    def from_json(cls, raw: dict[str, Any]) -> "DqIssue":
+        return cls(
+            **cls._summary_kwargs(raw),
+            source_record_ids=raw.get("source_record_ids"),
+        )
+
+
+@dataclass(frozen=True)
+class DqIssuePage:
+    """One BOUNDED page of the queue plus the truth about the rest of it
+    (API handoff 0030). ``total`` is the server's count over the WHOLE
+    queue under the same filters — never the page — so a notebook can
+    always say what it has not loaded. Walk pages with ``cursor`` (or let
+    :meth:`~headway_client.HeadwayClient.iter_dq_issues` walk them)."""
+
+    issues: list[DqIssueSummary]
+    total: int
+    limit: int
+    next_cursor: Optional[str]
+    has_more: bool
+
+    @classmethod
+    def from_json(cls, raw: dict[str, Any]) -> "DqIssuePage":
+        return cls(
+            issues=[DqIssueSummary.from_json(r) for r in raw["issues"]],
+            total=raw["total"],
+            limit=raw["limit"],
+            next_cursor=raw.get("next_cursor"),
+            has_more=raw["has_more"],
         )
 
 
@@ -225,6 +278,10 @@ class DqIssueCounts:
     total: int
     by_severity: dict[str, int]
     by_status: dict[str, int]
+    #: Recorded resolution effort over the same rows, in whole minutes
+    #: (API handoff 0030) — workflow metadata stewards typed, never a
+    #: reported figure. ``None`` when the server predates the field.
+    resolution_minutes_total: Optional[int] = None
 
     @classmethod
     def from_json(cls, raw: dict[str, Any]) -> "DqIssueCounts":
@@ -232,6 +289,7 @@ class DqIssueCounts:
             total=raw["total"],
             by_severity=dict(raw["by_severity"]),
             by_status=dict(raw["by_status"]),
+            resolution_minutes_total=raw.get("resolution_minutes_total"),
         )
 
 

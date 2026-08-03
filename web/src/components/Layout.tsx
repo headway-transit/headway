@@ -1,5 +1,5 @@
 /**
- * App shell for the public AND authenticated pages: skip link, header
+ * App shell for the public AND authenticated pages: skip link, command bar,
  * navigation, and focus management on route changes (focus moves to <main>
  * so keyboard and screen-reader users land on the new page's content, not
  * back at the top of the tab order). Signed out, only the public-data link
@@ -18,6 +18,28 @@
  *   brand != data encoding (see src/branding.ts). The dark theme also pins
  *   its own accent, because the server's contrast guardrail covers the
  *   light surfaces only.
+ *
+ * HANDOFF 0044 — THE COMMAND BAR (output 1)
+ * -----------------------------------------
+ * The shell was the most generic element on every screen: a two-row
+ * wrapping text nav that spent a full screen-inch on seventeen links before
+ * any content appeared, and no wave had ever owned it.
+ *
+ * It is now two dense rows with different jobs:
+ *   1. THE COMMAND BAR — the brand mark, the agency's own name, the room
+ *      you are in, and an "as computed" run stamp read from the real
+ *      calculation-run record (RunStamp), then the utility cluster
+ *      (tour, theme, session).
+ *   2. THE NAVIGATION ROW — one row. The rooms people live in stay direct
+ *      links; the long tail sits in named groups (NavGroup), which are
+ *      disclosures over ordinary links rather than a command palette (the
+ *      handoff's open question: a palette hides the map of the product from
+ *      an audience one week into Linux).
+ *
+ * Keyboard order is unchanged in kind: skip link → brand → nav in visual
+ * order → utilities → main. Focus visibility is the house ring throughout,
+ * and a group's links are genuinely `hidden` when it is closed, so focus
+ * never lands somewhere invisible.
  */
 
 import { useEffect, useRef } from "react";
@@ -25,17 +47,65 @@ import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { brandingLogoUrl } from "../api/client";
 import { loadBranding, useBranding } from "../branding";
 import { copy } from "../copy";
-import {
-  canCertify,
-  canComputeFigures,
-  clearSession,
-  useSession,
-} from "../auth/session";
+import { canCertify, canReviewOnly, clearSession, useSession } from "../auth/session";
 import { initTheme, setTheme, useTheme } from "../theme";
 import { clearToasts } from "../toasts";
 import { startTour } from "../tour";
+import { NavGroup } from "./NavGroup";
+import { RunStamp } from "./RunStamp";
 import { ToastRegion } from "./Toasts";
 import { TourOverlay } from "./Tour";
+
+/**
+ * The room you are in, for the command bar's context slot. Longest prefix
+ * wins, so /metrics/{id}/lineage still reads as Metrics. Nothing here is
+ * security: it is a label.
+ */
+const CONTEXTS: { path: string; label: string }[] = [
+  { path: "/today", label: copy.nav.today },
+  { path: "/review", label: copy.nav.review },
+  { path: "/map", label: copy.nav.map },
+  { path: "/dashboard", label: copy.nav.dashboard },
+  { path: "/metrics", label: copy.nav.metrics },
+  { path: "/calc-runs", label: copy.nav.calcRuns },
+  { path: "/compare", label: copy.nav.compare },
+  { path: "/reports/monthly", label: copy.nav.reports },
+  { path: "/safety", label: copy.nav.safety },
+  { path: "/sampling", label: copy.nav.sampling },
+  { path: "/dq", label: copy.nav.dq },
+  { path: "/revenue-review", label: copy.nav.revenueReview },
+  { path: "/sandbox", label: copy.nav.sandbox },
+  { path: "/attestations", label: copy.nav.attestations },
+  { path: "/certifications", label: copy.nav.certifications },
+  { path: "/certify", label: copy.nav.certify },
+  { path: "/admin", label: copy.nav.admin },
+  { path: "/settings/branding", label: copy.nav.admin },
+  { path: "/public", label: copy.nav.publicData },
+  { path: "/login", label: copy.nav.signIn },
+];
+
+function contextLabel(pathname: string): string | null {
+  let best: { path: string; label: string } | null = null;
+  for (const entry of CONTEXTS) {
+    if (pathname === entry.path || pathname.startsWith(`${entry.path}/`)) {
+      if (!best || entry.path.length > best.path.length) best = entry;
+    }
+  }
+  return best?.label ?? null;
+}
+
+/** Which grouped rooms live behind each nav group (for the current mark). */
+const GROUP_PATHS: Record<string, string[]> = {
+  reports: ["/reports/monthly", "/safety", "/sampling", "/compare"],
+  records: ["/certifications", "/attestations"],
+  tools: ["/calc-runs", "/revenue-review", "/sandbox"],
+};
+
+function groupHasCurrent(group: string, pathname: string): boolean {
+  return (GROUP_PATHS[group] ?? []).some(
+    (p) => pathname === p || pathname.startsWith(`${p}/`),
+  );
+}
 
 export function Layout() {
   const session = useSession();
@@ -112,6 +182,11 @@ export function Layout() {
   };
 
   const displayName = branding?.display_name ?? copy.appName;
+  const context = contextLabel(location.pathname);
+  // The map is the one surface that takes the whole viewport (handoff 0044,
+  // output 2): the canvas is the hero, so <main> drops its reading-width
+  // column there and the page composes its own grid.
+  const fullBleed = location.pathname === "/map";
 
   return (
     <>
@@ -119,32 +194,96 @@ export function Layout() {
         {copy.skipToContent}
       </a>
       <header className="app-header">
-        <span className="brand">
-          {/* Decorative: the display name beside it carries the meaning. */}
-          {/* logo_version busts the browser cache on replacement (handoff
-              0025 #3): a new upload mints a new URL, so the new logo shows
-              immediately. */}
-          {branding?.has_logo && (
-            <img
-              className="brand-logo"
-              src={brandingLogoUrl(branding.logo_version)}
-              alt=""
-            />
+        {/* ---- row 1: the command bar ---- */}
+        <div className="command-bar">
+          <span className="brand">
+            {/* Decorative: the display name beside it carries the meaning. */}
+            {/* logo_version busts the browser cache on replacement (handoff
+                0025 #3): a new upload mints a new URL, so the new logo shows
+                immediately. */}
+            {branding?.has_logo && (
+              <img
+                className="brand-logo"
+                src={brandingLogoUrl(branding.logo_version)}
+                alt=""
+              />
+            )}
+            {displayName}
+          </span>
+          {context && (
+            <span className="command-context">
+              <span className="visually-hidden">
+                {`${copy.shell.contextLabel}: `}
+              </span>
+              {context}
+            </span>
           )}
-          {displayName}
-        </span>
-        <nav aria-label="Main">
+          {/* The run stamp reads the real calculation-run record; it needs a
+              session, so signed-out visitors simply do not see it. */}
+          {session && <RunStamp />}
+          <div className="session-info">
+            {/* "Take the tour" (handoff 0021 #3): restartable any time.
+                SPA navigation to /today, then the tour starts at step 1. */}
+            {session && (
+              <button
+                type="button"
+                className="link-like"
+                onClick={() => {
+                  navigate("/today");
+                  startTour();
+                }}
+              >
+                {copy.today.takeTourLink}
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+            >
+              {theme === "dark"
+                ? copy.theme.switchToLight
+                : copy.theme.switchToDark}
+            </button>
+            {session ? (
+              <>
+                <span>
+                  {copy.signedInAs(
+                    session.username,
+                    copy.roleLabels[session.role] ?? session.role,
+                  )}
+                </span>
+                <button type="button" onClick={handleSignOut}>
+                  {copy.signOut}
+                </button>
+              </>
+            ) : (
+              <NavLink to="/login">{copy.nav.signIn}</NavLink>
+            )}
+          </div>
+        </div>
+
+        {/* ---- row 2: one dense navigation row ---- */}
+        <nav aria-label="Main" className="nav-strip">
           <ul>
             {/* Authenticated pages are linked only when signed in — UX, not
                 security: the API enforces authentication on every call. */}
             {session && (
               <>
-                {/* The briefing home leads the nav (handoff 0021 #1). */}
+                {/* The rooms people live in stay direct links. */}
+                {/* A read-only role's home comes first, because it IS their
+                    home (handoff 0047): they land here, not in the control
+                    room. Offered to readers only — that is UX, never
+                    security: /review is composed of reads the API already
+                    grants every signed-in account, and any role that opens
+                    it directly gets the page. */}
+                {canReviewOnly(session) && (
+                  <li>
+                    <NavLink to="/review">{copy.nav.review}</NavLink>
+                  </li>
+                )}
                 <li>
                   <NavLink to="/today">{copy.nav.today}</NavLink>
                 </li>
-                {/* The living map (handoff 0024): beside Today — the two
-                    "what is happening right now" surfaces sit together. */}
                 <li>
                   <NavLink to="/map">{copy.nav.map}</NavLink>
                 </li>
@@ -154,53 +293,108 @@ export function Layout() {
                 <li>
                   <NavLink to="/metrics">{copy.nav.metrics}</NavLink>
                 </li>
-                {/* The calculations room (handoff 0026): linked for the
-                    roles the API lets start a run — UX only, never
-                    security. Viewers can still read /calc-runs when routed
-                    there (e.g. from the metrics empty state's plain-words
-                    line). */}
-                {canComputeFigures(session) && (
-                  <li>
-                    <NavLink to="/calc-runs">{copy.nav.calcRuns}</NavLink>
-                  </li>
-                )}
-                <li>
-                  <NavLink to="/compare">{copy.nav.compare}</NavLink>
-                </li>
-                <li>
-                  <NavLink to="/reports/monthly">{copy.nav.reports}</NavLink>
-                </li>
-                <li>
-                  <NavLink to="/safety">{copy.nav.safety}</NavLink>
-                </li>
-                <li>
-                  <NavLink to="/sampling">{copy.nav.sampling}</NavLink>
-                </li>
                 <li>
                   <NavLink to="/dq">{copy.nav.dq}</NavLink>
                 </li>
+                {/* The long tail, in named groups. */}
                 <li>
-                  <NavLink to="/sandbox">{copy.nav.sandbox}</NavLink>
+                  <NavGroup
+                    label={copy.shell.groups.reports}
+                    containsCurrent={groupHasCurrent(
+                      "reports",
+                      location.pathname,
+                    )}
+                    hint={copy.shell.groupHint(copy.shell.groups.reports)}
+                    currentHint={copy.shell.groupCurrentHint(
+                      copy.shell.groups.reports,
+                    )}
+                  >
+                    <li>
+                      <NavLink to="/reports/monthly">
+                        {copy.nav.reports}
+                      </NavLink>
+                    </li>
+                    <li>
+                      <NavLink to="/safety">{copy.nav.safety}</NavLink>
+                    </li>
+                    <li>
+                      <NavLink to="/sampling">{copy.nav.sampling}</NavLink>
+                    </li>
+                    <li>
+                      <NavLink to="/compare">{copy.nav.compare}</NavLink>
+                    </li>
+                  </NavGroup>
                 </li>
-                {/* Statistician attestations (handoff 0019): every signed-in
-                    role can read the record; the entry form inside is
-                    role-gated (UX only — the API enforces the role). */}
                 <li>
-                  <NavLink to="/attestations">{copy.nav.attestations}</NavLink>
+                  <NavGroup
+                    label={copy.shell.groups.records}
+                    containsCurrent={groupHasCurrent(
+                      "records",
+                      location.pathname,
+                    )}
+                    hint={copy.shell.groupHint(copy.shell.groups.records)}
+                    currentHint={copy.shell.groupCurrentHint(
+                      copy.shell.groups.records,
+                    )}
+                  >
+                    {/* The certifications index (handoff 0019 follow-up):
+                        any signed-in role reads the record, like the API. */}
+                    <li>
+                      <NavLink to="/certifications">
+                        {copy.nav.certifications}
+                      </NavLink>
+                    </li>
+                    {/* Statistician attestations (handoff 0019): every
+                        signed-in role can read the record; the entry form
+                        inside is role-gated (UX only — API enforces). */}
+                    <li>
+                      <NavLink to="/attestations">
+                        {copy.nav.attestations}
+                      </NavLink>
+                    </li>
+                  </NavGroup>
                 </li>
-                {/* The certifications index (handoff 0019 follow-up): any
-                    signed-in role reads the record, like the API. Placed
-                    beside Certify — the room its records come from. */}
                 <li>
-                  <NavLink to="/certifications">
-                    {copy.nav.certifications}
-                  </NavLink>
+                  <NavGroup
+                    label={copy.shell.groups.tools}
+                    containsCurrent={groupHasCurrent(
+                      "tools",
+                      location.pathname,
+                    )}
+                    hint={copy.shell.groupHint(copy.shell.groups.tools)}
+                    currentHint={copy.shell.groupCurrentHint(
+                      copy.shell.groups.tools,
+                    )}
+                  >
+                    {/* The calculations room (handoff 0026). Linked for
+                        EVERY signed-in role since handoff 0047: the link
+                        used to be gated on canComputeFigures, but GET
+                        /calc/runs is require_authenticated, so the nav was
+                        hiding a surface the API grants — and which
+                        calculation version produced a figure, and what a run
+                        refused to compute, is evidence. A reader who cannot
+                        find it has to be told the URL. The write controls
+                        INSIDE the page stay gated exactly as they were (UX
+                        only; the API enforces data_steward+ on POST). */}
+                    <li>
+                      <NavLink to="/calc-runs">{copy.nav.calcRuns}</NavLink>
+                    </li>
+                    {/* The revenue review queue (handoff 0040): boardings
+                        held out of the ridership figure until a person says
+                        what they were. */}
+                    <li>
+                      <NavLink to="/revenue-review">
+                        {copy.nav.revenueReview}
+                      </NavLink>
+                    </li>
+                    <li>
+                      <NavLink to="/sandbox">{copy.nav.sandbox}</NavLink>
+                    </li>
+                  </NavGroup>
                 </li>
                 {/* Shown only to the certifying official — UX, not security:
                     the API enforces the role on POST /certifications and on
-                    every admin/branding write. The admin hub (handoff 0025)
-                    absorbs the old Branding nav entry; /settings/branding
-                    keeps working and is linked from the hub. */}
+                    every admin/branding write. */}
                 {canCertify(session) && (
                   <>
                     <li>
@@ -217,51 +411,15 @@ export function Layout() {
             <li>
               <NavLink to="/public">{copy.nav.publicData}</NavLink>
             </li>
-            {/* "Take the tour" (handoff 0021 #3): restartable any time.
-                SPA navigation to /today, then the tour starts at step 1. */}
-            {session && (
-              <li>
-                <button
-                  type="button"
-                  className="link-like"
-                  onClick={() => {
-                    navigate("/today");
-                    startTour();
-                  }}
-                >
-                  {copy.today.takeTourLink}
-                </button>
-              </li>
-            )}
           </ul>
         </nav>
-        <div className="session-info">
-          <button
-            type="button"
-            onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-          >
-            {theme === "dark"
-              ? copy.theme.switchToLight
-              : copy.theme.switchToDark}
-          </button>
-          {session ? (
-            <>
-              <span>
-                {copy.signedInAs(
-                  session.username,
-                  copy.roleLabels[session.role] ?? session.role,
-                )}
-              </span>
-              <button type="button" onClick={handleSignOut}>
-                {copy.signOut}
-              </button>
-            </>
-          ) : (
-            <NavLink to="/login">{copy.nav.signIn}</NavLink>
-          )}
-        </div>
       </header>
-      <main id="main" tabIndex={-1} ref={mainRef}>
+      <main
+        id="main"
+        tabIndex={-1}
+        ref={mainRef}
+        className={fullBleed ? "page-full" : undefined}
+      >
         <Outlet />
       </main>
       {/* The shell-wide action-confirmation region (handoff 0017 #4):

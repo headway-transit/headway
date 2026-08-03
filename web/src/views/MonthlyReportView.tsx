@@ -455,7 +455,9 @@ export function MonthlyReportView() {
               <thead>
                 <tr>
                   <th scope="col">{copy.report.columns.metric}</th>
-                  <th scope="col">{copy.report.columns.value}</th>
+                  <th scope="col" className="numeric">
+                    {copy.report.columns.value}
+                  </th>
                   <th scope="col">{copy.report.columns.unit}</th>
                   <th scope="col">{copy.report.columns.calc}</th>
                   <th scope="col">{copy.report.columns.status}</th>
@@ -492,8 +494,10 @@ export function MonthlyReportView() {
                               </>
                             )}
                           </th>
-                          {/* The figure, verbatim as the API served it. */}
-                          <td className="figure">{v.value}</td>
+                          {/* The figure, verbatim as the API served it.
+                              `numeric`: nothing but the number, so the
+                              column aligns on the ones place. */}
+                          <td className="figure numeric">{v.value}</td>
                           <td>{unitLabel(v.unit)}</td>
                           <td>
                             {v.calc_name} {v.calc_version}

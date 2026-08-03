@@ -57,6 +57,10 @@ from decimal import Decimal
 from headway_calc._blocks import LAYOVER_MAX_SECONDS
 from headway_calc._grouping import COVERAGE_THRESHOLD, GAP_THRESHOLD_SECONDS
 from headway_calc.attestation import applicable_attestations
+from headway_calc.boarding_reviews import (
+    load_boarding_reviews,
+    persist_review_items,
+)
 from headway_calc.dq import route_findings
 from headway_calc.dr import (
     compute_dr_pmt,
@@ -84,19 +88,27 @@ from headway_calc.mode import (
 from headway_calc.persist import _METRIC_BY_CALC_NAME, persist_result
 from headway_calc.pmt import compute_pmt
 from headway_calc.reader import (
+    load_agency_timezones,
     load_attestations,
     load_dr_trips,
     load_operated_trip_ids,
     load_passenger_events,
+    load_revenue_window_seconds,
     load_trip_geometries,
     load_vehicle_positions,
 )
+from headway_calc.revenue_window import build_windows
 from headway_calc.settings import load_policy_settings
 from headway_calc.types import CalcResult, Finding
 from headway_calc.upt import IMBALANCE_THRESHOLD, MISSING_TRIP_THRESHOLD, compute_upt
 from headway_calc.voms import compute_voms
 from headway_calc.vrh import compute_vrh
 from headway_calc.vrm import compute_vrm
+from headway_calc import pmt as _pmt
+from headway_calc import upt as _upt
+from headway_calc import voms as _voms
+from headway_calc import vrh as _vrh
+from headway_calc import vrm as _vrm
 
 #: The fleet-wide scope value (the computed.metric_values.scope column
 #: default, handoff 0001).
@@ -120,6 +132,132 @@ def scope_for_dr_tos(tos: str) -> str:
     return f"mode:DR:tos:{tos}"
 
 
+#: Issue type of the run-level empty-input refusal. A period whose primary
+#: inputs hold nothing measurable REFUSES instead of persisting a figure: a
+#: 0.00 over no evidence is an invented number, not a measurement (the first
+#: partner agency's June run persisted exactly such zeros — the flagged
+#: case this closes). The guard lives in the RUNNER, before any compute_*
+#: call, so every shipped calc version still recomputes bit-for-bit over the
+#: inputs it is actually given; nothing about calc semantics changed.
+NO_DATA_ISSUE_TYPE = "no_data_in_period"
+
+
+def _no_data_refusal(
+    calc_name: str,
+    calc_version: str,
+    unit: str,
+    what_is_missing: str,
+    period_start: date,
+    period_end: date,
+) -> CalcResult:
+    """A blocking refusal standing in for a calc whose primary input is empty.
+
+    Carries the calc's own name/version so the routed finding and the
+    REFUSED outcome say which figure refused and why — but no compute_*
+    function ran, no detail is fabricated, and no lineage exists (there are
+    no input records by definition)."""
+    description = (
+        f"{calc_name} {calc_version} found {what_is_missing} between "
+        f"{period_start.isoformat()} and {period_end.isoformat()} (end "
+        "exclusive). Nothing was measured in this period, so no figure is "
+        "reported — writing 0.00 would invent a number where there is no "
+        "evidence. If your agency operated service in this period, its data "
+        "connection was not flowing yet; the Data sources page shows when "
+        "each connection first landed records."
+    )
+    return CalcResult(
+        value=None,
+        unit=unit,
+        calc_name=calc_name,
+        calc_version=calc_version,
+        input_record_ids=(),
+        blocking_issues=(
+            Finding(
+                issue_type=NO_DATA_ISSUE_TYPE,
+                title="No data covers this period",
+                description=description,
+            ),
+        ),
+    )
+
+
+def _fleet_results(
+    positions,
+    passenger_events,
+    operated_trip_ids,
+    trip_geometries,
+    threshold,
+    cov_threshold,
+    layover_max,
+    missing_threshold,
+    imbal_threshold,
+    attestations_for,
+    period_start: date,
+    period_end: date,
+    revenue_windows=None,
+    boarding_reviews=None,
+) -> tuple[CalcResult, ...]:
+    """The four fleet-wide results, with the empty-input guard applied.
+
+    Shared by run_period and preview_period so a preview refuses exactly
+    where a real run would. Guards are per calc, on that calc's PRIMARY
+    input: vrm/vrh need vehicle telemetry; upt/pmt need passenger counts or
+    at least operated trips (operated trips with zero events is NOT guarded
+    here — compute_upt already refuses that honestly via the p. 146
+    missing-trip threshold, which is the truer finding)."""
+    have_telemetry = bool(positions)
+    have_count_inputs = bool(passenger_events) or bool(operated_trip_ids)
+    no_telemetry = "no vehicle telemetry"
+    no_counts = "no passenger counts and no operated trips"
+    return (
+        compute_vrm(positions, threshold, cov_threshold)
+        if have_telemetry
+        else _no_data_refusal(
+            _vrm.CALC_NAME, _vrm.CALC_VERSION, _vrm.UNIT,
+            no_telemetry, period_start, period_end,
+        ),
+        compute_vrh(positions, threshold, cov_threshold, layover_max)
+        if have_telemetry
+        else _no_data_refusal(
+            _vrh.CALC_NAME, _vrh.CALC_VERSION, _vrh.UNIT,
+            no_telemetry, period_start, period_end,
+        ),
+        compute_upt(
+            passenger_events,
+            operated_trip_ids,
+            missing_trip_threshold=missing_threshold,
+            imbalance_threshold=imbal_threshold,
+            attestations=attestations_for("upt", SCOPE_AGENCY),
+            revenue_windows=revenue_windows,
+            boarding_reviews=boarding_reviews,
+        )
+        if have_count_inputs
+        else _no_data_refusal(
+            _upt.CALC_NAME, _upt.CALC_VERSION, _upt.UNIT,
+            no_counts, period_start, period_end,
+        ),
+        # pmt_v0 (handoff 0011): the same p. 146 threshold family as upt_v0.
+        # shape_dist_unit_miles is deliberately NOT set here: the GTFS spec
+        # leaves shape_dist units feed-defined, so consuming them requires an
+        # explicit per-feed conversion (a future per-agency knob — handoff
+        # 0011 Response); without it pmt_v0 uses the flagged haversine
+        # fallback and says so.
+        compute_pmt(
+            passenger_events,
+            operated_trip_ids,
+            trip_geometries,
+            missing_trip_threshold=missing_threshold,
+            imbalance_threshold=imbal_threshold,
+            attestations=attestations_for("pmt", SCOPE_AGENCY),
+        )
+        if have_count_inputs
+        else _no_data_refusal(
+            _pmt.CALC_NAME, _pmt.CALC_VERSION, _pmt.UNIT,
+            no_counts, period_start, period_end,
+        ),
+    )
+
+
 @dataclass(frozen=True)
 class MetricOutcome:
     """Per-metric outcome of one run.
@@ -138,6 +276,11 @@ class MetricOutcome:
     ``scope`` (handoff 0009) is the computed.metric_values.scope the outcome
     was persisted under: 'agency' (fleet-wide, the default) or 'mode:<mode>'
     on a --per-mode run.
+
+    ``already_on_record``: an identical figure (value, period, scope, calc
+    version AND detail) already existed, so persist_result inserted nothing
+    and ``metric_value_id`` names the EXISTING row — re-running unchanged
+    data never duplicates a figure (see headway_calc.persist.PersistedValue).
     """
 
     calc_name: str
@@ -151,6 +294,7 @@ class MetricOutcome:
     routed_info_ids: tuple[str, ...]
     detail: dict | None
     scope: str = SCOPE_AGENCY
+    already_on_record: bool = False
 
     @property
     def persisted(self) -> bool:
@@ -172,6 +316,7 @@ class MetricOutcome:
             "value": self.value,
             "metric_value_id": self.metric_value_id,
             "persisted": self.persisted,
+            "already_on_record": self.already_on_record,
             "coverage": self.coverage,
             "detail": self.detail,
             "routed_blocking_ids": list(self.routed_blocking_ids),
@@ -487,6 +632,23 @@ def run_period(
     operated_trip_ids = load_operated_trip_ids(conn, period_start, period_end)
     trip_geometries = load_trip_geometries(conn, period_start, period_end)
     dr_trips = load_dr_trips(conn, period_start, period_end)
+    # Revenue-service window (handoff 0040): the schedule-derived corroborating
+    # signal for classifying no-run boardings. One timezone => a window per
+    # service date; zero or many distinct zones => no window (a schedule
+    # anchor is never guessed, so ambiguous no-run boardings are held pending
+    # review rather than mis-classified). upt_v0 0.3.0 only.
+    agency_timezones = load_agency_timezones(conn)
+    revenue_windows = build_windows(
+        load_revenue_window_seconds(conn, period_start, period_end),
+        agency_timezones[0] if len(agency_timezones) == 1 else None,
+    )
+    # Human revenue classifications (handoff 0040, review sub-wave): the
+    # decisions data stewards recorded in dq.boarding_revenue_reviews for
+    # boardings an earlier run over this period could not decide. THIS re-run
+    # is what lets a held boarding finally count (or finally be excluded) —
+    # the loop the review queue closes. No decisions (or a pre-0040 database)
+    # means every ambiguous boarding stays held, exactly as 0.3.0 held it.
+    boarding_reviews = load_boarding_reviews(conn, period_start, period_end)
     # Statistician attestations (handoff 0019): unrevoked cert.attestations
     # rows covering the run period; each scoped upt/pmt computation receives
     # ONLY the attestations matching its metric AND scope AND period (the
@@ -499,30 +661,21 @@ def run_period(
             attestations, metric, scope, period_start, period_end
         )
 
-    results: tuple[CalcResult, ...] = (
-        compute_vrm(positions, threshold, cov_threshold),
-        compute_vrh(positions, threshold, cov_threshold, layover_max),
-        compute_upt(
-            passenger_events,
-            operated_trip_ids,
-            missing_trip_threshold=missing_threshold,
-            imbalance_threshold=imbal_threshold,
-            attestations=_attestations_for("upt", SCOPE_AGENCY),
-        ),
-        # pmt_v0 (handoff 0011): the same p. 146 threshold family as upt_v0.
-        # shape_dist_unit_miles is deliberately NOT set here: the GTFS spec
-        # leaves shape_dist units feed-defined, so consuming them requires an
-        # explicit per-feed conversion (a future per-agency knob — handoff
-        # 0011 Response); without it pmt_v0 uses the flagged haversine
-        # fallback and says so.
-        compute_pmt(
-            passenger_events,
-            operated_trip_ids,
-            trip_geometries,
-            missing_trip_threshold=missing_threshold,
-            imbalance_threshold=imbal_threshold,
-            attestations=_attestations_for("pmt", SCOPE_AGENCY),
-        ),
+    results: tuple[CalcResult, ...] = _fleet_results(
+        positions,
+        passenger_events,
+        operated_trip_ids,
+        trip_geometries,
+        threshold,
+        cov_threshold,
+        layover_max,
+        missing_threshold,
+        imbal_threshold,
+        _attestations_for,
+        period_start,
+        period_end,
+        revenue_windows,
+        boarding_reviews,
     )
 
     # Scoped result list: the fleet-wide ('agency') results first — unchanged
@@ -534,7 +687,15 @@ def run_period(
     run_finding = None
     if per_mode:
         scoped_results.append(
-            (SCOPE_AGENCY, compute_voms(positions, period_start, period_end))
+            (
+                SCOPE_AGENCY,
+                compute_voms(positions, period_start, period_end)
+                if positions
+                else _no_data_refusal(
+                    _voms.CALC_NAME, _voms.CALC_VERSION, _voms.UNIT,
+                    "no vehicle telemetry", period_start, period_end,
+                ),
+            )
         )
         per_mode_results = (
             compute_vrm_by_mode(positions, threshold, cov_threshold),
@@ -547,6 +708,8 @@ def run_period(
                 attestations_for_scope=lambda scope: _attestations_for(
                     "upt", scope
                 ),
+                revenue_windows=revenue_windows,
+                boarding_reviews=boarding_reviews,
             ),
             compute_pmt_by_mode(
                 passenger_events,
@@ -626,6 +789,24 @@ def run_period(
                 issue_ids[n_infos : n_infos + n_warnings]
             )
             blocking_ids_by_key[key] = tuple(issue_ids[n_infos + n_warnings :])
+        # The review queue rides WITH the findings, in the fail-loudly-first
+        # transaction and for the same reason (handoff 0040). A boarding the
+        # calculation held out of a figure and could not hand to anybody is
+        # the dead end this wave exists to close, so the hand-over must be
+        # durable no matter what happens to the value phase below. The UPSERT
+        # is idempotent and refuses to touch a row a human already answered,
+        # so the same boarding appearing under both the fleet and its mode
+        # scope lands exactly once.
+        if result.review_items:
+            persist_review_items(
+                conn,
+                list(result.review_items),
+                calc_name=result.calc_name,
+                calc_version=result.calc_version,
+                period_start=period_start,
+                period_end=period_end,
+            )
+            routed_any = True
     run_info_ids: tuple[str, ...] = ()
     if run_finding is not None:
         run_info_ids = tuple(
@@ -671,7 +852,7 @@ def run_period(
                     )
                 )
             else:
-                metric_value_id = persist_result(
+                persisted = persist_result(
                     conn, result, period_start, period_end, scope=scope
                 )
                 persisted_any = True
@@ -682,12 +863,13 @@ def run_period(
                         metric=_METRIC_BY_CALC_NAME[result.calc_name],
                         unit=result.unit,
                         value=str(result.value),
-                        metric_value_id=metric_value_id,
+                        metric_value_id=persisted.metric_value_id,
                         routed_blocking_ids=(),
                         routed_warning_ids=warning_ids,
                         routed_info_ids=info_ids,
                         detail=detail,
                         scope=scope,
+                        already_on_record=persisted.already_on_record,
                     )
                 )
         if persisted_any:
@@ -1006,7 +1188,7 @@ def run_ops_period(
                     )
                 )
             else:
-                metric_value_id = persist_result(
+                persisted = persist_result(
                     conn, result, period_start, period_end, scope=scope
                 )
                 persisted_any = True
@@ -1017,12 +1199,13 @@ def run_ops_period(
                         metric=_METRIC_BY_CALC_NAME[result.calc_name],
                         unit=result.unit,
                         value=str(result.value),
-                        metric_value_id=metric_value_id,
+                        metric_value_id=persisted.metric_value_id,
                         routed_blocking_ids=(),
                         routed_warning_ids=warning_ids,
                         routed_info_ids=info_ids,
                         detail=detail,
                         scope=scope,
+                        already_on_record=persisted.already_on_record,
                     )
                 )
         if persisted_any:
@@ -1289,7 +1472,7 @@ def run_daytype_period(
                     )
                 )
             else:
-                metric_value_id = persist_result(
+                persisted = persist_result(
                     conn, result, period_start, period_end, scope=scope
                 )
                 persisted_any = True
@@ -1300,12 +1483,13 @@ def run_daytype_period(
                         metric=_METRIC_BY_CALC_NAME[result.calc_name],
                         unit=result.unit,
                         value=str(result.value),
-                        metric_value_id=metric_value_id,
+                        metric_value_id=persisted.metric_value_id,
                         routed_blocking_ids=(),
                         routed_warning_ids=warning_ids,
                         routed_info_ids=info_ids,
                         detail=detail,
                         scope=scope,
+                        already_on_record=persisted.already_on_record,
                     )
                 )
         if persisted_any:
@@ -1548,6 +1732,18 @@ def preview_period(
     # run's would be a lie. Loading them is a SELECT: the no-writes
     # guarantee stands.
     attestations = load_attestations(conn, period_start, period_end)
+    # Revenue windows AND recorded human classifications resolved exactly as
+    # a real run (handoff 0040) — a preview that ignored a decision an
+    # analyst already made would show a figure the next real run would not
+    # produce. All SELECTs: the no-writes guarantee stands, and a preview
+    # never WRITES to the review queue (previewing is not a run; it must not
+    # put work in anybody's queue).
+    boarding_reviews = load_boarding_reviews(conn, period_start, period_end)
+    agency_timezones = load_agency_timezones(conn)
+    revenue_windows = build_windows(
+        load_revenue_window_seconds(conn, period_start, period_end),
+        agency_timezones[0] if len(agency_timezones) == 1 else None,
+    )
 
     variant_reports: list[PreviewVariantReport] = []
     for variant in variants:
@@ -1566,28 +1762,26 @@ def preview_period(
             variant.missing_trip_threshold,
             None,
         )
-        results = (
-            compute_vrm(positions, threshold, cov_threshold),
-            compute_vrh(positions, threshold, cov_threshold, layover_max),
-            compute_upt(
-                passenger_events,
-                operated_trip_ids,
-                missing_trip_threshold=missing_threshold,
-                imbalance_threshold=imbal_threshold,
-                attestations=applicable_attestations(
-                    attestations, "upt", SCOPE_AGENCY, period_start, period_end
-                ),
+        # The shared guard means a preview over an empty period REFUSES with
+        # the same no_data_in_period finding a real run would route — no
+        # threshold variant can conjure a figure out of no evidence.
+        results = _fleet_results(
+            positions,
+            passenger_events,
+            operated_trip_ids,
+            trip_geometries,
+            threshold,
+            cov_threshold,
+            layover_max,
+            missing_threshold,
+            imbal_threshold,
+            lambda metric, scope: applicable_attestations(
+                attestations, metric, scope, period_start, period_end
             ),
-            compute_pmt(
-                passenger_events,
-                operated_trip_ids,
-                trip_geometries,
-                missing_trip_threshold=missing_threshold,
-                imbalance_threshold=imbal_threshold,
-                attestations=applicable_attestations(
-                    attestations, "pmt", SCOPE_AGENCY, period_start, period_end
-                ),
-            ),
+            period_start,
+            period_end,
+            revenue_windows,
+            boarding_reviews,
         )
         variant_reports.append(
             PreviewVariantReport(

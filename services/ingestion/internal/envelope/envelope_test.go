@@ -145,3 +145,73 @@ func TestNewObjectRef(t *testing.T) {
 		t.Errorf("record_id = %q, want hash of object bytes %q", e.RecordID, id)
 	}
 }
+
+func TestNewStoredCarriesInlinePayloadAndPayloadRef(t *testing.T) {
+	payload := []byte("raw realtime frame bytes")
+	id := RecordID(payload)
+	key := "raw/gtfs_rt/" + id + ".pb"
+	e, err := NewStored(payload, key, testParams)
+	if err != nil {
+		t.Fatalf("NewStored: %v", err)
+	}
+	// Additive (handoff 0036): encoding stays base64, the inline copy stays
+	// on the wire, payload_ref is the durable address.
+	if e.PayloadEncoding != EncodingBase64 {
+		t.Errorf("payload_encoding = %q, want base64", e.PayloadEncoding)
+	}
+	if e.PayloadRef != key {
+		t.Errorf("payload_ref = %q, want %q", e.PayloadRef, key)
+	}
+	decoded, err := base64.StdEncoding.DecodeString(e.Payload)
+	if err != nil || string(decoded) != string(payload) {
+		t.Errorf("inline payload no longer round-trips the exact bytes")
+	}
+	raw, err := e.MarshalJSONBytes()
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if m["payload_ref"] != key {
+		t.Errorf("marshaled payload_ref = %v, want %v", m["payload_ref"], key)
+	}
+}
+
+func TestNewStoredRefusesEmptyKey(t *testing.T) {
+	if _, err := NewStored([]byte("bytes"), "", testParams); err == nil {
+		t.Fatal("NewStored with empty key must fail")
+	}
+}
+
+func TestPayloadRefOmittedWhenUnset(t *testing.T) {
+	e, err := New([]byte("bytes"), testParams)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	raw, err := e.MarshalJSONBytes()
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if _, ok := m["payload_ref"]; ok {
+		t.Errorf("payload_ref present on a plain base64 envelope (must be additive/omitted)")
+	}
+}
+
+func TestObjectRefEnvelopeWithDisagreeingPayloadRefRejected(t *testing.T) {
+	payload := []byte("zip bytes")
+	key := "raw/gtfs_static/" + RecordID(payload) + ".zip"
+	e, err := NewObjectRef(payload, key, testParams)
+	if err != nil {
+		t.Fatalf("NewObjectRef: %v", err)
+	}
+	e.PayloadRef = "raw/other/key"
+	if err := e.Validate(); err == nil {
+		t.Fatal("object_ref envelope with a disagreeing payload_ref must fail validation")
+	}
+}

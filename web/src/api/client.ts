@@ -19,6 +19,9 @@ import type {
   AttestationRequest,
   AttestationRevokeRequest,
   AttestationRevoked,
+  BoardingReview,
+  BoardingReviewCounts,
+  BoardingReviewPage,
   Branding,
   CalcRunCreated,
   CalcRunRecord,
@@ -33,8 +36,11 @@ import type {
   CertificationResponse,
   VerificationResult,
   CompareResponse,
+  ClassifyBoardingRequest,
+  ClassifyBoardingResponse,
   DqIssue,
   DqIssueCounts,
+  DqIssuePage,
   ErrorEnvelope,
   HistoryResponse,
   LineageNode,
@@ -46,6 +52,9 @@ import type {
   Mr20Package,
   OpsVehiclesLatest,
   PublicMetricValue,
+  RawRecordLabel,
+  RawRecordPreview,
+  RawRecordVerdict,
   ResetPasswordResponse,
   RoutesCollection,
   ResolveRequest,
@@ -100,6 +109,15 @@ const NETWORK_ERROR_MESSAGE =
 
 const UNREADABLE_ERROR_MESSAGE =
   "The server reported an error but the message could not be read.";
+
+/**
+ * The unauthenticated sign-in endpoints. A 401 from either means "that
+ * sign-in attempt failed", never "your session expired", so neither one
+ * clears a session or triggers the login redirect: doing so would take the
+ * sign-in screen out from under its own error message before it could be
+ * read. The screen that made the call owns the outcome.
+ */
+const SIGN_IN_PATHS = new Set(["/auth/login", "/auth/oidc/callback"]);
 
 let unauthorizedHandler: (() => void) | null = null;
 
@@ -163,7 +181,7 @@ async function request<T>(
     throw new ApiError(NETWORK_ERROR_STATUS, NETWORK_ERROR_MESSAGE);
   }
 
-  if (response.status === 401 && path !== "/auth/login") {
+  if (response.status === 401 && !SIGN_IN_PATHS.has(path)) {
     // Session invalid or expired: clear it and send the user to sign in.
     const message = await extractErrorMessage(response);
     clearSession();
@@ -368,16 +386,46 @@ export function publicVerifyCertification(
   );
 }
 
-export function listDqIssues(status?: string): Promise<DqIssue[]> {
-  const qs = status ? `?${new URLSearchParams({ status })}` : "";
-  return request<DqIssue[]>("GET", `/dq/issues${qs}`);
+/**
+ * GET /dq/issues (handoff 0030): ONE BOUNDED PAGE of the data-quality
+ * queue.
+ *
+ * Until this wave this call downloaded the whole queue — measured live at
+ * 98,497 issues, 850 MB, 17 s, and a frozen browser tab. The server now
+ * caps a page at 200 rows (50 by default) and hands back a cursor for the
+ * next one; the response also carries the whole-queue `total` under the
+ * same filters, so nothing on screen has to mistake the loaded rows for
+ * the queue.
+ *
+ * `status` and `severity` filter on the SERVER. That matters: with one
+ * page loaded, filtering in the browser would filter the page, and a card
+ * reading "8,824 blocking" above two visible rows is exactly the quiet
+ * lie this project refuses.
+ */
+export function listDqIssues(params?: {
+  status?: string;
+  severity?: string;
+  limit?: number;
+  cursor?: string;
+}): Promise<DqIssuePage> {
+  const query = new URLSearchParams();
+  if (params?.status) query.set("status", params.status);
+  if (params?.severity) query.set("severity", params.severity);
+  if (params?.limit !== undefined) query.set("limit", String(params.limit));
+  if (params?.cursor) query.set("cursor", params.cursor);
+  const qs = query.toString();
+  return request<DqIssuePage>("GET", `/dq/issues${qs ? `?${qs}` : ""}`);
 }
 
 /**
  * GET /dq/issues/{id} (handoff 0026): one finding directly — the deep-link
  * target a calculation refusal points at (/dq?issue=<id>). Fetched on its
- * own so the linked finding renders immediately, independent of the
- * whole-queue download (97k issues / hundreds of MB on the live box).
+ * own so the linked finding renders immediately, independent of the queue.
+ *
+ * Since handoff 0030 this is also the ONLY place `source_record_ids` is
+ * served: the complete, untruncated provenance array for the one finding
+ * being worked. The queue rows link here, so the path from a finding back
+ * to its raw records is one request rather than an 850 MB download.
  */
 export function getDqIssue(issueId: string): Promise<DqIssue> {
   return request<DqIssue>(
@@ -1130,4 +1178,353 @@ export function getSourcesStatus(
       ? `?${new URLSearchParams({ window_hours: String(windowHours) })}`
       : "";
   return request<SourcesStatusResponse>("GET", `/sources/status${qs}`);
+}
+
+// ---- the raw-record inspector (handoff 0035) ----
+
+/**
+ * GET /raw/records/{id} — the label on the evidence bag. Every field is a
+ * raw.records column or a measurement taken server-side; an absent value is
+ * served absent and rendered absent.
+ */
+export function getRawRecord(recordId: string): Promise<RawRecordLabel> {
+  return request<RawRecordLabel>(
+    "GET",
+    `/raw/records/${encodeURIComponent(recordId)}`,
+  );
+}
+
+/**
+ * POST /raw/records/{id}/verify — integrity as an action, not a claim.
+ *
+ * The ONE call in this client that reads the body on a non-2xx response,
+ * deliberately: the API answers 409 for a mismatch and 404/410/503 for
+ * unreadable bytes precisely so a caller checking only the status cannot
+ * mistake a failure for a pass — and the failing body is the verdict the
+ * auditor came for. A 401 still redirects to sign-in like every other call.
+ */
+export async function verifyRawRecord(
+  recordId: string,
+): Promise<RawRecordVerdict> {
+  const path = `/raw/records/${encodeURIComponent(recordId)}/verify`;
+  const session = getSession();
+  const headers: Record<string, string> = { Accept: "application/json" };
+  if (session) headers["Authorization"] = `Bearer ${session.token}`;
+
+  let response: Response;
+  try {
+    response = await fetch(`${BASE_URL}${path}`, { method: "POST", headers });
+  } catch {
+    throw new ApiError(NETWORK_ERROR_STATUS, NETWORK_ERROR_MESSAGE);
+  }
+  if (response.status === 401) {
+    clearSession();
+    unauthorizedHandler?.();
+    throw new ApiError(401, "Your session has expired. Please sign in again.");
+  }
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch {
+    throw new ApiError(response.status, UNREADABLE_ERROR_MESSAGE);
+  }
+  if (body && typeof body === "object" && "result" in body) {
+    return body as RawRecordVerdict;
+  }
+  // No verdict in the body (403, 404 on an unknown record id, 5xx): surface
+  // the server's plain-language message, never a fabricated verdict.
+  const detail = (body as ErrorEnvelope | null)?.detail;
+  throw new ApiError(
+    response.status,
+    typeof detail === "string" ? detail : UNREADABLE_ERROR_MESSAGE,
+  );
+}
+
+/** GET /raw/records/{id}/payload — the bounded, decoded window. */
+export function getRawRecordPayload(
+  recordId: string,
+): Promise<RawRecordPreview> {
+  return request<RawRecordPreview>(
+    "GET",
+    `/raw/records/${encodeURIComponent(recordId)}/payload`,
+  );
+}
+
+/**
+ * GET /raw/records/{id}/download — the exact stored bytes. Saved byte for
+ * byte (saveBlob re-encodes nothing), so hashing the saved file reproduces
+ * the record id.
+ */
+export function downloadRawRecord(recordId: string): Promise<ExportDownload> {
+  return requestExport(
+    `/raw/records/${encodeURIComponent(recordId)}/download`,
+    recordId,
+  );
+}
+
+// ---- revenue review queue (handoff 0040) ----
+
+/**
+ * GET /revenue-review/boardings — one BOUNDED page of the boardings the
+ * calculation held out of Unlinked Passenger Trips because it could not tell
+ * prep from real riders.
+ *
+ * Paged on the server by keyset cursor, like the data-quality queue and for
+ * the same reason: a queue that grows with the feed must never arrive as one
+ * response, and a page must never skip or repeat a boarding while a
+ * calculation run flags more behind the reader.
+ */
+export function listBoardingReviews(params?: {
+  status?: string;
+  limit?: number;
+  cursor?: string;
+}): Promise<BoardingReviewPage> {
+  const query = new URLSearchParams();
+  if (params?.status) query.set("status", params.status);
+  if (params?.limit !== undefined) query.set("limit", String(params.limit));
+  if (params?.cursor) query.set("cursor", params.cursor);
+  const qs = query.toString();
+  return request<BoardingReviewPage>(
+    "GET",
+    `/revenue-review/boardings${qs ? `?${qs}` : ""}`,
+  );
+}
+
+/**
+ * GET /revenue-review/boardings/counts — the whole-queue tally. The ONLY
+ * source of a queue-wide number: no screen counts the rows it happens to
+ * have loaded.
+ */
+export function getBoardingReviewCounts(): Promise<BoardingReviewCounts> {
+  return request<BoardingReviewCounts>(
+    "GET",
+    "/revenue-review/boardings/counts",
+  );
+}
+
+/** GET /revenue-review/boardings/{id} — one boarding, the deep-link target. */
+export function getBoardingReview(
+  passengerEventId: string,
+): Promise<BoardingReview> {
+  return request<BoardingReview>(
+    "GET",
+    `/revenue-review/boardings/${encodeURIComponent(passengerEventId)}`,
+  );
+}
+
+/**
+ * POST /revenue-review/boardings/{id}/classify — record one decision and the
+ * reason for it. The reason is required by the API and by the database; this
+ * client never sends a blank one, and the form never offers that path.
+ *
+ * The response does not mean a figure changed. It means a decision was
+ * recorded; the figure moves when the calculation is next run.
+ */
+export function classifyBoarding(
+  passengerEventId: string,
+  body: ClassifyBoardingRequest,
+): Promise<ClassifyBoardingResponse> {
+  return request<ClassifyBoardingResponse>(
+    "POST",
+    `/revenue-review/boardings/${encodeURIComponent(passengerEventId)}/classify`,
+    body,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Single sign-on (handoff 0046 / ADR-0011)
+// ---------------------------------------------------------------------------
+//
+// Two audiences behind one section. The three sign-in calls are deliberately
+// UNAUTHENTICATED (`auth: false`) — nobody is signed in yet, and attaching a
+// stale bearer token to them would be meaningless at best. The configuration
+// calls are ordinary authenticated admin calls, certifying-official only at
+// the server.
+//
+// There is NO function here that reads a client secret back, because there is
+// no endpoint that serves one. A stored secret is encrypted at rest and shown
+// exactly once — at the moment the administrator typed it.
+
+/** What the sign-in screen may know before anyone signs in. Nothing else. */
+export interface SsoStatus {
+  enabled: boolean;
+  button_label: string;
+}
+
+export interface SsoStartResponse {
+  authorization_url: string;
+  state: string;
+  /**
+   * Keep in sessionStorage for the length of the redirect and send back at
+   * the callback. In a bearer-token app there is no cookie to bind `state`
+   * to, so this is what ties a sign-in to THIS browser.
+   */
+  browser_token: string;
+}
+
+export interface SsoCallbackRequest {
+  code: string;
+  state: string;
+  browser_token: string;
+}
+
+export interface SsoCallbackResponse {
+  access_token: string;
+  token_type: string;
+  expires_in: number;
+  username: string;
+  role: string;
+}
+
+export interface SsoConfig {
+  configured: boolean;
+  discovery_url: string | null;
+  client_id: string | null;
+  /** Whether a secret is stored. The secret itself is never served. */
+  client_secret_set: boolean;
+  redirect_uri: string | null;
+  groups_claim: string;
+  username_claim: string;
+  clock_skew_seconds: number;
+  ca_bundle_path: string | null;
+  button_label: string;
+  is_enabled: boolean;
+  updated_by: string | null;
+  updated_at: string | null;
+  /** False when the server has no at-rest encryption key — warn BEFORE the
+      administrator types a credential, not with a 503 afterwards. */
+  secret_storage_available: boolean;
+  disabled_by_environment: boolean;
+}
+
+export interface UpdateSsoConfigRequest {
+  discovery_url: string;
+  client_id: string;
+  /** Omit to KEEP the stored secret; "" clears it. */
+  client_secret?: string | null;
+  redirect_uri: string;
+  groups_claim: string;
+  username_claim: string;
+  clock_skew_seconds: number;
+  ca_bundle_path: string | null;
+  button_label: string;
+  is_enabled: boolean;
+}
+
+export interface SsoConfigUpdated extends SsoConfig {
+  audit_event_id: number;
+}
+
+export interface SsoTestStep {
+  step: string;
+  ok: boolean;
+  message: string;
+}
+
+export interface SsoTestResult {
+  ok: boolean;
+  steps: SsoTestStep[];
+  audit_event_id: number;
+}
+
+export interface SsoRoleMapping {
+  mapping_id: string;
+  claim_value: string;
+  headway_role: string;
+  role_label: string;
+  note: string | null;
+  created_by: string;
+  created_at: string;
+}
+
+export interface CreateSsoMappingRequest {
+  claim_value: string;
+  headway_role: string;
+  note?: string | null;
+}
+
+export interface SsoMappingCreated extends SsoRoleMapping {
+  audit_event_id: number;
+}
+
+export interface SsoMappingDeleted {
+  claim_value: string;
+  headway_role: string;
+  audit_event_id: number;
+}
+
+/** GET /auth/oidc/status — unauthenticated; enough to draw a button, no more. */
+export function getSsoStatus(): Promise<SsoStatus> {
+  return request<SsoStatus>("GET", "/auth/oidc/status", undefined, {
+    auth: false,
+  });
+}
+
+/**
+ * POST /auth/oidc/start — begin an authorization-code + PKCE sign-in.
+ * Unauthenticated. The caller sends the browser to `authorization_url` and
+ * keeps `browser_token` until the provider sends it back.
+ */
+export function startSsoLogin(): Promise<SsoStartResponse> {
+  return request<SsoStartResponse>("POST", "/auth/oidc/start", undefined, {
+    auth: false,
+  });
+}
+
+/**
+ * POST /auth/oidc/callback — finish the sign-in and receive a Headway
+ * session. Unauthenticated. Every failure returns one generic message; the
+ * real reason is in Headway's audit trail, by design.
+ */
+export function finishSsoLogin(
+  body: SsoCallbackRequest,
+): Promise<SsoCallbackResponse> {
+  return request<SsoCallbackResponse>(
+    "POST",
+    "/auth/oidc/callback",
+    body,
+    { auth: false },
+  );
+}
+
+/** GET /auth/oidc/config — the stored settings, never the client secret. */
+export function getSsoConfig(): Promise<SsoConfig> {
+  return request<SsoConfig>("GET", "/auth/oidc/config");
+}
+
+/** PUT /auth/oidc/config — save the settings (audited; secret encrypted). */
+export function updateSsoConfig(
+  body: UpdateSsoConfigRequest,
+): Promise<SsoConfigUpdated> {
+  return request<SsoConfigUpdated>("PUT", "/auth/oidc/config", body);
+}
+
+/**
+ * POST /auth/oidc/config/test — prove it works before anyone depends on it.
+ * Runs the real sign-in code as far as it can go without a browser.
+ */
+export function testSsoConfig(): Promise<SsoTestResult> {
+  return request<SsoTestResult>("POST", "/auth/oidc/config/test");
+}
+
+/** GET /auth/oidc/mappings — every configured group -> role grant. */
+export function listSsoMappings(): Promise<SsoRoleMapping[]> {
+  return request<SsoRoleMapping[]>("GET", "/auth/oidc/mappings");
+}
+
+/** POST /auth/oidc/mappings — grant a role to one exact group value. */
+export function createSsoMapping(
+  body: CreateSsoMappingRequest,
+): Promise<SsoMappingCreated> {
+  return request<SsoMappingCreated>("POST", "/auth/oidc/mappings", body);
+}
+
+/** DELETE /auth/oidc/mappings/{id} — remove a grant. Accounts are untouched. */
+export function deleteSsoMapping(
+  mappingId: string,
+): Promise<SsoMappingDeleted> {
+  return request<SsoMappingDeleted>(
+    "DELETE",
+    `/auth/oidc/mappings/${encodeURIComponent(mappingId)}`,
+  );
 }

@@ -54,7 +54,10 @@ def test_golden_v04_middle_trip_excision_keeps_clean_remainder(
     for warning, exp_warning in zip(result.warnings, exp["warnings"]):
         assert warning.issue_type == exp_warning["issue_type"]
         assert warning.severity == exp_warning["severity"]
-        assert exp_warning["trip_id"] in warning.title
+        # Title leads with the vehicle handle (handoff 0032); the excised
+        # trip's id stays in the description and the subject.
+        assert exp_warning["trip_id"] in warning.description
+        assert warning.subject.ids == (exp_warning["trip_id"],)
         assert list(warning.source_record_ids) == exp_warning["source_record_ids"]
     assert result.infos == ()  # block_id present: no fallback documentation
 

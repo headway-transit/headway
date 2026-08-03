@@ -4,6 +4,9 @@ import type {
   CertificationRecord,
   CompareResponse,
   DqIssue,
+  DqIssueCounts,
+  DqIssuePage,
+  DqIssueSummary,
   LineageNode,
   MetricValue,
   Mr20Package,
@@ -722,6 +725,120 @@ export const dashboardValues: MetricValue[] = [
   ...dashboardVrhHistory,
 ];
 
+/**
+ * Per-mode figures (handoff 0009's `--per-mode` path, as handoff 0041's
+ * Mode selector reads them): the SAME periods as the agency rows above,
+ * persisted under `scope = 'mode:<mode>'`. Deliberately NOT a partition
+ * that adds up to the agency figure — the dashboard must never be able to
+ * derive one from the others, and these values make an accidental sum
+ * obvious.
+ *
+ * `mode:subway` carries a figure OUTSIDE the March/February window the
+ * other fixtures use, so the "this mode has scopes but nothing in the
+ * selected dates" empty state is exercisable.
+ */
+export const dashboardModeValues: MetricValue[] = [
+  {
+    ...vrmValue,
+    metric_value_id: "mv-vrm-bus-mar",
+    scope: "mode:bus",
+    period_start: "2026-03-01",
+    period_end: "2026-03-31",
+    value: "8888.80",
+    calc_version: "0.2.0",
+    certification_status: "certified",
+    detail: { ...vrmCoverageDetail, coverage: "0.8400" },
+  },
+  {
+    ...vrhValue,
+    metric_value_id: "mv-vrh-bus-mar",
+    scope: "mode:bus",
+    period_start: "2026-03-01",
+    period_end: "2026-03-31",
+    value: "701.05",
+    calc_version: "0.2.0",
+    certification_status: "certified",
+    detail: { ...vrmCoverageDetail, coverage: "0.8700" },
+  },
+  {
+    ...uptValue,
+    metric_value_id: "mv-upt-bus-mar",
+    scope: "mode:bus",
+    period_start: "2026-03-01",
+    period_end: "2026-03-31",
+    value: "900.00",
+    certification_status: "certified",
+    detail: undefined,
+  },
+  {
+    ...vrmValue,
+    metric_value_id: "mv-vrm-dr-mar",
+    scope: "mode:DR",
+    period_start: "2026-03-01",
+    period_end: "2026-03-31",
+    value: "1234.50",
+    calc_version: "0.2.0",
+    detail: undefined,
+  },
+  {
+    ...vrmValue,
+    metric_value_id: "mv-vrm-subway-jan",
+    scope: "mode:subway",
+    period_start: "2026-01-01",
+    period_end: "2026-01-31",
+    value: "77.70",
+    calc_version: "0.2.0",
+    detail: undefined,
+  },
+];
+
+/**
+ * One page of the queue as GET /dq/issues serves it since handoff 0030 —
+ * the rows PLUS the whole-queue truth (total / has_more / next_cursor).
+ * Defaults describe a queue that fits on one page; override for paging
+ * tests.
+ */
+export function dqPage(
+  issues: DqIssueSummary[],
+  overrides: Partial<DqIssuePage> = {},
+): DqIssuePage {
+  return {
+    issues,
+    total: issues.length,
+    limit: 50,
+    next_cursor: null,
+    has_more: false,
+    ...overrides,
+  };
+}
+
+/**
+ * Server-side counts over EXACTLY the given rows, honouring the same
+ * optional status filter — the 0017/0023 cards-match-table guarantee that
+ * the mocked counts route must keep, now with the whole-queue effort sum
+ * (handoff 0030).
+ */
+export function dqCountsFor(
+  issues: DqIssueSummary[],
+  status: string | null,
+): DqIssueCounts {
+  const rows = status ? issues.filter((i) => i.status === status) : issues;
+  const tally = (pick: (i: DqIssueSummary) => string) => {
+    const out: Record<string, number> = {};
+    for (const i of rows) out[pick(i)] = (out[pick(i)] ?? 0) + 1;
+    return out;
+  };
+  return {
+    total: rows.length,
+    by_severity: tally((i) => i.severity),
+    by_status: tally((i) => i.status),
+    resolution_minutes_total: rows.reduce(
+      (sum, i) => sum + (i.resolution_minutes ?? 0),
+      0,
+    ),
+  };
+}
+
 export const blockingIssue: DqIssue = {
   issue_id: "dq-1",
   issue_type: "telemetry_gap",
@@ -754,6 +871,134 @@ export const attestedBlockingIssue: DqIssue = {
   resolved_at: "2026-07-15T16:00:00Z",
   resolution:
     "Closed under statistician attestation #att-3 (p. 146): the factoring method was approved.",
+};
+
+/**
+ * A blocking finding carrying its SUBJECT in the agency's vocabulary
+ * (migration 0035, handoff 0029) — shaped exactly like the live MBTA run:
+ * blocks with readable ids, one block running two routes, a route with no
+ * short name, a bucket of trips the feed carries no block for, an
+ * after-midnight scheduled time, a stated group cap, and trips that are not
+ * in the schedule feed at all.
+ */
+export const subjectContextIssue: DqIssue = {
+  issue_id: "dq-subject-1",
+  issue_type: "apc_missing_trips_above_fta_threshold",
+  severity: "blocking",
+  status: "open",
+  owner: null,
+  title:
+    "No passenger counts arrived for any operated trip: all 2,307 trips in this period",
+  description:
+    "Every operated trip in this period is affected — all 2,307 of the trips Headway saw running have no passenger counts at all.",
+  source_record_ids: null,
+  created_at: "2026-07-29T11:00:00Z",
+  resolved_at: null,
+  resolution: null,
+  resolution_minutes: null,
+  subject_context: {
+    version: 1,
+    kind: "canonical.trips",
+    total: 2307,
+    grouped_by: "block",
+    group_count: 660,
+    group_cap: 25,
+    trip_id_cap: 20,
+    groups: [
+      {
+        block_id: null,
+        trip_count: 83,
+        routes: [
+          {
+            route_id: "CR-Fairmount",
+            short_name: null,
+            long_name: "Fairmount Line",
+          },
+        ],
+        route_count: 12,
+        first_departure: "18:10",
+        last_departure: "24:31",
+        trip_ids: ["NorthBase-825706-274", "NorthBase-825707-277"],
+      },
+      {
+        block_id: "L455-173",
+        trip_count: 4,
+        routes: [
+          { route_id: "442", short_name: "442", long_name: "Marblehead" },
+          { route_id: "455", short_name: "455", long_name: "Salem Depot" },
+        ],
+        route_count: 2,
+        first_departure: "19:05",
+        last_departure: "22:59",
+        trip_ids: ["t-442-a", "t-455-b"],
+      },
+      {
+        block_id: "C01-28",
+        trip_count: 2,
+        routes: [{ route_id: "1", short_name: "1", long_name: "Harvard" }],
+        route_count: 1,
+        first_departure: null,
+        last_departure: null,
+        trip_ids: ["t-1-a"],
+      },
+    ],
+    unmatched: { trip_count: 211, trip_ids: ["added-trip-1", "added-trip-2"] },
+  },
+};
+
+/**
+ * A finding whose frozen context carries the agency's OPERATIONAL block
+ * names (migration 0038, handoff 0038) — the feed's block_id is an opaque
+ * UUID, the label is the word on the run board. One group is mapped, one is
+ * not: the unmapped one must render its feed id exactly as before the
+ * mapping existed. Synthetic twin values throughout (handoff 0016).
+ */
+export const blockLabelSubjectIssue: DqIssue = {
+  issue_id: "dq-subject-2",
+  issue_type: "apc_missing_trips_above_fta_threshold",
+  severity: "blocking",
+  status: "open",
+  owner: null,
+  title:
+    "No passenger counts arrived for any operated trip: all 6 trips in this period",
+  description:
+    "Every operated trip in this period is affected — all 6 of the trips Headway saw running have no passenger counts at all.",
+  source_record_ids: null,
+  created_at: "2026-07-30T11:00:00Z",
+  resolved_at: null,
+  resolution: null,
+  resolution_minutes: null,
+  subject_context: {
+    version: 1,
+    kind: "canonical.trips",
+    total: 6,
+    grouped_by: "block",
+    group_count: 2,
+    group_cap: 25,
+    trip_id_cap: 20,
+    groups: [
+      {
+        block_id: "0f00d1e5-1111-4222-8333-444455556666",
+        block_label: "42-9",
+        trip_count: 4,
+        routes: [{ route_id: "42", short_name: "42", long_name: "Crosstown" }],
+        route_count: 1,
+        first_departure: "06:14",
+        last_departure: "14:22",
+        trip_ids: ["7a000001-aaaa-4bbb-8ccc-000000000001"],
+      },
+      {
+        block_id: "9e00d1e5-7777-4888-8999-000011112222",
+        block_label: null,
+        trip_count: 2,
+        routes: [{ route_id: "9", short_name: "9", long_name: "Riverside" }],
+        route_count: 1,
+        first_departure: "05:00",
+        last_departure: "09:40",
+        trip_ids: ["7a000001-aaaa-4bbb-8ccc-000000000002"],
+      },
+    ],
+  },
 };
 
 export const warningIssue: DqIssue = {

@@ -69,9 +69,20 @@ Unset, requests go to the same origin (for co-hosting or a dev proxy).
 
 ### Sessions
 
-The bearer token from `POST /auth/login` is held **in memory only** (module
-state, `src/auth/session.ts`): nothing is written to localStorage, and a page
-reload signs you out. The hardening increment is a server-set `httpOnly`,
+The bearer token from `POST /auth/login` is held in **sessionStorage**
+(`src/auth/session.ts`, key `headway-session-v1`): it survives a page reload
+and dies with the tab. It was in memory only until 2026-08-03, when a reload
+signed you out — an annoyance on a desktop and unusable on a phone, where
+pull-to-refresh is a gesture people make by accident.
+
+What that trades, stated plainly: an XSS payload on this origin could read the
+token. It is bounded by the 30-minute expiry, by the server re-reading the
+account on **every** request (so a stolen token dies the moment the account is
+deactivated, rather than running to expiry), and by the fact that an XSS can
+already act as the user for as long as the page is open. Nothing is written to
+localStorage, which would outlive the tab and every other tab.
+
+The hardening increment is unchanged — a server-set `httpOnly`,
 `Secure`, `SameSite` cookie session, which removes the token from JS reach
 entirely. Any 401 clears the session and returns you to `/login`.
 
@@ -88,7 +99,7 @@ entirely. Any 401 clears the session and returns you to `/login`.
 | `/calc-runs` | The **calculations room** ("Compute figures", handoff 0026; `src/views/CalcRunsView.tsx`). Ask the server to run the deterministic calculation service over one half-open period (month presets + custom range) via `POST /calc/runs` (data_steward+ — nav link + form gated as UX only, the API enforces the role) and read every run's honest outcome from `GET /calc/runs` (any signed-in role; viewers get the read-only surface with plain words about who computes). Binding rules: the page never computes a number — every figure, count, and id is the runner's own string served verbatim; **refusals are first-class** (status "Refused — figures withheld", the per-calc outcomes name the EXACT blocking findings and link them straight into `/dq?issue=<id>`, and a newest-run refusal shows the house-voice teaching block walking to the DQ queue); **no fake progress** (a live run shows "Running since HH:MM:SS UTC" only, polled every 5 s; no bar, no percentage, nothing animated); the single-flight 409 and the server's staleness note render verbatim at the control; persisted outcomes link to `/metrics` and the figure's lineage receipt. The old developer CLI line is gone from every user surface (metrics/dashboard/today empty states now door here or state who computes). |
 | `/compare` | The **comparison surface** (handoff 0017, design point 1; `src/views/CompareView.tsx`): pick a metric and 2–4 comparands — calculation versions of one period, or one calculation across periods — → a card row (big value verbatim, delta vs the baseline and vs the previous comparand, per-mode subline) and a detail matrix (rows = scopes, columns = comparands). Binding rules upheld: every cell's figure is a button opening the SAME Receipt as every other surface (focus-trapped dialog); deltas are SERVER-computed exact-decimal strings rendered **sign-neutrally** (glyph + magnitude, muted for both directions) unless the response's calc-registry `directions` entry defines better/worse (coverage only today — and then always with the word, never color alone); simulated/ops/DR/pre-verification badges carry through; a certified-vs-uncertified mix renders the server's label-both note verbatim and tags every figure. The comparand vocabulary is enumerated client-side from `GET /metrics/values` (a workflow enumeration); figures and deltas come verbatim from `GET /metrics/compare` — this page never subtracts two figures. |
 | `/sandbox` | The **settings sandbox** (handoff 0017, design point 6; `src/views/SandboxView.tsx`): what-if modeling behind the honesty walls. Propose values for the previewable policy knobs (current values + descriptions verbatim from `GET /settings`), pick a period, and `POST /sandbox/preview` recomputes both variants over the same recorded data — EPHEMERALLY (the API's `persisted` is constant false; nothing is written anywhere, so preview figures deliberately have no receipt/lineage door). "Modeling preview — changes nothing" banners on every visit AND on every result (the server's own banner verbatim); the impact rail shows baseline vs proposed per figure with every would-be finding listed (refusals stated, never blank) and sign-neutral server-computed deltas; there is **no apply control anywhere** — the server's settings_flow_note names the separate audited settings flow verbatim. |
-| `/metrics/:id/lineage` | "How this number was made": the provenance tree from `GET /metrics/values/{id}/lineage`. Carries a breadcrumb trail (handoff 0017 #4): Metrics → figure → this page. Default is the **lineage graph** (`src/components/LineageGraph.tsx`) — a hand-rolled accessible SVG flow (figure → processing steps → raw records; raw tier collapsed to a count node, expanding 20 at a time; arrow keys move within/between tiers, Enter toggles). A "Text view" toggle is always visible and renders the FULL nested-list tree (every node, complete record ids) — the graph is progressive enhancement, never the only path. |
+| `/metrics/:id/lineage` | "How this number was made": the provenance tree from `GET /metrics/values/{id}/lineage`. Carries a breadcrumb trail (handoff 0017 #4): Metrics → figure → this page. Default is the **lineage graph** (`src/components/LineageGraph.tsx`) — a hand-rolled accessible SVG flow (figure → processing steps → raw records; raw tier collapsed to a count node, expanding 20 at a time; arrow keys move within/between tiers, Enter toggles). A "Text view" toggle is always visible and renders the FULL nested-list tree (every node, complete record ids) — the graph is progressive enhancement, never the only path. **Since handoff 0035 the raw leaves OPEN** (`src/components/RawRecordInspector.tsx`): a UAT auditor reached this page, hit a wall of hashes labelled "the end of the trail" and said *"It doesn't really provide any data to validate or verify."* Each leaf now discloses the record's LABEL (source, who collected it, when it arrived, size, whether it could be read on arrival — absent values rendered absent), a **Verify integrity** action whose verdict is rendered in the server's own words (a pass is a `role="status"`; a MISMATCH is a `role="alert"` panel stating BOTH fingerprints, naming the blocking DQ finding it raised and linking to it — loud by heading, icon, border and text, never by colour), an expandable **bounded preview** whose cap is stated BEFORE the data (a GTFS-Realtime frame becomes its real vehicles at their real coordinates at that minute; a contract CSV becomes its own header + first rows; a vendor export becomes lines verbatim with NO invented column names), and the exact bytes to download. The **hash stays visible, demoted to the footnote it should always have been**. Withheld payloads (paratransit — rider addresses) explain the refusal and keep the label and the integrity check: the chain of custody is never broken, only the window is closed. View parity holds — a raw node in the graph opens the SAME inspector in a panel beneath it. Leaves open ON DEMAND, not with the tree: one live VRH figure has 1,138 raw leaves, and fetching a label for each on load would be the handoff-0030 mistake in a new costume. |
 | `/reports/monthly` | Monthly ridership preview: VRM/VRH/UPT for a picked month, verbatim, with certification status, coverage summary, per-row Receipt, provenance links, simulated-data banner, and CSV export of the exact served strings. |
 | `/safety` | The **Safety & Security module** (handoff 0010, design point 5; `src/views/SafetyView.tsx`), typed against `services/api` routers/safety.py exactly. Three rooms: a **deadlines panel** (`GET /safety/deadlines`) with API-computed due dates — S&S-40 per open major event, S&S-50 per operated mode **including zero-event rows** — each rule shown as the verbatim tracker quote + page citation, urgency as text + icon + color (never color alone; the only client date math is days-until-the-served-date); a plain-language **entry form** (`POST /safety/events`, data_steward+; "Was anyone taken directly from the scene for medical care?", never "injury threshold") with rail-only questions disclosed only for the classifier's own rail-mode set, client-side validation mirroring the contract, and the returned verdict rendered as a **classification receipt** (the sscls_v0 classifier's summary and per-threshold sentences verbatim, plus the verified manual quote per token via the extract-quotes pattern; unknown tokens and unmapped quotes stated loudly, never hidden); and the **events list** with classification chips (major/non-major/not reportable), per-event receipts, and the append-only **correction flow** (`POST /safety/events/{id}/supersede`, required audit reason) — the original stays visible, struck and linked to its replacement, never hidden. Honest-scope banner on every visit: alpha, no NTD e-filing. The page never classifies an event; `property_damage_usd` is a decimal string end to end. |
 | `/dq` | Data-quality queue: severity as text + icon + color (never color alone), status/owner/description, blocking issues prominent with their consequence stated. Since handoff 0024 the queue-at-a-glance cards are SERVER counts (`GET /dq/issues/counts`, milliseconds since 0023) painted while the full list downloads, and they are refetched after every resolve/attest — recounted, never client-adjusted. Resolve action (required resolution note) appears for data stewards and above. |
@@ -338,3 +349,43 @@ recompute; VRM refusal-vs-figure rail; nothing persisted) → themed chrome
 applied via the audited settings flow, verified light/dark, and reverted.
 Evidence in handoff 0017's frontend section. The earlier walking-skeleton
 pending (certify a figure live) was closed by the wave-13/15 click-throughs.
+
+---
+
+## "Which trips this affects" — findings in the agency's vocabulary (handoff 0029)
+
+`/dq` renders a finding's `subject_context` as its PRIMARY content: a table
+of blocks with trip count, route(s) and the scheduled time span, in the order
+their first trip is scheduled to leave. Raw trip identifiers moved into a
+collapsed `<details>` disclosure ("Technical detail: trip identifiers") where
+they stay copyable for anyone working a ticket.
+
+Nothing is invented and nothing is computed client-side: every label was
+resolved once by the calc runner and frozen on the row. Where the feed
+carries no block, no route name or no scheduled time, the copy SAYS so
+("No block in the schedule feed … Headway shows no block for them rather than
+guessing one"). Trips absent from the schedule feed get their own bucket.
+Both caps (25 blocks shown, 20 identifiers per block) are stated next to the
+true totals.
+
+Graceful degradation is the load-bearing part: a finding with no context —
+every one of the 97,067 rows raised before migration 0035 — renders exactly
+as it did before, and so does a context whose `version` this UI does not
+recognise. Pinned by test.
+
+Finding descriptions now render with `white-space: pre-line`, so the blank
+lines the calc writes between paragraphs survive (a live click-through
+finding: the paragraphed refusal was rendering as one wall of text). This
+improves every finding, old and new.
+
+- `npx vitest run`: **272 passed / 37 files** (+9 in
+  `src/test/dqSubject.test.tsx`), including jest-axe on the panel and on the
+  opened disclosure.
+- `npm run check:contrast`: all 71 token pairs PASS.
+- Live axe-core 4.x run IN Chrome against the real `/dq` page (live API, live
+  97k queue, the real 2,307-trip finding): **0 violations, 0 incomplete, 223
+  colour-contrast nodes checked** — in light AND dark theme.
+- Keyboard: Tab reaches the disclosure summary (`:focus-visible` → 3 px solid
+  outline, 2 px offset, the house ring), Enter opens it and the identifiers
+  become visible. The table is a real `<table>` with `<caption>`, 4
+  `<th scope="col">` and 25 `<th scope="row">`.

@@ -127,7 +127,11 @@ def query_metric_values(
     sql = _SELECT_VALUES
     if clauses:
         sql += " WHERE " + " AND ".join(clauses)
-    sql += " ORDER BY period_start, metric"
+    # computed_at DESC breaks the tie WITHIN one metric/period/scope, so the
+    # newest figure is always first and the order is total. Without it a
+    # recomputed period returned two rows in whatever order the scan produced
+    # — and "which of these is current?" had no answer on screen.
+    sql += " ORDER BY period_start, metric, computed_at DESC"
     rows = db.execute(sql, tuple(params)).fetchall()
     return [
         MetricValue(
@@ -531,23 +535,18 @@ _SELECT_VALUE_EXISTS = (
 )
 
 
-@router.get(
-    "/metrics/values/{metric_value_id}/lineage", response_model=LineageNode
-)
-def explain_metric_value(
-    metric_value_id: str,
-    request: Request,
-    identity: Identity | MachineIdentity = Depends(
-        require_human_session_or_machine_scope(SCOPE_READ_METRICS)
-    ),
-    db=Depends(get_db),
-) -> LineageNode:
-    """"Explain this number": the full provenance tree from the reported
-    figure down to the raw records that produced it (ADR-0007).
+def lineage_tree(db, metric_value_id: str) -> LineageNode:
+    """THE lineage walk — the one implementation, shared.
 
-    Dual credential (handoff 0006 follow-up): a signed-in human session OR a
-    ``read:metrics`` machine key. The machine path is rate-limited per key
-    and audited with actor ``key:<key_prefix>``; the human path is unchanged.
+    ``GET /metrics/values/{id}/lineage`` is a thin wrapper around this, and so
+    is the evidence bundle (handoff 0047): an auditor's bundle and the
+    "explain this number" screen must never be able to disagree about a
+    figure's provenance, which is only guaranteed if there is one walk.
+
+    Raises the same plain-language ``HTTPException``s the endpoint always
+    did — 404 for an unknown figure, 500 for a figure with no lineage or a
+    cyclic graph. Callers that assemble many figures catch them per figure and
+    report the gap rather than letting one defect blank the whole document.
     """
     exists = db.execute(_SELECT_VALUE_EXISTS, (metric_value_id,)).fetchone()
     if exists is None:
@@ -598,7 +597,28 @@ def explain_metric_value(
             inputs=inputs,
         )
 
-    tree = build("computed.metric_values", str(metric_value_id), frozenset())
+    return build("computed.metric_values", str(metric_value_id), frozenset())
+
+
+@router.get(
+    "/metrics/values/{metric_value_id}/lineage", response_model=LineageNode
+)
+def explain_metric_value(
+    metric_value_id: str,
+    request: Request,
+    identity: Identity | MachineIdentity = Depends(
+        require_human_session_or_machine_scope(SCOPE_READ_METRICS)
+    ),
+    db=Depends(get_db),
+) -> LineageNode:
+    """"Explain this number": the full provenance tree from the reported
+    figure down to the raw records that produced it (ADR-0007).
+
+    Dual credential (handoff 0006 follow-up): a signed-in human session OR a
+    ``read:metrics`` machine key. The machine path is rate-limited per key
+    and audited with actor ``key:<key_prefix>``; the human path is unchanged.
+    """
+    tree = lineage_tree(db, metric_value_id)
     if isinstance(identity, MachineIdentity):
         # Successful key use is audited at endpoint level, actor key:<prefix>
         # (handoff 0006, design point 4) — the id only, never the figures.

@@ -26,11 +26,14 @@ from __future__ import annotations
 import hashlib
 import secrets
 import time
+from collections import OrderedDict
 from dataclasses import dataclass
+from typing import Optional
 
 from fastapi import Depends, HTTPException, Request
 
 from .audit import write_event
+from .client_identity import client_address
 from .auth import Identity, get_current_identity
 from .db import get_db
 
@@ -40,13 +43,28 @@ KEY_PREFIX = "hwk_"
 KEY_ID_PREFIX_LEN = 12
 
 # v0 scope registry (handoff 0006, design point 3; ingest:dr added by
-# handoff 0013). A scope not in this tuple cannot be issued, and an endpoint
-# can only require a scope from this tuple — deny-by-default in both
-# directions.
+# handoff 0013; read:dq / read:ops added by handoff 0039). A scope not in
+# this tuple cannot be issued, and an endpoint can only require a scope from
+# this tuple — deny-by-default in both directions.
 SCOPE_INGEST_TIDES = "ingest:tides"
 SCOPE_INGEST_DR = "ingest:dr"
 SCOPE_READ_METRICS = "read:metrics"
-KNOWN_SCOPES = (SCOPE_INGEST_TIDES, SCOPE_INGEST_DR, SCOPE_READ_METRICS)
+#: The two machine READ scopes of handoff 0039: the data-quality queue and
+#: the operations (live vehicle) surface. Each is granted EXPLICITLY at key
+#: creation — no scope implies another, and neither implies read:metrics.
+#: They authorize machine-key mirrors of the human read endpoints; they NEVER
+#: relax the column-level sensitivity withholdings a machine key inherits as a
+#: VIEWER-class principal (design point 3 — a future scope, out of this wave,
+#: would be needed for sensitive content).
+SCOPE_READ_DQ = "read:dq"
+SCOPE_READ_OPS = "read:ops"
+KNOWN_SCOPES = (
+    SCOPE_INGEST_TIDES,
+    SCOPE_INGEST_DR,
+    SCOPE_READ_METRICS,
+    SCOPE_READ_DQ,
+    SCOPE_READ_OPS,
+)
 
 #: Scopes that push raw records and therefore REQUIRE a bound source_label
 #: at issuance (the envelope source is always the key's label, never
@@ -123,15 +141,21 @@ def get_machine_identity(request: Request, db=Depends(get_db)) -> MachineIdentit
     presented_prefix = token[:KEY_ID_PREFIX_LEN]
     row = db.execute(_SELECT_KEY_BY_HASH, (hash_key(token),)).fetchone()
     if row is None:
-        with db.transaction():
-            write_event(
-                db,
-                actor=f"key:{presented_prefix}",
-                action="machine_auth_failed",
-                subject_kind="auth.api_keys",
-                subject_id=None,
-                detail={"reason": "unknown key", "path": request.url.path},
-            )
+        suppressed = _failure_audit_gate(request, "unknown_key")
+        if suppressed is not None:
+            with db.transaction():
+                write_event(
+                    db,
+                    actor=f"key:{presented_prefix}",
+                    action="machine_auth_failed",
+                    subject_kind="auth.api_keys",
+                    subject_id=None,
+                    detail={
+                        "reason": "unknown key",
+                        "path": request.url.path,
+                        **({"suppressed_since_last": suppressed} if suppressed else {}),
+                    },
+                )
         raise HTTPException(
             status_code=401,
             detail=(
@@ -141,15 +165,21 @@ def get_machine_identity(request: Request, db=Depends(get_db)) -> MachineIdentit
         )
     key_id, name, key_prefix, scopes, source_label, revoked_at = row
     if revoked_at is not None:
-        with db.transaction():
-            write_event(
-                db,
-                actor=f"key:{key_prefix}",
-                action="machine_auth_failed",
-                subject_kind="auth.api_keys",
-                subject_id=str(key_id),
-                detail={"reason": "key revoked", "path": request.url.path},
-            )
+        suppressed = _failure_audit_gate(request, "revoked_key")
+        if suppressed is not None:
+            with db.transaction():
+                write_event(
+                    db,
+                    actor=f"key:{key_prefix}",
+                    action="machine_auth_failed",
+                    subject_kind="auth.api_keys",
+                    subject_id=str(key_id),
+                    detail={
+                        "reason": "key revoked",
+                        "path": request.url.path,
+                        **({"suppressed_since_last": suppressed} if suppressed else {}),
+                    },
+                )
         raise HTTPException(
             status_code=401,
             detail=(
@@ -181,19 +211,22 @@ def require_machine_scope(scope: str):
         db=Depends(get_db),
     ) -> MachineIdentity:
         if scope not in identity.scopes:
-            with db.transaction():
-                write_event(
-                    db,
-                    actor=identity.actor,
-                    action="machine_scope_denied",
-                    subject_kind="auth.api_keys",
-                    subject_id=identity.key_id,
-                    detail={
-                        "required_scope": scope,
-                        "held_scopes": list(identity.scopes),
-                        "path": request.url.path,
-                    },
-                )
+            suppressed = _failure_audit_gate(request, f"scope_denied:{scope}")
+            if suppressed is not None:
+                with db.transaction():
+                    write_event(
+                        db,
+                        actor=identity.actor,
+                        action="machine_scope_denied",
+                        subject_kind="auth.api_keys",
+                        subject_id=identity.key_id,
+                        detail={
+                            "required_scope": scope,
+                            "held_scopes": list(identity.scopes),
+                            "path": request.url.path,
+                            **({"suppressed_since_last": suppressed} if suppressed else {}),
+                        },
+                    )
             raise HTTPException(
                 status_code=403,
                 detail=(
@@ -257,6 +290,12 @@ class RateLimiter:
         if bucket.tokens >= 1.0:
             bucket.tokens -= 1.0
             return None
+        if self.refill_per_second <= 0:
+            # requests_per_minute=0 means "refuse everything". Without this
+            # the next line divides by zero and the endpoint answers 500 —
+            # a configuration value turning a refusal into a crash. A minute
+            # is the honest Retry-After: the bucket never refills.
+            return 60.0
         return (1.0 - bucket.tokens) / self.refill_per_second
 
 
@@ -273,6 +312,86 @@ def enforce_rate_limit(limiter: RateLimiter, key: str) -> None:
             ),
             headers={"Retry-After": str(seconds)},
         )
+
+
+# ---------------------------------------------------------------------------
+# Failure-audit coalescing (adversarial-review finding F1)
+# ---------------------------------------------------------------------------
+
+
+class FailureAuditThrottle:
+    """Coalesces repeated auth/scope FAILURE audit writes.
+
+    The rate limiter (above) is applied INSIDE each endpoint body, reached
+    only after auth and scope pass — so a flood of REJECTED requests never
+    consumes a token, yet each one writes a row to audit.events. That is a
+    write-amplification denial of service: an attacker presenting an invalid
+    key, or a valid key hammering an out-of-scope endpoint, forces unbounded
+    audit INSERTs (exhausting the connection pool and disk) at zero cost to
+    themselves.
+
+    Best-practice shape for security telemetry under abuse is to COALESCE, not
+    drop: the FIRST failure per ``(bucket, reason)`` in a window is recorded —
+    so probing stays visible in the trail — and further identical failures in
+    that window are suppressed at the DB layer and merely counted, folded into
+    the next recorded event's ``suppressed_since_last``. The bucket is the
+    client IP, the one attacker attribute that costs something to rotate and
+    that safely collapses to a single bucket behind a reverse proxy (the real
+    per-request IP still lives at that proxy's logs); the presented/real key
+    prefix stays in the recorded event's detail for forensics.
+
+    In-process and bounded, the SAME documented single-instance scope as
+    RateLimiter — a distributed store is the hosted-tier increment. The first
+    line of defense remains edge rate limiting at the reverse proxy; this
+    bounds what still reaches the database.
+    """
+
+    def __init__(
+        self,
+        window_seconds: float = 60.0,
+        max_buckets: int = 4096,
+        clock=time.monotonic,
+    ):
+        self.window = float(window_seconds)
+        self.max_buckets = max_buckets
+        self.clock = clock
+        self._last: "OrderedDict[tuple[str, str], float]" = OrderedDict()
+        self._suppressed: dict[tuple[str, str], int] = {}
+
+    def on_failure(self, bucket: str, reason: str) -> Optional[int]:
+        """Record one auth/scope failure. Returns ``None`` when the caller
+        should SUPPRESS the audit write (within the window of an already-
+        recorded identical failure); otherwise returns how many failures were
+        suppressed for this ``(bucket, reason)`` since the last recorded one
+        (0 on the first) — fold it into the audit detail."""
+        now = self.clock()
+        k = (bucket, reason)
+        last = self._last.get(k)
+        if last is not None and (now - last) < self.window:
+            self._suppressed[k] = self._suppressed.get(k, 0) + 1
+            self._last.move_to_end(k)
+            return None
+        suppressed = self._suppressed.pop(k, 0)
+        self._last[k] = now
+        self._last.move_to_end(k)
+        # Bound memory: evict the oldest bucket. Eviction only permits one more
+        # write later for that bucket (memory-safe; a hot bucket stays cached).
+        while len(self._last) > self.max_buckets:
+            old, _ = self._last.popitem(last=False)
+            self._suppressed.pop(old, None)
+        return suppressed
+
+
+def _failure_audit_gate(request: Request, reason: str) -> Optional[int]:
+    """Bridge from a request to the app's FailureAuditThrottle. Returns the
+    ``suppressed_since_last`` count to fold into the audit detail, or ``None``
+    to suppress the write. Absent throttle (a bare test app) → always write,
+    0 suppressed — behavior identical to before coalescing existed."""
+    throttle = getattr(request.app.state, "machine_audit_throttle", None)
+    if throttle is None:
+        return 0
+    bucket = client_address(request)
+    return throttle.on_failure(bucket, reason)
 
 
 # ---------------------------------------------------------------------------
@@ -346,7 +465,11 @@ def require_human_session_or_machine_scope(scope: str):
             )
             return identity
         try:
-            return get_current_identity(request)
+            # ``db`` passed explicitly: this is a direct call, not FastAPI
+            # resolving the dependency, so the default Depends() marker would
+            # arrive as-is. The human path re-reads the account per request
+            # (auth._live_account), which needs a real connection.
+            return get_current_identity(request, db)
         except HTTPException:
             raise _DUAL_AUTH_401
 

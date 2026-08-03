@@ -38,6 +38,14 @@ Environment:
                   never buffer an unbounded body); the aborted message is
                   quarantined as a blocking transform_failure dq.issues row
                   naming the limit.
+  HEADWAY_TELEMATICS_SERVICE_DAY_TZ (optional) the agency's IANA timezone for
+                  fleet-telematics service days (handoff 0028), e.g.
+                  America/New_York. It MUST match the connector's
+                  SAMSARA_SERVICE_DAY_TZ. When unset, every
+                  raw.telematics.vehicle_stats page is refused with a
+                  blocking 'telematics_timezone_undeclared' dq.issues row and
+                  ZERO canonical rows — a service DATE is a local wall date
+                  and Headway never guesses a zone.
   IDLE_SLEEP_SECONDS (optional) sleep between empty polls, default 1.
 
 Fail-loudly policy: missing required config is a refusal at startup, never a
@@ -58,6 +66,7 @@ from .consumer import (
     TOPIC_GTFS_RT_TRIP_UPDATES,
     TOPIC_GTFS_RT_VEHICLE_POSITIONS,
     TOPIC_GTFS_STATIC_FEED,
+    TOPIC_TELEMATICS_VEHICLE_STATS,
     TOPIC_TIDES_PASSENGER_EVENTS,
     TOPIC_VENDOR_FILES,
     ObjectFetcher,
@@ -65,6 +74,7 @@ from .consumer import (
     run_loop,
 )
 from .kafka_source import KafkaMessageSource
+from .service_day_timezone import resolve_service_day_timezone
 from .writer import DbWriter
 
 logger = logging.getLogger("headway_transform")
@@ -76,6 +86,7 @@ TOPICS = [
     TOPIC_TIDES_PASSENGER_EVENTS,
     TOPIC_DR_TRIPS,
     TOPIC_VENDOR_FILES,
+    TOPIC_TELEMATICS_VEHICLE_STATS,
 ]
 
 #: Repo-checkout default for the vendor adapter registry (handoff 0015).
@@ -231,6 +242,26 @@ def main() -> int:
     adapter_registry = adapter_registry_from_env()
     idle_sleep = float(os.environ.get("IDLE_SLEEP_SECONDS", "1"))
 
+    telematics_tz, tz_source = resolve_service_day_timezone(connection)
+    if TOPIC_TELEMATICS_VEHICLE_STATS in topics and not telematics_tz:
+        # Loud degraded mode, not a startup refusal: a deployment with no
+        # telematics feed must still start. Pages that DO arrive are refused
+        # with a blocking dq.issues row rather than dated by a guessed zone.
+        logger.warning(
+            "No service-day timezone is declared, so %s pages will be refused "
+            "as blocking dq.issues (a service date is a local wall date and is "
+            "never derived from a guessed timezone). Set it in Headway under "
+            "Admin -> Settings -> service_day_timezone; no file editing and no "
+            "restart is needed.",
+            TOPIC_TELEMATICS_VEHICLE_STATS,
+        )
+    elif telematics_tz:
+        # WHICH SOURCE, always. Two homes for one value is a support burden
+        # unless the running service says which one it read (ADR-0015).
+        logger.info(
+            "service-day timezone %s (from %s)", telematics_tz, tz_source
+        )
+
     logger.info("consuming %s from %s", topics, brokers)
     try:
         # run_loop exits on an empty poll; wrap it to run forever. Kafka
@@ -238,7 +269,11 @@ def main() -> int:
         # are idempotent via content-addressed record_ids + ON CONFLICT).
         while True:
             processed = run_loop(
-                source, writer, fetcher, adapter_registry=adapter_registry
+                source,
+                writer,
+                fetcher,
+                adapter_registry=adapter_registry,
+                telematics_service_day_tz=telematics_tz or None,
             )
             if processed:
                 source.commit()

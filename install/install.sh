@@ -75,6 +75,8 @@ UPGRADE=0
 RESET_PASSWORD=0
 UPDATE_SOURCE=0
 DOWNLOAD_BASEMAP=0
+CHECK_FEEDS=0
+DISCOVER_FEEDS=0
 UPGRADE_TARGET=""
 FAILURES=0
 WARNINGS=0
@@ -206,6 +208,24 @@ Usage:
                                   computer — the map page itself never
                                   contacts the internet. Safe to re-run
                                   any time you want newer map data.
+  ./install/install.sh --check-feeds
+                                  Re-check the feed addresses already in
+                                  this installation's configuration: each
+                                  one is fetched once (only because you ran
+                                  this) and must answer and look like the
+                                  right kind of feed. Plain-language results;
+                                  exits with an error if any feed fails.
+                                  This is the first command to run when the
+                                  dashboard looks empty.
+  ./install/install.sh --discover-feeds
+                                  Look your agency up in the MobilityData
+                                  Mobility Database (an open, public catalog
+                                  of transit feeds) instead of typing feed
+                                  addresses by hand. Asks before contacting
+                                  the catalog, checks every candidate feed
+                                  really answers, and only writes addresses
+                                  you approve. The installer offers this
+                                  same lookup during a fresh install.
   ./install/install.sh --reset-admin-password
                                   Forgot a Headway sign-in password? This
                                   sets a new one for an existing account,
@@ -233,6 +253,8 @@ for arg in "$@"; do
     --reset-admin-password) RESET_PASSWORD=1 ;;
     --update-from-source) UPDATE_SOURCE=1 ;;
     --download-basemap) DOWNLOAD_BASEMAP=1 ;;
+    --check-feeds) CHECK_FEEDS=1 ;;
+    --discover-feeds) DISCOVER_FEEDS=1 ;;
     v[0-9]*)
       # A release version like v0.2.0-alpha — only meaningful with --upgrade.
       if ! printf '%s' "$arg" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.-]+)?$'; then
@@ -343,14 +365,64 @@ docker_is_snap() {
   command -v snap >/dev/null 2>&1 && snap list docker >/dev/null 2>&1
 }
 
+# The exact command to install Docker on THIS computer, printed and never
+# run. Detected from /etc/os-release (ID and ID_LIKE, so derivatives such as
+# Linux Mint or Rocky are covered by their parent), because "follow the
+# upstream docs" is the wrong amount of help for the audience this installer
+# is written for: one week of Linux, zero SQL. A person who has to work out
+# which of five package managers they have has already been handed the
+# problem the installer exists to remove.
+#
+# PRINTED, NEVER RUN. Installing Docker needs root, and this installer's
+# standing posture is that it never runs sudo for you (see
+# print_firewall_guidance). An installer that silently escalates is one no IT
+# department should accept, and `curl | sudo sh` is precisely the pattern
+# ADR-0001's posture rejects.
+docker_install_hint() {
+  local id="" like=""
+  if [ -r /etc/os-release ]; then
+    # shellcheck disable=SC1091
+    id="$(. /etc/os-release 2>/dev/null && printf '%s' "${ID:-}")"
+    like="$(. /etc/os-release 2>/dev/null && printf '%s' "${ID_LIKE:-}")"
+  fi
+  case " $id $like " in
+    *" ubuntu "*|*" debian "*|*" linuxmint "*|*" pop "*|*" raspbian "*)
+      printf '%s' "sudo apt-get update && sudo apt-get install -y docker.io docker-compose-v2 docker-buildx" ;;
+    *" fedora "*)
+      printf '%s' "sudo dnf install -y docker docker-compose-plugin docker-buildx-plugin" ;;
+    *" rhel "*|*" centos "*|*" rocky "*|*" almalinux "*)
+      printf '%s' "sudo dnf install -y docker docker-compose-plugin docker-buildx-plugin" ;;
+    *" opensuse"*|*" suse "*|*" sles "*)
+      printf '%s' "sudo zypper install -y docker docker-compose docker-buildx" ;;
+    *" arch "*|*" manjaro "*)
+      printf '%s' "sudo pacman -S --needed docker docker-compose docker-buildx" ;;
+    *)
+      printf '%s' "" ;;
+  esac
+}
+
 check_docker() {
   if ! command -v docker >/dev/null 2>&1; then
+    local hint
+    hint="$(docker_install_hint)"
     fail "Docker is not installed. Headway runs inside Docker containers,"
     fixln "so Docker is required."
-    fixln "To fix: install Docker for your Linux distribution by following"
-    fixln "https://docs.docker.com/engine/install/ then run this installer"
-    fixln "again. (On Ubuntu, 'sudo snap install docker' also works; this"
-    fixln "installer knows how to guide you through snap's extra setup.)"
+    if [ -n "$hint" ]; then
+      fixln "To fix on this computer, run this ONE line, then run the"
+      fixln "installer again:"
+      fixln ""
+      fixln "    $hint"
+      fixln "    sudo usermod -aG docker \$USER   # then log out and back in"
+      fixln ""
+      fixln "Headway will not run that for you: it needs administrator"
+      fixln "rights, and this installer never uses them on your behalf."
+      fixln "Other options: https://docs.docker.com/engine/install/"
+    else
+      fixln "To fix: install Docker for your Linux distribution by following"
+      fixln "https://docs.docker.com/engine/install/ then run this installer"
+      fixln "again. (On Ubuntu, 'sudo snap install docker' also works; this"
+      fixln "installer knows how to guide you through snap's extra setup.)"
+    fi
     return
   fi
   ok "Docker is installed ($(docker --version 2>/dev/null || echo 'version unknown'))."
@@ -366,6 +438,25 @@ check_docker() {
     fixln "Then run this installer again."
   else
     ok "Docker Compose is installed ($(docker compose version --short 2>/dev/null || echo 'version unknown'))."
+  fi
+
+  # A WARNING, not a failure: the build genuinely succeeds without buildx —
+  # Compose falls back to the classic builder and says so. Found live
+  # 2026-08-02 on a clean Ubuntu 26.04 install, where apt's `docker.io` ships
+  # no buildx and every `up --build` printed "Docker Compose is configured to
+  # build using Bake, but buildx isn't installed". Harmless, and alarming to
+  # someone on their first install who has no way to tell harmless from not.
+  if ! docker buildx version >/dev/null 2>&1; then
+    local buildx_hint
+    buildx_hint="$(docker_install_hint)"
+    note "Docker's 'buildx' builder is not installed. Headway builds fine"
+    fixln "without it — Docker falls back to its older builder — but every"
+    fixln "build prints a warning about it. To silence that, install the"
+    fixln "buildx package for your system (it is included in the one-line"
+    fixln "command above on a fresh install)."
+    if [ -n "$buildx_hint" ]; then
+      fixln "Nothing is wrong if you skip this."
+    fi
   fi
 
   if docker info >/dev/null 2>&1; then
@@ -471,14 +562,60 @@ check_docker() {
   fixln "install/README.md, section 'Getting help'."
 }
 
+# Ports published by THIS installation's own containers, one per line.
+# Empty when Docker is unavailable or nothing is running — callers treat that
+# as "no port is ours", which is the pre-install case and the safe default.
+headway_owned_ports() {
+  # Docker prints published ports two ways, and BOTH occur in this stack:
+  #     127.0.0.1:8000->8000/tcp          a single port
+  #     127.0.0.1:9000-9001->9000-9001/tcp   a RANGE (MinIO publishes one)
+  # A parser that only understands the first shape silently drops MinIO's two
+  # ports and then reports them as somebody else's conflict — which is what the
+  # first version of this function did.
+  docker ps --filter "name=^/${COMPOSE_PROJECT}-" --format '{{.Ports}}' 2>/dev/null \
+    | tr ',' '\n' \
+    | awk -F'->' '/->/ {
+        split($1, a, ":"); spec = a[length(a)]
+        if (spec ~ /^[0-9]+-[0-9]+$/) {
+          split(spec, r, "-")
+          for (p = r[1]; p <= r[2]; p++) print p
+        } else if (spec ~ /^[0-9]+$/) {
+          print spec
+        }
+      }' \
+    | sort -un
+}
+
 check_ports() {
-  local busy=0
+  local busy=0 ours=0
+  # Read once: `docker ps` per port would be eight subprocesses for no reason.
+  local owned
+  owned="$(headway_owned_ports)"
   for port in "${REQUIRED_PORTS[@]}"; do
     if port_in_use "$port"; then
+      # A port held by Headway's OWN container is not a conflict, it is
+      # Headway running. Reporting it as a problem told an operator with a
+      # perfectly healthy installation that their computer was "NOT ready" —
+      # found live 2026-08-02 by running --check on a working install, which
+      # is exactly when a worried operator reaches for it.
+      if printf '%s\n' "$owned" | grep -qx "$port"; then
+        ours=$((ours + 1))
+        continue
+      fi
       fail "Port $port is already in use. Headway needs it for $(port_label "$port")."
       busy=1
     fi
   done
+  if [ "$ours" -gt 0 ] && [ "$busy" -eq 0 ]; then
+    ok "All the network ports Headway needs are either free or already in use"
+    fixln "by this Headway installation ($ours of ${#REQUIRED_PORTS[@]} in use by"
+    fixln "Headway itself, which is what a running installation looks like)."
+    return
+  fi
+  if [ "$ours" -gt 0 ]; then
+    note "$ours of the ports listed above are in use by this Headway"
+    fixln "installation itself, which is expected while it is running."
+  fi
   if [ "$busy" -eq 1 ]; then
     fixln "A 'port' is a numbered door programs use to talk on this computer;"
     fixln "two programs cannot use the same one. Something already running is"
@@ -607,6 +744,11 @@ $(docker ps -a --filter "label=com.docker.compose.project=$COMPOSE_PROJECT" --fo
 AGENCY_ID=""
 GTFS_STATIC_URL_IN=""
 GTFS_RT_VP_URL_IN=""
+GTFS_RT_TU_URL_IN=""
+GTFS_RT_SA_URL_IN=""
+# Whether typed feed addresses can be live-checked (curl present). When
+# not, addresses are still spell-checked and the limit is said out loud.
+FEED_LIVE_CHECKS=1
 
 gather_inputs() {
   blank
@@ -628,6 +770,12 @@ gather_inputs() {
       exit 1
     fi
     say "Agency ID (from HEADWAY_AGENCY_ID): $AGENCY_ID"
+    # Feed addresses provided via environment are validated exactly like
+    # typed ones (handoff 0037): spelling always; live check unless
+    # HEADWAY_FEED_URL_UNCHECKED_OK=yes. A failing address is refused —
+    # in unattended mode nobody can say "keep it anyway".
+    validate_feed_url_noninteractive HEADWAY_GTFS_STATIC_URL "$GTFS_STATIC_URL_IN" static
+    validate_feed_url_noninteractive HEADWAY_GTFS_RT_VEHICLE_POSITIONS_URL "$GTFS_RT_VP_URL_IN" realtime
     read_access_mode_from_env
     return
   fi
@@ -647,23 +795,62 @@ gather_inputs() {
   done
   log "agency id entered"
 
-  say ""
-  say "2) (Optional) Your agency's GTFS schedule feed. GTFS is the standard"
-  say "   file format for transit schedules — most agencies already publish"
-  say "   one for trip planners like Google Maps. It is a web address ending"
-  say "   in .zip. If you do not know it, just press Enter to skip; you can"
-  say "   add it later in deploy/compose/.env."
-  printf '   GTFS schedule address (or press Enter to skip): '
-  read -r GTFS_STATIC_URL_IN
+  if ! command -v curl >/dev/null 2>&1; then
+    FEED_LIVE_CHECKS=0
+    warn "The 'curl' tool is missing, so feed addresses can only be"
+    fixln "spell-checked now, not fetched to prove they answer."
+    fixln "To fix on Ubuntu/Debian:   sudo apt install curl"
+    fixln "(./install/install.sh --check-feeds can re-check them later.)"
+  fi
 
   say ""
-  say "3) (Optional) Your agency's GTFS-Realtime vehicle positions feed."
-  say "   This is a live web address that reports where your vehicles are"
-  say "   right now — it usually comes from your AVL/CAD vendor. Press"
-  say "   Enter to skip if you do not know it."
-  printf '   Vehicle positions address (or press Enter to skip): '
-  read -r GTFS_RT_VP_URL_IN
-  log "feed urls entered (static: $([ -n "$GTFS_STATIC_URL_IN" ] && echo provided || echo skipped), vehicle positions: $([ -n "$GTFS_RT_VP_URL_IN" ] && echo provided || echo skipped))"
+  say "2) Your agency's data feeds. Headway can LOOK THESE UP for you: with"
+  say "   your consent (explained first), it searches the MobilityData"
+  say "   Mobility Database — an open, public catalog of transit feeds —"
+  say "   checks that every address it finds really answers, and saves only"
+  say "   what you approve. Or you can type the addresses yourself."
+  local lookup_answer
+  if [ "$FEED_LIVE_CHECKS" -eq 1 ]; then
+    printf '   Look your agency up in the public catalog? (yes/no) [yes]: '
+    read -r lookup_answer
+    case "${lookup_answer:-yes}" in
+      y|Y|yes|YES|Yes)
+        if discover_feeds_flow; then
+          GTFS_STATIC_URL_IN="$DISCOVERED_STATIC"
+          GTFS_RT_VP_URL_IN="$DISCOVERED_VP"
+          GTFS_RT_TU_URL_IN="$DISCOVERED_TU"
+          GTFS_RT_SA_URL_IN="$DISCOVERED_SA"
+        else
+          say ""
+          say "   No problem — the addresses can also be typed by hand below,"
+          say "   or added later in deploy/compose/.env."
+        fi
+        ;;
+      *) : ;;
+    esac
+  else
+    note "Skipping the catalog lookup (it needs curl, see above)."
+  fi
+
+  if [ -z "$GTFS_STATIC_URL_IN" ]; then
+    say ""
+    say "   (Optional) Your agency's GTFS schedule feed. GTFS is the standard"
+    say "   file format for transit schedules — most agencies already publish"
+    say "   one for trip planners like Google Maps. It is a web address ending"
+    say "   in .zip. If you do not know it, just press Enter to skip; you can"
+    say "   add it later in deploy/compose/.env."
+    prompt_feed_url '   GTFS schedule address (or press Enter to skip): ' static GTFS_STATIC_URL_IN
+  fi
+
+  if [ -z "$GTFS_RT_VP_URL_IN" ]; then
+    say ""
+    say "   (Optional) Your agency's GTFS-Realtime vehicle positions feed."
+    say "   This is a live web address that reports where your vehicles are"
+    say "   right now — it usually comes from your AVL/CAD vendor. Press"
+    say "   Enter to skip if you do not know it."
+    prompt_feed_url '   Vehicle positions address (or press Enter to skip): ' realtime GTFS_RT_VP_URL_IN
+  fi
+  log "feed urls entered (static: $([ -n "$GTFS_STATIC_URL_IN" ] && echo provided || echo skipped), vehicle positions: $([ -n "$GTFS_RT_VP_URL_IN" ] && echo provided || echo skipped), trip updates: $([ -n "$GTFS_RT_TU_URL_IN" ] && echo provided || echo skipped), alerts: $([ -n "$GTFS_RT_SA_URL_IN" ] && echo provided || echo skipped))"
 
   ask_access_mode
 }
@@ -822,6 +1009,63 @@ ask_access_mode() {
   log "access mode chosen: $ACCESS_MODE"
 }
 
+# Keep the running services' logs BEFORE anything recreates their containers.
+#
+# Docker container logs die with the container, and an update rebuilds every
+# one of them. So the operation an operator runs to FIX a problem is the
+# operation that destroys the evidence of it — found live 2026-08-03, when a
+# partner agency ran --update-from-source to pick up an adapter fix and it
+# took with it the transform logs holding the reason their file had produced
+# no rows. There was nothing left to read.
+#
+# Written beside install.log, which is already the durable host-side record of
+# an installer run. Bounded by --tail so a chatty service cannot fill the disk
+# on the way out, and NEVER fatal: a failure to keep logs must not stop an
+# update the operator needs.
+LOG_KEEP_LINES=20000
+
+#: How many captures to keep. Bounding the container logs and then leaving an
+#: unbounded pile of copies of them would be the same bug one level up — a
+#: single capture measured 3.9 MB on a one-day-old installation, and an update
+#: can be run many times in a week.
+LOG_KEEP_CAPTURES=10
+
+capture_service_logs() {
+  local reason="$1"
+  local dir="$SCRIPT_DIR/logs"
+  local stamp
+  stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+  local dest="$dir/$stamp-$reason.log"
+
+  mkdir -p "$dir" 2>/dev/null || {
+    note "Could not create $dir, so the current logs were not kept."
+    return 0
+  }
+  # 2>&1 into the file: compose writes its own diagnostics to stderr, and a
+  # log capture that drops them is the half you need when it went wrong.
+  if docker compose --project-directory "$COMPOSE_DIR" logs \
+       --no-color --timestamps --tail "$LOG_KEEP_LINES" > "$dest" 2>&1; then
+    ok "Kept the current service logs: $dest"
+    say "         Container logs are erased when services are rebuilt, so this"
+    say "         copy is what remains of what happened before this run."
+  else
+    note "Could not read the current service logs; continuing anyway."
+    rm -f "$dest" 2>/dev/null
+  fi
+
+  # Keep the newest LOG_KEEP_CAPTURES and delete the rest. Timestamped names
+  # sort chronologically, so this needs no date parsing. Deletes only files
+  # this function created — the glob is anchored to its own naming.
+  local old_captures
+  old_captures="$(ls -1 "$dir"/*-*.log 2>/dev/null | sort | head -n -"$LOG_KEEP_CAPTURES")"
+  if [ -n "$old_captures" ]; then
+    printf '%s\n' "$old_captures" | while IFS= read -r stale; do
+      rm -f "$stale" 2>/dev/null
+    done
+  fi
+  return 0
+}
+
 # Add/remove one profile token in COMPOSE_PROFILES (comma-separated) in .env,
 # preserving whatever else is there. Idempotent by construction.
 add_compose_profile() {
@@ -859,7 +1103,6 @@ write_access_env() {
     # browser on this box working against the same rebuilt website.
     set_env_value HEADWAY_CORS_ORIGINS "https://$LAN_ADDRESS,http://localhost:8080"
     set_env_value VITE_API_BASE_URL "https://$LAN_ADDRESS/api"
-    add_compose_profile app
     add_compose_profile lan
   else
     set_env_value HEADWAY_LAN_ADDRESS ""
@@ -867,6 +1110,14 @@ write_access_env() {
     set_env_value VITE_API_BASE_URL "http://localhost:8000"
     remove_compose_profile lan
   fi
+  # EVERY mode, not just lan. Until 2026-08-02 this lived inside the lan
+  # branch, so the DEFAULT install ('local') brought up the database, queue,
+  # storage and dashboards and no Headway: no website, no API, no collector.
+  # The installer then reported "All services are healthy" (true of the ones
+  # it started), said "Only web browsers on this machine can reach it", and
+  # exited 0. Found on the first cold-machine install, 2026-08-02 — the
+  # access mode answers WHO may reach Headway, never WHETHER it runs.
+  add_compose_profile app
   log "network access wired in .env (mode: $ACCESS_MODE; values not logged: none are secret, but passwords never are)"
 }
 
@@ -975,6 +1226,11 @@ write_env_file() {
   set_env_value AGENCY_ID "$AGENCY_ID"
   [ -n "$GTFS_STATIC_URL_IN" ] && set_env_value GTFS_STATIC_URL "$GTFS_STATIC_URL_IN"
   [ -n "$GTFS_RT_VP_URL_IN" ] && set_env_value GTFS_RT_VEHICLE_POSITIONS_URL "$GTFS_RT_VP_URL_IN"
+  # Trip updates + service alerts arrive only via the catalog lookup today
+  # (handoff 0037: v0 offers all three realtime feed types when the
+  # registry has them and they verify).
+  [ -n "$GTFS_RT_TU_URL_IN" ] && set_env_value GTFS_RT_TRIP_UPDATES_URL "$GTFS_RT_TU_URL_IN"
+  [ -n "$GTFS_RT_SA_URL_IN" ] && set_env_value GTFS_RT_ALERTS_URL "$GTFS_RT_SA_URL_IN"
 
   # The API needs a signing secret for sign-in sessions; generate one like
   # the passwords above (it is a secret; it is never logged).
@@ -1000,10 +1256,11 @@ start_stack() {
   say "--- Starting Headway ---"
   say "Docker will now download and start Headway's building blocks: the"
   say "database, the message queue, file storage, metrics and dashboards."
+  say "The Headway website, its sign-in service and the feed collector are"
+  say "built from source on this computer and started too."
   if [ "$ACCESS_MODE" = "lan" ]; then
-    say "Because you chose office access, the Headway website, its sign-in"
-    say "service and the secure office doorway are also built and started"
-    say "now — that adds some one-time build work."
+    say "Because you chose office access, the secure office doorway is"
+    say "started alongside them."
   fi
   say "The first start downloads about 2 GB of software, so this can take"
   say "10 to 20 minutes depending on your internet connection."
@@ -1432,6 +1689,16 @@ update_from_source() {
 
   run_migrations
 
+  # Retro-fix for installations from before handoff 0037: Docker used to
+  # create the drop-folder mounts itself, owned by root, which the
+  # collector's locked-down account (uid 65532) cannot use. Detect and
+  # offer the least-privilege repair before the services restart.
+  ensure_drop_dirs update
+
+  # BEFORE the rebuild: the containers about to be replaced are the only
+  # place their own history exists.
+  capture_service_logs "before-update"
+
   blank
   say "--- Rebuilding and restarting the Headway services ---"
   say "This is the slowest step (a few minutes of compiling)."
@@ -1444,6 +1711,25 @@ update_from_source() {
   fi
 
   wait_for_healthy
+
+  # Every source update rebuilds images, and each rebuild strands the
+  # previous build's layers and build cache on disk — invisible in any
+  # Headway data folder, but real growth (found live 2026-07-29: an agency
+  # VM exhausted its 150 GB virtual-disk provisioning largely through
+  # rebuild churn). Prune ONLY what nothing references: dangling images
+  # (tagged images — including release images a rollback needs — are never
+  # touched) and the builder cache (safe; the only cost is a slower next
+  # rebuild). Cleanup failure never fails an otherwise-good update.
+  blank
+  say "--- Reclaiming disk space left by previous updates ---"
+  say "Old image layers and build cache from earlier rebuilds are removed."
+  say "Running services and your data are never touched by this step."
+  if ! docker image prune -f 2>&1 | tail -1 | tee -a "$LOG_FILE"; then
+    note "Image cleanup could not run; skipped (the update itself is fine)."
+  fi
+  if ! docker builder prune -f 2>&1 | tail -1 | tee -a "$LOG_FILE"; then
+    note "Build-cache cleanup could not run; skipped (the update is fine)."
+  fi
 
   blank
   say "=================================================================="
@@ -1791,6 +2077,922 @@ download_basemap() {
   say "docs/basemap.md."
 }
 
+# --- Feed-address validation, --check-feeds, drop folders, --discover-feeds ------
+# Design contract: docs/handoffs/0037-…-first-mile-hardening.md. Every rule
+# here is a real first-mile failure from a live agency install: a pasted
+# URL with 'https//' (no colon), a typo inside a pasted path, a drop folder
+# the collector's locked-down account could not write, and 'chmod 777' as
+# field advice. The posture: no address is written to .env until it has
+# been checked — spelling first, then a live fetch the operator is told
+# about — and no failing address is ever written silently.
+
+# Check the SPELLING of a feed web address (no network). Returns 0 when it
+# looks like a well-formed http(s) address; otherwise sets SYNTAX_PROBLEM
+# to a plain-language description — the typos we have actually seen in the
+# field are named specifically, never just "invalid URL" — and returns 1.
+SYNTAX_PROBLEM=""
+feed_url_syntax_ok() {
+  local url="$1"
+  SYNTAX_PROBLEM=""
+  case "$url" in
+    *" "*|*$'\t'*)
+      SYNTAX_PROBLEM="the address contains a space. Web addresses never do — usually the copy-and-paste picked up an extra piece, or two pieces of the address got separated. Please paste it as one unbroken line." ;;
+    https//*|http//*)
+      SYNTAX_PROBLEM="there is a colon missing near the start. It begins '${url%%//*}//' but web addresses start 'https://' — colon first, then the two slashes." ;;
+    https:/[!/]*|http:/[!/]*)
+      SYNTAX_PROBLEM="the start of the address is one slash short. Web addresses start 'https://' with two slashes after the colon." ;;
+    https://*|http://*)
+      local rest="${url#*://}"
+      case "$rest" in
+        ""|/*) SYNTAX_PROBLEM="there is nothing after the 'https://' — the website part of the address is missing." ;;
+        *.*)   return 0 ;;
+        *)     SYNTAX_PROBLEM="the part right after https:// ('$rest') does not look like a website name (it has no dot in it). Please compare it with the address your vendor or IT contact gave you." ;;
+      esac ;;
+    *://*)
+      SYNTAX_PROBLEM="it starts with '${url%%://*}://', which is not a kind of address Headway can fetch. Feed addresses start with https:// (or http://)." ;;
+    *)
+      SYNTAX_PROBLEM="it does not start with https:// — the front part of the address is probably missing. Feed addresses begin with https://" ;;
+  esac
+  [ -z "$SYNTAX_PROBLEM" ]
+}
+
+# Live-check one feed address: SAY what is being fetched, fetch it once,
+# and confirm the answer looks like the right kind of feed.
+#   $1 = url    $2 = kind: static (GTFS zip) | realtime (GTFS-Realtime)
+# Returns 0 verified (an OK line was printed); 1 failed (a plain-words
+# explanation of what was checked and the likely cause was printed).
+#
+# HONEST LIMIT, recorded: this is a bash-level shape check, not a full
+# parse. A schedule feed must answer with the ZIP file signature ('PK');
+# a realtime feed must answer with binary protobuf whose first byte is the
+# GTFS-Realtime FeedMessage's required header field tag (0x0a). The real
+# decode happens in the ingestion service; this check exists to catch
+# typos and wrong-address mistakes at the moment they are typed.
+feed_live_check() {
+  local url="$1" kind="$2" label
+  case "$kind" in
+    static) label="schedule file" ;;
+    *)      label="live feed" ;;
+  esac
+  say "   Checking the feed…"
+  say "   (fetching $url once, now, only because you gave Headway this address)"
+  local tmp code="" rc=0 size=0
+  tmp="$(mktemp)"
+  # --range asks for only the first 2 KB (plenty for a file signature);
+  # servers that ignore ranges send the whole file, so size and time are
+  # capped as well. A timeout or size-cap stop with bytes already received
+  # still lets the signature check run.
+  code="$(curl -fsSL --max-time 45 --max-filesize 268435456 --range 0-2047 \
+          -o "$tmp" -w '%{http_code}' "$url" 2>>"$LOG_FILE")" || rc=$?
+  size="$(stat -c %s "$tmp" 2>/dev/null || echo 0)"
+
+  if [ "$rc" -ne 0 ] && [ "$size" -lt 4 ]; then
+    case "$rc" in
+      6)
+        say "   PROBLEM  No website with that name could be found."
+        say "            The middle part of the address (the website name,"
+        say "            right after https://) is probably misspelled." ;;
+      7)
+        say "   PROBLEM  The website exists, but nothing answered there."
+        say "            The site may be down, or a firewall on your network"
+        say "            may be blocking this computer from reaching it." ;;
+      28)
+        say "   PROBLEM  Nothing answered within 45 seconds. The site may be"
+        say "            slow or down right now, or your network may be"
+        say "            blocking it. Trying again later is reasonable." ;;
+      22)
+        case "$code" in
+          404)
+            say "   PROBLEM  The website answered 'not found' (error 404) for"
+            say "            this exact address. The website itself is real,"
+            say "            but this path on it is not — check the part"
+            say "            after the website name for a small typo." ;;
+          401|403)
+            say "   PROBLEM  The website refused access (error $code). Two"
+            say "            common causes: a typo in the path (many sites"
+            say "            answer 'access refused' for addresses that do"
+            say "            not exist — check the part after the website"
+            say "            name letter by letter), or a feed that needs a"
+            say "            key — check with whoever gave you the address." ;;
+          5*)
+            say "   PROBLEM  The website reported a problem on its own side"
+            say "            (error $code). The address may still be right;"
+            say "            try again in a few minutes." ;;
+          *)
+            say "   PROBLEM  The website answered with an error (HTTP $code)."
+            say "            Details are in $LOG_FILE." ;;
+        esac ;;
+      *)
+        say "   PROBLEM  The fetch did not complete (details in"
+        say "            $LOG_FILE). Check the address and your internet"
+        say "            connection, then try again." ;;
+    esac
+    rm -f "$tmp"
+    return 1
+  fi
+
+  if [ "$size" -lt 4 ]; then
+    say "   PROBLEM  The address answered, but with an empty response —"
+    say "            that is not a $label."
+    rm -f "$tmp"
+    return 1
+  fi
+
+  local sig first
+  sig="$(od -An -tx1 -N4 "$tmp" 2>/dev/null | tr -d ' \n')"
+  first="${sig:0:2}"
+  rm -f "$tmp"
+
+  if [ "$kind" = "static" ]; then
+    if [ "$sig" = "504b0304" ]; then
+      ok "The feed answered and looks like a GTFS schedule file (a ZIP archive)."
+      return 0
+    fi
+    case "$first" in
+      3c)
+        say "   PROBLEM  This address answered with a web page, not a"
+        say "            schedule file. That usually means it points at a"
+        say "            page ABOUT the feed instead of the feed itself, or"
+        say "            there is a typo in the path — a schedule feed"
+        say "            address normally ends in .zip." ;;
+      7b|5b)
+        say "   PROBLEM  This address answered with data (JSON), not a"
+        say "            schedule file. It may be a different service of"
+        say "            your vendor's — a GTFS schedule feed is a .zip"
+        say "            file." ;;
+      0a)
+        say "   PROBLEM  This address answered like a LIVE vehicle feed,"
+        say "            not a schedule file. The schedule and realtime"
+        say "            addresses may be swapped." ;;
+      *)
+        say "   PROBLEM  This address answered, but not with a schedule"
+        say "            file (a GTFS schedule is a ZIP archive, and this"
+        say "            response is not one). Check for a typo, or check"
+        say "            with whoever gave you the address." ;;
+    esac
+    return 1
+  fi
+
+  # realtime
+  if [ "$first" = "0a" ]; then
+    ok "The feed answered and looks like a live GTFS-Realtime feed."
+    return 0
+  fi
+  case "$first" in
+    3c)
+      say "   PROBLEM  This address answered with a web page, not a live"
+      say "            GTFS-Realtime feed. That usually means a typo in the"
+      say "            path, or an address that points at a page ABOUT the"
+      say "            feed instead of the feed itself." ;;
+    7b|5b)
+      say "   PROBLEM  This address answered with data (JSON), not a"
+      say "            GTFS-Realtime feed. GTFS-Realtime is a binary"
+      say "            format — this may be a different API of your"
+      say "            vendor's. Ask them for the GTFS-Realtime address." ;;
+    *)
+      if [ "$sig" = "504b0304" ]; then
+        say "   PROBLEM  This address answered with a schedule file (ZIP)"
+        say "            where a live feed was expected. The schedule and"
+        say "            realtime addresses may be swapped."
+      else
+        say "   PROBLEM  This address answered, but the response does not"
+        say "            look like a GTFS-Realtime feed. Check for a typo,"
+        say "            or check the address with your AVL/CAD vendor."
+      fi ;;
+  esac
+  return 1
+}
+
+# Ask for one feed address interactively, validating spelling and then the
+# live feed before accepting it. Empty input skips. The accepted value goes
+# into the global variable named by $3. A failing address is written ONLY
+# after an explicit "keep it anyway" answer — never silently. Spelling
+# failures get re-entry only (a misspelled address can never answer).
+prompt_feed_url() {
+  local prompt="$1" kind="$2" varname="$3" typed answer
+  while true; do
+    printf '%s' "$prompt"
+    read -r typed
+    if [ -z "$typed" ]; then
+      printf -v "$varname" '%s' ""
+      return 0
+    fi
+    if ! feed_url_syntax_ok "$typed"; then
+      say "   That address will not work as typed: $SYNTAX_PROBLEM"
+      say "   Let's try again — or press Enter to skip this feed for now."
+      continue
+    fi
+    if [ "$FEED_LIVE_CHECKS" -eq 0 ]; then
+      printf -v "$varname" '%s' "$typed"
+      note "Accepted with its spelling checked only — curl is missing, so"
+      fixln "it was not fetched. ./install/install.sh --check-feeds can"
+      fixln "verify it once curl is installed."
+      return 0
+    fi
+    if feed_live_check "$typed" "$kind"; then
+      printf -v "$varname" '%s' "$typed"
+      return 0
+    fi
+    say ""
+    say "   The address was NOT saved. You can type it again (r), keep it"
+    say "   anyway (k) — reasonable when you know the feed is only briefly"
+    say "   down — or skip this feed for now (s). A kept address can be"
+    say "   re-checked any time with: ./install/install.sh --check-feeds"
+    printf '   Type again, keep anyway, or skip? (r/k/s) [r]: '
+    read -r answer
+    case "${answer:-r}" in
+      k|K)
+        printf -v "$varname" '%s' "$typed"
+        warn "Keeping $typed although its check failed (your choice, recorded)."
+        return 0
+        ;;
+      s|S)
+        printf -v "$varname" '%s' ""
+        say "   Skipped. You can add it later in $ENV_FILE."
+        return 0
+        ;;
+      *) : ;;
+    esac
+  done
+}
+
+# Non-interactive (--yes) validation of one env-provided feed URL. A URL
+# that fails is a hard refusal — in unattended mode nobody can confirm
+# "keep it anyway", so nothing broken is ever written silently. Automation
+# that really means it sets HEADWAY_FEED_URL_UNCHECKED_OK=yes (the
+# HEADWAY_UPGRADE_SOURCE_MISMATCH_OK pattern) to skip only the LIVE check;
+# spelling problems are always refused.
+validate_feed_url_noninteractive() {
+  local envname="$1" url="$2" kind="$3"
+  [ -z "$url" ] && return 0
+  if ! feed_url_syntax_ok "$url"; then
+    fail "The address in $envname will not work as written:"
+    fixln "$SYNTAX_PROBLEM"
+    fixln "(Got: $url)"
+    exit 1
+  fi
+  if [ "${HEADWAY_FEED_URL_UNCHECKED_OK:-}" = "yes" ]; then
+    note "Writing $envname with its spelling checked only"
+    fixln "(HEADWAY_FEED_URL_UNCHECKED_OK=yes skips the live check)."
+    fixln "Re-check any time with: ./install/install.sh --check-feeds"
+    return 0
+  fi
+  require_curl
+  if ! feed_live_check "$url" "$kind"; then
+    fail "Running with --yes, so nobody can confirm this address should be"
+    fixln "kept despite the failed check. Refusing; nothing was written."
+    fixln "Fix the address, or set HEADWAY_FEED_URL_UNCHECKED_OK=yes if the"
+    fixln "feed is expected to be unreachable right now."
+    exit 1
+  fi
+}
+
+# --- --check-feeds: re-validate whatever .env currently holds --------------------
+# The command support tells an agency to run first. Same checks, same plain
+# language as install-time validation; exit 1 when any configured feed
+# fails, 0 otherwise.
+
+CF_TOTAL=0
+CF_BAD=0
+
+check_feeds_one() {
+  local envkey="$1" kind="$2" label="$3" url
+  url="$(read_env_value "$envkey")"
+  [ -z "$url" ] && return 0
+  CF_TOTAL=$((CF_TOTAL + 1))
+  blank
+  say "$label:"
+  say "   $url"
+  if ! feed_url_syntax_ok "$url"; then
+    fail "That address cannot work as written: $SYNTAX_PROBLEM"
+    fixln "To fix: edit the $envkey= line in"
+    fixln "$ENV_FILE, then apply the change with:"
+    fixln "    docker compose --project-directory $COMPOSE_DIR --profile app up -d"
+    CF_BAD=$((CF_BAD + 1))
+    return 0
+  fi
+  if ! feed_live_check "$url" "$kind"; then
+    fixln "If the address is wrong, edit the $envkey= line in"
+    fixln "$ENV_FILE and apply the change with:"
+    fixln "    docker compose --project-directory $COMPOSE_DIR --profile app up -d"
+    CF_BAD=$((CF_BAD + 1))
+  fi
+}
+
+check_feeds() {
+  blank
+  say "--- Checking the feed addresses in this installation ---"
+  if [ ! -f "$ENV_FILE" ]; then
+    fail "No Headway configuration file was found at"
+    fixln "$ENV_FILE, so there are no feed addresses to"
+    fixln "check. To install Headway first, run: ./install/install.sh"
+    exit 1
+  fi
+  require_curl
+  say ""
+  say "Each feed address in your configuration is now fetched once — only"
+  say "because you ran this command — and must answer and look like the"
+  say "right kind of feed. Nothing about your installation is sent anywhere."
+
+  check_feeds_one GTFS_STATIC_URL                static   "GTFS schedule feed"
+  check_feeds_one GTFS_RT_VEHICLE_POSITIONS_URL  realtime "Vehicle positions feed"
+  check_feeds_one GTFS_RT_TRIP_UPDATES_URL       realtime "Trip updates feed"
+  check_feeds_one GTFS_RT_ALERTS_URL             realtime "Service alerts feed"
+
+  blank
+  if [ "$CF_TOTAL" -eq 0 ]; then
+    note "No feed addresses are configured yet (the GTFS_* lines in"
+    fixln "$ENV_FILE are empty), so there was nothing to"
+    fixln "check. ./install/install.sh --discover-feeds can look your"
+    fixln "agency's feeds up in the public catalog."
+    log "check-feeds: no feeds configured"
+    exit 0
+  fi
+  if [ "$CF_BAD" -gt 0 ]; then
+    say "Result: $CF_BAD of $CF_TOTAL configured feed(s) FAILED the check —"
+    say "the details and the fix for each are above. Data from a failing"
+    say "feed is not arriving."
+    log "check-feeds: $CF_BAD of $CF_TOTAL failed"
+    exit 1
+  fi
+  say "Result: all $CF_TOTAL configured feed(s) answered and look like the"
+  say "right kind of feed."
+  log "check-feeds: all $CF_TOTAL ok"
+  exit 0
+}
+
+# --- Drop folders the collector can actually use ---------------------------------
+# Design point 3 (handoff 0037). The collector container runs as a locked-
+# down account, uid 65532 (the distroless 'nonroot' user). When Docker
+# auto-creates the drop-folder mounts, they come out owned by root, and the
+# collector cannot create processed/ or move a handled file — the exact
+# blocker of the first live agency ingest (where the interim field advice
+# was chmod 777; never that). Least-privilege layout chosen, and why:
+#   owner = YOU (the installing account)  -> you can copy exports in
+#                                            without sudo;
+#   group = 65532 with group-write + setgid (mode 2775)
+#                                         -> the collector can read drops,
+#                                            create processed/, move files;
+#   everyone else: read-only             -> not 777, ever.
+# The fix runs through a one-off helper container (this installer never
+# runs sudo for you; Docker access, which you already proved, is what
+# grants this ability). The updater detects and offers to repair folders
+# from older installs (Docker-created, root-owned).
+
+COLLECTOR_UID=65532
+
+# Is this directory usable by the collector account (uid 65532)?
+drop_dir_ready() {
+  local d="$1" owner group gw
+  [ -d "$d" ] || return 1
+  owner="$(stat -c %u "$d" 2>/dev/null || echo -1)"
+  [ "$owner" = "$COLLECTOR_UID" ] && return 0
+  group="$(stat -c %g "$d" 2>/dev/null || echo -1)"
+  gw="$(stat -c %A "$d" 2>/dev/null | cut -c6)"
+  [ "$group" = "$COLLECTOR_UID" ] && [ "$gw" = "w" ]
+}
+
+# Create/repair the drop folders. $1 = install | update. In update mode the
+# repair is OFFERED (interactive) rather than just applied; --yes applies
+# it with a note. Never exits: a drop-folder problem must not abort an
+# install, but it is reported loudly with the manual fix.
+ensure_drop_dirs() {
+  local mode="${1:-install}" d s p problems=()
+  for d in tides-drop vendor-drop; do
+    for s in "" processed rejected; do
+      p="$COMPOSE_DIR/$d${s:+/$s}"
+      drop_dir_ready "$p" || problems+=("$p")
+    done
+  done
+  if [ "${#problems[@]}" -eq 0 ]; then
+    ok "The data drop folders (tides-drop, vendor-drop) are set up so both"
+    fixln "you and Headway's collector can use them."
+    return 0
+  fi
+
+  blank
+  say "--- Setting up the data drop folders ---"
+  say "These folders are where exported files (passenger counts, vendor"
+  say "exports) are placed for Headway to pick up. Headway's collector runs"
+  say "as a locked-down account (user id $COLLECTOR_UID) that cannot use a folder"
+  say "owned by another account — so the folders are set up now with the"
+  say "least privilege that works: you own them (you can copy files in),"
+  say "the collector's account can read and move files (group access), and"
+  say "nobody else can write. Not 777."
+  if [ "$mode" = "update" ]; then
+    say ""
+    say "These existing folders are NOT usable by the collector right now"
+    say "(usually a leftover from an earlier version, where Docker created"
+    say "them owned by root):"
+    for p in "${problems[@]}"; do say "    $p"; done
+    if [ "$ASSUME_YES" -eq 1 ]; then
+      note "Fixing them now (--yes)."
+    else
+      local fix_answer
+      printf 'Fix their ownership now? (yes/no) [yes]: '
+      read -r fix_answer
+      case "${fix_answer:-yes}" in
+        y|Y|yes|YES|Yes) : ;;
+        *)
+          warn "Skipped at your request. File drops into these folders will"
+          fixln "fail with a permission error (the error itself prints this"
+          fixln "same fix). To do it by hand later:"
+          fixln "    sudo chown -R \$USER:$COLLECTOR_UID $COMPOSE_DIR/tides-drop $COMPOSE_DIR/vendor-drop"
+          fixln "    sudo chmod 2775 $COMPOSE_DIR/tides-drop $COMPOSE_DIR/vendor-drop \\"
+          fixln "        $COMPOSE_DIR/tides-drop/processed $COMPOSE_DIR/tides-drop/rejected \\"
+          fixln "        $COMPOSE_DIR/vendor-drop/processed $COMPOSE_DIR/vendor-drop/rejected"
+          return 0
+          ;;
+      esac
+    fi
+  fi
+
+  # The one-off helper container (root inside, so it can repair root-owned
+  # leftovers) creates the folders and hands them over: owner you, group
+  # 65532, mode 2775. Same helper image the migrations already use.
+  local host_uid
+  host_uid="$(id -u)"
+  if ! HOST_UID="$host_uid" docker run --rm \
+      -v "$COMPOSE_DIR/tides-drop:/fix/tides-drop" \
+      -v "$COMPOSE_DIR/vendor-drop:/fix/vendor-drop" \
+      -e HOST_UID \
+      -e COLLECTOR_UID="$COLLECTOR_UID" \
+      python:3.12-slim bash -c '
+        set -e
+        for d in /fix/tides-drop /fix/vendor-drop; do
+          mkdir -p "$d/processed" "$d/rejected"
+          chown -R "$HOST_UID:$COLLECTOR_UID" "$d"
+          chmod 2775 "$d" "$d/processed" "$d/rejected"
+        done' >>"$LOG_FILE" 2>&1; then
+    warn "The drop folders could not be set up automatically (details in"
+    fixln "$LOG_FILE). Headway still works — but file drops will fail with"
+    fixln "a permission error until this is done by hand:"
+    fixln "    sudo mkdir -p $COMPOSE_DIR/tides-drop/processed $COMPOSE_DIR/tides-drop/rejected \\"
+    fixln "        $COMPOSE_DIR/vendor-drop/processed $COMPOSE_DIR/vendor-drop/rejected"
+    fixln "    sudo chown -R \$USER:$COLLECTOR_UID $COMPOSE_DIR/tides-drop $COMPOSE_DIR/vendor-drop"
+    fixln "    sudo chmod 2775 $COMPOSE_DIR/tides-drop $COMPOSE_DIR/vendor-drop \\"
+    fixln "        $COMPOSE_DIR/tides-drop/processed $COMPOSE_DIR/tides-drop/rejected \\"
+    fixln "        $COMPOSE_DIR/vendor-drop/processed $COMPOSE_DIR/vendor-drop/rejected"
+    return 0
+  fi
+
+  # Verify, never assume (Constraint 8): re-check every folder.
+  local still=()
+  for d in tides-drop vendor-drop; do
+    for s in "" processed rejected; do
+      p="$COMPOSE_DIR/$d${s:+/$s}"
+      drop_dir_ready "$p" || still+=("$p")
+    done
+  done
+  if [ "${#still[@]}" -gt 0 ]; then
+    warn "The drop folders were set up, but these still verify as not"
+    fixln "usable by the collector (details in $LOG_FILE):"
+    for p in "${still[@]}"; do fixln "    $p"; done
+    return 0
+  fi
+  ok "Drop folders ready: $COMPOSE_DIR/tides-drop and"
+  fixln "$COMPOSE_DIR/vendor-drop (owner: you; group: the collector's"
+  fixln "account, id $COLLECTOR_UID; mode 2775 — least privilege, not 777)."
+  log "drop dirs ensured (mode $mode): owner uid $host_uid, group $COLLECTOR_UID, 2775"
+}
+
+# --- Feed auto-discovery (--discover-feeds; also offered during install) ---------
+# Design point 7 (handoff 0037): nobody should have to type a feed URL.
+# Registry-FIRST and registry-ONLY in v0: the single external service
+# consulted is the MobilityData Mobility Database — the open, community-
+# maintained catalog of the world's public transit feeds — and the operator
+# consents BEFORE any network contact, with the service named (the
+# --download-basemap precedent). No AI, no crawling: a registry miss is an
+# honest miss (the AI-crawl fallback stays on the ROADMAP under the
+# grounding contract). Every candidate is live-verified with the SAME
+# checks typed URLs get, BEFORE it is offered — a stale registry entry
+# (several exist per agency; older ones dead) is never shown. .env is
+# written only on the operator's yes.
+#
+# Catalog fetch, pinned (2026-07-30): the aggregate sources.csv the
+# MobilityData project publishes. Their README hands out a link-shortener
+# (bit.ly/catalogs-csv); Headway pins the file it RESOLVES to instead — no
+# link shortener on the path. Verified 2026-07-30 that both return the
+# same bytes. If the project moves the file, this line moves with it.
+MOBILITY_CATALOG_URL="https://storage.googleapis.com/storage/v1/b/mdb-csv/o/sources.csv?alt=media"
+
+# Parse ONE CSV line (RFC-4180 quoting: quoted fields, doubled quotes) into
+# the global array CSVF. Good enough for the catalog's row shape; a record
+# broken across physical lines parses short and is skipped by the field-
+# count guard at the call site.
+csv_fields() {
+  local line="$1" field="" in_quotes=0 i c n=${#1}
+  CSVF=()
+  i=0
+  while [ "$i" -lt "$n" ]; do
+    c="${line:$i:1}"
+    if [ "$in_quotes" -eq 1 ]; then
+      if [ "$c" = '"' ]; then
+        if [ "${line:$((i+1)):1}" = '"' ]; then
+          field+='"'
+          i=$((i + 1))
+        else
+          in_quotes=0
+        fi
+      else
+        field+="$c"
+      fi
+    else
+      case "$c" in
+        '"') in_quotes=1 ;;
+        ,)   CSVF+=("$field"); field="" ;;
+        *)   field+="$c" ;;
+      esac
+    fi
+    i=$((i + 1))
+  done
+  CSVF+=("$field")
+}
+
+# Case-insensitive "does haystack contain needle" (pure bash).
+contains_ci() {
+  local hay="${1,,}" needle="${2,,}"
+  [ -n "$needle" ] && [[ "$hay" == *"$needle"* ]]
+}
+
+# Catalog column positions (0-based; header verified 2026-07-30 against
+# the pinned URL above): 0 mdb_source_id, 1 data_type, 2 entity_type,
+# 3 country, 4 subdivision, 5 municipality, 6 provider, 9 name,
+# 12 static_reference, 13 urls.direct_download, 14 urls.authentication_type,
+# 24 status, 26 redirect.id. Guarded by the header check in
+# discover_fetch_catalog: if MobilityData reorders columns, the wizard
+# refuses loudly instead of misreading.
+CATALOG_COLUMNS=28
+CATALOG_HEADER_PREFIX="mdb_source_id,data_type,entity_type,"
+
+# A catalog row is offerable when it is not redirected elsewhere, not
+# marked out of date, and needs no API key (Headway's collector sends
+# none). $1..$3 = status, redirect_id, auth_type.
+catalog_row_offerable() {
+  local status="$1" redirect="$2" auth="$3"
+  [ -z "$redirect" ] || return 1
+  case "$status" in ""|active) : ;; *) return 1 ;; esac
+  case "$auth" in ""|0) : ;; *) return 1 ;; esac
+  return 0
+}
+
+# Fetch the catalog into $1. Consent must already have been given.
+discover_fetch_catalog() {
+  local dest="$1"
+  say ""
+  say "Downloading the public catalog (about 1 MB)…"
+  if ! curl -fsSL --max-time 120 -o "$dest" "$MOBILITY_CATALOG_URL" 2>>"$LOG_FILE"; then
+    say ""
+    fail "The catalog could not be downloaded. Usually this means no"
+    fixln "internet connection from this computer, or the catalog site is"
+    fixln "briefly unreachable. Nothing was changed; try again later — or"
+    fixln "ask your vendor for the feed addresses and enter them yourself"
+    fixln "(docs/connecting-your-data.md, section 2, explains both)."
+    return 1
+  fi
+  if ! head -c 100 "$dest" | grep -q "^$CATALOG_HEADER_PREFIX"; then
+    fail "The catalog downloaded, but its format is not the one this"
+    fixln "installer knows (its column layout changed). Refusing to guess."
+    fixln "Please report this (SUPPORT.md); meanwhile the feed addresses"
+    fixln "can be entered by hand (docs/connecting-your-data.md, section 2)."
+    return 1
+  fi
+  ok "Catalog downloaded."
+  return 0
+}
+
+# Results of a successful discovery, consumed by the caller.
+DISCOVERED_PROVIDER=""
+DISCOVERED_STATIC=""
+DISCOVERED_VP=""
+DISCOVERED_TU=""
+DISCOVERED_SA=""
+
+# The interactive lookup. Returns 0 with the DISCOVERED_* globals filled
+# when the operator accepted verified feeds; 1 otherwise (nothing written,
+# reasons already printed). This wrapper only owns the catalog temp file's
+# lifetime; the flow itself is in discover_feeds_flow_inner.
+discover_feeds_flow() {
+  local catalog rc=0
+  catalog="$(mktemp)"
+  discover_feeds_flow_inner "$catalog" || rc=$?
+  rm -f "$catalog"
+  return "$rc"
+}
+
+discover_feeds_flow_inner() {
+  local catalog="$1"
+  DISCOVERED_PROVIDER=""; DISCOVERED_STATIC=""
+  DISCOVERED_VP=""; DISCOVERED_TU=""; DISCOVERED_SA=""
+
+  say ""
+  say "--- Looking up your agency's feeds in the public catalog ---"
+  say ""
+  say "Here is exactly what this does, before anything touches the network:"
+  say "  1. It downloads the public catalog file of the MobilityData"
+  say "     Mobility Database — an open, community-maintained list of the"
+  say "     world's public transit feeds — from:"
+  say "         $MOBILITY_CATALOG_URL"
+  say "     Nothing about you or this computer is sent; it is a plain file"
+  say "     download, and it happens only if you say yes below."
+  say "  2. It looks for your agency by name in that list."
+  say "  3. Each candidate feed found is fetched once to check it really"
+  say "     answers and looks like the right kind of feed — a stale or dead"
+  say "     catalog entry is never offered."
+  say "  4. Nothing is saved until you approve what was found."
+  say ""
+  local consent
+  printf 'Look your agency up now? (yes/no): '
+  read -r consent
+  case "$consent" in
+    y|Y|yes|YES|Yes) : ;;
+    *)
+      say "Skipping the lookup — nothing was contacted."
+      log "discover-feeds: consent declined"
+      return 1
+      ;;
+  esac
+  require_curl
+
+  local agency_query
+  while true; do
+    printf 'Your agency'"'"'s name (as the public knows it, e.g. "Metro Transit"): '
+    read -r agency_query
+    [ -n "$agency_query" ] && break
+    say "   Please type at least part of the agency's name."
+  done
+  log "discover-feeds: consent given; querying catalog"
+
+  discover_fetch_catalog "$catalog" || return 1
+
+  # --- Schedule (GTFS static) candidates ---------------------------------
+  local -a sched_ids=() sched_urls=() sched_desc=()
+  local skipped_stale=0 line
+  while IFS= read -r line; do
+    csv_fields "$line"
+    [ "${#CSVF[@]}" -eq "$CATALOG_COLUMNS" ] || continue
+    [ "${CSVF[1]}" = "gtfs" ] || continue
+    contains_ci "${CSVF[6]} ${CSVF[9]}" "$agency_query" || continue
+    if ! catalog_row_offerable "${CSVF[24]}" "${CSVF[26]}" "${CSVF[14]}"; then
+      case "${CSVF[24]}" in deprecated|inactive) skipped_stale=$((skipped_stale + 1)) ;; esac
+      continue
+    fi
+    [ -n "${CSVF[13]}" ] || continue
+    sched_ids+=("${CSVF[0]}")
+    sched_urls+=("${CSVF[13]}")
+    local place="${CSVF[5]:-}"
+    [ -n "${CSVF[4]}" ] && place="${place:+$place, }${CSVF[4]}"
+    [ -n "${CSVF[3]}" ] && place="${place:+$place, }${CSVF[3]}"
+    sched_desc+=("${CSVF[6]}${place:+ — $place}")
+  done < <(grep -iF -- "$agency_query" "$catalog" || true)
+
+  if [ "${#sched_ids[@]}" -eq 0 ]; then
+    say ""
+    if [ "$skipped_stale" -gt 0 ]; then
+      say "The catalog knows that name, but only from entries it marks as"
+      say "out of date ($skipped_stale skipped) — those are never offered, because a"
+      say "stale address would fail silently later."
+    else
+      say "Your agency was not found in the public catalog under that name."
+    fi
+    say ""
+    say "That is an honest miss, not a dead end. What works instead:"
+    say "  - Try again with a different form of the name (the catalog often"
+    say "    uses the formal name, e.g. 'Massachusetts Bay Transportation"
+    say "    Authority' rather than 'the T')."
+    say "  - Ask your AVL/CAD vendor or IT contact for your GTFS schedule"
+    say "    address (.zip) and GTFS-Realtime addresses, then enter them —"
+    say "    docs/connecting-your-data.md, section 2, says exactly what to"
+    say "    ask for."
+    log "discover-feeds: no match for query (stale skipped: $skipped_stale)"
+    return 1
+  fi
+
+  # Too many name matches: narrow by state/region (the catalog's
+  # subdivision column) before doing any live checks.
+  if [ "${#sched_ids[@]}" -gt 5 ]; then
+    say ""
+    say "That name matches ${#sched_ids[@]} agencies in the catalog. Which state or"
+    printf 'region is yours in? (e.g. Massachusetts): '
+    local region
+    read -r region
+    if [ -n "$region" ]; then
+      local -a f_ids=() f_urls=() f_desc=()
+      local k
+      for k in "${!sched_ids[@]}"; do
+        if contains_ci "${sched_desc[$k]}" "$region"; then
+          f_ids+=("${sched_ids[$k]}")
+          f_urls+=("${sched_urls[$k]}")
+          f_desc+=("${sched_desc[$k]}")
+        fi
+      done
+      if [ "${#f_ids[@]}" -gt 0 ]; then
+        sched_ids=("${f_ids[@]}")
+        sched_urls=("${f_urls[@]}")
+        sched_desc=("${f_desc[@]}")
+      else
+        say "   None of the matches mention that region; keeping the full list."
+      fi
+    fi
+  fi
+
+  # Live-verify every candidate BEFORE offering (capped at 5 so a broad
+  # name never hammers anyone's servers).
+  if [ "${#sched_ids[@]}" -gt 5 ]; then
+    say ""
+    say "Checking the first 5 of ${#sched_ids[@]} matches (narrow the name to see others)."
+    sched_ids=("${sched_ids[@]:0:5}")
+    sched_urls=("${sched_urls[@]:0:5}")
+    sched_desc=("${sched_desc[@]:0:5}")
+  fi
+  blank
+  say "Found ${#sched_ids[@]} possible schedule feed(s); checking each one really answers:"
+  local -a v_ids=() v_urls=() v_desc=()
+  local k
+  for k in "${!sched_ids[@]}"; do
+    say ""
+    say "   ${sched_desc[$k]}"
+    if feed_live_check "${sched_urls[$k]}" static; then
+      v_ids+=("${sched_ids[$k]}")
+      v_urls+=("${sched_urls[$k]}")
+      v_desc+=("${sched_desc[$k]}")
+    else
+      say "   (This catalog entry was skipped: its address did not verify.)"
+    fi
+  done
+  if [ "${#v_ids[@]}" -eq 0 ]; then
+    say ""
+    say "The catalog has entries for that name, but none of their addresses"
+    say "answered with a real schedule feed just now — so none is offered"
+    say "(a dead address saved today is an empty dashboard next week)."
+    say "Try again later, or ask your vendor for the addresses directly"
+    say "(docs/connecting-your-data.md, section 2)."
+    log "discover-feeds: candidates found but none verified"
+    return 1
+  fi
+
+  local chosen=0
+  if [ "${#v_ids[@]}" -gt 1 ]; then
+    say ""
+    say "More than one verified match — which is your agency?"
+    for k in "${!v_ids[@]}"; do
+      say "   $((k + 1))) ${v_desc[$k]}"
+    done
+    say "   0) None of these"
+    local pick
+    while true; do
+      printf '   Your choice: '
+      read -r pick
+      if [ "$pick" = "0" ]; then
+        say "   Understood — nothing was saved. Ask your vendor for the"
+        say "   addresses (docs/connecting-your-data.md, section 2)."
+        return 1
+      fi
+      if printf '%s' "$pick" | grep -Eq '^[0-9]+$' \
+         && [ "$pick" -ge 1 ] && [ "$pick" -le "${#v_ids[@]}" ]; then
+        chosen=$((pick - 1))
+        break
+      fi
+      say "   Please answer with one of the numbers above."
+    done
+  fi
+
+  local sched_id="${v_ids[$chosen]}"
+  local sched_url="${v_urls[$chosen]}"
+  local provider="${v_desc[$chosen]}"
+
+  # --- Realtime candidates linked to the chosen schedule ------------------
+  # The catalog ties realtime rows to their schedule row via
+  # static_reference; provider-name matches are the fallback (some RT rows
+  # carry the vendor's name, not the agency's). v0 offers ALL THREE feed
+  # types when present and verified: vehicle positions, trip updates,
+  # service alerts.
+  say ""
+  say "Now looking for live (GTFS-Realtime) feeds linked to that agency…"
+  local vp_url="" tu_url="" sa_url=""
+  while IFS= read -r line; do
+    csv_fields "$line"
+    [ "${#CSVF[@]}" -eq "$CATALOG_COLUMNS" ] || continue
+    [ "${CSVF[1]}" = "gtfs-rt" ] || continue
+    [ -n "${CSVF[13]}" ] || continue
+    catalog_row_offerable "${CSVF[24]}" "${CSVF[26]}" "${CSVF[14]}" || continue
+    # Linked to the chosen schedule, or same provider/name text.
+    if [ "${CSVF[12]}" != "$sched_id" ] \
+       && ! contains_ci "${CSVF[6]} ${CSVF[9]}" "$agency_query"; then
+      continue
+    fi
+    case "${CSVF[2]}" in
+      vp) [ -z "$vp_url" ] && vp_url="${CSVF[13]}" ;;
+      tu) [ -z "$tu_url" ] && tu_url="${CSVF[13]}" ;;
+      sa) [ -z "$sa_url" ] && sa_url="${CSVF[13]}" ;;
+    esac
+  done < <(grep -F ",gtfs-rt," "$catalog" | grep -iF -e ",$sched_id," -e "$agency_query" || true)
+
+  local verified_vp="" verified_tu="" verified_sa=""
+  if [ -n "$vp_url" ]; then
+    say ""
+    say "   Vehicle positions candidate:"
+    if feed_live_check "$vp_url" realtime; then
+      verified_vp="$vp_url"
+    else
+      say "   (Skipped: the catalog's vehicle-positions address did not verify.)"
+    fi
+  fi
+  if [ -n "$tu_url" ]; then
+    say ""
+    say "   Trip updates candidate:"
+    if feed_live_check "$tu_url" realtime; then
+      verified_tu="$tu_url"
+    else
+      say "   (Skipped: the catalog's trip-updates address did not verify.)"
+    fi
+  fi
+  if [ -n "$sa_url" ]; then
+    say ""
+    say "   Service alerts candidate:"
+    if feed_live_check "$sa_url" realtime; then
+      verified_sa="$sa_url"
+    else
+      say "   (Skipped: the catalog's service-alerts address did not verify.)"
+    fi
+  fi
+
+  # --- Present what was found and verified; save only on yes --------------
+  blank
+  say "=================================================================="
+  say " Found and checked, for: $provider"
+  say "=================================================================="
+  say ""
+  say "  Schedule feed (GTFS):        $sched_url"
+  [ -n "$verified_vp" ] && say "  Live vehicle positions:      $verified_vp"
+  [ -n "$verified_tu" ] && say "  Live trip updates:           $verified_tu"
+  [ -n "$verified_sa" ] && say "  Live service alerts:         $verified_sa"
+  if [ -z "$verified_vp" ]; then
+    say ""
+    say "  (No live vehicle-positions feed was found and verified in the"
+    say "  catalog. Vehicle positions usually come from your AVL/CAD"
+    say "  vendor — you can add that address later in $ENV_FILE.)"
+  fi
+  say ""
+  say "Every address above answered its check just now. Nothing is saved yet."
+  local accept
+  printf 'Use these feeds for this installation? (yes/no): '
+  read -r accept
+  case "$accept" in
+    y|Y|yes|YES|Yes) : ;;
+    *)
+      say "Nothing was saved."
+      log "discover-feeds: verified feeds declined by operator"
+      return 1
+      ;;
+  esac
+
+  DISCOVERED_PROVIDER="$provider"
+  DISCOVERED_STATIC="$sched_url"
+  DISCOVERED_VP="$verified_vp"
+  DISCOVERED_TU="$verified_tu"
+  DISCOVERED_SA="$verified_sa"
+  log "discover-feeds: operator accepted verified feeds for '$provider'"
+  return 0
+}
+
+# The standalone --discover-feeds command: run the lookup against an
+# EXISTING installation and write .env on acceptance.
+discover_feeds_command() {
+  blank
+  say "--- Finding your agency's feeds (public catalog lookup) ---"
+  if [ ! -f "$ENV_FILE" ]; then
+    fail "No Headway configuration file was found at"
+    fixln "$ENV_FILE. This command updates an existing"
+    fixln "installation's feed addresses; the installer itself offers the"
+    fixln "same lookup during a fresh install: ./install/install.sh"
+    exit 1
+  fi
+  if [ "$ASSUME_YES" -eq 1 ]; then
+    fail "This command contacts a public catalog on the internet and saves"
+    fixln "only what a person approves, so it cannot run with --yes."
+    fixln "Run it without --yes and answer the questions."
+    exit 1
+  fi
+  if ! discover_feeds_flow; then
+    exit 1
+  fi
+  set_env_value GTFS_STATIC_URL "$DISCOVERED_STATIC"
+  [ -n "$DISCOVERED_VP" ] && set_env_value GTFS_RT_VEHICLE_POSITIONS_URL "$DISCOVERED_VP"
+  [ -n "$DISCOVERED_TU" ] && set_env_value GTFS_RT_TRIP_UPDATES_URL "$DISCOVERED_TU"
+  [ -n "$DISCOVERED_SA" ] && set_env_value GTFS_RT_ALERTS_URL "$DISCOVERED_SA"
+  blank
+  ok "The verified feed addresses for $DISCOVERED_PROVIDER"
+  fixln "were written to $ENV_FILE."
+  say ""
+  say "One more step to make the collector use them (a .env change needs"
+  say "'up -d', not 'restart'):"
+  say "    docker compose --project-directory $COMPOSE_DIR --profile app up -d"
+  say ""
+  say "Then ./install/install.sh --check-feeds re-checks them any time."
+  log "discover-feeds: wrote feeds to .env"
+}
+
 # --- Step 7: summary -------------------------------------------------------------
 
 print_summary() {
@@ -1831,13 +3033,13 @@ print_summary() {
     say "     '$ADMIN_USERNAME' at https://$LAN_ADDRESS — and see"
     say "     deploy/compose/README.md for what each service is."
   else
-    say "  2. To start collecting your agency's live feed data, see"
-    say "     deploy/compose/README.md (the 'app' services, which include the"
-    say "     feed collector, are started with:"
-    say "     docker compose --project-directory $COMPOSE_DIR --profile app up -d --build )"
-    say "  3. The Headway sign-in website/API ships with the app services;"
-    say "     your administrator account ('$ADMIN_USERNAME') is already set up"
-    say "     and ready for it."
+    say "  2. The Headway website, sign-in service and feed collector are"
+    say "     already running. Sign in as '$ADMIN_USERNAME' at"
+    say "     http://localhost:8080 — and see deploy/compose/README.md for"
+    say "     what each service is."
+    say "  3. To start collecting your agency's live feed data, put your feed"
+    say "     addresses in $ENV_FILE (GTFS_STATIC_URL and the GTFS_RT_* ones)"
+    say "     and restart: docker compose --project-directory $COMPOSE_DIR up -d"
   fi
   say ""
   say "Everything above was recorded (without passwords) in:"
@@ -2326,6 +3528,7 @@ run_upgrade() {
   ;; esac
 
   # 4. Restart onto the new images.
+  capture_service_logs "before-upgrade"
   say "Restarting Headway's services on the new version..."
   blank
   if ! dc up -d 2>&1 | tee -a "$LOG_FILE"; then
@@ -2372,12 +3575,12 @@ fi
 # Modes are one at a time; each promises something different (--check and
 # --check-updates promise to change nothing; --upgrade and
 # --reconfigure-access exist to change things).
-MODES=$((CHECK_ONLY + RECONFIGURE + CHECK_UPDATES + UPGRADE + RESET_PASSWORD + UPDATE_SOURCE + DOWNLOAD_BASEMAP))
+MODES=$((CHECK_ONLY + RECONFIGURE + CHECK_UPDATES + UPGRADE + RESET_PASSWORD + UPDATE_SOURCE + DOWNLOAD_BASEMAP + CHECK_FEEDS + DISCOVER_FEEDS))
 if [ "$MODES" -gt 1 ]; then
   fail "Those options cannot be combined. Please run one at a time:"
   fixln "--check, --check-updates, --upgrade, --reconfigure-access,"
-  fixln "--reset-admin-password, --update-from-source, or"
-  fixln "--download-basemap."
+  fixln "--reset-admin-password, --update-from-source,"
+  fixln "--download-basemap, --check-feeds, or --discover-feeds."
   exit 1
 fi
 
@@ -2398,6 +3601,15 @@ fi
 
 if [ "$DOWNLOAD_BASEMAP" -eq 1 ]; then
   download_basemap
+  exit 0
+fi
+
+if [ "$CHECK_FEEDS" -eq 1 ]; then
+  check_feeds   # prints results and exits 0 (all good) or 1 (failures)
+fi
+
+if [ "$DISCOVER_FEEDS" -eq 1 ]; then
+  discover_feeds_command
   exit 0
 fi
 
@@ -2458,6 +3670,10 @@ fi
 gather_inputs
 gather_admin_credentials   # ask everything up front; then no babysitting
 write_env_file
+# Drop folders must exist with the RIGHT ownership BEFORE the stack starts:
+# if Docker creates the mounts itself, they come out owned by root and the
+# collector cannot use them (handoff 0037, design point 3).
+ensure_drop_dirs install
 start_stack
 wait_for_healthy
 run_migrations

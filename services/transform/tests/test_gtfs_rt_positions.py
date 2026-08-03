@@ -40,11 +40,14 @@ def add_vehicle(
     bearing: float | None = 90.0,
     speed: float | None = 11.5,
     odometer: float | None = 120345.0,
+    label: str | None = None,
 ) -> None:
     entity = feed.entity.add()
     entity.id = entity_id
     vp = entity.vehicle
     vp.vehicle.id = vehicle_id
+    if label is not None:
+        vp.vehicle.label = label
     vp.position.latitude = lat
     vp.position.longitude = lon
     if bearing is not None:
@@ -104,7 +107,7 @@ def test_normalizes_entities_with_one_lineage_edge_per_row() -> None:
         assert edge.output_id.endswith(f"|{envelope.record_id}")
         assert "|" in edge.output_id and "Z|" in edge.output_id
         assert edge.transform_name == TRANSFORM_NAME == "normalize_gtfs_rt_positions"
-        assert edge.transform_version == TRANSFORM_VERSION == "0.1.0"
+        assert edge.transform_version == TRANSFORM_VERSION == "0.2.0"
         assert edge.input_kind == "raw.records"
         assert edge.input_id == envelope.record_id
 
@@ -193,3 +196,37 @@ def test_connector_flagged_malformed_payload_is_quarantined_not_parsed() -> None
     assert rows == [] and edges == []
     assert findings[0].issue_type == "undecodable_payload"
     assert "connector saw truncation" in findings[0].description
+
+
+# --- VehicleDescriptor.label -> vehicle_label (handoff 0032) -----------------
+#
+# The label is the identifier dispatch actually uses (fleet numbers like
+# '5335'); the normalizer previously discarded it. Three cases decide whether
+# the mapping is honest: present (verbatim), absent (NULL), and empty string
+# (NULL — proto3 renders an unset string field as "", which is absence, not a
+# name).
+
+
+def test_vehicle_label_is_mapped_verbatim_when_present() -> None:
+    feed = build_feed()
+    add_vehicle(feed, "e1", "07b5efcb-uuid-vehicle", label="5335")
+    rows, _, findings = normalize(envelope_for(feed))
+    assert findings == []
+    assert rows[0].vehicle_id == "07b5efcb-uuid-vehicle"
+    assert rows[0].vehicle_label == "5335"
+
+
+def test_absent_vehicle_label_stores_none_never_a_guess() -> None:
+    feed = build_feed()
+    add_vehicle(feed, "e1", "bus-101")  # no label in the descriptor
+    rows, _, _ = normalize(envelope_for(feed))
+    assert rows[0].vehicle_label is None
+
+
+def test_empty_string_vehicle_label_normalizes_to_none() -> None:
+    """proto3 cannot distinguish an unset string from ''. Either way the
+    feed stated no label, and '' must never masquerade as one."""
+    feed = build_feed()
+    add_vehicle(feed, "e1", "bus-101", label="")
+    rows, _, _ = normalize(envelope_for(feed))
+    assert rows[0].vehicle_label is None

@@ -26,7 +26,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Iterable, Union
 
-from .models import CompareResponse, DqIssue, LineageTrail, MetricValue
+from .models import CompareResponse, DqIssueSummary, LineageTrail, MetricValue
 
 if TYPE_CHECKING:  # pragma: no cover
     import pandas as pd
@@ -94,9 +94,18 @@ def metric_values_frame(values: Iterable[MetricValue]) -> "pd.DataFrame":
     return pd.DataFrame(rows, columns=columns)
 
 
-def dq_issues_frame(issues: Iterable[DqIssue]) -> "pd.DataFrame":
-    """One row per data-quality issue. ``resolution_minutes`` stays a
-    nullable integer — an unmeasured effort is missing, never zero."""
+def dq_issues_frame(issues: Iterable[DqIssueSummary]) -> "pd.DataFrame":
+    """One row per data-quality issue (accepts queue rows or an
+    :meth:`~headway_client.HeadwayClient.iter_dq_issues` walk).
+    ``resolution_minutes`` stays a nullable integer — an unmeasured effort
+    is missing, never zero.
+
+    No ``source_record_ids`` column any more: the provenance array moved
+    off the queue listing when it gained pagination (API handoff 0030 —
+    the ids were 716 MB of an 850 MB whole-queue response). For one
+    issue's complete array, call
+    :meth:`~headway_client.HeadwayClient.dq_issue` with the row's
+    ``issue_id`` — nothing was truncated, it moved to where it is used."""
     pd = _pandas()
     rows = [
         {
@@ -107,7 +116,6 @@ def dq_issues_frame(issues: Iterable[DqIssue]) -> "pd.DataFrame":
             "owner": i.owner,
             "title": i.title,
             "description": i.description,
-            "source_record_ids": i.source_record_ids,
             "created_at": i.created_at,
             "resolved_at": i.resolved_at,
             "resolution": i.resolution,
@@ -119,7 +127,7 @@ def dq_issues_frame(issues: Iterable[DqIssue]) -> "pd.DataFrame":
         rows,
         columns=[
             "issue_id", "issue_type", "severity", "status", "owner", "title",
-            "description", "source_record_ids", "created_at", "resolved_at",
+            "description", "created_at", "resolved_at",
             "resolution", "resolution_minutes",
         ],
     )

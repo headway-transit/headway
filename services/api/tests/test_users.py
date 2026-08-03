@@ -282,7 +282,11 @@ def test_deactivate_then_login_refused_then_reactivate(client, fake_db):
     assert r.status_code == 200
     body = r.json()
     assert body["is_active"] is False
-    assert "refused from now on" in body["note"]
+    # The note must describe what actually happens: an existing session ends
+    # on its NEXT request (auth._live_account), not when a token expires. The
+    # behaviour itself is proved in test_session_reflects_the_account_now.py.
+    assert "can no longer use Headway" in body["note"]
+    assert "New sign-ins are refused too" in body["note"]
     assert fake_db.users["vera"]["is_active"] is False
 
     # The deactivated account's login is the SAME generic 401 as a wrong

@@ -45,6 +45,16 @@ class VehiclePosition:
     trips→routes by the reader — handoff 0009); None when the position is
     unassigned or the trip/route is unknown, in which case mode-scoped
     computations bucket it as 'unknown' (never dropped, never guessed).
+    ``vehicle_label`` (handoff 0032, migration 0037) is the feed's
+    VehicleDescriptor.label verbatim — the fleet number dispatch actually
+    uses; None when the feed carries none (a label is never invented, and
+    finding titles then fall back to a shortened vehicle_id).
+    ``route_short_name`` is the trip's route short name
+    (canonical.routes.short_name, joined trips→routes by the reader —
+    handoff 0032); None when the position is unassigned or the trip/route
+    is unknown or unnamed, in which case finding titles simply omit the
+    route. Both default None so every pre-0032 constructor (and golden)
+    builds the identical value.
     """
 
     time: datetime
@@ -55,6 +65,8 @@ class VehiclePosition:
     source_record_id: str
     block_id: str | None = None
     mode: str | None = None
+    vehicle_label: str | None = None
+    route_short_name: str | None = None
 
     def __post_init__(self) -> None:
         if self.time.tzinfo is None or self.time.utcoffset() is None:
@@ -111,6 +123,20 @@ class PassengerEvent:
     source: str
     source_record_id: str
     mode: str | None = None
+    # --- revenue classification (handoff 0040 / migration 0039) -----------
+    # The TRANSFORM's assignment status: 'assigned' — the row resolved to a
+    # run; 'unassigned' — a no-run "ghost" boarding a vehicle fired while
+    # moving with the APC on but not logged into a run (prep/pull-out/pull-in,
+    # or a catch-up bus dispatched without a trip). None for every first-party
+    # TIDES feed and every pre-0040 row (a TIDES feed states trip_id_performed
+    # itself and nothing classifies it). This is the assignment STATUS the
+    # transform recorded — NEVER the revenue verdict. upt_v0 0.3.0 derives the
+    # revenue verdict (revenue / excluded-non-revenue / pending-review) from
+    # this status + the schedule-derived revenue window + the detour flag; a
+    # NULL classification is handled by the pre-0040 trip-assignment proxy
+    # (trip_id present = revenue counted; trip_id NULL = excluded), so a feed
+    # that never sets it computes byte-for-byte as upt_v0 0.2.0.
+    revenue_classification: str | None = None
 
     def __post_init__(self) -> None:
         if (
@@ -281,6 +307,135 @@ class DrTrip:
         attendants/companions (pp. 143-144 as quoted in the tracker — the
         employee rule is applied by the exporter per the wire contract)."""
         return self.riders + self.attendants_companions
+
+
+#: Distance/engine-time measurement bases (fleet-telematics.v0 wire contract;
+#: canonical.vehicle_telematics_days, migration 0034). Kept DISTINCT and never
+#: silently substituted (the honesty wall). Distance bases first, then
+#: engine-time bases.
+VP_DISTANCE_BASES = ("ecu_odometer", "gps_odometer", "gps_distance")
+VP_ENGINE_TIME_BASES = (
+    "ecu_engine_time",
+    "estimated_engine_time",
+    "duty_status_time",
+)
+VP_MEASURE_DISTANCE = "distance"
+VP_MEASURE_ENGINE_TIME = "engine_time"
+VP_READING_CUMULATIVE = "cumulative_counter"
+VP_READING_PERIOD_TOTAL = "period_total"
+
+
+@dataclass(frozen=True)
+class VpTelematicsDay:
+    """One canonical fleet-telematics measurement series (read contract:
+    canonical.vehicle_telematics_days, migration 0034 — the
+    fleet-telematics.v0 wire contract normalized; handoff 0028).
+
+    ONE vehicle, ONE service date, ONE ``measure`` (distance | engine_time)
+    on ONE ``basis``. A van with both an ECU odometer and a GPS distance
+    counter is TWO VpTelematicsDay rows for the same day, never one
+    reconciled number — the honesty wall makes basis substitution
+    structurally impossible.
+
+    THE HONESTY WALL (fleet-telematics.v0.md): ``distance`` is ALL movement
+    the vehicle did — revenue service, deadhead, personal use (a vanpool van
+    lives at a participant's house), maintenance travel — it is NOT revenue
+    miles. ``engine_time`` is engine runtime including idling — it is NOT
+    revenue hours. This type carries MEASURED VEHICLE MOVEMENT; turning it
+    into a reportable VP figure is exactly what headway_calc.vp adjudicates
+    against the FTA vanpool rules quoted in REGULATORY_TRACKER.md.
+
+    ``value`` is Decimal in ``unit`` (meters | seconds), or None — None means
+    UNMEASURED (fewer than two readings of a cumulative counter, or a counter
+    that ran backwards): never coalesced to 0, never interpolated. Endpoints
+    are still carried when present so the subtraction is auditable.
+    ``max_sample_gap_seconds`` is the honesty field — how blind the
+    measurement is between its endpoints; None when ``sample_count`` < 2.
+    ``source`` is the registered envelope label ('samsara' real,
+    'samsara_simulated' synthetic — the handoff-0005 simulated-data rule).
+    ``source_record_id`` anchors lineage (ADR-0007).
+    """
+
+    vehicle_id: str
+    service_date: date
+    window_start: datetime
+    window_end: datetime
+    measure: str
+    basis: str
+    unit: str
+    reading_kind: str
+    sample_count: int
+    source: str
+    source_record_id: str
+    vehicle_label: str | None = None
+    value: Decimal | None = None
+    first_reading_at: datetime | None = None
+    first_reading_value: Decimal | None = None
+    last_reading_at: datetime | None = None
+    last_reading_value: Decimal | None = None
+    max_sample_gap_seconds: int | None = None
+
+    def __post_init__(self) -> None:
+        for name, val in (
+            ("window_start", self.window_start),
+            ("window_end", self.window_end),
+        ):
+            if val.tzinfo is None or val.utcoffset() is None:
+                raise ValueError(
+                    f"VpTelematicsDay.{name} must be timezone-aware; got "
+                    f"{val!r} (vehicle_id={self.vehicle_id!r})"
+                )
+        if self.window_end <= self.window_start:
+            raise ValueError(
+                f"VpTelematicsDay.window_end must be > window_start "
+                f"(vehicle_id={self.vehicle_id!r})"
+            )
+        if self.measure == VP_MEASURE_DISTANCE:
+            allowed = VP_DISTANCE_BASES
+            want_unit = "meters"
+        elif self.measure == VP_MEASURE_ENGINE_TIME:
+            allowed = VP_ENGINE_TIME_BASES
+            want_unit = "seconds"
+        else:
+            raise ValueError(
+                f"VpTelematicsDay.measure must be one of "
+                f"{(VP_MEASURE_DISTANCE, VP_MEASURE_ENGINE_TIME)}; got "
+                f"{self.measure!r} (vehicle_id={self.vehicle_id!r})"
+            )
+        if self.basis not in allowed:
+            raise ValueError(
+                f"VpTelematicsDay.basis {self.basis!r} does not match measure "
+                f"{self.measure!r} (allowed: {allowed}) — the honesty wall "
+                f"forbids a basis crossing its measure "
+                f"(vehicle_id={self.vehicle_id!r})"
+            )
+        if self.unit != want_unit:
+            raise ValueError(
+                f"VpTelematicsDay.unit must be {want_unit!r} for measure "
+                f"{self.measure!r}; got {self.unit!r} "
+                f"(vehicle_id={self.vehicle_id!r})"
+            )
+        if self.reading_kind not in (VP_READING_CUMULATIVE, VP_READING_PERIOD_TOTAL):
+            raise ValueError(
+                f"VpTelematicsDay.reading_kind must be one of "
+                f"{(VP_READING_CUMULATIVE, VP_READING_PERIOD_TOTAL)}; got "
+                f"{self.reading_kind!r} (vehicle_id={self.vehicle_id!r})"
+            )
+        if self.sample_count < 0:
+            raise ValueError(
+                f"VpTelematicsDay.sample_count must be >= 0; got "
+                f"{self.sample_count} (vehicle_id={self.vehicle_id!r})"
+            )
+        for name, val in (
+            ("value", self.value),
+            ("first_reading_value", self.first_reading_value),
+            ("last_reading_value", self.last_reading_value),
+        ):
+            if val is not None and val < 0:
+                raise ValueError(
+                    f"VpTelematicsDay.{name} must be >= 0 or None; got {val!r} "
+                    f"(vehicle_id={self.vehicle_id!r})"
+                )
 
 
 @dataclass(frozen=True)
@@ -467,6 +622,94 @@ class HeadwayAdherenceDetail:
         }
 
 
+#: Subject kinds a Finding may point at (handoff 0029). A kind names the
+#: CANONICAL TABLE whose primary key the subject ids are — nothing else, so
+#: the persistence-time resolver always knows exactly what to look the ids
+#: up in.
+#:
+#: The tuple is CLOSED and holds exactly the kinds that have a working
+#: resolver in headway_calc.subjects. That is the point: a kind without a
+#: resolver produces a finding nobody can label, which is the failure this
+#: whole mechanism exists to prevent. Adding a kind means adding its
+#: resolver in the same change — tests/test_subjects.py asserts the tuple
+#: and the resolver registry agree, so the two cannot drift.
+SUBJECT_TRIPS = "canonical.trips"
+SUBJECT_KINDS = (SUBJECT_TRIPS,)
+
+
+@dataclass(frozen=True)
+class VehicleRef:
+    """The VEHICLE a finding concerns — id plus the label dispatch uses
+    (handoff 0032).
+
+    The operational subject of a telemetry-gap finding is the vehicle, not
+    its position rows, so this is a lightweight reference rather than a
+    subject kind: ``vehicle_id`` is the feed's identifier (often opaque),
+    ``label`` is the feed's VehicleDescriptor.label — the fleet number a
+    dispatcher scans for — or None when the feed carries none. The calc
+    stays pure: the label travels WITH the input rows (VehiclePosition
+    .vehicle_label, read from canonical.vehicle_positions), so emitting it
+    here queries nothing and invents nothing. The persistence-time resolver
+    (headway_calc.subjects) freezes it into dq.issues.subject_context so
+    the UI can group gap findings by route/vehicle exactly as handoff 0029
+    groups missing trips by block.
+    """
+
+    vehicle_id: str
+    label: str | None = None
+
+
+@dataclass(frozen=True)
+class SubjectRef:
+    """WHAT a finding is about, as structured data instead of prose (handoff
+    0029).
+
+    A finding is addressed to a person who has to go fix something, so it
+    must name the thing in the vocabulary that person uses to find it. The
+    calculation library cannot do that naming: it is PURE — it never queries
+    a database, so it has no route names, no block names, no departure
+    times. What it *does* know is exactly which canonical rows the finding
+    is about. It emits those as a SubjectRef — ``kind`` (the canonical
+    table) plus ``ids`` (that table's primary keys) — and the persistence
+    layer (headway_calc.subjects, called from headway_calc.dq) resolves them
+    ONCE into agency-facing labels, freezing the result on the dq.issues
+    row.
+
+    Before this existed, ``upt_v0`` formatted the first 20 raw trip ids into
+    its description string. That is data smuggled through prose: it cannot
+    be grouped, cannot be labelled, cannot be linked, and truncates at 20
+    with no way to recover the rest. ``ids`` is COMPLETE — every affected id,
+    never truncated — because truncation is a presentation decision and this
+    is not the presentation layer.
+
+    ``vehicle`` (handoff 0032) names the vehicle the finding concerns —
+    id plus the fleet label when the feed broadcast one — for the finding
+    families that are per-vehicle (telemetry gaps, layovers, block
+    fallbacks). None for findings that are not about one vehicle (a missing
+    trip has no vehicle by definition). Not a new subject KIND: the ids
+    still name canonical.trips rows and resolve exactly as before; the
+    vehicle rides alongside into the frozen context.
+    """
+
+    kind: str
+    ids: tuple[str, ...] = field(default_factory=tuple)
+    vehicle: VehicleRef | None = None
+
+    def __post_init__(self) -> None:
+        if self.kind not in SUBJECT_KINDS:
+            raise ValueError(
+                f"SubjectRef.kind must be one of {SUBJECT_KINDS}; got "
+                f"{self.kind!r}. A finding's subject names the canonical "
+                f"table its ids belong to — an unknown kind has no resolver "
+                f"and would leave the finding unlabelled."
+            )
+
+    @property
+    def total(self) -> int:
+        """How many rows the finding is about. Never a truncated count."""
+        return len(self.ids)
+
+
 @dataclass(frozen=True)
 class Finding:
     """A data-quality finding raised by a calculation.
@@ -489,6 +732,18 @@ class Finding:
     finding. For an excluded group this is ALL of that group's records —
     excluded groups' records are cited by their finding instead of appearing in
     input_record_ids/lineage (handoff 0002, rule 5).
+
+    ``subject`` (handoff 0029) is the STRUCTURED reference to the canonical
+    rows the finding is about — the trips a dispatcher has to go look at,
+    the events an APC technician has to go chase. It is deliberately
+    separate from ``source_record_ids``: source records are PROVENANCE (the
+    raw feed messages that produced the evidence, content-addressed, for the
+    lineage graph); a subject is the OPERATIONAL thing that needs fixing.
+    They answer different questions and frequently have no rows in common —
+    a missing trip has, by definition, no passenger-event records to cite,
+    yet it is exactly the trip a dispatcher must find. None when the finding
+    is about the run as a whole (a coverage ratio, a timezone declaration)
+    rather than about identifiable rows.
     """
 
     issue_type: str
@@ -496,6 +751,7 @@ class Finding:
     description: str
     source_record_ids: tuple[str, ...] = field(default_factory=tuple)
     severity: str = SEVERITY_BLOCKING
+    subject: SubjectRef | None = None
 
     def __post_init__(self) -> None:
         if self.severity not in _ALLOWED_SEVERITIES:
@@ -646,6 +902,42 @@ class UptDetail:
     missing_trip_threshold: Decimal
     imbalance_threshold: Decimal
     attestation: dict | None = None
+    # --- revenue classification split (upt_v0 0.3.0, handoff 0040) ---------
+    # The no-run ("unassigned") boardings, split by the calc's revenue
+    # verdict. ``revenue_boardings`` is the counted base
+    # (total_boardings_counted — the assigned, in-revenue-service boardings);
+    # ``excluded_non_revenue_boardings`` is auto-classified prep/pull-in,
+    # EXCLUDED from UPT; ``pending_review_boardings`` is the ambiguous
+    # mid-service case, HELD OUT of the figure until a human classifies it
+    # (the exclude-until-classified default, ``pending_review_policy``). All
+    # three are boarding COUNTS (event_count sums), so they add up to every
+    # boarding the calc saw. Emitted in ``to_dict`` ONLY when any no-run
+    # boarding was classified, so a pre-0040 feed's detail is byte-identical
+    # to upt_v0 0.2.0's output.
+    excluded_non_revenue_boardings: int = 0
+    pending_review_boardings: int = 0
+    pending_review_policy: str = "exclude_until_classified"
+    # Boardings with NO trip and NO revenue_classification at all — the calc
+    # could not place them in the split, so they are stated here rather than
+    # left to vanish (external adversarial review, 2026-08-01). NOT counted
+    # toward UPT and NOT part of the split's arithmetic: with no
+    # classification there is no basis to call them revenue, and inventing one
+    # would put a guess into a reported number. Non-zero here means rows
+    # written before migration 0039, or a source that does not set the field.
+    unclassified_no_run_boardings: int = 0
+    # --- human classifications (upt_v0 0.4.0, handoff 0040 review sub-wave) -
+    # The judgment calls that shaped this figure. A no-run boarding 0.3.0
+    # would have held PENDING is counted (or excluded) here because a named
+    # person decided it, and wrote down why. Both are boarding counts;
+    # ``human_classifications`` is the receipt itself — one entry per
+    # decision, carrying who, when, and the justification note VERBATIM, so
+    # "explain this number" shows the reasoning instead of asserting the
+    # correction. Frozen into the detail at compute time: the receipt
+    # describes what the figure was computed FROM, so re-reading the review
+    # table years later can never change what a persisted figure says.
+    human_revenue_boardings: int = 0
+    human_non_revenue_boardings: int = 0
+    human_classifications: tuple[dict, ...] = ()
 
     def to_dict(self) -> dict:
         detail = {
@@ -663,6 +955,40 @@ class UptDetail:
         }
         if self.attestation is not None:
             detail["attestation"] = dict(self.attestation)
+        # The revenue split appears only when a no-run boarding was
+        # classified — every pre-0040 (all-assigned) run's detail stays
+        # byte-for-byte upt_v0 0.2.0's.
+        if (
+            self.excluded_non_revenue_boardings
+            or self.pending_review_boardings
+            or self.human_revenue_boardings
+            or self.human_non_revenue_boardings
+            or self.unclassified_no_run_boardings
+        ):
+            split = {
+                "revenue_boardings": self.total_boardings_counted,
+                "excluded_non_revenue_boardings": self.excluded_non_revenue_boardings,
+                "pending_review_boardings": self.pending_review_boardings,
+                "pending_review_policy": self.pending_review_policy,
+            }
+            # Appended only when a human actually decided something, so a run
+            # with no classifications stays byte-for-byte upt_v0 0.3.0's.
+            if self.human_classifications:
+                split["human_revenue_boardings"] = self.human_revenue_boardings
+                split["human_non_revenue_boardings"] = (
+                    self.human_non_revenue_boardings
+                )
+                split["human_classifications"] = [
+                    dict(c) for c in self.human_classifications
+                ]
+            # Stated only when non-zero, so a fully-classified feed's detail is
+            # unchanged. Deliberately OUTSIDE the three split counts: it is the
+            # set the split could not account for, not a fourth bucket of it.
+            if self.unclassified_no_run_boardings:
+                split["unclassified_no_run_boardings"] = (
+                    self.unclassified_no_run_boardings
+                )
+            detail["revenue_classification"] = split
         return detail
 
 
@@ -1163,6 +1489,113 @@ class DaytypeUptAvgDetail:
 
 
 @dataclass(frozen=True)
+class VpTelematicsDetail:
+    """Detail of one headway_calc.vp result (handoff 0042), persisted verbatim
+    into computed.metric_values.detail (JSONB, migration 0010) — or carried by
+    a REFUSED result whose value is None (the detail then records exactly what
+    was missing and what the observed movement was, so the refusal is
+    auditable).
+
+    - ``figure`` — the VP figure requested ('vrm' | 'vrh' | 'upt' | 'voms').
+    - ``reportable`` — always False in v0 (the calc is never certifiable —
+      see the tracker: telematics is NOT revenue service, all sources are
+      simulated); the field is explicit so a consumer never infers it.
+    - ``refusal_reason`` — the machine key of the blocking finding when the
+      figure REFUSES (None when a context figure was emitted).
+    - ``observed_distance_meters`` / ``observed_engine_seconds`` — the SI
+      movement actually measured over the window, per basis, as decimal
+      strings — CONTEXT, never a reportable figure. ``by_basis`` breaks these
+      down so no basis is silently merged with another.
+    - ``vehicle_days_seen`` / ``vehicle_days_unmeasured`` — series seen and
+      those whose ``value`` was absent (fewer than two readings, or a counter
+      regression) — an unmeasured series is stated, never zeroed.
+    - ``basis_conflicts`` — vehicle-days carrying two distance bases that
+      disagree beyond a stated tolerance (Shared Constraint 7 — surfaced,
+      never averaged); each is its own warning finding.
+    - ``source_mix`` — series per envelope source (ALWAYS present: the
+      handoff-0005 simulated-data rule; any '_simulated' suffix means the
+      figure can never be certifiable).
+    """
+
+    figure: str
+    reportable: bool
+    refusal_reason: str | None
+    vehicle_days_seen: int
+    vehicle_days_unmeasured: int
+    observed_distance_meters: str | None
+    observed_engine_seconds: str | None
+    by_basis: dict[str, str]
+    basis_conflicts: int
+    source_mix: dict[str, int]
+
+    def to_dict(self) -> dict:
+        return {
+            "figure": self.figure,
+            "reportable": self.reportable,
+            "refusal_reason": self.refusal_reason,
+            "vehicle_days_seen": self.vehicle_days_seen,
+            "vehicle_days_unmeasured": self.vehicle_days_unmeasured,
+            "observed_distance_meters": self.observed_distance_meters,
+            "observed_engine_seconds": self.observed_engine_seconds,
+            "by_basis": {k: self.by_basis[k] for k in sorted(self.by_basis)},
+            "basis_conflicts": self.basis_conflicts,
+            "source_mix": {k: self.source_mix[k] for k in sorted(self.source_mix)},
+        }
+
+
+@dataclass(frozen=True)
+class BoardingReviewItem:
+    """One boarding the calculation could not decide, handed to a human
+    (handoff 0040, the review sub-wave).
+
+    A no-run boarding INSIDE the day's revenue-service window is genuinely
+    ambiguous: it is either non-revenue prep, or an extra bus dispatch
+    running real riders without a formal trip assignment. No rule in the NTD
+    manual separates those, so the calculation refuses to guess, holds the
+    boarding OUT of the figure, and emits this — the structured fact an
+    analyst decides on, and the calculation's own words for why it could not.
+
+    The calculation stays PURE: it emits these, it does not write them. The
+    runner persists them into dq.boarding_revenue_reviews at the same point
+    it persists findings, and never overwrites a decision a human already
+    made there.
+    """
+
+    passenger_event_id: str
+    source_record_id: str
+    service_date: date
+    event_timestamp: datetime
+    #: The feed's own vehicle identifier; None when the feed carried none —
+    #: absent stays absent, never a placeholder.
+    vehicle_id: str | None
+    event_count: int
+    #: Always 'pending_review'. The calculation's position, stated rather
+    #: than inferred: it declined to guess.
+    suggested_verdict: str
+    suggested_reason: str
+
+
+@dataclass(frozen=True)
+class HumanBoardingVerdict:
+    """One recorded human decision about one held boarding — the input side
+    of the review loop (handoff 0040).
+
+    ``justification`` is never blank: the database refuses a verdict without
+    a reason, so a verdict that reaches the calculation always carries the
+    words that defend it. The calculation copies those words into the
+    figure's detail verbatim; it never summarises, paraphrases, or ranks
+    them.
+    """
+
+    passenger_event_id: str
+    #: 'revenue' (count it) or 'non_revenue' (exclude it).
+    verdict: str
+    justification: str
+    classified_by: str
+    classified_at: datetime
+
+
+@dataclass(frozen=True)
 class CalcResult:
     """The output of one calculation run.
 
@@ -1203,8 +1636,17 @@ class CalcResult:
         | HeadwayAdherenceDetail
         | DaysOperatedDetail
         | DaytypeUptAvgDetail
+        | VpTelematicsDetail
         | None
     ) = None
+    #: Rows a HUMAN must decide before this figure can be completed (handoff
+    #: 0040). Empty for every calculation that has nothing to ask — which is
+    #: all of them but upt_v0, and upt_v0 too whenever every boarding
+    #: resolved to a run. The runner persists these into the review queue;
+    #: they are NOT part of the figure and never become one, which is the
+    #: whole point: the boardings they name are held OUT of the value above
+    #: until somebody says, in writing, what they were.
+    review_items: tuple[BoardingReviewItem, ...] = ()
 
     def __post_init__(self) -> None:
         if self.blocking_issues and self.value is not None:

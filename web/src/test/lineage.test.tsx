@@ -78,7 +78,9 @@ describe("/metrics/:id/lineage", () => {
     });
     expect(rawGroup).toHaveAttribute("aria-expanded", "false");
     expect(
-      within(graph).queryByRole("img", { name: /Raw source record/ }),
+      within(graph).queryByRole("button", {
+        name: /^Open the raw source record/,
+      }),
     ).not.toBeInTheDocument();
 
     await expectNoAxeViolations();
@@ -123,14 +125,19 @@ describe("/metrics/:id/lineage", () => {
     expect(rawGroup).toHaveAttribute("aria-expanded", "false");
 
     // Enter expands: the first PAGE of 20 raw records, plus "show more".
+    // Handoff 0035: each raw node is an activatable button that opens the
+    // record inspector, so its accessible name says what activating does —
+    // and still carries the complete record id.
     await user.keyboard("{Enter}");
     expect(rawGroup).toHaveAttribute("aria-expanded", "true");
     expect(
-      within(graph).getAllByRole("img", { name: /Raw source record/ }),
+      within(graph).getAllByRole("button", {
+        name: /^Open the raw source record/,
+      }),
     ).toHaveLength(20);
     expect(
-      within(graph).getByRole("img", {
-        name: "Raw source record sha256:raw0000",
+      within(graph).getByRole("button", {
+        name: "Open the raw source record sha256:raw0000",
       }),
     ).toBeInTheDocument();
     const showMore = within(graph).getByRole("button", {
@@ -140,15 +147,17 @@ describe("/metrics/:id/lineage", () => {
     // Walk down to a raw record: full id in the accessible name.
     await user.keyboard("{ArrowDown}");
     expect(
-      within(graph).getByRole("img", {
-        name: "Raw source record sha256:raw0000",
+      within(graph).getByRole("button", {
+        name: "Open the raw source record sha256:raw0000",
       }),
     ).toHaveFocus();
 
     // Activate "show more" (click = same activation path): all 26 shown.
     await user.click(showMore);
     expect(
-      within(graph).getAllByRole("img", { name: /Raw source record/ }),
+      within(graph).getAllByRole("button", {
+        name: /^Open the raw source record/,
+      }),
     ).toHaveLength(26);
     expect(
       within(graph).queryByRole("button", { name: /Show 20 more/ }),
@@ -159,7 +168,9 @@ describe("/metrics/:id/lineage", () => {
     await user.keyboard("{Enter}");
     expect(rawGroup).toHaveAttribute("aria-expanded", "false");
     expect(
-      within(graph).queryByRole("img", { name: /Raw source record/ }),
+      within(graph).queryByRole("button", {
+        name: /^Open the raw source record/,
+      }),
     ).not.toBeInTheDocument();
 
     await expectNoAxeViolations();
@@ -185,11 +196,15 @@ describe("/metrics/:id/lineage", () => {
       screen.getAllByText("made by gtfsrt_normalizer (version 0.2.0)"),
     ).toHaveLength(2);
 
-    // Leaves: content-addressed raw records, labeled as the end of the trail.
+    // Leaves: content-addressed raw records. No longer a dead end (handoff
+    // 0035) — each one names itself and offers the way in.
     expect(screen.getByText("sha256:aaaa1111")).toBeInTheDocument();
     expect(screen.getByText("sha256:bbbb2222")).toBeInTheDocument();
     expect(
-      screen.getAllByText("raw source record as received — the end of the trail"),
+      screen.getAllByText("raw source record, exactly as Headway received it"),
+    ).toHaveLength(2);
+    expect(
+      screen.getAllByRole("button", { name: /^Open the raw source record/ }),
     ).toHaveLength(2);
 
     // Structure is genuinely nested lists (root > canonical > raw).

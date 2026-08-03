@@ -1,0 +1,311 @@
+{
+  "id": "dark",
+  "name": "Headway Control Room (dark)",
+  "summary": "A dark GROUND with a LIGHT street network. Authored — not filtered from the light style — because the partner agency's ITS manager reported that a dark theme buried the streets: the stock dark basemap paints roads dark grey on a dark ground (measured 1.5:1) so the network you are reasoning about disappears. This style inverts that: near-black warm ground, roads by class as light hairlines, water raised in contrast, and a halo under every label. Every ratio below is checked by test; the style does not ship if a street stops reading.",
+  "labelHalo": {
+    "width": 1.6,
+    "blur": 0.4
+  },
+  "roadWidthScale": 1.15,
+  "contrastTargets": {
+    "road": 3.0,
+    "label": 4.5,
+    "water": 3.0
+  },
+  "contrastChecks": [
+    {
+      "what": "Motorway / highway vs ground",
+      "kind": "road",
+      "min": 3.0,
+      "bg": "earth",
+      "fg": ["highway", "highway_casing_early"]
+    },
+    {
+      "what": "Major road (arterial) vs ground",
+      "kind": "road",
+      "min": 3.0,
+      "bg": "earth",
+      "fg": ["major", "major_casing_early"]
+    },
+    {
+      "what": "Link / ramp vs ground",
+      "kind": "road",
+      "min": 3.0,
+      "bg": "earth",
+      "fg": ["link", "link_casing"]
+    },
+    {
+      "what": "Minor street, far zoom vs ground",
+      "kind": "road",
+      "min": 3.0,
+      "bg": "earth",
+      "fg": ["minor_a", "minor_casing"]
+    },
+    {
+      "what": "Minor street, close zoom vs ground",
+      "kind": "road",
+      "min": 3.0,
+      "bg": "earth",
+      "fg": ["minor_b", "minor_casing"]
+    },
+    {
+      "what": "Service road / alley vs ground",
+      "kind": "road",
+      "min": 3.0,
+      "bg": "earth",
+      "fg": ["minor_service", "minor_service_casing"]
+    },
+    {
+      "what": "Track / path (other) vs ground",
+      "kind": "road",
+      "min": 3.0,
+      "bg": "earth",
+      "fg": ["other"]
+    },
+    {
+      "what": "Bridge deck (highway) vs ground",
+      "kind": "road",
+      "min": 3.0,
+      "bg": "earth",
+      "fg": ["bridges_highway", "bridges_highway_casing"]
+    },
+    {
+      "what": "Bridge deck (minor) vs ground",
+      "kind": "road",
+      "min": 3.0,
+      "bg": "earth",
+      "fg": ["bridges_minor", "bridges_minor_casing"]
+    },
+    {
+      "what": "Tunnel (highway) vs ground",
+      "kind": "road",
+      "min": 3.0,
+      "bg": "earth",
+      "fg": ["tunnel_highway"]
+    },
+    {
+      "what": "Tunnel (minor) vs ground",
+      "kind": "road",
+      "min": 3.0,
+      "bg": "earth",
+      "fg": ["tunnel_minor"]
+    },
+    {
+      "what": "Railway vs ground",
+      "kind": "road",
+      "min": 3.0,
+      "bg": "earth",
+      "fg": ["railway"]
+    },
+    {
+      "what": "Water vs ground",
+      "kind": "water",
+      "min": 3.0,
+      "bg": "earth",
+      "fg": ["water"]
+    },
+    {
+      "what": "Administrative boundary vs ground",
+      "kind": "road",
+      "min": 3.0,
+      "bg": "earth",
+      "fg": ["boundaries"]
+    },
+    {
+      "what": "Major street name vs ground",
+      "kind": "label",
+      "min": 4.5,
+      "bg": "earth",
+      "fg": ["roads_label_major"]
+    },
+    {
+      "what": "Major street name vs its own halo",
+      "kind": "label",
+      "min": 4.5,
+      "bg": "roads_label_major_halo",
+      "fg": ["roads_label_major"]
+    },
+    {
+      "what": "Minor street name vs ground",
+      "kind": "label",
+      "min": 4.5,
+      "bg": "earth",
+      "fg": ["roads_label_minor"]
+    },
+    {
+      "what": "Minor street name vs its own halo",
+      "kind": "label",
+      "min": 4.5,
+      "bg": "roads_label_minor_halo",
+      "fg": ["roads_label_minor"]
+    },
+    {
+      "what": "City / town name vs ground",
+      "kind": "label",
+      "min": 4.5,
+      "bg": "earth",
+      "fg": ["city_label"]
+    },
+    {
+      "what": "City / town name vs its own halo",
+      "kind": "label",
+      "min": 4.5,
+      "bg": "city_label_halo",
+      "fg": ["city_label"]
+    },
+    {
+      "what": "Neighborhood name vs ground",
+      "kind": "label",
+      "min": 4.5,
+      "bg": "earth",
+      "fg": ["subplace_label"]
+    },
+    {
+      "what": "Neighborhood name vs its own halo",
+      "kind": "label",
+      "min": 4.5,
+      "bg": "subplace_label_halo",
+      "fg": ["subplace_label"]
+    },
+    {
+      "what": "State / region name vs ground",
+      "kind": "label",
+      "min": 4.5,
+      "bg": "earth",
+      "fg": ["state_label"]
+    },
+    {
+      "what": "Country name vs ground",
+      "kind": "label",
+      "min": 4.5,
+      "bg": "earth",
+      "fg": ["country_label"]
+    },
+    {
+      "what": "Address number vs ground",
+      "kind": "label",
+      "min": 4.5,
+      "bg": "earth",
+      "fg": ["address_label"]
+    },
+    {
+      "what": "Peak name vs ground",
+      "kind": "label",
+      "min": 4.5,
+      "bg": "earth",
+      "fg": ["peak_label"]
+    },
+    {
+      "what": "Lake / ocean name vs the water it sits on",
+      "kind": "label",
+      "min": 4.5,
+      "bg": "water",
+      "fg": ["ocean_label"]
+    },
+    {
+      "what": "River / stream name vs the water halo",
+      "kind": "label",
+      "min": 4.5,
+      "bg": "water",
+      "fg": ["waterway_label"]
+    }
+  ],
+  "theme": {
+    "background": "#07090E",
+    "earth": "#0C0F16",
+    "park_a": "#0D1410",
+    "park_b": "#0E1712",
+    "hospital": "#17161C",
+    "industrial": "#14171F",
+    "school": "#17161C",
+    "wood_a": "#0C120E",
+    "wood_b": "#0E1712",
+    "pedestrian": "#10131A",
+    "scrub_a": "#0D110F",
+    "scrub_b": "#0E1512",
+    "glacier": "#171B22",
+    "sand": "#16171C",
+    "beach": "#191A20",
+    "aerodrome": "#101319",
+    "runway": "#1A1F29",
+    "water": "#35709A",
+    "zoo": "#14191A",
+    "military": "#16171C",
+    "tunnel_other_casing": "#05070B",
+    "tunnel_minor_casing": "#05070B",
+    "tunnel_link_casing": "#05070B",
+    "tunnel_major_casing": "#05070B",
+    "tunnel_highway_casing": "#05070B",
+    "tunnel_other": "#5C6879",
+    "tunnel_minor": "#5C6879",
+    "tunnel_link": "#5C6879",
+    "tunnel_major": "#6E7A8D",
+    "tunnel_highway": "#7E8A9E",
+    "pier": "#1A1F29",
+    "buildings": "#161B26",
+    "minor_service_casing": "#05070B",
+    "minor_casing": "#05070B",
+    "link_casing": "#05070B",
+    "major_casing_late": "#05070B",
+    "highway_casing_late": "#05070B",
+    "other": "#7C8AA0",
+    "minor_service": "#7C8AA0",
+    "minor_a": "#93A2B8",
+    "minor_b": "#A8B6C9",
+    "link": "#D9E1EC",
+    "major_casing_early": "#05070B",
+    "major": "#D9E1EC",
+    "highway_casing_early": "#05070B",
+    "highway": "#F2F5FA",
+    "railway": "#8E97AB",
+    "boundaries": "#63748F",
+    "waterway_label": "#EAF2F9",
+    "bridges_other_casing": "#05070B",
+    "bridges_minor_casing": "#05070B",
+    "bridges_link_casing": "#05070B",
+    "bridges_major_casing": "#05070B",
+    "bridges_highway_casing": "#05070B",
+    "bridges_other": "#7C8AA0",
+    "bridges_minor": "#A8B6C9",
+    "bridges_link": "#D9E1EC",
+    "bridges_major": "#D9E1EC",
+    "bridges_highway": "#F2F5FA",
+    "roads_label_minor": "#CDD7E5",
+    "roads_label_minor_halo": "#05070B",
+    "roads_label_major": "#F2F6FB",
+    "roads_label_major_halo": "#05070B",
+    "ocean_label": "#EAF2F9",
+    "peak_label": "#B3C0D0",
+    "subplace_label": "#BAC5D6",
+    "subplace_label_halo": "#05070B",
+    "city_label": "#FFFFFF",
+    "city_label_halo": "#05070B",
+    "state_label": "#97A4B8",
+    "state_label_halo": "#05070B",
+    "country_label": "#A6B2C4",
+    "address_label": "#9AA7BA",
+    "address_label_halo": "#05070B",
+    "regular": "Noto Sans Regular",
+    "bold": "Noto Sans Regular",
+    "italic": "Noto Sans Regular",
+    "pois": {
+      "blue": "#7FB0FF",
+      "green": "#6BD693",
+      "lapis": "#9BADFF",
+      "pink": "#FFA3C8",
+      "red": "#FF9384",
+      "slategray": "#B0BCCD",
+      "tangerine": "#FFBE7C",
+      "turquoise": "#7BDDD5"
+    },
+    "landcover": {
+      "grassland": "#0D120F",
+      "barren": "#101010",
+      "urban_area": "#101319",
+      "farmland": "#0E120D",
+      "glacier": "#171B22",
+      "scrub": "#0F120D",
+      "forest": "#0C120E"
+    }
+  }
+}

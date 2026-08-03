@@ -6,10 +6,13 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "typecheck": "tsc -b",
     "lint": "oxlint",
     "preview": "vite preview",
     "test": "vitest",
     "check:contrast": "node scripts/check-contrast.mjs",
+    "check:map-contrast": "vitest run src/test/basemap-style.test.ts --reporter=verbose",
+    "check:map-marks": "vitest run src/test/map-marks.test.ts --reporter=verbose",
     "extract:quotes": "node scripts/extract-quotes.mjs"
   },
   "dependencies": {

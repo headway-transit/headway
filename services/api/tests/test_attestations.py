@@ -297,7 +297,7 @@ def test_attested_is_a_listable_status_filter(client, fake_db):
     r = client.get(
         "/dq/issues?status=attested", headers=auth_header(fake_db, "vera")
     )
-    assert [i["issue_id"] for i in r.json()] == [issue["issue_id"]]
+    assert [i["issue_id"] for i in r.json()["issues"]] == [issue["issue_id"]]
 
 
 # --- HARD LIMIT 1 at the API surface ---------------------------------------------

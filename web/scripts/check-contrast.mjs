@@ -129,61 +129,93 @@ const PAIRS = [
   ["tour panel border / target ring on card background (non-text, 3:1)", "#0b57d0", "#ffffff", 3.0],
   ["tour panel border / target ring on page plane (non-text, 3:1)", "#0b57d0", "#f6f8fa", 3.0],
 
-  // ---- DARK theme (handoff 0008 pillar A) ----
-  // Card/content surface #161b22, page plane #0d1117. Brand color overrides
-  // are NOT applied to dark text/controls (server guardrail covers light
-  // surfaces only) — the dark accent below is pinned in styles.css.
-  ["dark: body text on card surface", "#e6edf3", "#161b22", 4.5],
-  ["dark: body text on page plane", "#e6edf3", "#0d1117", 4.5],
-  ["dark: muted text on card surface", "#9ea7b3", "#161b22", 4.5],
-  ["dark: muted text on page plane", "#9ea7b3", "#0d1117", 4.5],
-  ["dark: link / accent text on card surface", "#58a6ff", "#161b22", 4.5],
-  ["dark: link / accent text on page plane", "#58a6ff", "#0d1117", 4.5],
-  ["dark: primary button text on accent", "#0d1117", "#58a6ff", 4.5],
+  // ---- The ONE identity accent (handoff 0041): signal-orange.
+  // NON-SEMANTIC — wordmark rule, active control, sparkline, eyebrows. It is
+  // deliberately NOT the light theme's --color-accent (that one carries the
+  // AGENCY's server-certified brand color); in the dark theme, where the
+  // accent has always been pinned by us, the two converge.
+  ["identity signal on page background", "#a84400", "#ffffff", 4.5],
+  ["identity signal on raised surface", "#a84400", "#f6f8fa", 4.5],
+  ["text on identity-signal fill (pressed control)", "#ffffff", "#a84400", 4.5],
+  ["identity signal sparkline / rule on card background (non-text, 3:1)", "#a84400", "#ffffff", 3.0],
+  ["identity signal sparkline / rule on page plane (non-text, 3:1)", "#a84400", "#f6f8fa", 3.0],
+  // The semantic status set (ok / watch / alert), kept SEPARATE from
+  // identity. Card-flag text and the frame edge-rail.
+  ["status ok text on card background", "#1c632f", "#ffffff", 4.5],
+  ["status watch text on card background", "#946300", "#ffffff", 4.5],
+  ["status alert text on card background", "#9f1b1b", "#ffffff", 4.5],
+  ["status alert edge-rail on card background (non-text, 3:1)", "#9f1b1b", "#ffffff", 3.0],
+  ["status watch edge-rail on card background (non-text, 3:1)", "#946300", "#ffffff", 3.0],
+
+  // ---- DARK theme (handoff 0008 pillar A; obsidian ground from 0041) ----
+  // Card/content surface #0f131b (graphite), page plane #07090e (void),
+  // hairline etch #242c3a. Brand color overrides are NOT applied to dark
+  // text/controls (server guardrail covers light surfaces only) — the dark
+  // accent is pinned in styles.css, and since 0041 it IS the identity
+  // signal-orange.
+  ["dark: body text on card surface", "#e9eef5", "#0f131b", 4.5],
+  ["dark: body text on page plane", "#e9eef5", "#07090e", 4.5],
+  ["dark: body text on raised well", "#e9eef5", "#1a2130", 4.5],
+  ["dark: muted text on card surface", "#96a3b7", "#0f131b", 4.5],
+  ["dark: muted text on page plane", "#96a3b7", "#07090e", 4.5],
+  ["dark: link / accent text on card surface", "#ff7a1a", "#0f131b", 4.5],
+  ["dark: link / accent text on page plane", "#ff7a1a", "#07090e", 4.5],
+  ["dark: primary button text on accent", "#07090e", "#ff7a1a", 4.5],
   ["dark: blocking (danger) text on danger background", "#ffb3ab", "#3a1d1f", 4.5],
   ["dark: warning text on warning background", "#e8c06c", "#332711", 4.5],
   ["dark: info text on info background", "#a8c7f0", "#172439", 4.5],
   ["dark: certified (success) text on success background", "#8ddaa4", "#12291a", 4.5],
-  ["dark: focus outline on card surface (non-text, 3:1)", "#58a6ff", "#161b22", 3.0],
-  ["dark: focus outline on page plane (non-text, 3:1)", "#58a6ff", "#0d1117", 3.0],
-  ["dark: input border on card surface (non-text, 3:1)", "#8b949e", "#161b22", 3.0],
-  ["dark: input border on page plane (non-text, 3:1)", "#8b949e", "#0d1117", 3.0],
-  ["dark: aria-disabled certify button label on page-plane fill", "#9ea7b3", "#0d1117", 4.5],
-  ["dark: meter fill / metric node stroke on page-plane track (non-text, 3:1)", "#58a6ff", "#0d1117", 3.0],
-  ["dark: chart status blocking fill on dark chart surface (non-text, 3:1)", "#f2827f", "#161b22", 3.0],
-  ["dark: chart status warning fill on dark chart surface (non-text, 3:1)", "#d4a72c", "#161b22", 3.0],
-  ["dark: chart status info fill on dark chart surface (non-text, 3:1)", "#6cb6ff", "#161b22", 3.0],
-  ["dark: DR callout border on receipt background (non-text, 3:1)", "#a8c7f0", "#161b22", 3.0],
-  ["dark: ops badge border / ops-owned dashed rule on card background (non-text, 3:1)", "#a8c7f0", "#161b22", 3.0],
+  ["dark: focus outline on card surface (non-text, 3:1)", "#ff7a1a", "#0f131b", 3.0],
+  ["dark: focus outline on page plane (non-text, 3:1)", "#ff7a1a", "#07090e", 3.0],
+  ["dark: input border on card surface (non-text, 3:1)", "#8b949e", "#0f131b", 3.0],
+  ["dark: input border on page plane (non-text, 3:1)", "#8b949e", "#07090e", 3.0],
+  ["dark: aria-disabled certify button label on page-plane fill", "#96a3b7", "#07090e", 4.5],
+  ["dark: meter fill / metric node stroke on page-plane track (non-text, 3:1)", "#ff7a1a", "#07090e", 3.0],
+  ["dark: chart status blocking fill on dark chart surface (non-text, 3:1)", "#f5514e", "#0f131b", 3.0],
+  ["dark: chart status warning fill on dark chart surface (non-text, 3:1)", "#ffd166", "#0f131b", 3.0],
+  ["dark: chart status info fill on dark chart surface (non-text, 3:1)", "#6cb6ff", "#0f131b", 3.0],
+  ["dark: DR callout border on receipt background (non-text, 3:1)", "#a8c7f0", "#0f131b", 3.0],
+  ["dark: ops badge border / ops-owned dashed rule on card background (non-text, 3:1)", "#a8c7f0", "#0f131b", 3.0],
   ["dark: ops badge icon on info background (non-text, 3:1)", "#a8c7f0", "#172439", 3.0],
-  ["dark: ops formula text on raised surface (page plane)", "#e6edf3", "#0d1117", 4.5],
+  ["dark: ops formula text on raised surface (page plane)", "#e9eef5", "#07090e", 4.5],
+
+  // Handoff 0041, dark counterparts: identity + the status set.
+  ["dark: identity signal text on card surface", "#ff7a1a", "#0f131b", 4.5],
+  ["dark: identity signal sparkline / rule on card background (non-text, 3:1)", "#ff7a1a", "#0f131b", 3.0],
+  ["dark: text on identity-signal fill (pressed control)", "#07090e", "#ff7a1a", 4.5],
+  ["dark: status ok text on card background", "#3fc79b", "#0f131b", 4.5],
+  ["dark: status watch text on card background", "#ffd166", "#0f131b", 4.5],
+  ["dark: status alert text on card background", "#f5514e", "#0f131b", 4.5],
+  ["dark: status alert edge-rail on card background (non-text, 3:1)", "#f5514e", "#0f131b", 3.0],
+  ["dark: status watch edge-rail on card background (non-text, 3:1)", "#ffd166", "#0f131b", 3.0],
 
   // Handoff 0017 (UI wave), dark counterparts.
-  ["dark: summary card danger top border on card background (non-text, 3:1)", "#ffb3ab", "#161b22", 3.0],
-  ["dark: summary card warning top border on card background (non-text, 3:1)", "#e8c06c", "#161b22", 3.0],
-  ["dark: summary card info top border on card background (non-text, 3:1)", "#a8c7f0", "#161b22", 3.0],
-  ["dark: summary card success top border on card background (non-text, 3:1)", "#8ddaa4", "#161b22", 3.0],
-  ["dark: toast success border on card background (non-text, 3:1)", "#8ddaa4", "#161b22", 3.0],
-  ["dark: delta 'better' text on card background", "#8ddaa4", "#161b22", 4.5],
-  ["dark: delta 'worse' text on card background", "#ffb3ab", "#161b22", 4.5],
-  ["dark: ready progress fill on page-plane track (non-text, 3:1)", "#8ddaa4", "#0d1117", 3.0],
-  ["dark: sandbox apply-note border on page plane (non-text, 3:1)", "#a8c7f0", "#0d1117", 3.0],
+  ["dark: summary card danger top border on card background (non-text, 3:1)", "#ffb3ab", "#0f131b", 3.0],
+  ["dark: summary card warning top border on card background (non-text, 3:1)", "#e8c06c", "#0f131b", 3.0],
+  ["dark: summary card info top border on card background (non-text, 3:1)", "#a8c7f0", "#0f131b", 3.0],
+  ["dark: summary card success top border on card background (non-text, 3:1)", "#8ddaa4", "#0f131b", 3.0],
+  ["dark: toast success border on card background (non-text, 3:1)", "#8ddaa4", "#0f131b", 3.0],
+  ["dark: delta 'better' text on card background", "#8ddaa4", "#0f131b", 4.5],
+  ["dark: delta 'worse' text on card background", "#ffb3ab", "#0f131b", 4.5],
+  ["dark: ready progress fill on page-plane track (non-text, 3:1)", "#8ddaa4", "#07090e", 3.0],
+  ["dark: sandbox apply-note border on page plane (non-text, 3:1)", "#a8c7f0", "#07090e", 3.0],
 
   // Handoff 0019, dark counterparts of the exception family.
   ["dark: exception tag text + icon on exception background", "#cdb4f6", "#251a3d", 4.5],
-  ["dark: exception callout border on card background (non-text, 3:1)", "#cdb4f6", "#161b22", 3.0],
+  ["dark: exception callout border on card background (non-text, 3:1)", "#cdb4f6", "#0f131b", 3.0],
 
   // Handoff 0021, dark counterparts (tour border/ring on both surfaces).
-  ["dark: tour panel border / target ring on card background (non-text, 3:1)", "#58a6ff", "#161b22", 3.0],
-  ["dark: tour panel border / target ring on page plane (non-text, 3:1)", "#58a6ff", "#0d1117", 3.0],
+  ["dark: tour panel border / target ring on card background (non-text, 3:1)", "#ff7a1a", "#0f131b", 3.0],
+  ["dark: tour panel border / target ring on page plane (non-text, 3:1)", "#ff7a1a", "#07090e", 3.0],
 
   // Handoff 0024 (the living map): map marks are MEANINGFUL non-text
   // (SC 1.4.11, 3:1) against the self-hosted water-tone canvas (--map-bg;
   // there are no tiles, so the background is a token like any other).
-  // The staleness chip and legend text reuse pairs registered above; the
-  // sparkline line/points reuse --series-1, which — like every chart
-  // series — ships with direct equivalents (real buttons with accessible
-  // names, receipts, and the Metrics table) per the dataviz relief rule.
+  // The staleness chip and legend text reuse pairs registered above; since
+  // handoff 0041 the sparkline line/points take the identity signal (checked
+  // above) rather than --series-1. Chart SERIES colors still ship with
+  // direct equivalents (real buttons with accessible names, receipts, and
+  // the Metrics table) per the dataviz relief rule.
   ["map route line on map canvas (non-text, 3:1)", "#5c7086", "#dce8f0", 3.0],
   ["map stop dot on map canvas (non-text, 3:1)", "#57606a", "#dce8f0", 3.0],
   ["map vehicle dot on map canvas (non-text, 3:1)", "#1a56a8", "#dce8f0", 3.0],

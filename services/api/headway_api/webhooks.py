@@ -30,6 +30,7 @@ import json
 import logging
 import time
 from typing import Optional, Protocol
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -273,6 +274,25 @@ def _deliver_one(
     )
 
 
+def _origin_of(url: str) -> str:
+    """``scheme://host[:port]`` — enough to see WHERE an agency is sending its
+    figures, without the path or query that so often carries the credential.
+
+    A Slack incoming webhook keeps its secret in the path; plenty of receivers
+    keep it in a query string. Neither belongs in a table another role can
+    read. Anything unparseable degrades to a fixed label rather than falling
+    back to the raw value, because the failure mode of a parser is exactly
+    when the raw value is most likely to be strange.
+    """
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return "(unparseable)"
+    if not parsed.scheme or not parsed.netloc:
+        return "(unparseable)"
+    return f"{parsed.scheme}://{parsed.netloc}"
+
+
 def _audit_delivery(db, *, action: str, subscription_id: str, detail: dict) -> None:
     # Detail carries ids and outcomes only — never the URL's secret query
     # strings, never the subscription secret, never the signed body.
@@ -378,8 +398,16 @@ def create_subscription(
             action="webhook_subscribed",
             subject_kind="auth.webhook_subscriptions",
             subject_id=subscription_id,
-            # url + events only — the secret never enters the audit trail.
-            detail={"url": body.url, "event_types": event_types},
+            # Origin + events only. The full URL used to be written here,
+            # which contradicted this module's own rule 90 lines above
+            # (_audit_delivery: "never the URL's secret query strings") and
+            # was harmless only while audit.events needed database access to
+            # read. The `auditor` role (handoff 0046) is the first credential
+            # that reads this table over HTTP, so it stops being harmless: for
+            # Slack, Teams and Zapier receivers the URL IS the credential —
+            # anyone holding it can post as the agency. The subscription id is
+            # already this row's subject, so nothing traceable is lost.
+            detail={"url_origin": _origin_of(body.url), "event_types": event_types},
         )
     return SubscriptionResponse(
         subscription_id=subscription_id,

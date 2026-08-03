@@ -17,8 +17,10 @@ fail-loudly-first two-transaction design).
 
 from __future__ import annotations
 
+import json
 from datetime import date
 
+from headway_calc.subjects import resolve_contexts
 from headway_calc.types import SEVERITY_BLOCKING, Finding
 
 #: Column names exactly per handoff 0001 (dq.issues). issue_id, created_at,
@@ -28,6 +30,33 @@ _INSERT_ISSUE_SQL = (
     "(issue_type, severity, status, title, description, source_record_ids, category) "
     "VALUES (%s, %s, %s, %s, %s, %s, %s) "
     "RETURNING issue_id"
+)
+
+#: The migration-0035 variant: the same row plus the resolved, frozen
+#: subject context (handoff 0029). Bound as TEXT and cast in SQL
+#: (``%s::jsonb``) — the persist.py precedent — so this module keeps its
+#: stdlib-only, driver-free promise.
+_INSERT_ISSUE_WITH_CONTEXT_SQL = (
+    "INSERT INTO dq.issues "
+    "(issue_type, severity, status, title, description, source_record_ids, "
+    "category, subject_context) "
+    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb) "
+    "RETURNING issue_id"
+)
+
+#: Migration 0035 is ADDITIVE, and the agency updater applies migrations
+#: BEFORE rebuilding services (handoff 0025) — so in a supported deployment
+#: the column is always there by the time this code runs. A developer
+#: database that has not been migrated yet is the one case that is not, and
+#: it must not lose DQ evidence over a display feature: this probe (issued
+#: at most once per call, and only when a finding actually carries a
+#: subject) selects the pre-0035 INSERT instead. Byte-identical to pre-0029
+#: behaviour, which is exactly what "the migration is additive" has to mean
+#: in both directions.
+_SUBJECT_CONTEXT_COLUMN_SQL = (
+    "SELECT 1 FROM information_schema.columns "
+    "WHERE table_schema = 'dq' AND table_name = 'issues' "
+    "AND column_name = 'subject_context'"
 )
 
 #: dq.issues.category vocabulary (migration 0024). 'ntd' (the default —
@@ -58,6 +87,19 @@ _CONSEQUENCE_BY_SEVERITY = {
         "where block_id is unavailable)."
     ),
 }
+
+
+def _column_exists(conn) -> bool:
+    """Does dq.issues.subject_context exist (migration 0035)?
+
+    Asked at most once per route_findings call, and only when a finding
+    actually carries a subject — so the pre-0029 path issues no extra query
+    whatsoever. Not a swallow: nothing is hidden, the finding still lands
+    with every field it had before the column existed.
+    """
+    cur = conn.cursor()
+    cur.execute(_SUBJECT_CONTEXT_COLUMN_SQL)
+    return cur.fetchone() is not None
 
 
 def route_findings(
@@ -92,12 +134,26 @@ def route_findings(
     blocking-issue gate: an ops shortfall must never freeze a federal
     attestation). The ops runner passes 'ops'; no NTD call site changes.
 
+    ``Finding.subject`` (handoff 0029 / migration 0035): a finding that
+    names the canonical rows it is about has those ids resolved HERE, once,
+    into the agency's own vocabulary — block, route, first and last
+    scheduled departure — and the result is frozen on the row
+    (``dq.issues.subject_context``). Frozen, because a finding must read the
+    same in an audit years later even after the agency renames a route; the
+    ids are stored alongside so any reader can re-derive. The whole batch
+    resolves in ONE query (headway_calc.subjects), and a batch where no
+    finding carries a subject issues no query at all.
+
     Returns the inserted issue_ids (as text) in input order. Raises on any
     insert failure — never swallows. Does not commit.
     """
     cur = conn.cursor()
+    contexts = resolve_contexts(conn, list(findings))
+    has_context_column = any(c is not None for c in contexts) and _column_exists(
+        conn
+    )
     issue_ids: list[str] = []
-    for finding in findings:
+    for finding, context in zip(findings, contexts):
         scope_note = "" if scope is None else f" Metric-value scope: {scope!r}."
         description = (
             f"{finding.description}\n\n"
@@ -106,18 +162,27 @@ def route_findings(
             f"(half-open, UTC).{scope_note} "
             f"{_CONSEQUENCE_BY_SEVERITY[finding.severity]}"
         )
-        cur.execute(
-            _INSERT_ISSUE_SQL,
-            (
-                finding.issue_type,
-                finding.severity,
-                _STATUS,
-                finding.title,
-                description,
-                list(finding.source_record_ids),
-                category,
-            ),
+        base_params = (
+            finding.issue_type,
+            finding.severity,
+            _STATUS,
+            finding.title,
+            description,
+            list(finding.source_record_ids),
+            category,
         )
+        if has_context_column:
+            cur.execute(
+                _INSERT_ISSUE_WITH_CONTEXT_SQL,
+                base_params
+                + (
+                    None
+                    if context is None
+                    else json.dumps(context, sort_keys=True),
+                ),
+            )
+        else:
+            cur.execute(_INSERT_ISSUE_SQL, base_params)
         row = cur.fetchone()
         if row is None:
             raise RuntimeError(

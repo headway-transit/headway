@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Headway API",
-    "description": "Serves computed transit metrics with full lineage, the DQ resolution workflow, and the audited certification action. This API never computes a reported figure; it serves what the calculation library produced, joined to its provenance. Reported values are JSON strings (exact NUMERIC, never float). Auth: local accounts (ADR-0011); the native OIDC relying party is the next increment behind the same {sub, username, role} claim set.",
+    "description": "Serves computed transit metrics with full lineage, the DQ resolution workflow, and the audited certification action. This API never computes a reported figure; it serves what the calculation library produced, joined to its provenance. Reported values are JSON strings (exact NUMERIC, never float). Auth: local accounts AND a native OIDC relying party (ADR-0011), both producing the same {sub, username, role} claim set. Local accounts are never disabled by single sign-on \u2014 an IdP outage, an air-gapped box, or a misconfigured provider all leave the local path working.",
     "version": "0.1.0"
   },
   "paths": {
@@ -12,6 +12,7 @@
           "auth"
         ],
         "summary": "Login",
+        "description": "Sign in with a local Headway account.\n\nTHIS PATH NEVER STOPS WORKING. It does not consult the OIDC\nconfiguration, so a misconfigured provider, an unreachable IdP, or an\ninstallation with no internet at all leaves it untouched \u2014 the\nbreak-glass guarantee of handoff 0046.",
         "operationId": "login_auth_login_post",
         "requestBody": {
           "content": {
@@ -942,6 +943,49 @@
         }
       }
     },
+    "/certifications/{certification_id}/evidence": {
+      "get": {
+        "tags": [
+          "certification"
+        ],
+        "summary": "Downloadable evidence bundle for one certification",
+        "description": "A self-describing evidence bundle for one certification.\n\nOpen to any signed-in role. The bundle is ROLE-SENSITIVE: content\nsensitivity is evaluated for the calling account through\n``authz.may_read_sensitivity``, so an auditor \u2014 who reads at viewer\nbreadth on purpose (``raw_payloads.RESTRICTED_MINIMUM_ROLE``) \u2014 receives a\nbundle whose ``withheld`` list names the rider-location records it does not\ncarry, with Headway's refusal in full. Nothing withheld appears anywhere\nelse in the response.\n\nThe response is BOUNDED. A bundle builds at most ``MAX_LINEAGE_NODES``\nprovenance entries across all its figures and labels at most\n``MAX_RAW_RECORD_LABELS`` raw records; a certification large enough to pass\neither limit still returns 200 with every figure and every receipt, and says\nin ``gaps`` exactly what was left out and where to fetch it. Nothing is\nsilently truncated.\n\nGenerating a bundle is audited. Nothing in this endpoint changes a figure,\na certification, or a raw record.",
+        "operationId": "certification_evidence_certifications__certification_id__evidence_get",
+        "parameters": [
+          {
+            "name": "certification_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Certification Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvidenceBundle"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/attestations": {
       "post": {
         "tags": [
@@ -1147,6 +1191,7 @@
           "data-quality"
         ],
         "summary": "List Issues",
+        "description": "One BOUNDED page of the data-quality queue (handoff 0030).\n\nUntil this wave the endpoint returned every row it had. On the live\nqueue that measured **98,497 issues, 850 MB of JSON, 17 seconds**, and\nit froze the browser tab of the screen a data steward lives in. There\nis now no way to ask for that: ``limit`` defaults to 50 and is capped\nat 200, and pages are walked with the opaque ``cursor`` from the\nprevious response.\n\n**Provenance moved, it did not go away.** ``source_record_ids`` is not\nin these rows; ``GET /dq/issues/{id}`` serves it, complete and\nuntruncated, for the issue actually being worked. 716 MB of that 850 MB\nwas this one field.\n\n**Paging is keyset, on (created_at, issue_id) ascending** \u2014 the primary\nkey breaks every tie, so the ordering is total and a row can neither be\nskipped nor served twice while new findings land behind the reader.\n\n``total`` is the count over the whole queue under the same filters, so\na caller can always say what it has NOT loaded.",
         "operationId": "list_issues_dq_issues_get",
         "parameters": [
           {
@@ -1164,6 +1209,50 @@
               ],
               "title": "Status"
             }
+          },
+          {
+            "name": "severity",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Severity"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
           }
         ],
         "responses": {
@@ -1172,11 +1261,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/DqIssue"
-                  },
-                  "title": "Response List Issues Dq Issues Get"
+                  "$ref": "#/components/schemas/DqIssuePage"
                 }
               }
             }
@@ -1250,7 +1335,7 @@
           "data-quality"
         ],
         "summary": "Get Issue",
-        "description": "One issue by id (any signed-in role) \u2014 the deep-link target (handoff\n0026): a calculation refusal links straight to the exact finding that\nblocked it, and the UI must be able to show THAT finding without\ndownloading the whole queue (97k rows / hundreds of MB live). Registered\nafter /dq/issues/counts so the literal path wins.",
+        "description": "One issue by id (any signed-in role) \u2014 the deep-link target (handoff\n0026): a calculation refusal links straight to the exact finding that\nblocked it, and the UI must be able to show THAT finding without\ndownloading the whole queue. Registered after /dq/issues/counts so the\nliteral path wins.\n\nSince handoff 0030 this is ALSO where ``source_record_ids`` lives \u2014\nthe complete, untruncated provenance array for this one issue. The\nqueue listing no longer carries it (716 MB of an 850 MB response for a\nfield a list view only joined into a string); every queue row links\nhere, so the walk from a finding to its raw records is one request, not\na 850 MB download.",
         "operationId": "get_issue_dq_issues__issue_id__get",
         "parameters": [
           {
@@ -1590,6 +1675,241 @@
                     "$ref": "#/components/schemas/MetricValue"
                   },
                   "title": "Response Machine List Metric Values Machine Metrics Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/machine/dq/issues": {
+      "get": {
+        "tags": [
+          "machine"
+        ],
+        "summary": "Machine List Dq Issues",
+        "description": "One BOUNDED page of the data-quality queue for machine consumers\n(scope ``read:dq``): the SAME keyset-paginated rows, whole-queue\n``total``, ``next_cursor``, and ``has_more`` as the human ``GET\n/dq/issues`` (handoff 0030). ``source_record_ids`` is not on a list row \u2014\nit lives on ``GET /machine/dq/issues/{id}`` exactly as it does for the\nhuman detail endpoint.",
+        "operationId": "machine_list_dq_issues_machine_dq_issues_get",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "name": "severity",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Severity"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DqIssuePage"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/machine/dq/issues/counts": {
+      "get": {
+        "tags": [
+          "machine"
+        ],
+        "summary": "Machine Count Dq Issues",
+        "description": "Whole-queue severity/status counts for machine consumers (scope\n``read:dq``): the SAME GROUP BY over the SAME rows the machine list\nserves under the same optional status filter (handoff 0017/0023). A card\ntotal can never disagree with the page below it \u2014 the query is shared with\nthe human ``GET /dq/issues/counts``.",
+        "operationId": "machine_count_dq_issues_machine_dq_issues_counts_get",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DqIssueCounts"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/machine/dq/issues/{issue_id}": {
+      "get": {
+        "tags": [
+          "machine"
+        ],
+        "summary": "Machine Get Dq Issue",
+        "description": "One issue by id for machine consumers (scope ``read:dq``): the SAME\ndetail row as the human ``GET /dq/issues/{id}``, WITH the complete,\nuntruncated ``source_record_ids`` provenance array (handoff 0026/0030).\nA missing or malformed id gets the same plain-language 404. Registered\nafter /machine/dq/issues/counts so the literal path wins.",
+        "operationId": "machine_get_dq_issue_machine_dq_issues__issue_id__get",
+        "parameters": [
+          {
+            "name": "issue_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Issue Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DqIssue"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/machine/ops/vehicles/latest": {
+      "get": {
+        "tags": [
+          "machine"
+        ],
+        "summary": "Machine Latest Vehicles",
+        "description": "Latest position per vehicle for machine consumers (scope\n``read:ops``): the SAME live-map snapshot as the human ``GET\n/ops/vehicles/latest`` (handoff 0023), staleness framing and count\nhonesty intact. Operations data \u2014 never certifiable, never an NTD\nreported figure (the ``ops_note`` / ``category`` boundary rides on every\nresponse).",
+        "operationId": "machine_latest_vehicles_machine_ops_vehicles_latest_get",
+        "parameters": [
+          {
+            "name": "max_age_seconds",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 86400,
+              "minimum": 1,
+              "description": "Staleness window: only vehicles whose latest position is at most this many seconds old (by the database clock) are served.",
+              "default": 300,
+              "title": "Max Age Seconds"
+            },
+            "description": "Staleness window: only vehicles whose latest position is at most this many seconds old (by the database clock) are served."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpsVehiclesLatest"
                 }
               }
             }
@@ -2256,6 +2576,406 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/VerificationResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/raw/records/{record_id}": {
+      "get": {
+        "tags": [
+          "raw-records"
+        ],
+        "summary": "Raw Record Label",
+        "description": "What this record is \u2014 the label on the evidence bag.\n\nDeliberately does NOT read the payload: a lineage trail can bottom out\nin dozens of raw records, and the label must stay cheap enough to show\nbeside every one of them. For an object-store payload the size comes\nfrom a metadata call; for a payload carried inline on the broker the\nsize is stated as measured-on-open rather than guessed. An object store\nthat is down degrades to a label with an honest note, never to an error\npage \u2014 the record's identity does not depend on the store being up.",
+        "operationId": "raw_record_label_raw_records__record_id__get",
+        "parameters": [
+          {
+            "name": "record_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Record Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RawRecordLabel"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/raw/records/{record_id}/verify": {
+      "post": {
+        "tags": [
+          "raw-records"
+        ],
+        "summary": "Verify Raw Record",
+        "description": "Re-read the stored bytes, re-compute their SHA-256, report the verdict.\n\nOpen to any signed-in role, including for payloads whose CONTENTS are\nwithheld: a hash discloses nothing about rider addresses, and the whole\npoint of this action is that nobody has to take the integrity claim on\ntrust.\n\nA mismatch means the stored bytes are not the bytes this record was\ncreated from. That is either tampering or corruption, and either way\nevery figure computed from this record is in question \u2014 so it answers\n409, raises a blocking data-quality issue, and is audited.",
+        "operationId": "verify_raw_record_raw_records__record_id__verify_post",
+        "parameters": [
+          {
+            "name": "record_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Record Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VerificationVerdict"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Bytes missing from the store",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VerificationVerdict"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Integrity MISMATCH",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VerificationVerdict"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "Bytes no longer retained",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VerificationVerdict"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Storage unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VerificationVerdict"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/raw/records/{record_id}/payload": {
+      "get": {
+        "tags": [
+          "raw-records"
+        ],
+        "summary": "Raw Record Payload",
+        "description": "A bounded look inside the record, with the caps stated.\n\nThis is the moment a steward sees their own bus, at that minute, at\nthose coordinates, as the origin of a number. What is shown is decoded\nfrom the stored bytes at request time \u2014 never from a cached rendering,\nnever from the normalized copy downstream \u2014 so the preview is evidence\nabout the record and not about Headway's opinion of it.",
+        "operationId": "raw_record_payload_raw_records__record_id__payload_get",
+        "parameters": [
+          {
+            "name": "record_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Record Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PayloadPreview"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/raw/records/{record_id}/download": {
+      "get": {
+        "tags": [
+          "raw-records"
+        ],
+        "summary": "Raw Record Download",
+        "description": "The exact stored bytes, streamed, with the record's own content type.\n\nNot truncated and not transformed: a download that altered the bytes\nwould be worthless as evidence. The response carries the content address\nin a header so a downloaded file can be tied back to the record it came\nfrom without depending on the filename.",
+        "operationId": "raw_record_download_raw_records__record_id__download_get",
+        "parameters": [
+          {
+            "name": "record_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Record Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/revenue-review/boardings": {
+      "get": {
+        "tags": [
+          "revenue-review"
+        ],
+        "summary": "List Boardings",
+        "description": "One bounded page of the revenue review queue.\n\nDefault ``status=pending`` \u2014 the work. ``status=classified`` reads the\ndecision history, which is also the receipt trail behind every corrected\nfigure, so it stays readable forever. Pages are keyset-walked on\n(event_timestamp, passenger_event_id) ascending: the primary key breaks\nevery tie, so a boarding can neither be skipped nor served twice while a\ncalculation run flags new ones behind the reader.",
+        "operationId": "list_boardings_revenue_review_boardings_get",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "pending",
+              "title": "Status"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoardingReviewPage"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/revenue-review/boardings/counts": {
+      "get": {
+        "tags": [
+          "revenue-review"
+        ],
+        "summary": "Count Boardings",
+        "description": "The queue-wide tally: how many boardings are held, and how many a human\nhas already ruled in or out. Counted by the database over exactly the rows\nthe list serves \u2014 registered before the ``{passenger_event_id}`` route so\nthe literal path wins.",
+        "operationId": "count_boardings_revenue_review_boardings_counts_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoardingReviewCounts"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/revenue-review/boardings/{passenger_event_id}": {
+      "get": {
+        "tags": [
+          "revenue-review"
+        ],
+        "summary": "Get Boarding",
+        "description": "One boarding by id \u2014 the deep-link target, so a finding or a receipt\ncan point straight at the boarding it concerns.",
+        "operationId": "get_boarding_revenue_review_boardings__passenger_event_id__get",
+        "parameters": [
+          {
+            "name": "passenger_event_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Passenger Event Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoardingReview"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/revenue-review/boardings/{passenger_event_id}/classify": {
+      "post": {
+        "tags": [
+          "revenue-review"
+        ],
+        "summary": "Classify Boarding",
+        "description": "Record one human decision about one held boarding, with its reason.\n\nData-steward-grade, exactly like resolving a data-quality issue \u2014 this IS\na data-quality resolution, it just happens to change what the next figure\ncounts. The verdict, the note, the person and the time are written\ntogether, the boarding's open finding is closed in the same transaction,\nand the audit event commits with them or not at all.\n\nRefuses loudly and specifically:\n\n- **404** \u2014 no such boarding in the queue.\n- **409** \u2014 already classified. A decision is not re-decided in place; the\n  trail must stay honest about who said what and when.\n- **409** \u2014 the boarding falls inside an already-CERTIFIED Unlinked\n  Passenger Trips period. A certification attests to a number; recording a\n  change that would move that number on the next run would leave the\n  attestation describing a figure nobody computed.\n- **422** \u2014 a blank justification. There is no note-free path.",
+        "operationId": "classify_boarding_revenue_review_boardings__passenger_event_id__classify_post",
+        "parameters": [
+          {
+            "name": "passenger_event_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Passenger Event Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClassifyRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClassifyResponse"
                 }
               }
             }
@@ -3669,6 +4389,421 @@
           }
         }
       }
+    },
+    "/auth/oidc/status": {
+      "get": {
+        "tags": [
+          "sso"
+        ],
+        "summary": "Sso Status",
+        "description": "Should the sign-in screen offer a single-sign-on button, and what does\nit say? Unauthenticated by necessity, and tells an anonymous caller\nnothing beyond that.",
+        "operationId": "sso_status_auth_oidc_status_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SsoStatus"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/oidc/start": {
+      "post": {
+        "tags": [
+          "sso"
+        ],
+        "summary": "Start Login",
+        "description": "Begin an authorization-code + PKCE sign-in.\n\nGenerates ``state``, ``nonce``, a PKCE verifier and a browser binding\ntoken, stores everything but the browser token server-side, and hands\nback the provider URL to send the browser to.\n\nRATE LIMITED because it is unauthenticated AND expensive: it can open an\noutbound connection to the identity provider and it INSERTs a row. Every\nendpoint in this API is synchronous, so a request waiting on an\nunreachable provider is holding a worker thread \u2014 and the request that\nmust never queue behind it is ``POST /auth/login``, the break-glass path\nthis whole wave promises keeps working when the IdP does not.",
+        "operationId": "start_login_auth_oidc_start_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StartLoginResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/oidc/callback": {
+      "post": {
+        "tags": [
+          "sso"
+        ],
+        "summary": "Oidc Callback",
+        "description": "Finish a sign-in: consume the state, exchange the code, validate the\nID token in full, map claims onto a role, provision if needed, and issue\na Headway session.\n\nEvery refusal below returns the SAME message. The reason is in the audit\ntrail; the wire never says whether the account exists, whether it was\nmapped, or which check failed.\n\nRATE LIMITED for the same reason as ``start_login``, plus one of its own:\na caller who reaches the code exchange makes Headway POST to the agency's\nidentity provider, so an unlimited callback turns this box into a traffic\namplifier pointed at the agency's own IdP.",
+        "operationId": "oidc_callback_auth_oidc_callback_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CallbackRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CallbackResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/oidc/config": {
+      "get": {
+        "tags": [
+          "sso"
+        ],
+        "summary": "Get Config",
+        "description": "The stored configuration. NEVER includes the client secret \u2014 there is\nno field on this model that could carry it.",
+        "operationId": "get_config_auth_oidc_config_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderConfigResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "sso"
+        ],
+        "summary": "Put Config",
+        "description": "Save the provider configuration (certifying official only; audited).\n\nThe client secret is encrypted before it touches the database and the\naudit record says only that it CHANGED. Passing null keeps the stored\nsecret, so an admin can edit the group claim without re-entering a\ncredential they were shown once.",
+        "operationId": "put_config_auth_oidc_config_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateProviderRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateProviderResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/oidc/config/test": {
+      "post": {
+        "tags": [
+          "sso"
+        ],
+        "summary": "Test Config",
+        "description": "Prove the configuration works BEFORE anyone depends on it.\n\nRuns the same code the sign-in path runs, in the same order, as far as it\ncan go without a human at a browser: reach the discovery document over\nTLS, read the endpoints, fetch the signing keys, and prove the client id\nand secret are accepted by redeeming a deliberately invalid code (see\n``oidc.probe_client_credentials``). Then it checks the two things that\nare correct in configuration but useless in practice: no role mappings\n(every sign-in would be refused) and sign-on left switched off.\n\nEach step reports pass/fail with a message written for someone who has\nnever configured OIDC and does not have database access.",
+        "operationId": "test_config_auth_oidc_config_test_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TestConfigResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/oidc/mappings": {
+      "get": {
+        "tags": [
+          "sso"
+        ],
+        "summary": "List Mappings",
+        "description": "Every configured claim -> role grant. Certifying official only.",
+        "operationId": "list_mappings_auth_oidc_mappings_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/RoleMapping"
+                  },
+                  "type": "array",
+                  "title": "Response List Mappings Auth Oidc Mappings Get"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "sso"
+        ],
+        "summary": "Create Mapping",
+        "description": "Grant a Headway role to everyone carrying one exact claim value.\n\n``certifying_official`` is refused here in plain language, and the\ndatabase refuses it too (migration 0043). The message explains WHY rather\nthan just saying no, because an administrator told \"no\" without a reason\nwill look for a way around it.",
+        "operationId": "create_mapping_auth_oidc_mappings_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateMappingRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateMappingResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/oidc/mappings/{mapping_id}": {
+      "delete": {
+        "tags": [
+          "sso"
+        ],
+        "summary": "Delete Mapping",
+        "description": "Remove a grant (certifying official only; audited with what it was).\n\nExisting accounts are NOT deleted \u2014 removing a mapping stops future\nsign-ins for that group, and the accounts it already created are managed\nunder Admin -> Users like any other. Deleting people's accounts as a side\neffect of a configuration edit would be a surprise, and a destructive one.",
+        "operationId": "delete_mapping_auth_oidc_mappings__mapping_id__delete",
+        "parameters": [
+          {
+            "name": "mapping_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Mapping Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteMappingResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/audit/events": {
+      "get": {
+        "tags": [
+          "audit"
+        ],
+        "summary": "List Audit Events",
+        "description": "The audit trail, newest first. Auditors and certifying officials only.",
+        "operationId": "list_audit_events_audit_events_get",
+        "parameters": [
+          {
+            "name": "actor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only entries by this exact username or machine key.",
+              "title": "Actor"
+            },
+            "description": "Only entries by this exact username or machine key."
+          },
+          {
+            "name": "action",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only entries of this exact action.",
+              "title": "Action"
+            },
+            "description": "Only entries of this exact action."
+          },
+          {
+            "name": "subject_kind",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only entries about this kind of thing, e.g. cert.certifications.",
+              "title": "Subject Kind"
+            },
+            "description": "Only entries about this kind of thing, e.g. cert.certifications."
+          },
+          {
+            "name": "subject_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only entries about this exact record.",
+              "title": "Subject Id"
+            },
+            "description": "Only entries about this exact record."
+          },
+          {
+            "name": "before_event_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Cursor from the previous page's next_cursor.",
+              "title": "Before Event Id"
+            },
+            "description": "Cursor from the previous page's next_cursor."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 500,
+              "minimum": 1,
+              "default": 100,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditPage"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -4139,6 +5274,333 @@
         ],
         "title": "AttestationRevoked"
       },
+      "AuditEvent": {
+        "properties": {
+          "event_id": {
+            "type": "integer",
+            "title": "Event Id"
+          },
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Occurred At"
+          },
+          "actor": {
+            "type": "string",
+            "title": "Actor"
+          },
+          "action": {
+            "type": "string",
+            "title": "Action"
+          },
+          "subject_kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subject Kind"
+          },
+          "subject_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subject Id"
+          },
+          "detail": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "required": [
+          "event_id",
+          "occurred_at",
+          "actor",
+          "action",
+          "subject_kind",
+          "subject_id",
+          "detail"
+        ],
+        "title": "AuditEvent"
+      },
+      "AuditPage": {
+        "properties": {
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/AuditEvent"
+            },
+            "type": "array",
+            "title": "Events"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          },
+          "note": {
+            "type": "string",
+            "title": "Note"
+          }
+        },
+        "type": "object",
+        "required": [
+          "events",
+          "next_cursor",
+          "note"
+        ],
+        "title": "AuditPage"
+      },
+      "BoardingReview": {
+        "properties": {
+          "passenger_event_id": {
+            "type": "string",
+            "title": "Passenger Event Id"
+          },
+          "source_record_id": {
+            "type": "string",
+            "title": "Source Record Id"
+          },
+          "service_date": {
+            "type": "string",
+            "format": "date",
+            "title": "Service Date"
+          },
+          "event_timestamp": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Event Timestamp"
+          },
+          "vehicle_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vehicle Id"
+          },
+          "event_count": {
+            "type": "integer",
+            "title": "Event Count"
+          },
+          "suggested_verdict": {
+            "type": "string",
+            "title": "Suggested Verdict"
+          },
+          "suggested_reason": {
+            "type": "string",
+            "title": "Suggested Reason"
+          },
+          "calc_name": {
+            "type": "string",
+            "title": "Calc Name"
+          },
+          "calc_version": {
+            "type": "string",
+            "title": "Calc Version"
+          },
+          "period_start": {
+            "type": "string",
+            "format": "date",
+            "title": "Period Start"
+          },
+          "period_end": {
+            "type": "string",
+            "format": "date",
+            "title": "Period End"
+          },
+          "first_seen_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "First Seen At"
+          },
+          "verdict": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verdict"
+          },
+          "justification": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Justification"
+          },
+          "classified_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Classified By"
+          },
+          "classified_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Classified At"
+          },
+          "dq_issue_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dq Issue Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "passenger_event_id",
+          "source_record_id",
+          "service_date",
+          "event_timestamp",
+          "vehicle_id",
+          "event_count",
+          "suggested_verdict",
+          "suggested_reason",
+          "calc_name",
+          "calc_version",
+          "period_start",
+          "period_end",
+          "first_seen_at",
+          "verdict",
+          "justification",
+          "classified_by",
+          "classified_at",
+          "dq_issue_id"
+        ],
+        "title": "BoardingReview",
+        "description": "One boarding awaiting a decision \u2014 or the record of the decision made.\n\nEverything here was frozen when the calculation flagged the boarding, so\nthe row reads the same years later even if the feed is re-ingested or the\nvehicle is renumbered. Nothing is re-derived at read time and no label is\ninvented: an absent vehicle is served as null, not as \"unknown\"."
+      },
+      "BoardingReviewCounts": {
+        "properties": {
+          "pending": {
+            "type": "integer",
+            "title": "Pending"
+          },
+          "pending_boardings": {
+            "type": "integer",
+            "title": "Pending Boardings"
+          },
+          "classified": {
+            "type": "integer",
+            "title": "Classified"
+          },
+          "classified_revenue": {
+            "type": "integer",
+            "title": "Classified Revenue"
+          },
+          "classified_non_revenue": {
+            "type": "integer",
+            "title": "Classified Non Revenue"
+          },
+          "classified_revenue_boardings": {
+            "type": "integer",
+            "title": "Classified Revenue Boardings"
+          },
+          "classified_non_revenue_boardings": {
+            "type": "integer",
+            "title": "Classified Non Revenue Boardings"
+          }
+        },
+        "type": "object",
+        "required": [
+          "pending",
+          "pending_boardings",
+          "classified",
+          "classified_revenue",
+          "classified_non_revenue",
+          "classified_revenue_boardings",
+          "classified_non_revenue_boardings"
+        ],
+        "title": "BoardingReviewCounts",
+        "description": "The queue-wide tally, counted by the database over exactly the rows the\nlist serves \u2014 so a card can never disagree with the table below it."
+      },
+      "BoardingReviewPage": {
+        "properties": {
+          "boardings": {
+            "items": {
+              "$ref": "#/components/schemas/BoardingReview"
+            },
+            "type": "array",
+            "title": "Boardings"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          },
+          "has_more": {
+            "type": "boolean",
+            "title": "Has More"
+          }
+        },
+        "type": "object",
+        "required": [
+          "boardings",
+          "total",
+          "limit",
+          "next_cursor",
+          "has_more"
+        ],
+        "title": "BoardingReviewPage",
+        "description": "One page of the queue, plus the truth about the rest of it."
+      },
       "Body_upload_logo_branding_logo_post": {
         "properties": {
           "file": {
@@ -4207,6 +5669,41 @@
         ],
         "title": "BrandingResponse",
         "description": "What the app shell needs to brand itself. Colors here have already\npassed the WCAG AA contrast guardrail at write time."
+      },
+      "BundleGap": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "what": {
+            "type": "string",
+            "title": "What"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "what",
+          "detail"
+        ],
+        "title": "BundleGap",
+        "description": "Something that could NOT be produced. A defect or an absence \u2014 never a\nwithholding, which is a different list."
       },
       "CalcRunCreated": {
         "properties": {
@@ -4414,6 +5911,62 @@
         "title": "CalcRunRequest",
         "description": "One dispatch request: the half-open period only. No calc selection,\nno threshold knobs \u2014 the runner resolves thresholds exactly as the CLI\ndoes (explicit flag > audited app.settings row > code default; here\nthere are no explicit flags, so the audited settings govern)."
       },
+      "CallbackRequest": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "state": {
+            "type": "string",
+            "title": "State"
+          },
+          "browser_token": {
+            "type": "string",
+            "title": "Browser Token"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "state",
+          "browser_token"
+        ],
+        "title": "CallbackRequest"
+      },
+      "CallbackResponse": {
+        "properties": {
+          "access_token": {
+            "type": "string",
+            "title": "Access Token"
+          },
+          "token_type": {
+            "type": "string",
+            "title": "Token Type",
+            "default": "bearer"
+          },
+          "expires_in": {
+            "type": "integer",
+            "title": "Expires In"
+          },
+          "username": {
+            "type": "string",
+            "title": "Username"
+          },
+          "role": {
+            "type": "string",
+            "title": "Role"
+          }
+        },
+        "type": "object",
+        "required": [
+          "access_token",
+          "expires_in",
+          "username",
+          "role"
+        ],
+        "title": "CallbackResponse"
+      },
       "CanonicalLiveness": {
         "properties": {
           "newest_vehicle_position_at": {
@@ -4570,6 +6123,117 @@
         ],
         "title": "CertificationCertificate",
         "description": "The full certificate view (the frontend's certificate screen):\nthe stored canonical document (raw signed text + parsed object), the\nsignature, and a live verification result."
+      },
+      "CertificationEvidence": {
+        "properties": {
+          "certification_id": {
+            "type": "string",
+            "title": "Certification Id"
+          },
+          "certified_by": {
+            "type": "string",
+            "title": "Certified By"
+          },
+          "certified_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Certified At"
+          },
+          "attestation": {
+            "type": "string",
+            "title": "Attestation"
+          },
+          "signed": {
+            "type": "boolean",
+            "title": "Signed"
+          },
+          "algorithm": {
+            "type": "string",
+            "title": "Algorithm",
+            "default": "ed25519"
+          },
+          "key_fingerprint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key Fingerprint"
+          },
+          "signer_full_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Signer Full Name"
+          },
+          "signer_title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Signer Title"
+          },
+          "canonical_document": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Canonical Document"
+          },
+          "signature": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Signature"
+          },
+          "document": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Document"
+          },
+          "verification": {
+            "$ref": "#/components/schemas/VerificationResult"
+          }
+        },
+        "type": "object",
+        "required": [
+          "certification_id",
+          "certified_by",
+          "certified_at",
+          "attestation",
+          "signed",
+          "verification"
+        ],
+        "title": "CertificationEvidence",
+        "description": "The certification itself: signature block, signed bytes, live verdict."
       },
       "CertificationRecord": {
         "properties": {
@@ -4885,6 +6549,82 @@
         ],
         "title": "ClassificationResult"
       },
+      "ClassifyRequest": {
+        "properties": {
+          "verdict": {
+            "type": "string",
+            "title": "Verdict"
+          },
+          "justification": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Justification"
+          }
+        },
+        "type": "object",
+        "required": [
+          "verdict",
+          "justification"
+        ],
+        "title": "ClassifyRequest",
+        "description": "A verdict and the reason for it. The reason is not optional."
+      },
+      "ClassifyResponse": {
+        "properties": {
+          "passenger_event_id": {
+            "type": "string",
+            "title": "Passenger Event Id"
+          },
+          "verdict": {
+            "type": "string",
+            "title": "Verdict"
+          },
+          "justification": {
+            "type": "string",
+            "title": "Justification"
+          },
+          "classified_by": {
+            "type": "string",
+            "title": "Classified By"
+          },
+          "classified_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Classified At"
+          },
+          "dq_issue_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dq Issue Id"
+          },
+          "audit_event_id": {
+            "type": "integer",
+            "title": "Audit Event Id"
+          },
+          "recompute_required": {
+            "type": "boolean",
+            "title": "Recompute Required",
+            "default": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "passenger_event_id",
+          "verdict",
+          "justification",
+          "classified_by",
+          "classified_at",
+          "dq_issue_id",
+          "audit_event_id"
+        ],
+        "title": "ClassifyResponse"
+      },
       "Comparand": {
         "properties": {
           "key": {
@@ -5107,6 +6847,29 @@
         ],
         "title": "CompareRow"
       },
+      "ContentAddress": {
+        "properties": {
+          "algorithm": {
+            "type": "string",
+            "title": "Algorithm"
+          },
+          "digest": {
+            "type": "string",
+            "title": "Digest"
+          },
+          "note": {
+            "type": "string",
+            "title": "Note"
+          }
+        },
+        "type": "object",
+        "required": [
+          "algorithm",
+          "digest",
+          "note"
+        ],
+        "title": "ContentAddress"
+      },
       "CreateKeyRequest": {
         "properties": {
           "name": {
@@ -5201,6 +6964,91 @@
           "created_at"
         ],
         "title": "CreateKeyResponse"
+      },
+      "CreateMappingRequest": {
+        "properties": {
+          "claim_value": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Claim Value"
+          },
+          "headway_role": {
+            "type": "string",
+            "title": "Headway Role"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "type": "object",
+        "required": [
+          "claim_value",
+          "headway_role"
+        ],
+        "title": "CreateMappingRequest"
+      },
+      "CreateMappingResponse": {
+        "properties": {
+          "mapping_id": {
+            "type": "string",
+            "title": "Mapping Id"
+          },
+          "claim_value": {
+            "type": "string",
+            "title": "Claim Value"
+          },
+          "headway_role": {
+            "type": "string",
+            "title": "Headway Role"
+          },
+          "role_label": {
+            "type": "string",
+            "title": "Role Label"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "created_by": {
+            "type": "string",
+            "title": "Created By"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "audit_event_id": {
+            "type": "integer",
+            "title": "Audit Event Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "mapping_id",
+          "claim_value",
+          "headway_role",
+          "role_label",
+          "created_by",
+          "created_at",
+          "audit_event_id"
+        ],
+        "title": "CreateMappingResponse"
       },
       "CreateSubscriptionRequest": {
         "properties": {
@@ -5343,6 +7191,47 @@
         ],
         "title": "DeadlinesResponse"
       },
+      "DecoderBlock": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "note": {
+            "type": "string",
+            "title": "Note"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "note"
+        ],
+        "title": "DecoderBlock"
+      },
+      "DeleteMappingResponse": {
+        "properties": {
+          "claim_value": {
+            "type": "string",
+            "title": "Claim Value"
+          },
+          "headway_role": {
+            "type": "string",
+            "title": "Headway Role"
+          },
+          "audit_event_id": {
+            "type": "integer",
+            "title": "Audit Event Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "claim_value",
+          "headway_role",
+          "audit_event_id"
+        ],
+        "title": "DeleteMappingResponse"
+      },
       "DeleteServiceDayOverrideResponse": {
         "properties": {
           "service_date": {
@@ -5404,6 +7293,57 @@
             "type": "string",
             "title": "Description"
           },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "resolved_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved At"
+          },
+          "resolution": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolution"
+          },
+          "resolution_minutes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolution Minutes"
+          },
+          "subject_context": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subject Context"
+          },
           "source_record_ids": {
             "anyOf": [
               {
@@ -5417,6 +7357,141 @@
               }
             ],
             "title": "Source Record Ids"
+          }
+        },
+        "type": "object",
+        "required": [
+          "issue_id",
+          "issue_type",
+          "severity",
+          "status",
+          "owner",
+          "title",
+          "description",
+          "created_at",
+          "resolved_at",
+          "resolution",
+          "resolution_minutes",
+          "source_record_ids"
+        ],
+        "title": "DqIssue",
+        "description": "One issue WITH its provenance \u2014 served by ``GET /dq/issues/{id}``.\n\n``source_record_ids`` is the content-addressed lineage: the raw feed\nrecords this finding was raised over. It is a first-class provenance\nfield and it has not gone anywhere \u2014 but it is served HERE, per issue,\nnot by the queue listing (handoff 0030).\n\nWhy (measured on the live queue, 98,497 issues): the ids are 716 MB of\nthe 850 MB the whole-queue listing used to return \u2014 11.5 million\nidentifiers, up to 34,835 on a single issue \u2014 for a list view that\nnever displayed more than a joined string of them. Moving them to the\nper-issue endpoint is not a reduction in provenance: every row in the\nqueue links to its own issue, and this endpoint answers with the\ncomplete, untruncated array. Nothing is summarised, sampled, or capped."
+      },
+      "DqIssueCounts": {
+        "properties": {
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "by_severity": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "By Severity"
+          },
+          "by_status": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "By Status"
+          },
+          "resolution_minutes_total": {
+            "type": "integer",
+            "title": "Resolution Minutes Total"
+          }
+        },
+        "type": "object",
+        "required": [
+          "total",
+          "by_severity",
+          "by_status",
+          "resolution_minutes_total"
+        ],
+        "title": "DqIssueCounts",
+        "description": "Counts for the /dq summary cards (handoff 0017, design point 2):\ncounted over EXACTLY the rows GET /dq/issues serves under the same\nfilter, so a card total can never disagree with the table below it.\nMissing severities/statuses appear as explicit zeros.\n\nSince handoff 0030 the list endpoint serves ONE PAGE, so this endpoint\nis the only place a whole-queue tally comes from \u2014 which is what it has\nalways meant. Every screen that shows a queue-wide number reads it\nhere, never by counting rows it happens to have loaded."
+      },
+      "DqIssuePage": {
+        "properties": {
+          "issues": {
+            "items": {
+              "$ref": "#/components/schemas/DqIssueSummary"
+            },
+            "type": "array",
+            "title": "Issues"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          },
+          "has_more": {
+            "type": "boolean",
+            "title": "Has More"
+          }
+        },
+        "type": "object",
+        "required": [
+          "issues",
+          "total",
+          "limit",
+          "next_cursor",
+          "has_more"
+        ],
+        "title": "DqIssuePage",
+        "description": "One page of the queue, plus the truth about the rest of it.\n\n``total`` is counted by the database over EXACTLY the rows this filter\nselects \u2014 the whole queue, not the page \u2014 so nothing that reads this\nresponse has to mistake \"what I loaded\" for \"what exists\"."
+      },
+      "DqIssueSummary": {
+        "properties": {
+          "issue_id": {
+            "type": "string",
+            "title": "Issue Id"
+          },
+          "issue_type": {
+            "type": "string",
+            "title": "Issue Type"
+          },
+          "severity": {
+            "type": "string",
+            "title": "Severity"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "owner": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
           },
           "created_at": {
             "type": "string",
@@ -5456,6 +7531,18 @@
               }
             ],
             "title": "Resolution Minutes"
+          },
+          "subject_context": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subject Context"
           }
         },
         "type": "object",
@@ -5467,43 +7554,13 @@
           "owner",
           "title",
           "description",
-          "source_record_ids",
           "created_at",
           "resolved_at",
           "resolution",
           "resolution_minutes"
         ],
-        "title": "DqIssue"
-      },
-      "DqIssueCounts": {
-        "properties": {
-          "total": {
-            "type": "integer",
-            "title": "Total"
-          },
-          "by_severity": {
-            "additionalProperties": {
-              "type": "integer"
-            },
-            "type": "object",
-            "title": "By Severity"
-          },
-          "by_status": {
-            "additionalProperties": {
-              "type": "integer"
-            },
-            "type": "object",
-            "title": "By Status"
-          }
-        },
-        "type": "object",
-        "required": [
-          "total",
-          "by_severity",
-          "by_status"
-        ],
-        "title": "DqIssueCounts",
-        "description": "Counts for the /dq summary cards (handoff 0017, design point 2):\ncounted over EXACTLY the rows GET /dq/issues serves under the same\nfilter, so a card total can never disagree with the table below it.\nMissing severities/statuses appear as explicit zeros."
+        "title": "DqIssueSummary",
+        "description": "One issue as the QUEUE shows it (handoff 0030).\n\nEverything a steward reads in a list is here. What is deliberately NOT\nhere is ``source_record_ids`` \u2014 see :class:`DqIssue`."
       },
       "DrawCreated": {
         "properties": {
@@ -5845,6 +7902,329 @@
           "audit_event_id"
         ],
         "title": "EstimateResponse"
+      },
+      "EvidenceBundle": {
+        "properties": {
+          "bundle_type": {
+            "type": "string",
+            "title": "Bundle Type",
+            "default": "headway-evidence-bundle"
+          },
+          "bundle_version": {
+            "type": "integer",
+            "title": "Bundle Version",
+            "default": 1
+          },
+          "generated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Generated At"
+          },
+          "generated_for": {
+            "$ref": "#/components/schemas/GeneratedFor"
+          },
+          "scope_note": {
+            "type": "string",
+            "title": "Scope Note",
+            "default": "This bundle carries labels and digests, not stored payload bytes. Every raw source record's id IS the SHA-256 of the bytes Headway received, so the manifest already proves what each record contained without copying it here. To have Headway re-read a record's stored bytes and re-compute that hash in front of you, use POST /raw/records/{record_id}/verify on the record you care about \u2014 an auditor account may do this. Records whose bytes rode inline on the message broker may answer that the broker no longer retains them: that is a retention setting on this installation, not a failed check and not a missing record."
+          },
+          "withholding_note": {
+            "type": "string",
+            "title": "Withholding Note",
+            "default": "The 'withheld' list names everything left out of this bundle because of content sensitivity, with Headway's own reason in full. It is not an error and it is not a data gap \u2014 those are listed separately under 'gaps'. Withholding depends on the account this bundle was generated for, named above: another account may receive the same certification with a shorter or longer withheld list, and that is correct."
+          },
+          "certification": {
+            "$ref": "#/components/schemas/CertificationEvidence"
+          },
+          "figures": {
+            "items": {
+              "$ref": "#/components/schemas/FigureEvidence"
+            },
+            "type": "array",
+            "title": "Figures"
+          },
+          "raw_records": {
+            "items": {
+              "$ref": "#/components/schemas/RawRecordEvidence"
+            },
+            "type": "array",
+            "title": "Raw Records"
+          },
+          "withheld": {
+            "items": {
+              "$ref": "#/components/schemas/WithheldItem"
+            },
+            "type": "array",
+            "title": "Withheld"
+          },
+          "gaps": {
+            "items": {
+              "$ref": "#/components/schemas/BundleGap"
+            },
+            "type": "array",
+            "title": "Gaps"
+          },
+          "manifest": {
+            "$ref": "#/components/schemas/Manifest"
+          }
+        },
+        "type": "object",
+        "required": [
+          "generated_at",
+          "generated_for",
+          "certification",
+          "figures",
+          "raw_records",
+          "withheld",
+          "gaps",
+          "manifest"
+        ],
+        "title": "EvidenceBundle"
+      },
+      "EvidenceSensitivity": {
+        "properties": {
+          "classification": {
+            "type": "string",
+            "title": "Classification"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "minimum_role": {
+            "type": "string",
+            "title": "Minimum Role"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason"
+          },
+          "readable_by_this_account": {
+            "type": "boolean",
+            "title": "Readable By This Account"
+          },
+          "refusal": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Refusal"
+          }
+        },
+        "type": "object",
+        "required": [
+          "classification",
+          "label",
+          "minimum_role",
+          "reason",
+          "readable_by_this_account"
+        ],
+        "title": "EvidenceSensitivity"
+      },
+      "FigureEvidence": {
+        "properties": {
+          "metric_value_id": {
+            "type": "string",
+            "title": "Metric Value Id"
+          },
+          "metric": {
+            "type": "string",
+            "title": "Metric"
+          },
+          "unit": {
+            "type": "string",
+            "title": "Unit"
+          },
+          "period_start": {
+            "type": "string",
+            "format": "date",
+            "title": "Period Start"
+          },
+          "period_end": {
+            "type": "string",
+            "format": "date",
+            "title": "Period End"
+          },
+          "scope": {
+            "type": "string",
+            "title": "Scope"
+          },
+          "value": {
+            "type": "string",
+            "title": "Value"
+          },
+          "calc_name": {
+            "type": "string",
+            "title": "Calc Name"
+          },
+          "calc_version": {
+            "type": "string",
+            "title": "Calc Version"
+          },
+          "category": {
+            "type": "string",
+            "title": "Category"
+          },
+          "detail": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Detail",
+            "default": {}
+          },
+          "receipt": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Receipt"
+          },
+          "receipt_sha256": {
+            "type": "string",
+            "title": "Receipt Sha256"
+          },
+          "signed_receipt_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Signed Receipt Sha256"
+          },
+          "matches_signed_document": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Matches Signed Document"
+          },
+          "lineage": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LineageNode"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "lineage_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lineage Sha256"
+          },
+          "lineage_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lineage Error"
+          },
+          "lineage_omitted": {
+            "type": "boolean",
+            "title": "Lineage Omitted",
+            "default": false
+          },
+          "raw_record_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Raw Record Ids",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "metric_value_id",
+          "metric",
+          "unit",
+          "period_start",
+          "period_end",
+          "scope",
+          "value",
+          "calc_name",
+          "calc_version",
+          "category",
+          "receipt",
+          "receipt_sha256"
+        ],
+        "title": "FigureEvidence",
+        "description": "One covered figure, verbatim as the calculation library stored it.\n\n``receipt`` is the figure's receipt object exactly as the certification\nsignature covers it \u2014 served whole, including its own ``receipt_sha256``\nkey, so a reader can re-canonicalize and re-hash it without being told\nwhich fields to pick. The flat fields beside it are the same values again,\nnamed, so a spreadsheet or a UI does not have to reach into the receipt."
+      },
+      "GeneratedFor": {
+        "properties": {
+          "username": {
+            "type": "string",
+            "title": "Username"
+          },
+          "role": {
+            "type": "string",
+            "title": "Role"
+          },
+          "role_label": {
+            "type": "string",
+            "title": "Role Label"
+          },
+          "authenticated_via": {
+            "type": "string",
+            "title": "Authenticated Via"
+          },
+          "idp_issuer": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Idp Issuer"
+          },
+          "idp_subject": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Idp Subject"
+          },
+          "note": {
+            "type": "string",
+            "title": "Note"
+          }
+        },
+        "type": "object",
+        "required": [
+          "username",
+          "role",
+          "role_label",
+          "authenticated_via",
+          "note"
+        ],
+        "title": "GeneratedFor",
+        "description": "Who this bundle was produced for. On the bundle because withholding\ndepends on it \u2014 an unattributed bundle cannot be read safely."
       },
       "HTTPValidationError": {
         "properties": {
@@ -6360,6 +8740,90 @@
           "audit_event_id"
         ],
         "title": "LogoUploadResponse"
+      },
+      "Manifest": {
+        "properties": {
+          "artifact_count": {
+            "type": "integer",
+            "title": "Artifact Count"
+          },
+          "artifacts": {
+            "items": {
+              "$ref": "#/components/schemas/ManifestEntry"
+            },
+            "type": "array",
+            "title": "Artifacts"
+          },
+          "withheld_count": {
+            "type": "integer",
+            "title": "Withheld Count"
+          },
+          "gap_count": {
+            "type": "integer",
+            "title": "Gap Count"
+          },
+          "canonicalization": {
+            "type": "string",
+            "title": "Canonicalization",
+            "default": "json.dumps(bundle, sort_keys=True, separators=(',', ':'), ensure_ascii=True, allow_nan=False).encode('utf-8')"
+          },
+          "excluded_field": {
+            "type": "string",
+            "title": "Excluded Field",
+            "default": "manifest.bundle_sha256"
+          },
+          "bundle_sha256_recipe": {
+            "type": "string",
+            "title": "Bundle Sha256 Recipe",
+            "default": "To check this bundle has not been edited since Headway produced it: take this whole JSON document, delete the single field manifest.bundle_sha256 (delete the field itself \u2014 do not blank it, do not replace it with null), serialize what is left with json.dumps(bundle, sort_keys=True, separators=(',', ':'), ensure_ascii=True, allow_nan=False).encode('utf-8'), and take the SHA-256 of those bytes as lowercase hex. It must equal manifest.bundle_sha256. That serialization is deterministic \u2014 object keys sorted at every level, no whitespace, every non-ASCII character escaped \u2014 so it does not matter what order your JSON library read the fields in, and it is the same recipe Headway uses for the certification signature itself (services/api/headway_api/signing.py). Every figure in this bundle is a JSON string, never a number, so no decimal rounding can change the bytes you hash."
+          },
+          "bundle_sha256": {
+            "type": "string",
+            "title": "Bundle Sha256"
+          }
+        },
+        "type": "object",
+        "required": [
+          "artifact_count",
+          "artifacts",
+          "withheld_count",
+          "gap_count",
+          "bundle_sha256"
+        ],
+        "title": "Manifest"
+      },
+      "ManifestEntry": {
+        "properties": {
+          "artifact": {
+            "type": "string",
+            "title": "Artifact"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "location": {
+            "type": "string",
+            "title": "Location"
+          },
+          "sha256": {
+            "type": "string",
+            "title": "Sha256"
+          },
+          "digest_of": {
+            "type": "string",
+            "title": "Digest Of"
+          }
+        },
+        "type": "object",
+        "required": [
+          "artifact",
+          "kind",
+          "location",
+          "sha256",
+          "digest_of"
+        ],
+        "title": "ManifestEntry"
       },
       "MeasurementCreate": {
         "properties": {
@@ -6971,6 +9435,120 @@
         ],
         "title": "OptionsResponse"
       },
+      "PayloadPreview": {
+        "properties": {
+          "record_id": {
+            "type": "string",
+            "title": "Record Id"
+          },
+          "content_type": {
+            "type": "string",
+            "title": "Content Type"
+          },
+          "size_bytes": {
+            "type": "integer",
+            "title": "Size Bytes"
+          },
+          "read_from": {
+            "type": "string",
+            "title": "Read From"
+          },
+          "decoder": {
+            "type": "string",
+            "title": "Decoder"
+          },
+          "decoder_note": {
+            "type": "string",
+            "title": "Decoder Note"
+          },
+          "truncated": {
+            "type": "boolean",
+            "title": "Truncated"
+          },
+          "truncation_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Truncation Note"
+          },
+          "caps": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Caps"
+          },
+          "gtfs_realtime": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gtfs Realtime"
+          },
+          "delimited": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delimited"
+          },
+          "text": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text"
+          },
+          "undecoded": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Undecoded"
+          },
+          "download_note": {
+            "type": "string",
+            "title": "Download Note"
+          }
+        },
+        "type": "object",
+        "required": [
+          "record_id",
+          "content_type",
+          "size_bytes",
+          "read_from",
+          "decoder",
+          "decoder_note",
+          "truncated",
+          "caps",
+          "download_note"
+        ],
+        "title": "PayloadPreview",
+        "description": "A bounded look inside. Every cap that applied is stated in ``caps``."
+      },
       "PlanCreate": {
         "properties": {
           "report_year": {
@@ -7382,6 +9960,127 @@
         "title": "PreviewSide",
         "description": "One variant's outcome for one metric: the would-be value (or an\nhonest refusal) plus every would-be finding. Nothing here was written\nanywhere."
       },
+      "ProviderConfigResponse": {
+        "properties": {
+          "configured": {
+            "type": "boolean",
+            "title": "Configured"
+          },
+          "discovery_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Discovery Url"
+          },
+          "client_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Id"
+          },
+          "client_secret_set": {
+            "type": "boolean",
+            "title": "Client Secret Set",
+            "default": false
+          },
+          "redirect_uri": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Redirect Uri"
+          },
+          "groups_claim": {
+            "type": "string",
+            "title": "Groups Claim",
+            "default": "groups"
+          },
+          "username_claim": {
+            "type": "string",
+            "title": "Username Claim",
+            "default": "preferred_username"
+          },
+          "clock_skew_seconds": {
+            "type": "integer",
+            "title": "Clock Skew Seconds",
+            "default": 120
+          },
+          "ca_bundle_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ca Bundle Path"
+          },
+          "button_label": {
+            "type": "string",
+            "title": "Button Label",
+            "default": "Sign in with single sign-on"
+          },
+          "is_enabled": {
+            "type": "boolean",
+            "title": "Is Enabled",
+            "default": false
+          },
+          "updated_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated By"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "secret_storage_available": {
+            "type": "boolean",
+            "title": "Secret Storage Available",
+            "default": true
+          },
+          "disabled_by_environment": {
+            "type": "boolean",
+            "title": "Disabled By Environment",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "configured"
+        ],
+        "title": "ProviderConfigResponse",
+        "description": "The configuration as an admin sees it.\n\n``client_secret_set`` is a boolean and there is no field that could ever\ncarry the secret. Show-once means show once."
+      },
       "PublicCertificationRef": {
         "properties": {
           "certification_id": {
@@ -7583,6 +10282,184 @@
           "audit_event_id"
         ],
         "title": "PutServiceDayOverrideResponse"
+      },
+      "RawRecordEvidence": {
+        "properties": {
+          "record_id": {
+            "type": "string",
+            "title": "Record Id"
+          },
+          "content_address": {
+            "$ref": "#/components/schemas/ContentAddress"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "connector": {
+            "type": "string",
+            "title": "Connector"
+          },
+          "connector_version": {
+            "type": "string",
+            "title": "Connector Version"
+          },
+          "content_type": {
+            "type": "string",
+            "title": "Content Type"
+          },
+          "payload_encoding": {
+            "type": "string",
+            "title": "Payload Encoding"
+          },
+          "fetched_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Fetched At"
+          },
+          "landed_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Landed At"
+          },
+          "parse_status": {
+            "type": "string",
+            "title": "Parse Status"
+          },
+          "parse_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parse Error"
+          },
+          "sensitivity": {
+            "$ref": "#/components/schemas/EvidenceSensitivity"
+          },
+          "contents_included": {
+            "type": "boolean",
+            "title": "Contents Included",
+            "default": false
+          },
+          "contents_note": {
+            "type": "string",
+            "title": "Contents Note",
+            "default": "The stored bytes of this record are not copied into this bundle. Its id is their SHA-256, so the id is the proof of what they were."
+          }
+        },
+        "type": "object",
+        "required": [
+          "record_id",
+          "content_address",
+          "source",
+          "connector",
+          "connector_version",
+          "content_type",
+          "payload_encoding",
+          "fetched_at",
+          "landed_at",
+          "parse_status",
+          "sensitivity"
+        ],
+        "title": "RawRecordEvidence",
+        "description": "One raw-record leaf: the label on the evidence bag, and its seal."
+      },
+      "RawRecordLabel": {
+        "properties": {
+          "record_id": {
+            "type": "string",
+            "title": "Record Id"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "simulated": {
+            "type": "boolean",
+            "title": "Simulated"
+          },
+          "connector": {
+            "type": "string",
+            "title": "Connector"
+          },
+          "connector_version": {
+            "type": "string",
+            "title": "Connector Version"
+          },
+          "content_type": {
+            "type": "string",
+            "title": "Content Type"
+          },
+          "payload_encoding": {
+            "type": "string",
+            "title": "Payload Encoding"
+          },
+          "fetched_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Fetched At"
+          },
+          "landed_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Landed At"
+          },
+          "parse_status": {
+            "type": "string",
+            "title": "Parse Status"
+          },
+          "parse_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parse Error"
+          },
+          "stored_bytes": {
+            "$ref": "#/components/schemas/StoredBytes"
+          },
+          "content_address": {
+            "$ref": "#/components/schemas/ContentAddress"
+          },
+          "sensitivity": {
+            "$ref": "#/components/schemas/SensitivityBlock"
+          },
+          "decoder": {
+            "$ref": "#/components/schemas/DecoderBlock"
+          },
+          "immutability_note": {
+            "type": "string",
+            "title": "Immutability Note"
+          }
+        },
+        "type": "object",
+        "required": [
+          "record_id",
+          "source",
+          "simulated",
+          "connector",
+          "connector_version",
+          "content_type",
+          "payload_encoding",
+          "fetched_at",
+          "landed_at",
+          "parse_status",
+          "stored_bytes",
+          "content_address",
+          "sensitivity",
+          "decoder",
+          "immutability_note"
+        ],
+        "title": "RawRecordLabel",
+        "description": "The label on the evidence bag. Every field is a ``raw.records`` column\nor a measurement taken now; nothing is inferred."
       },
       "RequirementResponse": {
         "properties": {
@@ -7823,6 +10700,56 @@
           "audit_event_id"
         ],
         "title": "RevokeSubscriptionResponse"
+      },
+      "RoleMapping": {
+        "properties": {
+          "mapping_id": {
+            "type": "string",
+            "title": "Mapping Id"
+          },
+          "claim_value": {
+            "type": "string",
+            "title": "Claim Value"
+          },
+          "headway_role": {
+            "type": "string",
+            "title": "Headway Role"
+          },
+          "role_label": {
+            "type": "string",
+            "title": "Role Label"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "created_by": {
+            "type": "string",
+            "title": "Created By"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "mapping_id",
+          "claim_value",
+          "headway_role",
+          "role_label",
+          "created_by",
+          "created_at"
+        ],
+        "title": "RoleMapping"
       },
       "RouteFeature": {
         "properties": {
@@ -8485,6 +11412,50 @@
         ],
         "title": "SandboxPreviewResponse"
       },
+      "SensitivityBlock": {
+        "properties": {
+          "classification": {
+            "type": "string",
+            "title": "Classification"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "minimum_role": {
+            "type": "string",
+            "title": "Minimum Role"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason"
+          },
+          "preview_allowed": {
+            "type": "boolean",
+            "title": "Preview Allowed"
+          },
+          "refusal": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Refusal"
+          }
+        },
+        "type": "object",
+        "required": [
+          "classification",
+          "label",
+          "minimum_role",
+          "reason",
+          "preview_allowed"
+        ],
+        "title": "SensitivityBlock"
+      },
       "ServiceDayOverride": {
         "properties": {
           "service_date": {
@@ -8759,6 +11730,48 @@
         ],
         "title": "Ss50Deadline"
       },
+      "SsoStatus": {
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          },
+          "button_label": {
+            "type": "string",
+            "title": "Button Label"
+          }
+        },
+        "type": "object",
+        "required": [
+          "enabled",
+          "button_label"
+        ],
+        "title": "SsoStatus",
+        "description": "What the sign-in screen may know before anyone is signed in.\n\nDeliberately tiny: whether the button should appear and what it should\nsay. No discovery URL, no client id, no issuer \u2014 an unauthenticated\ncaller learns nothing about the agency's identity provider that it could\nnot learn by clicking the button."
+      },
+      "StartLoginResponse": {
+        "properties": {
+          "authorization_url": {
+            "type": "string",
+            "title": "Authorization Url"
+          },
+          "state": {
+            "type": "string",
+            "title": "State"
+          },
+          "browser_token": {
+            "type": "string",
+            "title": "Browser Token"
+          }
+        },
+        "type": "object",
+        "required": [
+          "authorization_url",
+          "state",
+          "browser_token"
+        ],
+        "title": "StartLoginResponse"
+      },
       "StopFeature": {
         "properties": {
           "type": {
@@ -8849,6 +11862,52 @@
         ],
         "title": "StopsCollection",
         "description": "GeoJSON FeatureCollection of canonical.stops. The extra members are\nGeoJSON foreign members (RFC 7946 \u00a76.1) carrying Headway's honesty\nmetadata."
+      },
+      "StoredBytes": {
+        "properties": {
+          "location": {
+            "type": "string",
+            "title": "Location"
+          },
+          "object_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Object Key"
+          },
+          "size_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Size Bytes"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "note": {
+            "type": "string",
+            "title": "Note"
+          }
+        },
+        "type": "object",
+        "required": [
+          "location",
+          "status",
+          "note"
+        ],
+        "title": "StoredBytes",
+        "description": "Where the payload lives and how big it is \u2014 measured, never assumed."
       },
       "SubscriptionResponse": {
         "properties": {
@@ -9051,6 +12110,55 @@
         ],
         "title": "SupersedeRequest"
       },
+      "TestConfigResponse": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          },
+          "steps": {
+            "items": {
+              "$ref": "#/components/schemas/TestStep"
+            },
+            "type": "array",
+            "title": "Steps"
+          },
+          "audit_event_id": {
+            "type": "integer",
+            "title": "Audit Event Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ok",
+          "steps",
+          "audit_event_id"
+        ],
+        "title": "TestConfigResponse"
+      },
+      "TestStep": {
+        "properties": {
+          "step": {
+            "type": "string",
+            "title": "Step"
+          },
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "step",
+          "ok",
+          "message"
+        ],
+        "title": "TestStep"
+      },
       "ThresholdExplanation": {
         "properties": {
           "threshold": {
@@ -9073,6 +12181,209 @@
           "citation"
         ],
         "title": "ThresholdExplanation"
+      },
+      "UpdateProviderRequest": {
+        "properties": {
+          "discovery_url": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Discovery Url"
+          },
+          "client_id": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Client Id"
+          },
+          "client_secret": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Secret"
+          },
+          "redirect_uri": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Redirect Uri"
+          },
+          "groups_claim": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Groups Claim",
+            "default": "groups"
+          },
+          "username_claim": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Username Claim",
+            "default": "preferred_username"
+          },
+          "clock_skew_seconds": {
+            "type": "integer",
+            "maximum": 600.0,
+            "minimum": 0.0,
+            "title": "Clock Skew Seconds",
+            "default": 120
+          },
+          "ca_bundle_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ca Bundle Path"
+          },
+          "button_label": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Button Label",
+            "default": "Sign in with single sign-on"
+          },
+          "is_enabled": {
+            "type": "boolean",
+            "title": "Is Enabled",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "discovery_url",
+          "client_id",
+          "redirect_uri"
+        ],
+        "title": "UpdateProviderRequest"
+      },
+      "UpdateProviderResponse": {
+        "properties": {
+          "configured": {
+            "type": "boolean",
+            "title": "Configured"
+          },
+          "discovery_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Discovery Url"
+          },
+          "client_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Id"
+          },
+          "client_secret_set": {
+            "type": "boolean",
+            "title": "Client Secret Set",
+            "default": false
+          },
+          "redirect_uri": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Redirect Uri"
+          },
+          "groups_claim": {
+            "type": "string",
+            "title": "Groups Claim",
+            "default": "groups"
+          },
+          "username_claim": {
+            "type": "string",
+            "title": "Username Claim",
+            "default": "preferred_username"
+          },
+          "clock_skew_seconds": {
+            "type": "integer",
+            "title": "Clock Skew Seconds",
+            "default": 120
+          },
+          "ca_bundle_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ca Bundle Path"
+          },
+          "button_label": {
+            "type": "string",
+            "title": "Button Label",
+            "default": "Sign in with single sign-on"
+          },
+          "is_enabled": {
+            "type": "boolean",
+            "title": "Is Enabled",
+            "default": false
+          },
+          "updated_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated By"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "secret_storage_available": {
+            "type": "boolean",
+            "title": "Secret Storage Available",
+            "default": true
+          },
+          "disabled_by_environment": {
+            "type": "boolean",
+            "title": "Disabled By Environment",
+            "default": false
+          },
+          "audit_event_id": {
+            "type": "integer",
+            "title": "Audit Event Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "configured",
+          "audit_event_id"
+        ],
+        "title": "UpdateProviderResponse"
       },
       "UpdateSettingRequest": {
         "properties": {
@@ -9263,6 +12574,145 @@
           "message"
         ],
         "title": "VerificationResult"
+      },
+      "VerificationVerdict": {
+        "properties": {
+          "record_id": {
+            "type": "string",
+            "title": "Record Id"
+          },
+          "verified_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Verified At"
+          },
+          "result": {
+            "type": "string",
+            "title": "Result"
+          },
+          "algorithm": {
+            "type": "string",
+            "title": "Algorithm"
+          },
+          "expected_digest": {
+            "type": "string",
+            "title": "Expected Digest"
+          },
+          "actual_digest": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actual Digest"
+          },
+          "size_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Size Bytes"
+          },
+          "read_from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Read From"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "headline": {
+            "type": "string",
+            "title": "Headline"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail"
+          },
+          "dq_issue_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dq Issue Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "record_id",
+          "verified_at",
+          "result",
+          "algorithm",
+          "expected_digest",
+          "headline",
+          "detail"
+        ],
+        "title": "VerificationVerdict",
+        "description": "The result of re-reading the bytes and re-computing their hash.\n\n``result`` is the whole answer in one word and the HTTP status agrees\nwith it: match is 200, mismatch is 409, and an unreadable payload is\n404/410/503 by reason. A caller that only checks the status code cannot\nmistake a failure for a pass."
+      },
+      "WithheldItem": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "what": {
+            "type": "string",
+            "title": "What"
+          },
+          "classification": {
+            "type": "string",
+            "title": "Classification"
+          },
+          "minimum_role": {
+            "type": "string",
+            "title": "Minimum Role"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "id",
+          "what",
+          "classification",
+          "minimum_role",
+          "reason"
+        ],
+        "title": "WithheldItem",
+        "description": "Something left out ON PURPOSE, by the content-sensitivity rule."
       }
     }
   }

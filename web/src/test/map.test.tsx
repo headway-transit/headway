@@ -13,7 +13,7 @@
  */
 
 import { describe, expect, it, vi } from "vitest";
-import { screen, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
   expectNoAxeViolations,
@@ -23,6 +23,17 @@ import {
 } from "./helpers";
 import type { RouteHandler } from "./helpers";
 import { copy } from "../copy";
+import { BASEMAP_FONT, BASEMAP_STYLES } from "../map/basemapStyle.ts";
+import { contrastRatio } from "../map/contrast.ts";
+import {
+  FINDING_GLYPH,
+  MARK_HALO,
+  TOKEN_MARK_COLORS,
+  modeColorExpression,
+  routeOpacityExpression,
+  routeWidthExpression,
+} from "../map/marks";
+import { PULSE_STATIC } from "../map/pulse";
 
 // ---- the maplibre-gl double (hoisted before the view imports it) ----
 vi.mock("maplibre-gl", () => {
@@ -33,8 +44,20 @@ vi.mock("maplibre-gl", () => {
      *  pmtiles source is only ever added in the present state). */
     sources: Record<string, unknown> = {};
     /** addLayer calls in order: {id, before} — pins that every basemap
-     *  street layer is inserted BELOW the schematic route lines. */
-    layerAdds: { id: string; before?: string }[] = [];
+     *  street layer is inserted BELOW the schematic route lines. The whole
+     *  spec is kept too, so the basemap-style wave (handoff 0043) can
+     *  assert the AUTHORED paint actually reaches the canvas. */
+    layerAdds: { id: string; before?: string; layer: LayerLike }[] = [];
+    /** setPaintProperty calls in order — the background ground color
+     *  follows the STREET style once tiles are drawing (handoff 0043). */
+    paintSets: { id: string; prop: string; value: unknown }[] = [];
+    /** setFeatureState calls in order — the relationship inspector lights
+     *  a finding's routes IN PLACE rather than re-sending the source
+     *  (handoff 0043, design points 6 and 7). */
+    featureStates: { source: string; id: unknown; state: unknown }[] = [];
+    /** The last data each source was given, so the mode join and the
+     *  findings placement can be asserted on what reached the canvas. */
+    sourceData: Record<string, unknown> = {};
     constructor() {
       fakeMaps.push(this);
     }
@@ -51,8 +74,8 @@ vi.mock("maplibre-gl", () => {
     addSource(id: string, spec: unknown) {
       this.sources[id] = spec;
     }
-    addLayer(layer: { id: string }, before?: string) {
-      this.layerAdds.push({ id: layer.id, before });
+    addLayer(layer: LayerLike, before?: string) {
+      this.layerAdds.push({ id: layer.id, before, layer });
     }
     removeLayer() {}
     getLayer() {
@@ -60,10 +83,26 @@ vi.mock("maplibre-gl", () => {
     }
     getSource(id: string) {
       if (id === "basemap" && !(id in this.sources)) return undefined;
-      return { setData: vi.fn() };
+      return {
+        setData: (data: unknown) => {
+          this.sourceData[id] = data;
+        },
+      };
     }
-    setPaintProperty() {}
+    setPaintProperty(id: string, prop: string, value: unknown) {
+      this.paintSets.push({ id, prop, value });
+    }
     setFilter() {}
+    setFeatureState(
+      target: { source: string; id: unknown },
+      state: unknown,
+    ) {
+      this.featureStates.push({
+        source: target.source,
+        id: target.id,
+        state,
+      });
+    }
     getCanvas() {
       return this.canvas;
     }
@@ -78,9 +117,18 @@ vi.mock("maplibre-gl", () => {
   return { Map: FakeMap, setWorkerUrl: () => {}, addProtocol: () => {} };
 });
 const fakeMaps: FakeMapShape[] = [];
+interface LayerLike {
+  id: string;
+  type?: string;
+  paint?: Record<string, unknown>;
+  layout?: Record<string, unknown>;
+}
 interface FakeMapShape {
   sources: Record<string, unknown>;
-  layerAdds: { id: string; before?: string }[];
+  layerAdds: { id: string; before?: string; layer: LayerLike }[];
+  paintSets: { id: string; prop: string; value: unknown }[];
+  featureStates: { source: string; id: unknown; state: unknown }[];
+  sourceData: Record<string, unknown>;
 }
 
 // ---- fixtures mirroring the live envelopes (handoff 0023 evidence) ----
@@ -600,6 +648,186 @@ describe("/map", () => {
     await expectNoAxeViolations();
   });
 
+  it("street style is the USER's choice, never the app theme: dark chrome still gets light streets by default, switching swaps the street layers only, and the choice persists (UAT 2026-07-29)", async () => {
+    window.localStorage.setItem("headway-theme", "dark");
+    window.localStorage.removeItem("headway-basemap-style");
+    signInAs("viewer");
+    mockApi({
+      ...geometryRoutes(),
+      "GET /ops/vehicles/latest": { status: 200, body: vehiclesLive },
+      ...basemapPresentRoutes,
+    });
+    renderApp("/map");
+    const user = userEvent.setup();
+
+    await screen.findByText("© OpenStreetMap contributors · Protomaps");
+    const map = fakeMaps[fakeMaps.length - 1];
+
+    // The app is in DARK theme, yet the streets came up LIGHT: legibility
+    // is a task decision, not a branding one.
+    const lightControl = screen.getByRole("button", {
+      name: copy.map.basemap.style.light,
+    });
+    expect(lightControl).toHaveAttribute("aria-pressed", "true");
+    expect(
+      screen.getByRole("button", { name: copy.map.basemap.style.dark }),
+    ).toHaveAttribute("aria-pressed", "false");
+
+    const streetAddsBefore = map.layerAdds.filter((l) =>
+      l.id.startsWith("basemap-"),
+    ).length;
+    expect(streetAddsBefore).toBeGreaterThan(0);
+    // Headway's OWN marks were added too and must survive a style swap.
+    const overlayAddsBefore = map.layerAdds.filter(
+      (l) => !l.id.startsWith("basemap-"),
+    ).length;
+
+    await user.click(
+      screen.getByRole("button", { name: copy.map.basemap.style.dark }),
+    );
+
+    // Only street layers were re-added; the overlay layers were never
+    // touched, and the choice is remembered for next time.
+    expect(
+      map.layerAdds.filter((l) => l.id.startsWith("basemap-")).length,
+    ).toBeGreaterThan(streetAddsBefore);
+    expect(
+      map.layerAdds.filter((l) => !l.id.startsWith("basemap-")).length,
+    ).toBe(overlayAddsBefore);
+    expect(window.localStorage.getItem("headway-basemap-style")).toBe("dark");
+    expect(
+      screen.getByRole("button", { name: copy.map.basemap.style.dark }),
+    ).toHaveAttribute("aria-pressed", "true");
+
+    window.localStorage.removeItem("headway-theme");
+    window.localStorage.removeItem("headway-basemap-style");
+  });
+
+  // ---- the two authored, contrast-tuned styles (handoff 0043) ----------
+
+  it("draws HEADWAY's OWN authored street styles, not the vendor flavors: the dark map puts LIGHT streets on a near-black ground and every label carries a raised halo", async () => {
+    window.localStorage.removeItem("headway-basemap-style");
+    signInAs("viewer");
+    mockApi({
+      ...geometryRoutes(),
+      "GET /ops/vehicles/latest": { status: 200, body: vehiclesLive },
+      ...basemapPresentRoutes,
+    });
+    renderApp("/map");
+    const user = userEvent.setup();
+    await screen.findByText(copy.map.basemap.attribution);
+    const map = fakeMaps[fakeMaps.length - 1];
+
+    const streetLayers = () =>
+      map.layerAdds.filter((l) => l.id.startsWith("basemap-"));
+
+    // Light is what came up (the ITS manager found it legible), and it is
+    // OURS: the ground and the road casings are the authored values.
+    /** The most recent add of a layer id — after a style swap that is the
+     *  layer the newly chosen style put on the canvas. */
+    const latest = (id: string) =>
+      [...streetLayers()].reverse().find((l) => l.id === id);
+
+    const lightGround = String(BASEMAP_STYLES.light.theme.earth);
+    expect(latest("basemap-earth")?.layer.paint?.["fill-color"]).toBe(
+      lightGround,
+    );
+
+    const beforeSwap = streetLayers().length;
+    await user.click(
+      screen.getByRole("button", { name: copy.map.basemap.style.dark }),
+    );
+    expect(streetLayers().length).toBeGreaterThan(beforeSwap);
+
+    const darkTheme = BASEMAP_STYLES.dark.theme as Record<string, string>;
+    expect(latest("basemap-earth")?.layer.paint?.["fill-color"]).toBe(
+      darkTheme.earth,
+    );
+
+    // The street network is LIGHTER than the ground it sits on — the whole
+    // point of the wave — and the separation is measured, never eyeballed.
+    expect(latest("basemap-roads_minor")).toBeDefined();
+    expect(
+      contrastRatio(darkTheme.minor_b, darkTheme.earth),
+    ).toBeGreaterThanOrEqual(3);
+    expect(
+      contrastRatio(darkTheme.roads_label_minor, darkTheme.earth),
+    ).toBeGreaterThanOrEqual(4.5);
+
+    // Every label layer that reached the canvas carries the raised halo.
+    const symbols = streetLayers().filter((l) => l.layer.type === "symbol");
+    expect(symbols.length).toBeGreaterThan(0);
+    for (const s of symbols) {
+      expect(Number(s.layer.paint?.["text-halo-width"])).toBeGreaterThan(1);
+      expect(s.layer.layout?.["text-font"]).toEqual(["Noto Sans Regular"]);
+    }
+
+    window.localStorage.removeItem("headway-basemap-style");
+  });
+
+  it("the ground under everything follows the STREET style, not the app theme: choosing the dark map repaints the canvas to its own near-black, so no pale halo survives around the extracted region", async () => {
+    window.localStorage.removeItem("headway-basemap-style");
+    signInAs("viewer");
+    mockApi({
+      ...geometryRoutes(),
+      "GET /ops/vehicles/latest": { status: 200, body: vehiclesLive },
+      ...basemapPresentRoutes,
+    });
+    renderApp("/map");
+    const user = userEvent.setup();
+    await screen.findByText(copy.map.basemap.attribution);
+    const map = fakeMaps[fakeMaps.length - 1];
+
+    const lastBackground = () =>
+      [...map.paintSets]
+        .reverse()
+        .find((p) => p.id === "background" && p.prop === "background-color")
+        ?.value;
+
+    expect(lastBackground()).toBe(BASEMAP_STYLES.light.theme.background);
+
+    await user.click(
+      screen.getByRole("button", { name: copy.map.basemap.style.dark }),
+    );
+    expect(lastBackground()).toBe(BASEMAP_STYLES.dark.theme.background);
+
+    window.localStorage.removeItem("headway-basemap-style");
+  });
+
+  it("names the street style in use and states the legibility promise in the legend — the ITS manager's report answered where people look", async () => {
+    window.localStorage.removeItem("headway-basemap-style");
+    signInAs("viewer");
+    mockApi({
+      ...geometryRoutes(),
+      "GET /ops/vehicles/latest": { status: 200, body: vehiclesLive },
+      ...basemapPresentRoutes,
+    });
+    renderApp("/map");
+    const user = userEvent.setup();
+    await screen.findByText(copy.map.basemap.attribution);
+
+    const legend = screen.getByRole("region", {
+      name: copy.map.legend.heading,
+    });
+    expect(legend).toHaveTextContent(
+      copy.map.basemap.legendStyleLine(BASEMAP_STYLES.light.name),
+    );
+    // The promise is stated in plain language with the real numbers.
+    expect(copy.map.basemap.legendStyleLine("x")).toContain("3:1");
+    expect(copy.map.basemap.legendStyleLine("x")).toContain("4.5:1");
+    expect(copy.map.basemap.style.note).toContain("3:1");
+
+    await user.click(
+      screen.getByRole("button", { name: copy.map.basemap.style.dark }),
+    );
+    expect(legend).toHaveTextContent(
+      copy.map.basemap.legendStyleLine(BASEMAP_STYLES.dark.name),
+    );
+    await expectNoAxeViolations();
+
+    window.localStorage.removeItem("headway-basemap-style");
+  });
+
   it("EXTENDS the zero-external-requests pin to the basemap-present state: every request stays same-origin (detection HEAD + ranged magic GET included)", async () => {
     signInAs("viewer");
     const calls = mockApi({
@@ -646,5 +874,548 @@ describe("/map", () => {
     ).not.toBeInTheDocument();
     const map = fakeMaps[fakeMaps.length - 1];
     expect("basemap" in map.sources).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Handoff 0043, second half: mode-aware marks, the flagged-findings layer and
+// the relationship inspector. The canvas is a spy double, so these tests pin
+// (a) exactly what paint reaches it, (b) the readable equivalents beside it,
+// and (c) the honesty rules that would otherwise be prose in a comment.
+// ---------------------------------------------------------------------------
+
+/** Two routes with DIFFERENT modes — the mode marks need something to tell
+ *  apart, and the mode filter needs more than one option to be real. */
+const routesTwoModes = {
+  ...routesBody,
+  features: [
+    routesBody.features[0],
+    {
+      type: "Feature",
+      geometry: {
+        type: "LineString",
+        coordinates: [
+          [-71.05, 42.35],
+          [-71.06, 42.36],
+          [-71.07, 42.37],
+        ],
+      },
+      properties: {
+        route_id: "39",
+        short_name: "39",
+        long_name: "Forest Hills — Back Bay",
+        mode: "bus",
+        geometry_kind: "schematic_stop_sequence",
+        pattern_trip_count: 200,
+        stop_count: 3,
+        stops_missing_coordinates: 0,
+      },
+    },
+  ],
+  route_count: 2,
+  total_routes_with_trips: 2,
+};
+
+/** One vehicle per mode, plus one the schedule data cannot place. */
+const vehiclesByMode = {
+  ...vehiclesLive,
+  vehicles: [
+    { ...liveVehicle, vehicle_id: "1702", route_id: "Red" },
+    { ...liveVehicle, vehicle_id: "2101", route_id: "39", source_record_id: "raw-3" },
+    { ...simulatedVehicle },
+  ],
+  vehicle_count: 3,
+  total_in_window: 3,
+};
+
+function subjectContext(routeIds: string[]) {
+  return {
+    version: 1,
+    kind: "trips",
+    total: 4,
+    grouped_by: "block",
+    group_count: 1,
+    group_cap: 20,
+    trip_id_cap: 20,
+    groups: [
+      {
+        block_id: "225",
+        block_label: "225-4",
+        trip_count: 4,
+        routes: routeIds.map((id) => ({
+          route_id: id,
+          short_name: id,
+          long_name: `${id} Line`,
+        })),
+        route_count: routeIds.length,
+        first_departure: "2026-07-22T05:00:00Z",
+        last_departure: "2026-07-22T23:00:00Z",
+        trip_ids: ["t1", "t2", "t3", "t4"],
+      },
+    ],
+  };
+}
+
+const flaggedIssue = {
+  issue_id: "dq-1",
+  issue_type: "coverage_gap",
+  severity: "blocking",
+  status: "open",
+  owner: null,
+  title: "Recorded miles stop part-way through block 225-4",
+  description:
+    "Four trips on block 225-4 have no recorded position after 14:10, so the miles for that block cannot be certified.",
+  created_at: "2026-07-22T15:00:00Z",
+  resolved_at: null,
+  resolution: null,
+  subject_context: subjectContext(["39"]),
+};
+
+/** A finding that CANNOT be drawn — it is about the run, not about trips. */
+const runWideIssue = {
+  ...flaggedIssue,
+  issue_id: "dq-2",
+  title: "The feed reported no positions at all for two hours",
+  subject_context: null,
+};
+
+const calcRunNamingIssue = {
+  run_id: "run-9",
+  requested_by: "steward",
+  requested_at: "2026-07-23T09:00:00Z",
+  period_start: "2026-06-01",
+  period_end: "2026-07-01",
+  status: "succeeded",
+  started_at: "2026-07-23T09:00:01Z",
+  finished_at: "2026-07-23T09:02:00Z",
+  runner_pid: null,
+  summary: {
+    metrics: [
+      {
+        calc_name: "vrm_v0",
+        calc_version: "0.3.0",
+        metric: "vrm",
+        unit: "miles",
+        scope: "agency",
+        outcome: "refused",
+        value: null,
+        metric_value_id: null,
+        coverage: null,
+        blocking_issue_ids: ["dq-1"],
+        warning_issue_ids: [],
+        info_issue_ids: [],
+      },
+    ],
+  },
+  stdout_tail: null,
+  duration_seconds: 119,
+  stale: false,
+  stale_note: null,
+};
+
+function findingRoutes(
+  issues: unknown[] = [],
+  runs: unknown[] = [],
+): Record<string, RouteHandler> {
+  return {
+    "GET /dq/issues": {
+      status: 200,
+      body: {
+        issues,
+        total: issues.length,
+        limit: 50,
+        next_cursor: null,
+        has_more: false,
+      },
+    },
+    "GET /dq/issues/dq-1": {
+      status: 200,
+      body: { ...flaggedIssue, source_record_ids: ["sha256:abc123"] },
+    },
+    "GET /dq/issues/dq-2": {
+      status: 200,
+      body: { ...runWideIssue, source_record_ids: null },
+    },
+    "GET /calc/runs": { status: 200, body: runs },
+  };
+}
+
+/** The mark layer as it actually reached the canvas. */
+function markLayer(map: FakeMapShape): LayerLike {
+  const add = map.layerAdds.find((a) => a.id === "vehicles-mark");
+  if (!add) throw new Error("no vehicles-mark layer was added");
+  return add.layer;
+}
+
+describe("/map — mode-aware vehicle marks (handoff 0043, design point 4)", () => {
+  it("encodes mode as ONE data-driven expression per channel — shape, colour and size — and never hides a vehicle to avoid a label collision", async () => {
+    signInAs("viewer");
+    mockApi({
+      "GET /geometry/stops": { status: 200, body: stopsBody },
+      "GET /geometry/routes": { status: 200, body: routesTwoModes },
+      "GET /ops/vehicles/latest": { status: 200, body: vehiclesByMode },
+    });
+    renderApp("/map");
+    await screen.findByRole("heading", { name: "Live map" });
+
+    const layer = markLayer(fakeMaps[fakeMaps.length - 1]);
+    expect(layer.type).toBe("symbol");
+    // Shape, size and colour are each a MATCH over the `mode` property —
+    // one GPU expression over the whole source, not a marker per vehicle.
+    for (const expression of [
+      layer.layout?.["text-field"],
+      layer.layout?.["text-size"],
+      layer.paint?.["text-color"],
+    ]) {
+      expect(Array.isArray(expression)).toBe(true);
+      expect((expression as unknown[])[0]).toBe("match");
+      expect((expression as unknown[])[1]).toEqual(["get", "mode"]);
+    }
+    // The colours are the SHIPPED palette for the ground in use.
+    expect(layer.paint?.["text-color"]).toEqual(modeColorExpression("light"));
+    expect(layer.paint?.["text-halo-color"]).toBe(MARK_HALO.light);
+    // A vehicle is never dropped for a label collision: that would be a
+    // silent gap, which is the one thing this product cannot do.
+    expect(layer.layout?.["text-allow-overlap"]).toBe(true);
+    expect(layer.layout?.["text-ignore-placement"]).toBe(true);
+    // The glyphs come from the vendored font, so no sprite is ever named.
+    expect(layer.layout?.["text-font"]).toEqual([BASEMAP_FONT]);
+    expect(JSON.stringify(layer)).not.toContain("icon-image");
+  });
+
+  it("joins the mode from the agency's OWN schedule data and says 'not known' out loud where it cannot", async () => {
+    signInAs("viewer");
+    mockApi({
+      "GET /geometry/stops": { status: 200, body: stopsBody },
+      "GET /geometry/routes": { status: 200, body: routesTwoModes },
+      "GET /ops/vehicles/latest": { status: 200, body: vehiclesByMode },
+    });
+    renderApp("/map");
+    await screen.findByRole("heading", { name: "Live map" });
+
+    // What actually reached the canvas carries the joined mode.
+    await waitFor(() => {
+      const data = fakeMaps[fakeMaps.length - 1].sourceData.vehicles as {
+        features: { properties: Record<string, unknown> }[];
+      };
+      expect(data.features.map((f) => f.properties.mode)).toEqual([
+        "subway",
+        "bus",
+        "unknown",
+      ]);
+    });
+
+    // And the readable equivalent names every mode in words — the map is
+    // never the only place the encoding exists.
+    await userEvent.click(
+      await screen.findByRole("button", { name: "List the vehicles" }),
+    );
+    const table = await screen.findByRole("table");
+    expect(within(table).getByText("Subway or metro")).toBeInTheDocument();
+    expect(within(table).getByText("Bus")).toBeInTheDocument();
+    expect(within(table).getByText("Not known")).toBeInTheDocument();
+    // The count of unplaceable vehicles is stated, not quietly greyed.
+    expect(
+      screen.getByText(copy.map.marks.unknownNoRoute("1")),
+    ).toBeInTheDocument();
+    await expectNoAxeViolations();
+  });
+
+  it("marks follow the GROUND, not the app theme: dark chrome over a light street map still gets the light-ground palette, and switching the street style repaints them", async () => {
+    signInAs("viewer");
+    // Dark APP theme, light street map (the shipped default pairing).
+    document.documentElement.setAttribute("data-theme", "dark");
+    window.localStorage.setItem("headway-theme", "dark");
+    mockApi({
+      "GET /geometry/stops": { status: 200, body: stopsBody },
+      "GET /geometry/routes": { status: 200, body: routesTwoModes },
+      "GET /ops/vehicles/latest": { status: 200, body: vehiclesByMode },
+      "HEAD /basemap/region.pmtiles": { status: 200, rawBody: "" },
+      "GET /basemap/region.pmtiles": { status: 206, rawBody: "PMTiles" },
+    });
+    renderApp("/map");
+    await screen.findByText(copy.map.basemap.attribution);
+
+    const map = fakeMaps[fakeMaps.length - 1];
+    const colorOf = () =>
+      [...map.paintSets]
+        .reverse()
+        .find((p) => p.id === "vehicles-mark" && p.prop === "text-color")?.value;
+    await waitFor(() => expect(colorOf()).toEqual(modeColorExpression("light")));
+
+    await userEvent.click(screen.getByRole("button", { name: "Dark" }));
+    await waitFor(() => expect(colorOf()).toEqual(modeColorExpression("dark")));
+    // The halo inverts with it: light marks on dark need a DARK outline.
+    expect(
+      [...map.paintSets]
+        .reverse()
+        .find((p) => p.id === "vehicles-mark" && p.prop === "text-halo-color")
+        ?.value,
+    ).toBe(MARK_HALO.dark);
+  });
+});
+
+describe("/map — the mode filter (handoff 0043, design point 6)", () => {
+  it("highlights by REPAINTING what is already on the map: no second request, and nothing removed", async () => {
+    signInAs("viewer");
+    const calls = mockApi({
+      "GET /geometry/stops": { status: 200, body: stopsBody },
+      "GET /geometry/routes": { status: 200, body: routesTwoModes },
+      "GET /ops/vehicles/latest": { status: 200, body: vehiclesByMode },
+    });
+    renderApp("/map");
+    const group = await screen.findByRole("group", {
+      name: copy.map.modeFilter.label,
+    });
+    // Options are data-driven: the modes this agency's routes actually
+    // carry, plus 'unknown' because one vehicle has no mode.
+    expect(
+      within(group)
+        .getAllByRole("button")
+        .map((b) => b.textContent),
+    ).toEqual(["All modes", "Bus", "Subway or metro", "Mode not known"]);
+
+    const before = calls.length;
+    await userEvent.click(within(group).getByRole("button", { name: "Bus" }));
+
+    const map = fakeMaps[fakeMaps.length - 1];
+    await waitFor(() => {
+      const opacity = [...map.paintSets]
+        .reverse()
+        .find((p) => p.id === "routes-line" && p.prop === "line-opacity");
+      expect(opacity?.value).toEqual(routeOpacityExpression("bus"));
+    });
+    expect(
+      [...map.paintSets]
+        .reverse()
+        .find((p) => p.id === "routes-line" && p.prop === "line-width")?.value,
+    ).toEqual(routeWidthExpression("bus"));
+    // Not one extra request: highlighting is paint, not a query.
+    expect(calls.length).toBe(before);
+    // And the vehicle counts are untouched — highlighting hides nothing.
+    expect(
+      screen.getByText(
+        "3 vehicles with a position in the selected window.",
+      ),
+    ).toBeInTheDocument();
+  });
+});
+
+describe("/map — flagged findings and the relationship inspector (handoff 0043, design points 6 and 7)", () => {
+  function flaggedApi(issues: unknown[] = [flaggedIssue, runWideIssue]) {
+    return mockApi({
+      "GET /geometry/stops": { status: 200, body: stopsBody },
+      "GET /geometry/routes": { status: 200, body: routesTwoModes },
+      "GET /ops/vehicles/latest": { status: 200, body: vehiclesByMode },
+      ...findingRoutes(issues, [calcRunNamingIssue]),
+    });
+  }
+
+  it("asks only for the findings that genuinely need a person, and draws them as a FRAME with a shape and a label — never a fill behind a figure", async () => {
+    signInAs("viewer");
+    const calls = flaggedApi();
+    renderApp("/map");
+    await screen.findByRole("heading", { name: "Needs investigation" });
+
+    // Scarce by construction: the FLAG request asks for open AND blocking
+    // only. Since handoff 0044 the provenance terminal in the rail also
+    // reads /dq/issues (unfiltered, for the event stream), so the flag
+    // request is identified by its own filters rather than by being the
+    // first call to that path.
+    const ask = calls
+      .filter((c) => c.path === "/dq/issues")
+      .find((c) => c.url.includes("severity=blocking"));
+    expect(ask?.url).toContain("status=open");
+    expect(ask?.url).toContain("severity=blocking");
+
+    const map = fakeMaps[fakeMaps.length - 1];
+    const pulse = map.layerAdds.find((a) => a.id === "findings-pulse")!.layer;
+    // A ring, never a fill: the glow can never sit behind a figure.
+    expect(pulse.type).toBe("circle");
+    expect(pulse.paint?.["circle-color"]).toBe("rgba(0,0,0,0)");
+    expect(pulse.paint?.["circle-stroke-color"]).toBe(
+      TOKEN_MARK_COLORS.alert.light,
+    );
+    // Shape AND label, so the signal survives without the pulse.
+    const mark = map.layerAdds.find((a) => a.id === "findings-mark")!.layer;
+    expect(mark.layout?.["text-field"]).toBe(FINDING_GLYPH);
+    const label = map.layerAdds.find((a) => a.id === "findings-label")!.layer;
+    expect(label.layout?.["text-field"]).toEqual(["get", "label"]);
+
+    await waitFor(() => {
+      const data = map.sourceData.findings as {
+        features: { properties: Record<string, unknown> }[];
+      };
+      expect(data.features.length).toBe(1);
+      expect(data.features[0].properties.issue_id).toBe("dq-1");
+      expect(data.features[0].properties.label).toBe("39");
+    });
+  });
+
+  it("is reachable from the KEYBOARD through the 'needs investigation' list — the canvas cannot be, so the list is the entry point", async () => {
+    signInAs("viewer");
+    flaggedApi();
+    renderApp("/map");
+
+    const list = await screen.findByRole("region", {
+      name: "Needs investigation",
+    });
+    const row = within(list).getByRole("button", {
+      name: /Recorded miles stop part-way through block 225-4/,
+    });
+    // Tab to it and open it with the keyboard alone.
+    row.focus();
+    expect(row).toHaveFocus();
+    await userEvent.keyboard("{Enter}");
+
+    const panel = await screen.findByRole("dialog");
+    expect(panel).toHaveTextContent(
+      "Recorded miles stop part-way through block 225-4",
+    );
+    expect(row).toHaveAttribute("aria-pressed", "true");
+    await expectNoAxeViolations();
+  });
+
+  it("renders the chain the API can honestly draw — finding → block → route → calculation → owner — plus the raw records behind it", async () => {
+    signInAs("viewer");
+    flaggedApi();
+    renderApp("/map");
+    await userEvent.click(
+      await screen.findByRole("button", {
+        name: /Recorded miles stop part-way through block 225-4/,
+      }),
+    );
+
+    const panel = await screen.findByRole("dialog");
+    // block — the agency's own operational name, with the feed id behind it
+    expect(panel).toHaveTextContent("Block 225-4 — 4 trips");
+    // route — plus the mode joined from the schedule data
+    expect(panel).toHaveTextContent("39 — Bus");
+    // calculation — the run that named THIS finding, and what it did
+    expect(panel).toHaveTextContent("vrm_v0 0.3.0 — vrm");
+    expect(panel).toHaveTextContent(copy.map.inspector.calcOutcomeRefused);
+    // owner — an open finding with nobody on it says so
+    expect(panel).toHaveTextContent(copy.map.inspector.ownerNone);
+    // provenance — the source records the finding cited
+    expect(await within(panel).findByText("sha256:abc123")).toBeInTheDocument();
+  });
+
+  it("lights the finding's routes IN PLACE with feature-state, instead of re-sending the source", async () => {
+    signInAs("viewer");
+    flaggedApi();
+    renderApp("/map");
+    await userEvent.click(
+      await screen.findByRole("button", {
+        name: /Recorded miles stop part-way through block 225-4/,
+      }),
+    );
+    const map = fakeMaps[fakeMaps.length - 1];
+    await waitFor(() => {
+      expect(map.featureStates).toContainEqual({
+        source: "routes",
+        id: "39",
+        state: { related: true },
+      });
+    });
+    expect(map.featureStates).toContainEqual({
+      source: "findings",
+      id: "dq-1",
+      state: { selected: true },
+    });
+    // The route source keeps a promoted id so feature-state can address it.
+    expect(map.sources.routes).toMatchObject({ promoteId: "route_id" });
+    expect(map.sources.findings).toMatchObject({ promoteId: "finding_key" });
+  });
+
+  it("never lets the map's drawing limits shrink the worklist: an un-anchorable finding is listed WITH the reason it has no flag", async () => {
+    signInAs("viewer");
+    flaggedApi();
+    renderApp("/map");
+
+    const list = await screen.findByRole("region", {
+      name: "Needs investigation",
+    });
+    // Two findings need a person; only one of them can be drawn.
+    expect(list).toHaveTextContent(
+      copy.map.findings.countLine("2", "1"),
+    );
+    expect(list).toHaveTextContent(
+      "The feed reported no positions at all for two hours",
+    );
+    expect(list).toHaveTextContent(copy.map.findings.gapNoSubject);
+    // And the map says, in the legend, what a flag's POSITION does not mean.
+    expect(
+      screen.getByText(copy.map.findings.legendNote),
+    ).toBeInTheDocument();
+  });
+
+  it("says so plainly when nothing needs a person — an empty worklist is an answer, not a blank", async () => {
+    signInAs("viewer");
+    flaggedApi([]);
+    renderApp("/map");
+    expect(
+      await screen.findByText(copy.map.findings.listEmpty),
+    ).toBeInTheDocument();
+    const map = fakeMaps[fakeMaps.length - 1];
+    await waitFor(() => {
+      const data = map.sourceData.findings as { features: unknown[] };
+      expect(data.features).toEqual([]);
+    });
+  });
+
+  it("collapses the pulse to a STATIC ring under prefers-reduced-motion, and animates the frame otherwise", async () => {
+    signInAs("viewer");
+    vi.stubGlobal("matchMedia", (query: string) => ({
+      matches: query.includes("prefers-reduced-motion"),
+      media: query,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    }));
+    flaggedApi();
+    renderApp("/map");
+    await screen.findByRole("heading", { name: "Needs investigation" });
+
+    const map = fakeMaps[fakeMaps.length - 1];
+    await waitFor(() => {
+      expect(
+        map.paintSets.some(
+          (p) => p.id === "findings-pulse" && p.prop === "circle-radius",
+        ),
+      ).toBe(true);
+    });
+    // Reduced motion = INSTANT, never "slower": every ring the layer is
+    // ever given is the resting one, at full strength.
+    for (const set of map.paintSets.filter((p) => p.id === "findings-pulse")) {
+      if (set.prop === "circle-radius") {
+        expect(set.value).toBe(PULSE_STATIC.radius);
+      }
+      if (set.prop === "circle-stroke-opacity") {
+        expect(set.value).toBe(PULSE_STATIC.strokeOpacity);
+      }
+    }
+  });
+
+  it("keeps the loop off the fleet: the pulse only ever repaints the findings layer", async () => {
+    signInAs("viewer");
+    flaggedApi();
+    renderApp("/map");
+    await screen.findByRole("heading", { name: "Needs investigation" });
+    const map = fakeMaps[fakeMaps.length - 1];
+    // The animated frame really does move …
+    await waitFor(() => {
+      expect(
+        map.paintSets.some(
+          (p) =>
+            p.id === "findings-pulse" &&
+            p.prop === "circle-radius" &&
+            p.value !== PULSE_STATIC.radius,
+        ),
+      ).toBe(true);
+    });
+    // … and it never touches a vehicle layer while doing it.
+    const radiusSets = map.paintSets.filter((p) => p.prop === "circle-radius");
+    expect(
+      radiusSets.every((p) => p.id === "findings-pulse"),
+    ).toBe(true);
   });
 });

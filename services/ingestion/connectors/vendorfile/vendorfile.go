@@ -49,6 +49,7 @@ import (
 	"time"
 
 	"github.com/headway-transit/headway/services/ingestion/internal/envelope"
+	"github.com/headway-transit/headway/services/ingestion/internal/permsg"
 	"github.com/headway-transit/headway/services/ingestion/internal/producer"
 )
 
@@ -109,6 +110,13 @@ type Scanner struct {
 	Dir      string
 	Source   string // envelope source label; REQUIRED, no default (fail closed)
 	AgencyID string // optional
+
+	// HostDir is Dir as the OPERATOR sees it on the host machine (compose
+	// passes VENDOR_DROP_DIR_HOST; the standard install mounts
+	// deploy/compose/vendor-drop at /data/vendor-drop). Optional; used only
+	// to make permission-error fix commands name the path the operator's
+	// shell can actually reach (handoff 0037, design point 4).
+	HostDir string
 
 	// MaxFileBytes caps the size of a dropped file; <= 0 means
 	// DefaultMaxFileBytes. Oversize files are moved to rejected/ and
@@ -205,6 +213,16 @@ func (s *Scanner) ScanOnce(ctx context.Context) error {
 	if err := s.checkSource(); err != nil {
 		return err
 	}
+	// filepath.Glob silently returns no matches on an unreadable directory,
+	// which would turn a root-owned drop dir into a connector that idles
+	// forever with nothing in any log (the first live agency install hit
+	// exactly this class of failure). Check readability explicitly so a
+	// permission problem is a LOUD error carrying its exact fix command
+	// (handoff 0037; Guardrail 7 — fail loudly).
+	if _, err := os.ReadDir(s.Dir); err != nil {
+		return fmt.Errorf("vendorfile: read drop directory %s: %w%s",
+			s.Dir, err, permsg.Hint(err, s.Dir, s.HostDir))
+	}
 	matches, err := filepath.Glob(filepath.Join(s.Dir, FilePattern))
 	if err != nil {
 		return fmt.Errorf("vendorfile: scan %s: %w", s.Dir, err)
@@ -220,7 +238,8 @@ func (s *Scanner) ScanOnce(ctx context.Context) error {
 		seen[path] = true
 		info, err := os.Stat(path)
 		if err != nil {
-			errs = append(errs, fmt.Errorf("vendorfile: stat %s: %w", path, err))
+			errs = append(errs, fmt.Errorf("vendorfile: stat %s: %w%s",
+				path, err, permsg.Hint(err, s.Dir, s.HostDir)))
 			continue
 		}
 
@@ -273,7 +292,8 @@ func (s *Scanner) ScanOnce(ctx context.Context) error {
 func (s *Scanner) processFile(ctx context.Context, path string) error {
 	body, err := os.ReadFile(path)
 	if err != nil {
-		return fmt.Errorf("vendorfile: read %s: %w", path, err)
+		return fmt.Errorf("vendorfile: read %s: %w%s",
+			path, err, permsg.Hint(err, s.Dir, s.HostDir))
 	}
 	if int64(len(body)) > s.maxFileBytes() {
 		// Grew past the cap between stat and read.
@@ -360,15 +380,20 @@ func (s *Scanner) rejectFile(path, reason string) error {
 }
 
 // moveTo relocates a file into Dir/<subdir>/ so the next scan does not pick
-// it up again.
+// it up again. Permission failures here were the first live agency
+// install's blocker (the connector could not create processed/ under a
+// host-owned drop dir), so both failure paths carry the exact fix command
+// (handoff 0037, design point 4).
 func (s *Scanner) moveTo(path, subdir string) error {
 	dir := filepath.Join(s.Dir, subdir)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return fmt.Errorf("vendorfile: create %s: %w", dir, err)
+		return fmt.Errorf("vendorfile: create %s: %w%s",
+			dir, err, permsg.Hint(err, s.Dir, s.HostDir))
 	}
 	dest := filepath.Join(dir, filepath.Base(path))
 	if err := os.Rename(path, dest); err != nil {
-		return fmt.Errorf("vendorfile: move %s to %s: %w", path, subdir, err)
+		return fmt.Errorf("vendorfile: move %s to %s: %w%s",
+			path, subdir, err, permsg.Hint(err, s.Dir, s.HostDir))
 	}
 	return nil
 }

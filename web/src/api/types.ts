@@ -10,7 +10,11 @@ export type Role =
   | "viewer"
   | "data_steward"
   | "report_preparer"
-  | "certifying_official";
+  | "certifying_official"
+  // Handoff 0046: reads broadly, writes nothing. Deliberately NOT a rung on
+  // the rank ladder in services/api authz — a rung would inherit every write
+  // permission at or below it by arithmetic.
+  | "auditor";
 
 // ---- /auth/login ----
 
@@ -351,7 +355,79 @@ export interface AttestationRevoked extends AttestationRecord {
 
 // ---- /dq/issues ----
 
-export interface DqIssue {
+/**
+ * One route a group of affected trips runs. `short_name` is the label an
+ * agency actually says out loud ("42"); it is null when the feed carries
+ * none, and NOTHING is substituted for it — the UI falls back to showing
+ * the route id as an id, because that is the only thing that exists.
+ */
+export interface DqSubjectRoute {
+  route_id: string;
+  short_name: string | null;
+  long_name: string | null;
+}
+
+/**
+ * One block's worth of affected trips. `block_id` is null when the feed
+ * carries no block for them — that is a real, sayable fact ("no block
+ * recorded"), never a placeholder id. Departure times are GTFS service-day
+ * clock times, so an hour of 24 or more means after midnight on the same
+ * service day; both are null when the feed schedules no departure.
+ * `trip_ids` is a capped sample for anyone working a ticket — `trip_count`
+ * is always the truth.
+ */
+export interface DqSubjectGroup {
+  block_id: string | null;
+  /**
+   * The agency's OPERATIONAL name for the block ("225-4") from the
+   * migration-0038 mapping (handoff 0038), frozen when the finding was
+   * raised. Optional AND nullable: null — or absent, on contexts frozen
+   * before the mapping existed — means the mapping does not know this
+   * block, and the UI shows the feed's `block_id` exactly as it always
+   * has. Nothing is ever substituted for a missing name; the feed id
+   * stays available in the technical detail either way.
+   */
+  block_label?: string | null;
+  trip_count: number;
+  routes: DqSubjectRoute[];
+  route_count: number;
+  first_departure: string | null;
+  last_departure: string | null;
+  trip_ids: string[];
+}
+
+/**
+ * What a finding is ABOUT, in the agency's own vocabulary (migration 0035,
+ * handoff 0029). Resolved once by the calc runner when the finding was
+ * raised and frozen on the row — so it reads the same in an audit years
+ * later — and served verbatim by the API.
+ *
+ * `version` is checked FIRST: an unrecognised version must render exactly
+ * as an absent context does (the finding's prose description, as before),
+ * because a shape this UI does not understand is worse than none.
+ * `group_count` is the true number of groups; `groups` may be shorter,
+ * capped at `group_cap`, and the UI says so. `unmatched` is present only
+ * when some affected trips are not in the schedule feed at all.
+ */
+export interface DqSubjectContext {
+  version: number;
+  kind: string;
+  total: number;
+  grouped_by: string;
+  group_count: number;
+  group_cap: number;
+  trip_id_cap: number;
+  groups: DqSubjectGroup[];
+  unmatched?: { trip_count: number; trip_ids: string[] };
+}
+
+/**
+ * One issue as the QUEUE serves it (handoff 0030). Everything a steward
+ * reads in a list row is here.
+ *
+ * What is deliberately NOT here is `source_record_ids` — see `DqIssue`.
+ */
+export interface DqIssueSummary {
   issue_id: string;
   issue_type: string;
   severity: string;
@@ -359,7 +435,6 @@ export interface DqIssue {
   owner: string | null;
   title: string;
   description: string;
-  source_record_ids: string[] | null;
   /** ISO date-time */
   created_at: string;
   /** ISO date-time */
@@ -371,6 +446,48 @@ export interface DqIssue {
    * UI tolerates an API that predates the field.
    */
   resolution_minutes?: number | null;
+  /**
+   * The finding's subject in the agency's vocabulary (migration 0035).
+   * Optional AND nullable: every finding raised before the migration —
+   * 97,067 of them in the live queue — carries null, and so does every
+   * finding that is about the run as a whole rather than about
+   * identifiable rows. Null is the normal case, not an error.
+   */
+  subject_context?: DqSubjectContext | null;
+}
+
+/**
+ * One issue WITH its provenance — what GET /dq/issues/{id} serves.
+ *
+ * `source_record_ids` is the content-addressed lineage: the raw feed
+ * records the finding was raised over. Since handoff 0030 it is served
+ * per issue rather than by the queue listing — on the live queue those ids
+ * were 716 MB of an 850 MB response, for a field a list row only ever
+ * joined into a string. The array served here is COMPLETE: nothing is
+ * summarised, sampled, or capped, so the walk from a finding back to its
+ * raw records is untouched.
+ */
+export interface DqIssue extends DqIssueSummary {
+  source_record_ids: string[] | null;
+}
+
+/**
+ * GET /dq/issues (handoff 0030): ONE BOUNDED PAGE of the queue, plus the
+ * truth about the rest of it.
+ *
+ * `total` is the server's count over the whole queue under the same
+ * filters — never the page — so a screen can always say what it is not
+ * showing rather than letting a visible row count pass for the queue.
+ */
+export interface DqIssuePage {
+  issues: DqIssueSummary[];
+  /** Issues matching the same filters across the WHOLE queue. */
+  total: number;
+  /** The page size the server applied. */
+  limit: number;
+  /** Pass back as `cursor` for the next page; null on the last page. */
+  next_cursor: string | null;
+  has_more: boolean;
 }
 
 /**
@@ -379,11 +496,21 @@ export interface DqIssue {
  * serves under the same filter, so a card total can never disagree with
  * the queue behind its door. Missing severities/statuses are explicit
  * zeros. Workflow tallies, never regulatory figures.
+ *
+ * Since handoff 0030 the list serves one page, so this endpoint is the
+ * ONLY source of a whole-queue number in the app — which is what it has
+ * always meant. No screen counts the rows it happens to have loaded.
  */
 export interface DqIssueCounts {
   total: number;
   by_severity: Record<string, number>;
   by_status: Record<string, number>;
+  /**
+   * Recorded resolution effort over the same rows, in whole minutes
+   * (handoff 0030). Workflow metadata a steward typed, never a regulatory
+   * figure. Optional so the UI tolerates an API that predates the field.
+   */
+  resolution_minutes_total?: number;
 }
 
 export interface ResolveRequest {
@@ -1509,6 +1636,9 @@ export interface CalcRunMetricOutcome {
   outcome: "persisted" | "refused";
   value: string | null;
   metric_value_id: string | null;
+  /** Identical re-run over unchanged data: the runner reused the EXISTING
+   *  metric row instead of writing a duplicate. Absent on pre-dedupe runs. */
+  already_on_record?: boolean;
   coverage: string | null;
   blocking_issue_ids: string[];
   warning_issue_ids: string[];
@@ -1568,6 +1698,185 @@ export interface CalcRunRecord {
   stale_note: string | null;
 }
 
+// ---- /raw/records/{id} — the raw-record inspector (handoff 0035) ----
+
+/**
+ * Where the payload physically lives and how big it is. Headway stores raw
+ * payloads in two places and the record says which: an object in the object
+ * store (`object_ref` records) or inline in the ingest envelope on the
+ * broker (`base64` records — GTFS-Realtime frames). `size_bytes` is null on
+ * purpose when the size cannot be read cheaply; that is honest, not missing.
+ */
+export interface StoredBytes {
+  location: "object_store" | "ingest_envelope_stream" | string;
+  object_key: string | null;
+  size_bytes: number | null;
+  /** 'available' | 'missing' | 'unavailable' | 'measured_on_open' */
+  status: string;
+  note: string;
+}
+
+export interface ContentAddress {
+  algorithm: string;
+  digest: string;
+  note: string;
+}
+
+/**
+ * The withholding rule for THIS record's contents, decided and enforced
+ * server-side. `preview_allowed` exists so the UI can explain a refusal
+ * rather than dangle a button that 403s — it is never the gate itself.
+ */
+export interface RawRecordSensitivity {
+  classification: string;
+  label: string;
+  minimum_role: string;
+  reason: string;
+  preview_allowed: boolean;
+  refusal: string | null;
+}
+
+export interface RawRecordDecoder {
+  /** 'gtfs_realtime' | 'delimited_text' | 'text' | 'none' */
+  kind: string;
+  note: string;
+}
+
+/** The label on the evidence bag: what this raw record is. */
+export interface RawRecordLabel {
+  record_id: string;
+  source: string;
+  simulated: boolean;
+  connector: string;
+  connector_version: string;
+  content_type: string;
+  payload_encoding: string;
+  fetched_at: string;
+  landed_at: string;
+  parse_status: string;
+  parse_error: string | null;
+  stored_bytes: StoredBytes;
+  content_address: ContentAddress;
+  sensitivity: RawRecordSensitivity;
+  decoder: RawRecordDecoder;
+  immutability_note: string;
+}
+
+/**
+ * The verdict of re-reading the stored bytes and re-hashing them. The HTTP
+ * status agrees with `result` (match 200, mismatch 409, unreadable
+ * 404/410/503), so a caller that only checks the status cannot mistake a
+ * failure for a pass — the client reads the body on every one of them.
+ */
+export interface RawRecordVerdict {
+  record_id: string;
+  verified_at: string;
+  /** 'match' | 'mismatch' | 'missing' | 'unavailable' */
+  result: string;
+  algorithm: string;
+  expected_digest: string;
+  actual_digest: string | null;
+  size_bytes: number | null;
+  read_from: string | null;
+  reason: string | null;
+  headline: string;
+  detail: string;
+  /** The blocking DQ issue a failing verdict raised, when there is one. */
+  dq_issue_id: string | null;
+}
+
+/** One decoded GTFS-Realtime entity. Absent fields are null, never zero. */
+export interface GtfsRealtimeEntity {
+  entity_id: string | null;
+  is_deleted: boolean | null;
+  /** 'vehicle_position' | 'trip_update' | 'alert' | 'unrecognized' */
+  kind: string | null;
+  vehicle_id?: string | null;
+  vehicle_label?: string | null;
+  trip_id?: string | null;
+  route_id?: string | null;
+  direction_id?: number | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  bearing?: number | null;
+  speed?: number | null;
+  timestamp?: number | null;
+  timestamp_utc?: string | null;
+  current_status?: string | null;
+  stop_id?: string | null;
+  occupancy_status?: string | null;
+  start_date?: string | null;
+  schedule_relationship?: string | null;
+  delay?: number | null;
+  stop_time_update_count?: number | null;
+  stop_time_updates?: GtfsRealtimeStopTimeUpdate[];
+  cause?: string | null;
+  effect?: string | null;
+  header_text?: string | null;
+  description_text?: string | null;
+  informed_entity_count?: number | null;
+}
+
+export interface GtfsRealtimeStopTimeUpdate {
+  stop_id: string | null;
+  stop_sequence: number | null;
+  arrival_time: number | null;
+  arrival_delay: number | null;
+  departure_time: number | null;
+  departure_delay: number | null;
+}
+
+export interface GtfsRealtimePreview {
+  decoded: boolean;
+  decode_error: string | null;
+  gtfs_realtime_version?: string | null;
+  incrementality?: string | null;
+  header_timestamp?: number | null;
+  header_timestamp_utc?: string | null;
+  entity_count?: number;
+  entity_kinds?: Record<string, number>;
+  entities?: GtfsRealtimeEntity[];
+}
+
+export interface DelimitedPreview {
+  readable: boolean;
+  complete: boolean;
+  note: string | null;
+  header: string[] | null;
+  header_source: string | null;
+  rows: string[][];
+}
+
+export interface TextPreview {
+  readable: boolean;
+  complete: boolean;
+  note: string | null;
+  lines: string[];
+}
+
+export interface UndecodedPreview {
+  content_type: string;
+  reason: string;
+}
+
+/** A bounded look inside one raw record, with every cap that applied. */
+export interface RawRecordPreview {
+  record_id: string;
+  content_type: string;
+  size_bytes: number;
+  read_from: string;
+  decoder: string;
+  decoder_note: string;
+  truncated: boolean;
+  truncation_note: string | null;
+  caps: Record<string, number>;
+  gtfs_realtime: GtfsRealtimePreview | null;
+  delimited: DelimitedPreview | null;
+  text: TextPreview | null;
+  undecoded: UndecodedPreview | null;
+  download_note: string;
+}
+
 // ---- error envelopes (FastAPI) ----
 
 export interface ValidationErrorItem {
@@ -1581,4 +1890,94 @@ export interface ValidationErrorItem {
 /** 4xx bodies are {"detail": string} for HTTPException, or a list for 422. */
 export interface ErrorEnvelope {
   detail?: string | ValidationErrorItem[];
+}
+
+// ---- revenue review queue (handoff 0040) ----
+
+/**
+ * One no-run boarding the calculation could not decide, waiting on a person
+ * — or the record of the decision they made.
+ *
+ * Everything here was frozen when the calculation flagged the boarding, so a
+ * row reads the same years later even if the feed is re-ingested. Absent
+ * facts stay absent: `vehicle_id` is null when the feed carried none, never
+ * a placeholder.
+ */
+export interface BoardingReview {
+  passenger_event_id: string;
+  /** The raw record this boarding was normalized from — the walk back. */
+  source_record_id: string;
+  /** ISO date */
+  service_date: string;
+  /** ISO date-time */
+  event_timestamp: string;
+  vehicle_id: string | null;
+  /** How many boardings this one event recorded. */
+  event_count: number;
+  /** Always "pending_review": Headway declined to guess, and says so. */
+  suggested_verdict: string;
+  /** The calculation's own words for why it could not decide. */
+  suggested_reason: string;
+  calc_name: string;
+  calc_version: string;
+  /** ISO date */
+  period_start: string;
+  /** ISO date */
+  period_end: string;
+  /** ISO date-time */
+  first_seen_at: string;
+  /** null while pending; "revenue" or "non_revenue" once decided. */
+  verdict: string | null;
+  /** The analyst's reason, verbatim. Never present without a verdict. */
+  justification: string | null;
+  classified_by: string | null;
+  /** ISO date-time */
+  classified_at: string | null;
+  /** The data-quality finding the classification closed, when one was open. */
+  dq_issue_id: string | null;
+}
+
+export interface BoardingReviewPage {
+  boardings: BoardingReview[];
+  /** Rows matching the same filter across the WHOLE queue, never the page. */
+  total: number;
+  limit: number;
+  /** Pass back as `cursor` for the next page; null on the last page. */
+  next_cursor: string | null;
+  has_more: boolean;
+}
+
+/**
+ * Queue-wide tallies. Rows and BOARDINGS are different numbers and both are
+ * told: one row can hold four boardings, and it is the boardings that are
+ * missing from the figure.
+ */
+export interface BoardingReviewCounts {
+  pending: number;
+  pending_boardings: number;
+  classified: number;
+  classified_revenue: number;
+  classified_non_revenue: number;
+  classified_revenue_boardings: number;
+  classified_non_revenue_boardings: number;
+}
+
+export interface ClassifyBoardingRequest {
+  /** "revenue" or "non_revenue". */
+  verdict: string;
+  /** Required, never blank — the reason the correction can be defended. */
+  justification: string;
+}
+
+export interface ClassifyBoardingResponse {
+  passenger_event_id: string;
+  verdict: string;
+  justification: string;
+  classified_by: string;
+  /** ISO date-time */
+  classified_at: string;
+  dq_issue_id: string | null;
+  audit_event_id: number;
+  /** Always true: the figure moves only when the calculation is re-run. */
+  recompute_required: boolean;
 }

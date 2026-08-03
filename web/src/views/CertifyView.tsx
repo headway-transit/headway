@@ -51,12 +51,11 @@ import {
   ApiError,
   certify,
   getCertificationIntent,
-  listDqIssues,
+  getDqIssueCounts,
   listMetricValues,
 } from "../api/client";
 import type {
   CertificationIntent,
-  DqIssue,
   MetricValue,
 } from "../api/types";
 import { canCertify, useSession } from "../auth/session";
@@ -99,7 +98,11 @@ export function CertifyView() {
   const signerTitleHintId = useId();
   const intentId = useId();
   const [values, setValues] = useState<MetricValue[] | null>(null);
-  const [issues, setIssues] = useState<DqIssue[] | null>(null);
+  // The open blocking tally, from the SERVER's counts endpoint (handoff
+  // 0030): the DQ list now serves one page at a time, so counting blocking
+  // issues from downloaded rows would have counted the page, not the
+  // queue. null = not known yet (the gate stays closed until it is).
+  const [openBlocking, setOpenBlocking] = useState<number | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   // The SERVER's intent + scope statements (GET /certifications/intent):
   // the ceremony signs against the server's words, never this bundle's.
@@ -124,7 +127,7 @@ export function CertifyView() {
     const seq = ++loadSeq.current;
     setLoadError(null);
     setValues(null);
-    setIssues(null);
+    setOpenBlocking(null);
     setSelected(new Set());
     setAcknowledged(false);
     try {
@@ -135,13 +138,20 @@ export function CertifyView() {
       // them at 409 and the database CHECK makes a certified ops row
       // unrepresentable), so the server's own filter keeps them from ever
       // appearing beside a signature checkbox.
-      const [nextValues, nextIssues] = await Promise.all([
+      // Blocking means status open OR owned (both unresolved; 'resolved'
+      // and 'attested' are the closed states) — the same composition the
+      // /dq header uses, counted by the server over the WHOLE queue.
+      const [nextValues, openCounts, ownedCounts] = await Promise.all([
         listMetricValues({ ...monthPeriod(year, month), category: "ntd" }),
-        listDqIssues(),
+        getDqIssueCounts("open"),
+        getDqIssueCounts("owned"),
       ]);
       if (seq !== loadSeq.current) return; // a newer load owns the screen
       setValues(nextValues);
-      setIssues(nextIssues);
+      setOpenBlocking(
+        (openCounts.by_severity.blocking ?? 0) +
+          (ownedCounts.by_severity.blocking ?? 0),
+      );
     } catch (err) {
       if (seq !== loadSeq.current) return;
       setLoadError(err instanceof ApiError ? err.message : String(err));
@@ -191,16 +201,9 @@ export function CertifyView() {
   // p. 146 statistician closure) are the two CLOSED states; treating
   // 'attested' as open here made the cockpit refuse what the API allows
   // (found by the 2026-07-15 live click-through; screen and server must
-  // tell the same story). Counted for DISPLAY and UX gating only — the
-  // API re-checks on POST.
-  const openBlocking =
-    issues === null
-      ? null
-      : issues.filter(
-          (i) =>
-            i.severity === "blocking" &&
-            (i.status === "open" || i.status === "owned"),
-        ).length;
+  // tell the same story). Counted BY THE SERVER over the whole queue
+  // (handoff 0030) — see the load above. For DISPLAY and UX gating only;
+  // the API re-checks on POST.
   const blocked = openBlocking === null || openBlocking > 0;
 
   const selectedValues = (values ?? []).filter((v) =>
@@ -368,8 +371,8 @@ export function CertifyView() {
           act. Its absence is stated too — never left blank. */}
       <section aria-labelledby="certify-blockers-heading">
         <h2 id="certify-blockers-heading">{copy.certify.blockersHeading}</h2>
-        {issues === null && !loadError && <p>{copy.loading}</p>}
-        {issues === null && loadError && (
+        {openBlocking === null && !loadError && <p>{copy.loading}</p>}
+        {openBlocking === null && loadError && (
           <div role="alert" className="alert">
             <p>{copy.certify.blockersUnknown}</p>
           </div>
@@ -558,10 +561,10 @@ export function CertifyView() {
                 className="certify-reason"
                 aria-label={copy.certify.sign.reasonLabel}
               >
-                {issues === null && !loadError && (
+                {openBlocking === null && !loadError && (
                   <p>{copy.certify.blockersLoading}</p>
                 )}
-                {issues === null && loadError && (
+                {openBlocking === null && loadError && (
                   <p>{copy.certify.blockersUnknown}</p>
                 )}
                 {openBlocking !== null && openBlocking > 0 && (

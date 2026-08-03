@@ -1,0 +1,555 @@
+<title>Headway — Street-Level Map Study</title>
+<style>
+  :root{
+    --void:#07090E; --graphite:#0F131B; --graphite-2:#151B26; --raised:#1A2130;
+    --etch:#242C3A; --fg:#E9EEF5; --fg-dim:#96A3B7; --fg-mute:#586576;
+    --signal:#FF7A1A; --signal-soft:rgba(255,122,26,.13);
+    --ok:#3FC79B; --watch:#F2B43D; --alert:#F5514E;
+    --alert-glow:rgba(245,81,78,.55); --watch-glow:rgba(242,180,61,.5);
+    --m-fixed:#4C8DF5; --m-dar:#2FB6A8; --m-vp:#8FB43D; --m-via:#E86AA6;
+    --display:'Arial Narrow','Helvetica Neue',Helvetica,system-ui,sans-serif;
+    --ui:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
+    --mono:ui-monospace,'SF Mono','JetBrains Mono',Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{background:var(--void); color:var(--fg); font-family:var(--ui); font-size:14px;
+    line-height:1.45; -webkit-font-smoothing:antialiased; display:flex; flex-direction:column;
+    min-height:100%; overflow-x:hidden}
+  .mono{font-family:var(--mono); font-variant-numeric:tabular-nums}
+
+  header{display:flex; align-items:center; gap:20px; padding:14px 22px; border-bottom:1px solid var(--etch);
+    background:var(--graphite); flex-wrap:wrap}
+  .brand{display:flex; align-items:baseline; gap:11px}
+  .brand .logo{font-family:var(--display); font-weight:800; font-size:22px; letter-spacing:.16em;
+    text-transform:uppercase; padding:2px 10px; border:1.5px solid var(--signal); border-radius:2px}
+  .brand .logo b{color:var(--signal)}
+  .brand .agency{color:var(--fg-dim); font-size:12.5px}
+  .tools{margin-left:auto; display:flex; align-items:center; gap:14px; flex-wrap:wrap}
+  .stamp{display:flex; align-items:center; gap:14px; color:var(--fg-mute); font-size:11.5px}
+  .stamp .dot{width:6px;height:6px;border-radius:50%;background:var(--ok);box-shadow:0 0 8px var(--ok)}
+  .stamp b{color:var(--fg-dim)}
+
+  .seg{display:inline-flex; border:1px solid var(--etch); border-radius:3px; overflow:hidden; background:var(--void)}
+  .seg button{font-family:var(--ui); font-size:11.5px; letter-spacing:.04em; color:var(--fg-mute);
+    background:transparent; border:0; padding:6px 12px; cursor:pointer; border-right:1px solid var(--etch);
+    text-transform:uppercase; transition:color .15s, background .15s}
+  .seg button:last-child{border-right:0}
+  .seg button:hover{color:var(--fg-dim)}
+  .seg button[aria-pressed="true"]{color:var(--void); background:var(--signal); font-weight:600}
+  .seg button:focus-visible{outline:2px solid var(--signal); outline-offset:-2px}
+  .seg.theme button[aria-pressed="true"]{background:var(--fg-dim)}
+
+  main{flex:1; display:grid; grid-template-columns:1fr 340px; gap:1px; background:var(--etch); min-height:0}
+  @media(max-width:900px){ main{grid-template-columns:1fr} .hero{min-height:60vh} }
+  .hero{background:var(--void); position:relative; min-height:540px; overflow:hidden}
+  #map{position:absolute; inset:0; width:100%; height:100%; display:block}
+  .rail{background:var(--graphite); display:flex; flex-direction:column; min-height:0; overflow-y:auto}
+
+  .hero-cap{position:absolute; top:16px; left:20px; z-index:3; pointer-events:none}
+  .hero-cap .k{font-family:var(--display); font-size:12px; letter-spacing:.22em; color:var(--fg-dim)}
+  .hero-cap .h{font-family:var(--display); font-size:25px; letter-spacing:.04em; margin-top:2px; text-transform:uppercase}
+  .hero-cap .h b{color:var(--signal)}
+  .legend{position:absolute; bottom:14px; left:20px; z-index:3; display:flex; gap:14px; flex-wrap:wrap;
+    font-size:10.5px; color:var(--fg-mute); letter-spacing:.03em; max-width:70%}
+  .legend span{display:inline-flex; align-items:center; gap:6px; text-transform:uppercase}
+  .legend i{width:11px;height:3px;border-radius:2px;display:inline-block}
+  .legend i.sq{width:9px;height:9px;border-radius:2px}
+  .honesty{position:absolute; bottom:12px; right:18px; z-index:3; font-size:10px; color:var(--fg-mute);
+    letter-spacing:.02em; max-width:250px; text-align:right; line-height:1.5}
+  .attribution{position:absolute; top:12px; right:16px; z-index:3; font-size:9.5px; color:var(--fg-mute);
+    letter-spacing:.02em; opacity:.7}
+
+  /* rail: needs-investigation list (the accessible entry to the map) */
+  .rail-h{padding:12px 16px 9px; font-family:var(--display); font-size:11px; letter-spacing:.22em;
+    color:var(--fg-mute); border-bottom:1px solid var(--etch); display:flex; align-items:center; justify-content:space-between}
+  .invest{border-bottom:1px solid var(--etch)}
+  .flagrow{display:flex; gap:11px; align-items:flex-start; padding:11px 16px; cursor:pointer; width:100%;
+    background:none; border:0; border-left:2px solid transparent; text-align:left; font-family:var(--ui)}
+  .flagrow:hover{background:var(--graphite-2)}
+  .flagrow:focus-visible{outline:2px solid var(--signal); outline-offset:-2px}
+  .flagrow .pin{width:9px;height:9px;border-radius:50%; margin-top:4px; flex:none}
+  .flagrow.alert{border-left-color:var(--alert)} .flagrow.alert .pin{background:var(--alert); box-shadow:0 0 8px var(--alert-glow)}
+  .flagrow.watch{border-left-color:var(--watch)} .flagrow.watch .pin{background:var(--watch); box-shadow:0 0 8px var(--watch-glow)}
+  .flagrow .tt{font-size:12.5px; color:var(--fg); line-height:1.3}
+  .flagrow .st{font-family:var(--mono); font-size:10px; color:var(--fg-mute); margin-top:2px; letter-spacing:.02em}
+
+  .card{padding:13px 16px; border-bottom:1px solid var(--etch); position:relative}
+  .card .top{display:flex; align-items:baseline; justify-content:space-between; margin-bottom:3px}
+  .card .metric{font-family:var(--display); font-size:10.5px; letter-spacing:.14em; color:var(--fg-dim); text-transform:uppercase}
+  .card .chip{font-family:var(--mono); font-size:9px; letter-spacing:.05em; padding:2px 7px; border-radius:2px;
+    text-transform:uppercase; border:1px solid}
+  .chip.ok{color:var(--ok); border-color:rgba(63,199,155,.4); background:rgba(63,199,155,.08)}
+  .chip.watch{color:var(--watch); border-color:rgba(242,180,61,.4); background:rgba(242,180,61,.08)}
+  .chip.refused{color:var(--alert); border-color:rgba(245,81,78,.4); background:rgba(245,81,78,.08)}
+  .card .fig{font-family:var(--mono); font-variant-numeric:tabular-nums; font-size:26px; font-weight:600; line-height:1.05}
+  .card .fig .u{font-size:12px; color:var(--fg-mute); font-weight:400; margin-left:5px}
+  .card .fig.refused{font-size:15px; color:var(--alert)}
+  .card .rcpt{font-family:var(--mono); font-size:9.5px; color:var(--fg-mute); margin-top:6px}
+  .card .rcpt b{color:var(--signal); font-weight:500}
+  .card.attn::before{content:""; position:absolute; left:0; top:0; bottom:0; width:2.5px; background:var(--alert);
+    box-shadow:0 0 12px var(--alert-glow), 0 0 3px var(--alert)}
+
+  .term{flex:1; min-height:150px; display:flex; flex-direction:column}
+  .term .rail-h .live{display:inline-flex; align-items:center; gap:6px; color:var(--ok); font-size:9.5px; letter-spacing:.1em}
+  .term .live i{width:5px;height:5px;border-radius:50%;background:var(--ok);box-shadow:0 0 7px var(--ok);animation:blink 1.6s ease-in-out infinite}
+  @keyframes blink{50%{opacity:.3}}
+  .stream{flex:1; overflow-y:auto; padding:4px 0; font-family:var(--mono); font-size:10.5px}
+  .er{display:grid; grid-template-columns:52px 1fr auto; gap:9px; padding:4px 16px; align-items:baseline;
+    border-left:2px solid transparent; animation:slidein .35s ease}
+  @keyframes slidein{from{opacity:0; transform:translateX(-6px)} to{opacity:1}}
+  .er .t{color:var(--fg-mute); font-size:9.5px}
+  .er .m{color:var(--fg-dim); white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  .er .m b{color:var(--fg)}
+  .er .s{font-size:8.5px; letter-spacing:.04em; text-transform:uppercase}
+  .er.ok{border-left-color:rgba(63,199,155,.5)} .er.ok .s{color:var(--ok)}
+  .er.watch{border-left-color:var(--watch)} .er.watch .s{color:var(--watch)}
+  .er.alert{border-left-color:var(--alert)} .er.alert .s{color:var(--alert)}
+  .er.sig{border-left-color:rgba(255,122,26,.5)} .er.sig .s{color:var(--signal)}
+
+  .scrim{position:fixed; inset:0; background:rgba(3,5,9,.55); opacity:0; pointer-events:none; transition:opacity .25s; z-index:20}
+  .scrim.open{opacity:1; pointer-events:auto}
+  .inspect{position:fixed; top:0; right:0; bottom:0; width:min(430px,92vw); background:var(--graphite);
+    border-left:1px solid var(--etch); transform:translateX(100%); transition:transform .3s cubic-bezier(.2,.8,.2,1);
+    z-index:21; display:flex; flex-direction:column; box-shadow:-24px 0 60px rgba(0,0,0,.5)}
+  .inspect.open{transform:none}
+  .insp-h{padding:16px 20px; border-bottom:1px solid var(--etch); display:flex; align-items:flex-start; gap:12px}
+  .insp-h .sev{font-family:var(--mono); font-size:9.5px; padding:3px 8px; border-radius:2px; letter-spacing:.06em;
+    text-transform:uppercase; white-space:nowrap; margin-top:2px}
+  .sev.alert{color:var(--alert); background:rgba(245,81,78,.1); border:1px solid rgba(245,81,78,.4)}
+  .sev.watch{color:var(--watch); background:rgba(242,180,61,.1); border:1px solid rgba(242,180,61,.4)}
+  .insp-h h2{font-family:var(--display); font-size:17px; margin:0; letter-spacing:.02em; line-height:1.2; text-transform:uppercase}
+  .insp-h .close{margin-left:auto; background:none; border:1px solid var(--etch); color:var(--fg-dim);
+    width:28px;height:28px; border-radius:3px; cursor:pointer; font-size:15px; flex:none}
+  .insp-h .close:hover{border-color:var(--fg-mute); color:var(--fg)}
+  .insp-b{padding:18px 20px; overflow-y:auto; flex:1}
+  .insp-b .lead{color:var(--fg-dim); font-size:13px; margin:0 0 18px}
+  .insp-b .lead b{color:var(--fg)}
+  .kv{display:grid; grid-template-columns:auto 1fr; gap:6px 14px; font-size:12px; margin-bottom:20px}
+  .kv .k{color:var(--fg-mute); font-family:var(--mono); font-size:10.5px; text-transform:uppercase}
+  .kv .v{color:var(--fg-dim); font-family:var(--mono)}
+  .kv .v b{color:var(--fg)}
+  .relh{font-family:var(--display); font-size:10.5px; letter-spacing:.2em; color:var(--fg-mute); margin:0 0 12px}
+  .chain{display:flex; flex-direction:column}
+  .node{display:flex; align-items:center; gap:11px; padding:9px 11px; border:1px solid var(--etch); border-radius:3px; background:var(--void)}
+  .node .ic{width:26px;height:26px;border-radius:3px; flex:none; display:grid; place-items:center;
+    font-family:var(--mono); font-size:11px; color:var(--void); font-weight:700}
+  .node .nk{font-family:var(--mono); font-size:9.5px; color:var(--fg-mute); text-transform:uppercase}
+  .node .nv{font-size:12.5px; color:var(--fg)}
+  .node.sound .ic{background:var(--ok)} .node.bad .ic{background:var(--alert)} .node.sig .ic{background:var(--signal)}
+  .connect{width:1px; height:14px; background:var(--etch); margin-left:22px}
+  .connect::after{content:"▾"; color:var(--fg-mute); font-size:9px; position:relative; left:-4px; top:-2px}
+
+  @media(prefers-reduced-motion:reduce){ .er,.term .live i{animation:none} *{transition-duration:.01ms !important} }
+</style>
+
+<header>
+  <div class="brand">
+    <span class="logo">HEAD<b>WAY</b></span>
+    <span class="agency">Riverbend Transit · Live Network</span>
+  </div>
+  <div class="tools">
+    <div class="seg" role="group" aria-label="Mode" id="modes">
+      <button aria-pressed="true" data-m="all">All</button>
+      <button aria-pressed="false" data-m="fixed">Fixed</button>
+      <button aria-pressed="false" data-m="dar">Dial-A-Ride</button>
+      <button aria-pressed="false" data-m="via">Via</button>
+      <button aria-pressed="false" data-m="vp">Vanpool</button>
+    </div>
+    <div class="seg theme" role="group" aria-label="Basemap theme" id="theme">
+      <button aria-pressed="true" data-t="dark">Dark</button>
+      <button aria-pressed="false" data-t="light">Light</button>
+    </div>
+    <div class="stamp"><span class="dot"></span> <span><b>FEED 06s FRESH</b></span></div>
+  </div>
+</header>
+
+<main>
+  <section class="hero" aria-label="Street-level network map">
+    <canvas id="map"></canvas>
+    <div class="hero-cap">
+      <div class="k" id="capk">LIVE NETWORK</div>
+      <div class="h" id="caph">RIVERBEND <b>CITY</b></div>
+    </div>
+    <div class="attribution">© OpenStreetMap · Protomaps · self-hosted, zero external requests</div>
+    <div class="legend" id="legend"></div>
+    <div class="honesty" id="honesty">Positions observed, never interpolated.</div>
+  </section>
+
+  <aside class="rail">
+    <div class="invest">
+      <div class="rail-h">NEEDS INVESTIGATION <span class="mono" style="color:var(--alert)">3</span></div>
+      <button class="flagrow alert" data-id="gap">
+        <span class="pin"></span>
+        <span><span class="tt">Telemetry gap · V-3684</span><span class="st">Route 12 · 7m04s silent · fixed</span></span>
+      </button>
+      <button class="flagrow watch" data-id="darcluster">
+        <span class="pin"></span>
+        <span><span class="tt">Boarding cluster · NE zone</span><span class="st">Dial-A-Ride · 41 no-run · aggregated</span></span>
+      </button>
+      <button class="flagrow watch" data-id="vrh">
+        <span class="pin"></span>
+        <span><span class="tt">VRH variance vs dispatch</span><span class="st">Route 1 · 20.9% · deadhead</span></span>
+      </button>
+    </div>
+
+    <div class="rail-h">FLEET READOUT · JULY 2026</div>
+    <div class="card">
+      <div class="top"><span class="metric">Vehicle Revenue Hours</span><span class="chip ok">Certified</span></div>
+      <div class="fig"><span class="count" data-target="612.48" data-dec="2">0.00</span><span class="u">hrs</span></div>
+      <div class="rcpt">RECEIPT <b>mvid:8f2a·c41d</b> · telemetry-grounded</div>
+    </div>
+    <div class="card">
+      <div class="top"><span class="metric">Unlinked Passenger Trips</span><span class="chip watch">292 held</span></div>
+      <div class="fig"><span class="count" data-target="41982" data-dec="0">0</span><span class="u">trips</span></div>
+      <div class="rcpt">RECEIPT <b>mvid:5d3c·a018</b> · revenue-only · 292 pending</div>
+    </div>
+    <div class="card attn">
+      <div class="top"><span class="metric">Vanpool · Passenger Trips</span><span class="chip refused">Refused</span></div>
+      <div class="fig refused">FIGURE WITHHELD</div>
+      <div class="rcpt">Telematics cannot certify vanpool ridership — no number invented.</div>
+    </div>
+
+    <div class="term">
+      <div class="rail-h">PROVENANCE TERMINAL <span class="live"><i></i>LIVE</span></div>
+      <div class="stream" id="stream" aria-live="polite"></div>
+    </div>
+  </aside>
+</main>
+
+<div class="scrim" id="scrim"></div>
+<aside class="inspect" id="inspect" role="dialog" aria-modal="true" aria-labelledby="insp-title"></aside>
+
+<script>
+(function(){
+  var rm = window.matchMedia('(prefers-reduced-motion:reduce)').matches;
+  var css = function(n){ return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); };
+
+  /* ── deterministic world (seeded, so it never reshuffles on resize) ── */
+  function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;var t=Math.imul(a^a>>>15,1|a);
+    t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+  var rnd = mulberry32(20260801);
+  var WW=1280, WH=860;
+
+  // warped street grid
+  var COLS=15, ROWS=11, gx=WW/(COLS-1), gy=WH/(ROWS-1), nodes=[];
+  for(var r=0;r<ROWS;r++){ nodes[r]=[]; for(var c=0;c<COLS;c++){
+    nodes[r][c]={x:c*gx+(rnd()-.5)*gx*0.5, y:r*gy+(rnd()-.5)*gy*0.5}; } }
+  var streets=[], arterials=[];
+  for(var r=0;r<ROWS;r++) for(var c=0;c<COLS-1;c++){ if(rnd()>0.14) streets.push([nodes[r][c],nodes[r][c+1]]); }
+  for(var c=0;c<COLS;c++) for(var r=0;r<ROWS-1;r++){ if(rnd()>0.14) streets.push([nodes[r][c],nodes[r+1][c]]); }
+  // arterials (full-length, brighter)
+  [2,6,9].forEach(function(rr){ var pts=[]; for(var c=0;c<COLS;c++) pts.push(nodes[rr][c]); arterials.push(pts); });
+  [4,10].forEach(function(cc){ var pts=[]; for(var r=0;r<ROWS;r++) pts.push(nodes[r][cc]); arterials.push(pts); });
+
+  // river — a curve through the city
+  var river=[{x:-40,y:120},{x:300,y:260},{x:560,y:340},{x:820,y:560},{x:1120,y:640},{x:1320,y:760}];
+
+  // bus routes follow streets (built from node points)
+  var busRoutes=[
+    {color:'--m-fixed', pts:[nodes[6][0],nodes[6][3],nodes[6][6],nodes[4][6],nodes[2][6],nodes[2][10],nodes[2][14]]},
+    {color:'--m-fixed', pts:[nodes[0][4],nodes[3][4],nodes[6][4],nodes[9][4],nodes[9][8],nodes[10][11]]}
+  ];
+
+  // DAR service zone (lower-left district) + demand-density hexbins
+  var darZone=[{x:40,y:470},{x:250,y:430},{x:400,y:500},{x:430,y:660},{x:300,y:800},{x:90,y:790},{x:10,y:620}];
+  // Via service zone (upper-right)
+  var viaZone=[{x:820,y:70},{x:1080,y:60},{x:1240,y:180},{x:1200,y:360},{x:980,y:380},{x:840,y:250}];
+  function inPoly(p,poly){var x=p.x,y=p.y,inside=false;
+    for(var i=0,j=poly.length-1;i<poly.length;j=i++){var xi=poly[i].x,yi=poly[i].y,xj=poly[j].x,yj=poly[j].y;
+      if(((yi>y)!=(yj>y))&&(x<(xj-xi)*(y-yi)/(yj-yi)+xi)) inside=!inside;} return inside;}
+  function hexbins(poly, seed){ var g=mulberry32(seed), cells=[], hr=34, dx=hr*1.732, dy=hr*1.5;
+    var minx=1e9,miny=1e9,maxx=-1e9,maxy=-1e9;
+    poly.forEach(function(p){minx=Math.min(minx,p.x);miny=Math.min(miny,p.y);maxx=Math.max(maxx,p.x);maxy=Math.max(maxy,p.y);});
+    var row=0;
+    for(var y=miny;y<=maxy;y+=dy){ var off=(row%2)*dx/2;
+      for(var x=minx;x<=maxx;x+=dx){ var cx=x+off, cy=y; if(inPoly({x:cx,y:cy},poly)) cells.push({x:cx,y:cy,d:g(),r:hr}); }
+      row++; }
+    return cells; }
+  var darCells=hexbins(darZone, 7), viaCells=hexbins(viaZone, 99);
+  // aggregated demand hubs + origin→destination flows (hub-to-hub, NEVER rider addresses)
+  var darHubs=[{x:120,y:560},{x:300,y:520,flag:'watch'},{x:200,y:735},{x:360,y:650},{x:90,y:660}];
+  var darFlows=[{a:0,b:3,v:.9},{a:4,b:3,v:.55},{a:2,b:3,v:.8},{a:0,b:1,v:.5},{a:2,b:1,v:.6}];
+  var viaHubs=[{x:900,y:160},{x:1080,y:120},{x:1160,y:290},{x:980,y:330},{x:1040,y:220}];
+  var viaFlows=[{a:0,b:4,v:.7},{a:1,b:4,v:.85},{a:2,b:4,v:.5},{a:3,b:4,v:.6}];
+  // flag one DAR cell as the NE boarding cluster
+  var darFlag=null; darCells.forEach(function(cl){ if(cl.x>300&&cl.y<560&&!darFlag){darFlag=cl; cl.flag='watch';} });
+  if(!darFlag&&darCells.length){darFlag=darCells[0]; darCells[0].flag='watch';}
+
+  // vehicles + interactive flags (world coords)
+  function lerp(a,b,t){return {x:a.x+(b.x-a.x)*t, y:a.y+(b.y-a.y)*t};}
+  var vehicles=[
+    {mode:'fixed', shape:'circle', p:lerp(nodes[6][3],nodes[6][6],.5)},
+    {mode:'fixed', shape:'circle', p:lerp(nodes[3][4],nodes[6][4],.4)},
+    {mode:'dar', shape:'diamond', p:{x:170,y:600}},
+    {mode:'dar', shape:'diamond', p:{x:250,y:690}},
+    {mode:'via', shape:'triangle', p:{x:1020,y:200}},
+    {mode:'vp', shape:'square', p:lerp(nodes[9][8],nodes[10][11],.5)}
+  ];
+  var vGap={mode:'fixed', shape:'circle', p:lerp(nodes[2][6],nodes[2][10],.45), flag:'alert', id:'gap'};
+  vehicles.push(vGap);
+
+  /* ── canvas + responsive fit (cover) ── */
+  var cv=document.getElementById('map'), ctx=cv.getContext('2d'), CW=0, CH=0, S=1, OX=0, OY=0, dpr=1;
+  var hits=[]; // {id,x,y,r} in screen space
+  function fit(){
+    dpr=Math.min(window.devicePixelRatio||1, 2);
+    CW=cv.clientWidth; CH=cv.clientHeight;
+    cv.width=Math.round(CW*dpr); cv.height=Math.round(CH*dpr);
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+    S=Math.max(CW/WW, CH/WH); OX=(CW-WW*S)/2; OY=(CH-WH*S)/2;
+  }
+  function T(p){ return {x:p.x*S+OX, y:p.y*S+OY}; }
+
+  var mode='all', theme='dark', vizMode='flows';
+  function pal(){
+    return theme==='dark'
+      ? {ground:'#07090E', minor:'#2B3648', major:'#4A5876', label:'#8391A6', water:'#122A3A', zone:'rgba(47,182,168,.10)'}
+      : {ground:'#EEF1F5', minor:'#C4CCD8', major:'#8A97AB', label:'#4A5666', water:'#BCD3E0', zone:'rgba(47,140,130,.12)'};
+  }
+  function poly(ctx,pts,close){ ctx.beginPath(); pts.forEach(function(p,i){var s=T(p); i?ctx.lineTo(s.x,s.y):ctx.moveTo(s.x,s.y);}); if(close)ctx.closePath(); }
+  function alpha(active){ return mode==='all'||active ? 1 : 0.12; }
+
+  function hex(ctx,cx,cy,r){ ctx.beginPath(); for(var i=0;i<6;i++){var a=Math.PI/180*(60*i-30); var x=cx+r*Math.cos(a),y=cy+r*Math.sin(a); i?ctx.lineTo(x,y):ctx.moveTo(x,y);} ctx.closePath(); }
+
+  function drawZone(zone, cells, tint, active, label){
+    var a=alpha(active); ctx.save(); ctx.globalAlpha=a;
+    // fill
+    poly(ctx,zone,true); ctx.fillStyle=theme==='dark'?'rgba(47,182,168,.07)':'rgba(47,140,130,.10)'; ctx.fill();
+    // density hexbins (aggregated — NO rider points)
+    cells.forEach(function(cl){ var s=T(cl); hex(ctx,s.x,s.y,cl.r*S*0.92);
+      ctx.fillStyle='rgba('+tint+','+(0.08+cl.d*0.42).toFixed(2)+')'; ctx.fill();
+      ctx.strokeStyle='rgba('+tint+',0.22)'; ctx.lineWidth=1; ctx.stroke();
+      if(cl.flag){ var g=css('--watch');
+        ctx.save(); ctx.globalAlpha=a*(0.4+0.4*pulse); hex(ctx,s.x,s.y,cl.r*S*0.92);
+        ctx.strokeStyle=g; ctx.lineWidth=2; ctx.stroke();
+        ctx.shadowColor=g; ctx.shadowBlur=18*pulse+6; ctx.stroke(); ctx.restore();
+        hits.push({id:'darcluster', x:s.x, y:s.y, r:cl.r*S}); }
+    });
+    // dashed boundary
+    poly(ctx,zone,true); ctx.setLineDash([7,5]); ctx.strokeStyle='rgba('+tint+',0.6)'; ctx.lineWidth=1.6; ctx.stroke(); ctx.setLineDash([]);
+    // label
+    var c0=zone.reduce(function(m,p){return{x:m.x+p.x/zone.length,y:m.y+p.y/zone.length};},{x:0,y:0}); var sl=T(c0);
+    ctx.fillStyle=css('--fg-dim'); ctx.font='600 '+(12)+'px '+'system-ui'; ctx.textAlign='center';
+    ctx.fillText(label, sl.x, sl.y-6);
+    ctx.fillStyle=css('--fg-mute'); ctx.font='10px '+'ui-monospace, monospace';
+    ctx.fillText('aggregated demand · no rider locations', sl.x, sl.y+10);
+    ctx.restore();
+  }
+
+  function drawFlows(zone, hubs, flows, tint, active, label){
+    var a=alpha(active); ctx.save(); ctx.globalAlpha=a;
+    // zone fill + dashed boundary
+    poly(ctx,zone,true); ctx.fillStyle='rgba('+tint+',0.05)'; ctx.fill();
+    poly(ctx,zone,true); ctx.setLineDash([7,5]); ctx.strokeStyle='rgba('+tint+',0.55)'; ctx.lineWidth=1.6; ctx.stroke(); ctx.setLineDash([]);
+    // origin→destination arcs, width & opacity ∝ trip volume
+    flows.forEach(function(f){
+      var o=T(hubs[f.a]), d=T(hubs[f.b]);
+      var dx=d.x-o.x, dy=d.y-o.y, len=Math.hypot(dx,dy)||1, bow=len*0.24;
+      var cp={x:(o.x+d.x)/2 - dy/len*bow, y:(o.y+d.y)/2 + dx/len*bow};
+      var grd=ctx.createLinearGradient(o.x,o.y,d.x,d.y);
+      grd.addColorStop(0,'rgba('+tint+',0.10)'); grd.addColorStop(1,'rgba('+tint+',0.85)');
+      ctx.beginPath(); ctx.moveTo(o.x,o.y); ctx.quadraticCurveTo(cp.x,cp.y,d.x,d.y);
+      ctx.strokeStyle=grd; ctx.lineWidth=1+f.v*5; ctx.lineCap='round'; ctx.stroke();
+      // arrowhead at destination (direction = tangent at end)
+      var ang=Math.atan2(d.y-cp.y, d.x-cp.x), ah=6+f.v*3;
+      ctx.save(); ctx.translate(d.x,d.y); ctx.rotate(ang);
+      ctx.beginPath(); ctx.moveTo(2,0); ctx.lineTo(-ah,-ah*0.55); ctx.lineTo(-ah,ah*0.55); ctx.closePath();
+      ctx.fillStyle='rgba('+tint+',0.85)'; ctx.fill(); ctx.restore();
+    });
+    // hub nodes (aggregated cluster centroids)
+    hubs.forEach(function(h){ var s=T(h);
+      if(h.flag){ var g=css('--watch');
+        ctx.save(); ctx.globalAlpha=a*(0.5+0.4*pulse);
+        ctx.beginPath(); ctx.arc(s.x,s.y,8+11*pulse,0,7); ctx.strokeStyle=g; ctx.lineWidth=1.6; ctx.stroke();
+        ctx.shadowColor=g; ctx.shadowBlur=16*pulse+6; ctx.beginPath(); ctx.arc(s.x,s.y,7,0,7); ctx.strokeStyle=g; ctx.stroke(); ctx.restore();
+        hits.push({id:'darcluster', x:s.x, y:s.y, r:13}); }
+      ctx.beginPath(); ctx.arc(s.x,s.y,4.6,0,7); ctx.fillStyle=pal().ground; ctx.fill();
+      ctx.strokeStyle=h.flag?css('--watch'):'rgba('+tint+',0.95)'; ctx.lineWidth=2; ctx.stroke();
+    });
+    // label
+    var c0=zone.reduce(function(m,p){return{x:m.x+p.x/zone.length,y:m.y+p.y/zone.length};},{x:0,y:0}); var sl=T(c0);
+    ctx.fillStyle=css('--fg-dim'); ctx.font='600 12px system-ui'; ctx.textAlign='center';
+    ctx.fillText(label, sl.x, sl.y-6);
+    ctx.fillStyle=css('--fg-mute'); ctx.font='10px ui-monospace, monospace';
+    ctx.fillText('aggregated O–D flows · hub-to-hub, no rider locations', sl.x, sl.y+10);
+    ctx.restore();
+  }
+
+  function marker(v){
+    var s=T(v.p), a=alpha(v.mode===mode), col=css('--m-'+v.mode), R=6.5;
+    ctx.save(); ctx.globalAlpha=a;
+    if(v.flag){ var gc=css(v.flag==='alert'?'--alert':'--watch');
+      // bloom
+      var grd=ctx.createRadialGradient(s.x,s.y,0,s.x,s.y,26);
+      grd.addColorStop(0,(v.flag==='alert'?'rgba(245,81,78,':'rgba(242,180,61,')+(0.5*a)+')');
+      grd.addColorStop(1,'rgba(0,0,0,0)');
+      ctx.fillStyle=grd; ctx.beginPath(); ctx.arc(s.x,s.y,26,0,7); ctx.fill();
+      // ping ring
+      var pr=8+ (v.flag==='alert'?18:14)*pulse;
+      ctx.globalAlpha=a*(1-pulse); ctx.strokeStyle=gc; ctx.lineWidth=1.6; ctx.beginPath(); ctx.arc(s.x,s.y,pr,0,7); ctx.stroke();
+      ctx.globalAlpha=a;
+      hits.push({id:v.id||'darcluster', x:s.x, y:s.y, r:16});
+    }
+    ctx.fillStyle=col; ctx.strokeStyle=pal().ground; ctx.lineWidth=1.6;
+    if(v.shape==='circle'){ ctx.beginPath(); ctx.arc(s.x,s.y,R,0,7); ctx.fill(); ctx.stroke(); }
+    else if(v.shape==='diamond'){ ctx.save(); ctx.translate(s.x,s.y); ctx.rotate(Math.PI/4); ctx.fillRect(-R+1,-R+1,2*R-2,2*R-2); ctx.strokeRect(-R+1,-R+1,2*R-2,2*R-2); ctx.restore(); }
+    else if(v.shape==='square'){ ctx.fillRect(s.x-R+1,s.y-R+1,2*R-2,2*R-2); ctx.strokeRect(s.x-R+1,s.y-R+1,2*R-2,2*R-2); }
+    else if(v.shape==='triangle'){ ctx.beginPath(); ctx.moveTo(s.x,s.y-R); ctx.lineTo(s.x+R,s.y+R); ctx.lineTo(s.x-R,s.y+R); ctx.closePath(); ctx.fill(); ctx.stroke(); }
+    ctx.restore();
+  }
+
+  var pulse=0;
+  function draw(){
+    hits=[]; var p=pal();
+    ctx.fillStyle=p.ground; ctx.fillRect(0,0,CW,CH);
+    // river
+    ctx.save(); ctx.globalAlpha=mode==='all'||mode==='fixed'?1:0.5;
+    ctx.beginPath(); river.forEach(function(pt,i){var s=T(pt); i?ctx.lineTo(s.x,s.y):ctx.moveTo(s.x,s.y);});
+    ctx.strokeStyle=p.water; ctx.lineWidth=22*S; ctx.lineJoin='round'; ctx.lineCap='round'; ctx.stroke(); ctx.restore();
+    // streets (legible: lighter than ground)
+    var streetsOn=(mode==='all'||mode==='fixed'||mode==='vp');
+    ctx.globalAlpha=streetsOn?1:0.35;
+    ctx.strokeStyle=p.minor; ctx.lineWidth=1.1; ctx.beginPath();
+    streets.forEach(function(sg){var a=T(sg[0]),b=T(sg[1]); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y);}); ctx.stroke();
+    ctx.strokeStyle=p.major; ctx.lineWidth=2.2; ctx.lineJoin='round';
+    arterials.forEach(function(pts){ ctx.beginPath(); pts.forEach(function(pt,i){var s=T(pt); i?ctx.lineTo(s.x,s.y):ctx.moveTo(s.x,s.y);}); ctx.stroke(); });
+    ctx.globalAlpha=1;
+
+    // zones (demand-responsive) — density heatmap OR origin→destination flows
+    var darActive=mode==='all'||mode==='dar';
+    if(vizMode==='flows') drawFlows(darZone, darHubs, darFlows, '47,182,168', darActive, 'DIAL-A-RIDE ZONE');
+    else drawZone(darZone, darCells, '47,182,168', darActive, 'DIAL-A-RIDE ZONE');
+    if(mode==='all'||mode==='via'){
+      if(vizMode==='flows') drawFlows(viaZone, viaHubs, viaFlows, '232,106,166', true, 'VIA CONNECT ZONE');
+      else drawZone(viaZone, viaCells, '232,106,166', true, 'VIA CONNECT ZONE');
+    }
+
+    // bus routes (follow streets)
+    busRoutes.forEach(function(rt){ var a=alpha(mode==='fixed'); ctx.save(); ctx.globalAlpha=a;
+      ctx.beginPath(); rt.pts.forEach(function(pt,i){var s=T(pt); i?ctx.lineTo(s.x,s.y):ctx.moveTo(s.x,s.y);});
+      ctx.strokeStyle=css(rt.color); ctx.lineWidth=(mode==='fixed'?4.5:3.2); ctx.lineJoin='round'; ctx.lineCap='round'; ctx.stroke(); ctx.restore(); });
+
+    // vanpool banner (honest refusal)
+    if(mode==='vp'){ ctx.save(); ctx.globalAlpha=1; ctx.textAlign='center';
+      ctx.fillStyle=css('--alert'); ctx.font='700 15px system-ui';
+      ctx.fillText('VANPOOL RIDERSHIP — FIGURE WITHHELD', CW/2, CH/2-6);
+      ctx.fillStyle=css('--fg-mute'); ctx.font='12px system-ui';
+      ctx.fillText('telematics cannot certify vanpool trips · no number invented', CW/2, CH/2+16); ctx.restore(); }
+
+    // vehicles + flags (drawn last, on top)
+    vehicles.forEach(marker);
+  }
+
+  var raf=null;
+  function loop(ts){ pulse=rm?0.5:(Math.sin(ts/560)*0.5+0.5); draw(); raf=requestAnimationFrame(loop); }
+  function start(){ if(raf) cancelAnimationFrame(raf); if(rm){pulse=0.5; draw();} else loop(0); }
+
+  new ResizeObserver(function(){ fit(); if(rm) draw(); }).observe(cv);
+  fit(); start();
+
+  /* ── legend + caption per mode ── */
+  var LG={
+    all:[['--m-fixed','line','Fixed route'],['--m-dar','sq','Dial-A-Ride zone'],['--m-via','sq','Via zone'],['--m-vp','sq','Vanpool'],['--alert','dot','Flagged']],
+    fixed:[['--m-fixed','line','Bus route (follows streets)'],['--alert','dot','Flagged vehicle']],
+    dar:[['--m-dar','sq','Service zone'],['--m-dar','grad','Demand density'],['--watch','dot','Cluster to review']],
+    via:[['--m-via','sq','Service zone'],['--m-via','grad','Demand density']],
+    vp:[['--m-vp','sq','Vanpool vehicle']]
+  };
+  var CAP={all:['LIVE NETWORK','RIVERBEND <b>CITY</b>'], fixed:['FIXED ROUTE','ON THE <b>STREETS</b>'],
+    dar:['DIAL-A-RIDE','SERVICE <b>ZONE</b>'], via:['VIA CONNECT','ON-DEMAND <b>ZONE</b>'], vp:['VANPOOL','WITHHELD BY <b>DESIGN</b>']};
+  var HON={all:'Positions observed, never interpolated.', fixed:'Bus routes follow real street geometry (GTFS shapes). Positions observed, never interpolated.',
+    dar:'Demand-responsive service has no fixed lines — shown as an aggregated zone. Rider locations are never plotted (disability-status privacy).',
+    via:'On-demand zone shown as aggregated density. No rider or driver locations.', vp:'No vanpool ridership figure is computed from telematics — a refusal, not a zero.'};
+  function chrome(){
+    var LGF={
+      all:[['--m-fixed','line','Fixed route'],['--m-dar','flow','Dial-A-Ride flows'],['--m-via','flow','Via flows'],['--m-vp','sq','Vanpool'],['--watch','dot','Flagged']],
+      dar:[['--m-dar','sq','Service zone'],['--m-dar','flow','O–D flow (volume)'],['--watch','dot','Cluster to review']],
+      via:[['--m-via','sq','Service zone'],['--m-via','flow','O–D flow (volume)']]
+    };
+    var src = (vizMode==='flows' && LGF[mode]) ? LGF[mode] : (LG[mode]||[]);
+    var lg=document.getElementById('legend'); lg.innerHTML=src.map(function(x){
+      var sw = x[1]==='dot' ? '<i style="width:8px;height:8px;border-radius:50%;background:'+css(x[0])+'"></i>'
+             : x[1]==='sq' ? '<i class="sq" style="background:'+css(x[0])+';opacity:.5"></i>'
+             : x[1]==='grad' ? '<i class="sq" style="background:'+css(x[0])+'"></i>'
+             : x[1]==='flow' ? '<i style="width:14px;height:2px;background:'+css(x[0])+'"></i>'
+             : '<i style="background:'+css(x[0])+'"></i>';
+      return '<span>'+sw+x[2]+'</span>'; }).join('');
+    document.getElementById('capk').textContent=CAP[mode][0];
+    document.getElementById('caph').innerHTML=CAP[mode][1];
+    var drMode=(mode==='dar'||mode==='via'||mode==='all');
+    document.getElementById('honesty').textContent = drMode
+      ? (vizMode==='flows'
+          ? 'Demand-responsive trips shown as aggregated origin→destination flows between hubs — never rider addresses.'
+          : 'Demand-responsive service shown as aggregated demand density — rider locations never plotted (disability-status privacy).')
+      : HON[mode];
+  }
+  chrome();
+
+  document.getElementById('modes').addEventListener('click',function(e){var b=e.target.closest('button'); if(!b)return;
+    this.querySelectorAll('button').forEach(function(x){x.setAttribute('aria-pressed',x===b?'true':'false');});
+    mode=b.getAttribute('data-m'); chrome(); if(rm) draw(); });
+  document.getElementById('theme').addEventListener('click',function(e){var b=e.target.closest('button'); if(!b)return;
+    this.querySelectorAll('button').forEach(function(x){x.setAttribute('aria-pressed',x===b?'true':'false');});
+    theme=b.getAttribute('data-t'); if(rm) draw(); });
+
+  /* ── count-up (flat, exact) ── */
+  document.querySelectorAll('.count').forEach(function(el){
+    var target=parseFloat(el.getAttribute('data-target')), dec=parseInt(el.getAttribute('data-dec'),10);
+    var fmt=function(n){return n.toLocaleString('en-US',{minimumFractionDigits:dec,maximumFractionDigits:dec});};
+    if(rm){el.textContent=fmt(target);return;}
+    var d=1100,t0=null; (function step(ts){if(!t0)t0=ts;var p=Math.min((ts-t0)/d,1);var e=1-Math.pow(1-p,3);
+      el.textContent=fmt(target*e); if(p<1)requestAnimationFrame(step); else el.textContent=fmt(target);})(performance.now());
+  });
+
+  /* ── provenance stream ── */
+  var rows=[['06:12:04','<b>UPT</b> revenue split · 292 held','sig','HELD'],
+    ['06:12:03','<b>V-3684</b> telemetry gap · 7m04s','alert','GAP'],
+    ['06:12:01','DAR NE zone · 41 no-run boardings','watch','REVIEW'],
+    ['06:11:58','<b>VRM</b> leaf verified · sha 2f…9c','ok','VERIFIED'],
+    ['06:11:55','Via trip <b>7741</b> matched schedule','ok','OK'],
+    ['06:11:52','vanpool figure withheld · no basis','sig','REFUSED'],
+    ['06:11:49','coverage 0.981 · above floor','ok','OK']];
+  var stream=document.getElementById('stream'), i=0;
+  function emit(){var r=rows[i%rows.length];i++;var d=document.createElement('div');d.className='er '+r[2];
+    d.innerHTML='<span class="t">'+r[0]+'</span><span class="m">'+r[1]+'</span><span class="s">'+r[3]+'</span>';
+    stream.insertBefore(d,stream.firstChild); while(stream.children.length>8)stream.removeChild(stream.lastChild);}
+  for(var s2=0;s2<6;s2++) emit(); if(!rm) setInterval(emit,2600);
+
+  /* ── inspector ── */
+  var DATA={
+    gap:{sev:'alert',title:'Telemetry Gap · V-3684',
+      lead:'Vehicle <b>V-3684</b> (Route 12) went silent for <b>7m04s</b> in revenue service. Positions before and after are observed; the interval is <b>held as a gap</b>, not interpolated, and excluded from the covered window.',
+      kv:[['Vehicle','V-3684'],['Route','12 · Fixed'],['Block','1-3'],['Gap','07:41:12 → 07:48:16'],['Effect','VRH window excised']],
+      chain:[['bad','!','FINDING','Telemetry gap · 7m04s'],['sig','B','BLOCK','1-3'],['sig','R','ROUTE','12 · Fixed'],['bad','C','CALC','VRH · window excised'],['sound','@','DQ OWNER','fleet-telemetry · open']]},
+    darcluster:{sev:'watch',title:'Boarding Cluster · DAR NE Zone',
+      lead:'<b>41</b> Dial-A-Ride boardings in the NE zone resolved to <b>no run assignment</b>. Shown as an <b>aggregated cluster</b> — individual rider locations are never plotted. Auto-held out of UPT until a human classifies revenue vs non-revenue, with a justification note.',
+      kv:[['Count','41 boardings'],['Mode','Dial-A-Ride'],['Zone','Northeast'],['Privacy','aggregated · no pins'],['Status','pending review']],
+      chain:[['bad','!','FINDING','41 no-run boardings'],['sig','Z','ZONE','Northeast (aggregated)'],['sig','W','WINDOW','mid-service'],['bad','C','CALC','UPT · 41 held'],['sound','@','DQ OWNER','ridership-analyst · open']]},
+    vrh:{sev:'watch',title:'VRH Variance vs Dispatch',
+      lead:'Dispatch shows <b>742.03 h</b>; Headway computes <b>587.32 h</b> from telemetry, schedule-aligned. The delta is <b>deadhead / non-revenue movement</b> dispatch counts and NTD excludes — the raw report over-states revenue hours.',
+      kv:[['Dispatch','742.03 h'],['Headway','587.32 h'],['Delta','154.71 h (20.9%)'],['Cause','deadhead / non-revenue'],['Treatment','excluded · FTA Ex.35']],
+      chain:[['bad','!','FINDING','VRH variance 20.9%'],['sig','B','BLOCKS','1-1 … 1-7'],['sig','R','ROUTE','1 · Fixed'],['sound','C','CALC','VRH · revenue-only'],['sound','@','RECONCILIATION','transparent to agency']]}
+  };
+  var scrim=document.getElementById('scrim'), insp=document.getElementById('inspect'), lastFocus=null;
+  function open(id){var d=DATA[id]; if(!d)return; lastFocus=document.activeElement;
+    var kv=d.kv.map(function(r){return '<div class="k">'+r[0]+'</div><div class="v"><b>'+r[1]+'</b></div>';}).join('');
+    var chain=d.chain.map(function(n,idx){return (idx?'<div class="connect"></div>':'')+
+      '<div class="node '+n[0]+'"><span class="ic">'+n[1]+'</span><span><span class="nk">'+n[2]+'</span><br><span class="nv">'+n[3]+'</span></span></div>';}).join('');
+    insp.innerHTML='<div class="insp-h"><span class="sev '+d.sev+'">'+(d.sev==='alert'?'Alert':'Review')+'</span>'+
+      '<h2 id="insp-title">'+d.title+'</h2><button class="close" aria-label="Close">✕</button></div>'+
+      '<div class="insp-b"><p class="lead">'+d.lead+'</p><div class="kv">'+kv+'</div>'+
+      '<p class="relh">RELATIONSHIP TRAIL</p><div class="chain">'+chain+'</div></div>';
+    scrim.classList.add('open'); insp.classList.add('open');
+    insp.querySelector('.close').addEventListener('click',close); insp.querySelector('.close').focus(); }
+  function close(){scrim.classList.remove('open'); insp.classList.remove('open'); if(lastFocus)lastFocus.focus();}
+  scrim.addEventListener('click',close);
+  document.addEventListener('keydown',function(e){if(e.key==='Escape')close();});
+  document.querySelectorAll('.flagrow').forEach(function(b){b.addEventListener('click',function(){open(b.getAttribute('data-id'));});});
+
+  // canvas click → hit-test flagged marks
+  cv.addEventListener('click',function(e){var rect=cv.getBoundingClientRect(), mx=e.clientX-rect.left, my=e.clientY-rect.top;
+    for(var k=0;k<hits.length;k++){var h=hits[k]; if(Math.hypot(mx-h.x,my-h.y)<=h.r+4){open(h.id); return;}}});
+  cv.style.cursor='crosshair';
+})();
+</script>

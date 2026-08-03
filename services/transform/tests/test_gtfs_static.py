@@ -54,6 +54,17 @@ STOP_TIMES_TXT = (
     "T1,10:40:00,10:40:30,S1,1\n"
     "T1,25:05:00,,S2,2\n"  # >24h service time; empty departure is valid GTFS
 )
+CALENDAR_TXT = (
+    "service_id,monday,tuesday,wednesday,thursday,friday,saturday,sunday,"
+    "start_date,end_date\n"
+    "WKDY,1,1,1,1,1,0,0,20260601,20261231\n"
+    "SAT,0,0,0,0,0,1,0,20260601,20261231\n"
+)
+CALENDAR_DATES_TXT = (
+    "service_id,date,exception_type\n"
+    "WKDY,20260704,2\n"
+    "SAT,20260703,1\n"
+)
 
 
 def base_zip(**overrides: str) -> bytes:
@@ -63,14 +74,16 @@ def base_zip(**overrides: str) -> bytes:
         "trips.txt": TRIPS_TXT,
         "stops.txt": STOPS_TXT,
         "stop_times.txt": STOP_TIMES_TXT,
+        "calendar.txt": CALENDAR_TXT,
+        "calendar_dates.txt": CALENDAR_DATES_TXT,
     }
     files.update(overrides)
     return build_zip(files)
 
 
 def test_routes_and_trips_normalized_with_edges() -> None:
-    routes, trips, stops, stop_times, agencies, edges, findings = normalize(
-        base_zip(), RECORD_ID
+    routes, trips, stops, stop_times, agencies, cal, cal_dates, edges, findings = (
+        normalize(base_zip(), RECORD_ID)
     )
 
     assert findings == []
@@ -92,29 +105,52 @@ def test_routes_and_trips_normalized_with_edges() -> None:
         ("A1", "Example Transit", "America/New_York")
     ]
 
+    # 0.5.0 (handoff 0031): calendar.txt + calendar_dates.txt normalized too.
+    assert [
+        (c.service_id, c.monday, c.saturday, c.start_date.isoformat(),
+         c.end_date.isoformat())
+        for c in cal
+    ] == [("WKDY", True, False, "2026-06-01", "2026-12-31"),
+          ("SAT", False, True, "2026-06-01", "2026-12-31")]
+    assert [
+        (d.service_id, d.service_date.isoformat(), d.exception_type)
+        for d in cal_dates
+    ] == [("WKDY", "2026-07-04", 2), ("SAT", "2026-07-03", 1)]
+
     # Exactly one lineage edge per canonical row, anchored to the feed record.
     assert len(edges) == (
-        len(routes) + len(trips) + len(stops) + len(stop_times) + len(agencies)
+        len(routes) + len(trips) + len(stops) + len(stop_times)
+        + len(agencies) + len(cal) + len(cal_dates)
     )
     route_edges = [e for e in edges if e.output_kind == "canonical.routes"]
     trip_edges = [e for e in edges if e.output_kind == "canonical.trips"]
     stop_edges = [e for e in edges if e.output_kind == "canonical.stops"]
     st_edges = [e for e in edges if e.output_kind == "canonical.stop_times"]
     agency_edges = [e for e in edges if e.output_kind == "canonical.agencies"]
+    cal_edges = [
+        e for e in edges if e.output_kind == "canonical.service_calendars"
+    ]
+    cd_edges = [
+        e for e in edges if e.output_kind == "canonical.service_calendar_dates"
+    ]
     assert sorted(e.output_id for e in route_edges) == ["R1", "R2"]
     assert sorted(e.output_id for e in trip_edges) == ["T1", "T2", "T3"]
     assert sorted(e.output_id for e in stop_edges) == ["S1", "S2", "node-1"]
     assert sorted(e.output_id for e in st_edges) == ["T1:1", "T1:2"]
     assert sorted(e.output_id for e in agency_edges) == ["A1"]
+    assert sorted(e.output_id for e in cal_edges) == ["SAT", "WKDY"]
+    assert sorted(e.output_id for e in cd_edges) == [
+        "SAT:2026-07-03", "WKDY:2026-07-04"
+    ]
     for edge in edges:
         assert edge.transform_name == TRANSFORM_NAME == "normalize_gtfs_static"
-        assert edge.transform_version == TRANSFORM_VERSION == "0.4.0"
+        assert edge.transform_version == TRANSFORM_VERSION == "0.5.0"
         assert edge.input_kind == "raw.records"
         assert edge.input_id == RECORD_ID
 
 
 def test_stops_normalized_with_nullable_node_coordinates() -> None:
-    _r, _t, stops, _st, _agencies, _e, findings = normalize(base_zip(), RECORD_ID)
+    _r, _t, stops, _st, _agencies, _cal, _cd, _e, findings = normalize(base_zip(), RECORD_ID)
 
     assert findings == []
     assert [(s.stop_id, s.name, s.latitude, s.longitude) for s in stops] == [
@@ -127,7 +163,7 @@ def test_stops_normalized_with_nullable_node_coordinates() -> None:
 
 
 def test_stop_times_parse_gtfs_times_and_preserve_null_shape_dist() -> None:
-    _r, _t, _s, stop_times, _agencies, _e, findings = normalize(base_zip(), RECORD_ID)
+    _r, _t, _s, stop_times, _agencies, _cal, _cd, _e, findings = normalize(base_zip(), RECORD_ID)
 
     assert findings == []
     assert [
@@ -157,7 +193,7 @@ def test_stop_times_shape_dist_traveled_parsed_when_present() -> None:
         "T1,10:45:00,10:45:00,S2,2,1.25\n"
         "T1,10:50:00,10:50:00,S1,3,\n"  # empty value → NULL, no finding
     )
-    _r, _t, _s, stop_times, _agencies, _e, findings = normalize(
+    _r, _t, _s, stop_times, _agencies, _cal, _cd, _e, findings = normalize(
         base_zip(**{"stop_times.txt": stop_times_txt}), RECORD_ID
     )
     assert findings == []
@@ -169,7 +205,7 @@ def test_stop_missing_required_coordinates_is_warning_stored_null() -> None:
         "stop_id,stop_name,stop_lat,stop_lon,location_type\n"
         "S-bad,No Coords Platform,,,0\n"
     )
-    _r, _t, stops, _st, _agencies, _e, findings = normalize(
+    _r, _t, stops, _st, _agencies, _cal, _cd, _e, findings = normalize(
         base_zip(**{"stops.txt": stops_txt}), RECORD_ID
     )
     assert [(s.stop_id, s.latitude, s.longitude) for s in stops] == [
@@ -187,7 +223,7 @@ def test_stop_malformed_or_out_of_range_coordinate_null_plus_warning() -> None:
         "S-x,Bad Lat,not-a-number,-71.06,0\n"
         "S-y,Bad Lon,42.35,-181.0,0\n"
     )
-    _r, _t, stops, _st, _agencies, _e, findings = normalize(
+    _r, _t, stops, _st, _agencies, _cal, _cd, _e, findings = normalize(
         base_zip(**{"stops.txt": stops_txt}), RECORD_ID
     )
     assert [(s.stop_id, s.latitude, s.longitude) for s in stops] == [
@@ -204,7 +240,7 @@ def test_stop_time_malformed_time_and_negative_shape_dist_warned() -> None:
         "trip_id,arrival_time,departure_time,stop_id,stop_sequence,shape_dist_traveled\n"
         "T1,10:99:00,10:40:00,S1,1,-5\n"
     )
-    _r, _t, _s, stop_times, _agencies, _e, findings = normalize(
+    _r, _t, _s, stop_times, _agencies, _cal, _cd, _e, findings = normalize(
         base_zip(**{"stop_times.txt": stop_times_txt}), RECORD_ID
     )
     assert [
@@ -225,7 +261,7 @@ def test_stop_time_missing_identity_quarantined_row_by_row() -> None:
         "T1,10:43:00,10:43:00,S1,minus\n"  # non-integer stop_sequence
         "T1,10:44:00,10:44:00,S1,-2\n"  # negative stop_sequence
     )
-    _r, _t, _s, stop_times, _agencies, edges, findings = normalize(
+    _r, _t, _s, stop_times, _agencies, _cal, _cd, edges, findings = normalize(
         base_zip(**{"stop_times.txt": stop_times_txt}), RECORD_ID
     )
     assert [(st.trip_id, st.stop_sequence) for st in stop_times] == [("T1", 1)]
@@ -245,7 +281,7 @@ def test_trips_block_id_parsed_when_column_present() -> None:
         "T2,R1,WKDY,1,B-77\n"
         "T3,R2,SAT,, \n"  # whitespace-only block_id → NULL, no finding
     )
-    _routes, trips, _stops, _st, _agencies, edges, findings = normalize(
+    _routes, trips, _stops, _st, _agencies, _cal, _cd, edges, findings = normalize(
         base_zip(**{"trips.txt": trips_txt}), RECORD_ID
     )
 
@@ -263,7 +299,7 @@ def test_unknown_route_type_gets_mode_unknown_plus_finding() -> None:
         "route_id,route_short_name,route_long_name,route_type\n"
         "RX,X,Mystery Line,99\n"
     )
-    routes, _trips, _stops, _st, _agencies, edges, findings = normalize(
+    routes, _trips, _stops, _st, _agencies, _cal, _cd, edges, findings = normalize(
         base_zip(
             **{
                 "routes.txt": routes_txt,
@@ -283,16 +319,22 @@ def test_unknown_route_type_gets_mode_unknown_plus_finding() -> None:
 
 
 def test_missing_required_files_are_blocking_findings() -> None:
-    routes, trips, stops, stop_times, agencies, edges, findings = normalize(
+    routes, trips, stops, stop_times, agencies, _cal, _cd, edges, findings = normalize(
         build_zip({"agency.txt": AGENCY_TXT}), RECORD_ID
     )
     assert routes == [] and trips == [] and stops == [] and stop_times == []
     assert len(agencies) == 1  # agency.txt itself parsed fine
     assert len(edges) == 1  # the agency row's edge only
     types = sorted(f.issue_type for f in findings)
-    # routes.txt, trips.txt, stops.txt, stop_times.txt each blockingly absent.
-    assert types == ["malformed_entity"] * 4
-    assert all(f.severity == "blocking" for f in findings)
+    # routes.txt, trips.txt, stops.txt, stop_times.txt each blockingly
+    # absent, PLUS the 0.5.0 warning that the feed defines no service days
+    # (neither calendar.txt nor calendar_dates.txt — handoff 0031).
+    assert types == ["malformed_entity"] * 5
+    blocking = [f for f in findings if f.severity == "blocking"]
+    warnings = [f for f in findings if f.severity == "warning"]
+    assert len(blocking) == 4
+    assert len(warnings) == 1
+    assert "no service days" in warnings[0].title
 
 
 def test_missing_agency_txt_is_blocking_finding() -> None:
@@ -302,7 +344,7 @@ def test_missing_agency_txt_is_blocking_finding() -> None:
         "stops.txt": STOPS_TXT,
         "stop_times.txt": STOP_TIMES_TXT,
     }
-    _r, _t, _s, _st, agencies, _e, findings = normalize(
+    _r, _t, _s, _st, agencies, _cal, _cd, _e, findings = normalize(
         build_zip(files), RECORD_ID
     )
     assert agencies == []
@@ -318,7 +360,7 @@ def test_agency_missing_timezone_quarantined_never_guessed() -> None:
         "A1,Good Transit,America/Chicago\n"
         "A2,No Zone Transit,\n"  # missing timezone → quarantined row
     )
-    _r, _t, _s, _st, agencies, edges, findings = normalize(
+    _r, _t, _s, _st, agencies, _cal, _cd, edges, findings = normalize(
         base_zip(**{"agency.txt": agency_txt}), RECORD_ID
     )
     assert [(a.agency_id, a.timezone) for a in agencies] == [
@@ -339,7 +381,7 @@ def test_agency_id_omitted_single_agency_feed_stored_empty() -> None:
         "agency_name,agency_timezone\n"
         "Solo Transit,America/Denver\n"
     )
-    _r, _t, _s, _st, agencies, edges, findings = normalize(
+    _r, _t, _s, _st, agencies, _cal, _cd, edges, findings = normalize(
         base_zip(**{"agency.txt": agency_txt}), RECORD_ID
     )
     assert [(a.agency_id, a.name, a.timezone) for a in agencies] == [
@@ -352,7 +394,7 @@ def test_agency_id_omitted_single_agency_feed_stored_empty() -> None:
 
 
 def test_bad_zip_is_undecodable_payload_finding_not_exception() -> None:
-    routes, trips, stops, stop_times, _agencies, edges, findings = normalize(
+    routes, trips, stops, stop_times, _agencies, _cal, _cd, edges, findings = normalize(
         b"not a zip at all", RECORD_ID
     )
     assert routes == [] and trips == [] and edges == []
@@ -369,7 +411,7 @@ def test_trip_missing_required_fields_quarantined_row_by_row() -> None:
         ",R1,WKDY\n"  # missing trip_id
         "T-bad,,\n"  # missing route_id and service_id
     )
-    _routes, trips, _stops, _st, _agencies, edges, findings = normalize(
+    _routes, trips, _stops, _st, _agencies, _cal, _cd, edges, findings = normalize(
         base_zip(**{"trips.txt": trips_txt}), RECORD_ID
     )
     assert [t.trip_id for t in trips] == ["T-ok"]

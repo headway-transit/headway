@@ -31,10 +31,15 @@ def test_dq_counts_match_the_list(client, fake_db):
     assert body["total"] == 4
     assert body["by_severity"] == {"blocking": 1, "warning": 2, "info": 1}
     assert body["by_status"] == {"open": 2, "owned": 1, "resolved": 1, "attested": 0}
+    # Since handoff 0030 the list serves ONE PAGE — so the guarantee is
+    # that the page's own total agrees with the cards, not that the page
+    # holds every row. The page says what it is not showing; the cards say
+    # what the whole queue holds.
     listed = client.get(
         "/dq/issues", headers=auth_header(fake_db, "vera")
     ).json()
-    assert len(listed) == body["total"]
+    assert listed["total"] == body["total"]
+    assert len(listed["issues"]) == body["total"]  # 4 rows fit in one page
 
 
 def test_dq_counts_respect_the_same_status_filter_as_the_list(client, fake_db):
@@ -56,6 +61,10 @@ def test_dq_counts_empty_state_is_explicit_zeros(client, fake_db):
         "total": 0,
         "by_severity": {"blocking": 0, "warning": 0, "info": 0},
         "by_status": {"open": 0, "owned": 0, "resolved": 0, "attested": 0},
+        # A sum of no measurements (handoff 0030) — the queue-wide effort
+        # line reads zero because nothing has been recorded, which is a
+        # different statement from any individual issue's null.
+        "resolution_minutes_total": 0,
     }
 
 

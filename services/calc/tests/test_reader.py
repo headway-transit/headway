@@ -41,6 +41,8 @@ def _sample_rows():
             "rec-a-00",
             "blk-1",
             "bus",  # canonical.routes.mode joined via trips (handoff 0009)
+            "5335",  # vehicle_label, migration 0037 (handoff 0032)
+            "42",  # canonical.routes.short_name joined via trips (handoff 0032)
         ),
         (
             datetime(2026, 1, 15, 12, 1, tzinfo=timezone.utc),
@@ -51,6 +53,8 @@ def _sample_rows():
             "rec-x-00",
             None,  # LEFT JOIN: no trip, no block — NULL, never a dropped row
             None,  # LEFT JOIN: no trip, no route, no mode — NULL, never guessed
+            None,  # a feed without labels stores NULL — never an invented name
+            None,  # no trip, no route, no short name — NULL, never guessed
         ),
     ]
 
@@ -69,9 +73,13 @@ def test_reader_maps_rows_to_dataclasses():
     assert first.source_record_id == "rec-a-00"
     assert first.block_id == "blk-1"  # joined from canonical.trips
     assert first.mode == "bus"  # joined from canonical.routes (handoff 0009)
+    assert first.vehicle_label == "5335"  # migration 0037 (handoff 0032)
+    assert first.route_short_name == "42"  # joined from canonical.routes
     assert positions[1].trip_id is None  # None passes through untouched
     assert positions[1].block_id is None
     assert positions[1].mode is None  # NULL mode stays None, never guessed
+    assert positions[1].vehicle_label is None  # absent stays absent
+    assert positions[1].route_short_name is None
 
 
 def test_reader_sql_columns_join_and_order_match_handoffs():
@@ -215,3 +223,134 @@ def test_reader_roundtrips_golden_fixture(golden_fixture):
             key=lambda p: (p.vehicle_id, p.time, p.source_record_id),
         )
     ]
+
+
+def test_pre_0037_database_falls_back_to_the_label_free_select():
+    """A vocabulary feature must never stop a calculation from reading its
+    inputs: on a database without canonical.vehicle_positions.vehicle_label
+    (SQLSTATE 42703) the reader rolls back and re-reads without the column —
+    labels are then honestly None and titles fall back to the shortened
+    vehicle_id."""
+    rows = [
+        (
+            datetime(2026, 1, 15, 12, 0, tzinfo=timezone.utc),
+            "veh-101",
+            "trip-A",
+            40.0,
+            -75.0,
+            "rec-a-00",
+            "blk-1",
+            "bus",
+            None,  # the fallback SELECT binds NULL for vehicle_label
+            "42",
+        ),
+    ]
+    conn = RecordingConnection(
+        position_rows=rows, vehicle_label_column_missing=True
+    )
+    positions = load_vehicle_positions(conn, PERIOD_START, PERIOD_END)
+
+    # The failed 0037 statement was rolled back, then the fallback ran.
+    assert conn.rollback_count == 1
+    selects = conn.statements_matching("FROM canonical.vehicle_positions")
+    assert len(selects) == 2
+    assert "p.vehicle_label" in selects[0][0]
+    assert "p.vehicle_label" not in selects[1][0]
+
+    # Every other field still loads; the label is honestly absent.
+    (position,) = positions
+    assert position.vehicle_id == "veh-101"
+    assert position.vehicle_label is None
+    assert position.route_short_name == "42"
+
+
+# ---------------------------------------------------------------------------
+# Handoff 0040: revenue_classification + revenue windows
+# ---------------------------------------------------------------------------
+
+def test_passenger_events_load_revenue_classification():
+    """The assignment status (migration 0039) rides each loaded event."""
+    from headway_calc.reader import load_passenger_events
+    from headway_calc.types import PassengerEvent
+
+    events = [
+        PassengerEvent(
+            event_timestamp=datetime(2026, 6, 15, 12, tzinfo=timezone.utc),
+            service_date=date(2026, 6, 15),
+            passenger_event_id="pe-1",
+            vehicle_id="v1",
+            trip_id=None,
+            trip_stop_sequence=None,
+            event_type="Passenger boarded",
+            event_count=1,
+            source="tides",
+            source_record_id="rec-1",
+            revenue_classification="unassigned",
+        ),
+    ]
+    conn = RecordingConnection(passenger_event_rows=events_to_rows(events))
+    (loaded,) = load_passenger_events(conn, PERIOD_START, PERIOD_END)
+    assert loaded.revenue_classification == "unassigned"
+    assert "e.revenue_classification" in conn.executed[0][0]
+
+
+def test_pre_0039_database_falls_back_to_classification_free_select():
+    """On a database without canonical.passenger_events.revenue_classification
+    (SQLSTATE 42703) the reader rolls back and re-reads without it — the
+    status is then honestly None and upt uses the trip-assignment proxy."""
+    from headway_calc.reader import load_passenger_events
+
+    # Rows in the 12-column shape the fallback SELECT returns (NULL at 11).
+    rows = [
+        (
+            datetime(2026, 6, 15, 12, tzinfo=timezone.utc),
+            date(2026, 6, 15),
+            "pe-1",
+            "v1",
+            "trip-1",
+            1,
+            "Passenger boarded",
+            2,
+            "tides",
+            "rec-1",
+            "bus",
+            None,  # the fallback binds NULL for revenue_classification
+        ),
+    ]
+    conn = RecordingConnection(
+        passenger_event_rows=rows, revenue_classification_column_missing=True
+    )
+    (loaded,) = load_passenger_events(conn, PERIOD_START, PERIOD_END)
+    assert conn.rollback_count == 1
+    selects = conn.statements_matching("FROM canonical.passenger_events")
+    assert "e.revenue_classification" in selects[0][0]
+    assert "e.revenue_classification" not in selects[1][0]
+    assert loaded.revenue_classification is None
+    assert loaded.trip_id == "trip-1"
+
+
+def test_load_revenue_window_seconds_maps_and_orders():
+    from headway_calc.reader import load_revenue_window_seconds
+
+    conn = RecordingConnection(
+        revenue_window_rows=[
+            (date(2026, 6, 15), 28800, 72000),
+            (date(2026, 6, 16), None, 71000),
+        ]
+    )
+    windows = load_revenue_window_seconds(conn, PERIOD_START, PERIOD_END)
+    assert windows == {
+        date(2026, 6, 15): (28800, 72000),
+        date(2026, 6, 16): (None, 71000),
+    }
+    assert "MIN(st.departure_seconds)" in conn.executed[0][0]
+
+
+def test_load_revenue_window_seconds_pre_0019_returns_empty():
+    """A database without canonical.stop_times (SQLSTATE 42P01) yields no
+    windows — every no-run boarding is then held pending, never guessed."""
+    from headway_calc.reader import load_revenue_window_seconds
+
+    conn = RecordingConnection(stop_times_table_missing=True)
+    assert load_revenue_window_seconds(conn, PERIOD_START, PERIOD_END) == {}
+    assert conn.rollback_count == 1

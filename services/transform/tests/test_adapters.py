@@ -49,6 +49,50 @@ def _run(spec_path: Path, fixture: Path):
     return spec, run_adapter(spec, data, record_id, spec.source_label)
 
 
+def test_tripspark_tolerates_an_optional_header_row(tmp_path):
+    """A real SSMS/warehouse export often includes a column-name header row
+    (skip_optional_header: true). An export WITH the header and one WITHOUT it
+    must process IDENTICALLY — the header is dropped, never quarantined, and
+    never counted as a data row; no boarding is lost either way."""
+    spec = load_spec(TRIPSPARK_SPEC)
+    assert spec.skip_optional_header is True
+
+    bom = "﻿".encode("utf-8")
+    headerless = (TRIPSPARK_DIR / "fixtures" / "stop_visits.csv").read_bytes()
+    body = headerless[len(bom):] if headerless.startswith(bom) else headerless
+    with_header = bom + ",".join(spec.columns).encode("utf-8") + b"\r\n" + body
+
+    a = run_adapter(spec, headerless, hashlib.sha256(headerless).hexdigest(), spec.source_label)
+    b = run_adapter(spec, with_header, hashlib.sha256(with_header).hexdigest(), spec.source_label)
+
+    assert a.total_rows == b.total_rows            # header not counted
+    assert a.quarantined_count == b.quarantined_count  # header not quarantined
+    assert len(a.passenger_events) == len(b.passenger_events)  # no boarding lost
+    # And the dropped header never appears as a quarantine finding.
+    assert not any("VehicleLocationAPCKey" in f.description for f in b.findings)
+
+
+def test_skip_optional_header_requires_a_headerless_format(tmp_path):
+    """skip_optional_header is only meaningful for header: false — a
+    header: true format already consumes its column-name row."""
+    doc = {
+        "mapping_spec_version": 0,
+        "vendor": "x", "product": "y", "source_label": "x_y",
+        "target_contract": "tides_passenger_events",
+        "source_format": {"kind": "csv", "csv": {
+            "header": True, "skip_optional_header": True,
+        }},
+        "timezone": "UTC",
+        "fields": {"service_date": {"derived": "local_date_of", "of": "event_timestamp"},
+                   "event_timestamp": {"from": "T", "coerce": "datetime", "format": "%Y-%m-%dT%H:%M:%S"}},
+    }
+    import yaml
+    p = tmp_path / "m.yaml"
+    p.write_text(yaml.safe_dump(doc))
+    with pytest.raises(SpecError, match="skip_optional_header"):
+        load_spec(p)
+
+
 MINIMAL_TIDES_SPEC = """\
 mapping_spec_version: 0
 vendor: testvendor
@@ -410,8 +454,11 @@ def test_registered_label_flows_to_canonical(fake_connection: FakeConnection) ->
     assert len(events) == 2
     record_id = hashlib.sha256(payload).hexdigest()
     for _sql, params in events:
-        assert params[-2] == "acme_ridelog_simulated"  # source column
-        assert params[-1] == record_id  # source_record_id
+        # 0036 added vendor_trip_ref + trip_resolution after source_record_id;
+        # both are NULL here (no resolution config for this adapter).
+        assert params[8] == "acme_ridelog_simulated"  # source column
+        assert params[9] == record_id  # source_record_id
+        assert params[10] is None and params[11] is None
     edges = fake_connection.sql_for("lineage.edges")
     assert len(edges) == 4  # normalizer + adapter edge per canonical row
     dq = fake_connection.sql_for("dq.issues")
@@ -579,9 +626,12 @@ def test_tripspark_streets_synthetic_fixture_accounting() -> None:
     assert spec.source_label == "tripspark_streets"
     assert spec.synthetic is False  # real adapter: sample provenance block
     assert spec.timezone_name == "America/Los_Angeles"
+    # Handoff 0040: the no-run boarding (row 900000106, blank TripName) is no
+    # longer FILTERED — it is emitted as an 'unassigned' passenger event, so
+    # mapped 3->4, filtered 4->3, emitted 4->5.
     assert (result.total_rows, result.mapped_count, result.filtered_count,
-            result.quarantined_count) == (12, 3, 4, 5)
-    assert len(result.records) == 4
+            result.quarantined_count) == (12, 4, 3, 5)
+    assert len(result.records) == 5
     # both-counts row fans out; ids embed row key + stop code + emission
     ids = [r["passenger_event_id"] for r in result.records]
     assert ids == [
@@ -589,6 +639,7 @@ def test_tripspark_streets_synthetic_fixture_accounting() -> None:
         "900000101:QT042:alight",
         "900000102:QT051:board",
         "900000103:QT066:alight",
+        "900000106:QT042:board",  # the no-run ghost boarding, now emitted
     ]
     first = result.records[0]
     # PDT (UTC-7) local wall clock rendered UTC
@@ -598,14 +649,25 @@ def test_tripspark_streets_synthetic_fixture_accounting() -> None:
     assert first["trip_stop_sequence"] == 105  # PatternPointRank
     assert first["vehicle_id"] == "7301"
     assert first["event_count"] == 2 and first["event_type"] == "Passenger boarded"
+    # assigned rows carry revenue_classification 'assigned'
+    assert first["revenue_classification"] == "assigned"
     assert result.records[1]["event_count"] == 1
     assert result.records[1]["event_type"] == "Passenger alighted"
+    # the no-run row: 'unassigned', with trip and stop-sequence DROPPED (NULL)
+    ghost = result.records[4]
+    assert ghost["revenue_classification"] == "unassigned"
+    assert "trip_id_performed" not in ghost
+    assert "trip_stop_sequence" not in ghost
+    assert ghost["event_type"] == "Passenger boarded" and ghost["event_count"] == 1
+    ghost_row = result.passenger_events[4]
+    assert ghost_row.trip_id is None and ghost_row.trip_stop_sequence is None
+    assert ghost_row.revenue_classification == "unassigned"
     descriptions = "\n".join(f.description for f in result.findings)
     # dwell pings (0/0) suppressed with the declared reasons
     assert "dwell pings" in descriptions
-    # unassigned-style row excluded by the declared TripName filter
-    assert "excluded by mapping-spec filter #1" in descriptions
-    assert "trip assignment" in descriptions
+    # the no-run row is now EMITTED unassigned, not filtered for lacking a trip
+    assert "no run assignment" in descriptions
+    assert "revenue_classification 'unassigned'" in descriptions
     # quarantine reasons: bad count, bad timestamp, DST gap, rank 0, width
     assert "'2x' is not an integer" in descriptions
     assert "does not match datetime format" in descriptions
@@ -614,7 +676,7 @@ def test_tripspark_streets_synthetic_fixture_accounting() -> None:
     assert "row has 17 field(s)" in descriptions
     # source label carried verbatim; dual lineage per record
     assert all(r.source == "tripspark_streets" for r in result.passenger_events)
-    assert len(result.edges) == 8
+    assert len(result.edges) == 10
 
 
 def test_tripspark_wrong_width_export_quarantines_every_row() -> None:
@@ -644,16 +706,40 @@ def test_tripspark_label_now_registered_and_flows(fake_connection: FakeConnectio
     )
     assert len(fake_connection.sql_for("raw.records")) == 1
     events = fake_connection.sql_for("canonical.passenger_events")
-    assert len(events) == 4
+    # Handoff 0040: the no-run ghost boarding is now emitted as a 5th event
+    # (revenue_classification 'unassigned'), no longer filtered out.
+    assert len(events) == 5
     record_id = hashlib.sha256(payload).hexdigest()
-    for _sql, params in events:
-        assert params[-2] == "tripspark_streets"
-        assert params[-1] == record_id
-    assert len(fake_connection.sql_for("lineage.edges")) == 8
+    # params index 12 is revenue_classification (migration 0039).
+    assigned = [p for _s, p in events if p[12] == "assigned"]
+    unassigned = [p for _s, p in events if p[12] == "unassigned"]
+    assert len(assigned) == 4 and len(unassigned) == 1
+    for params in assigned:
+        assert params[8] == "tripspark_streets"
+        assert params[9] == record_id
+        # tripspark/streets' direction convention is now CONFIRMED (agency
+        # accepted 2026-07-31), so the resolver RUNS instead of refusing: it
+        # preserves the vendor trip ref (params[10] = the TripName), and with
+        # no GTFS trips in this fake DB every assigned row resolves 'unmatched'
+        # (params[11]).
+        assert params[10] is not None
+        assert params[11] == "unmatched"
+    # the unassigned ghost boarding did NOT resolve (no trip): trip_id (4),
+    # vendor_trip_ref (10) and trip_resolution (11) are all NULL, and its
+    # stop-sequence (5) is NULL.
+    (ghost,) = unassigned
+    assert ghost[4] is None and ghost[5] is None
+    assert ghost[10] is None and ghost[11] is None
+    assert len(fake_connection.sql_for("lineage.edges")) == 10
     dq = fake_connection.sql_for("dq.issues")
     assert sum(1 for _s, p in dq if p[0] == "adapter_row_quarantined") == 5
-    assert sum(1 for _s, p in dq if p[0] == "adapter_rows_filtered") == 1
+    # no row-level filter remains (the TripName filter became the unassigned
+    # block); the two zero/zero dwell pings are emission suppressions.
+    assert sum(1 for _s, p in dq if p[0] == "adapter_rows_filtered") == 0
     assert sum(1 for _s, p in dq if p[0] == "adapter_emissions_filtered") == 2
+    assert sum(
+        1 for _s, p in dq if p[0] == "adapter_unassigned_boardings_emitted"
+    ) == 1
     assert not any(p[0] == "unregistered_adapter_source" for _s, p in dq)
 
 
@@ -718,3 +804,113 @@ def test_harness_red_on_emitted_count_drift(tmp_path: Path) -> None:
     report = validate_all(tmp_path)
     assert not report.ok
     assert any("emitted records expected 3, got 2" in line for line in report.lines)
+
+
+# ---------------------------------------------------------------------------
+# Handoff 0040: the `unassigned` no-run classification block
+# ---------------------------------------------------------------------------
+
+# A minimal TIDES spec with an `unassigned` block: a blank Trip column marks a
+# no-run boarding, whose trip/sequence are dropped.
+UNASSIGNED_TIDES_SPEC = """\
+mapping_spec_version: 0
+vendor: testvendor
+product: testproduct
+source_label: testvendor_testproduct_simulated
+target_contract: tides_passenger_events
+source_format:
+  kind: csv
+timezone: America/New_York
+fields:
+  passenger_event_id: {from: Id}
+  service_date: {derived: local_date_of, of: event_timestamp}
+  event_timestamp: {from: When, coerce: datetime, format: "%Y-%m-%d %H:%M:%S %z"}
+  trip_stop_sequence: {from: Seq, coerce: integer}
+  event_type:
+    from: Kind
+    coerce: enum_map
+    values: {"ON": "Passenger boarded"}
+  vehicle_id: {from: Bus}
+  trip_id_performed: {from: Trip}
+unassigned:
+  when:
+    - {column: Trip, op: equals, value: "", reason: "blank Trip = no run assignment"}
+  revenue_classification: unassigned
+  drop_fields: [trip_id_performed, trip_stop_sequence]
+  reason: "A blank Trip is a no-run ghost boarding, not an assigned trip."
+provenance:
+  verified_against: {synthetic: true}
+  verification_date: "2026-07-31"
+"""
+
+
+def _write_unassigned_fixture(spec_path: Path) -> Path:
+    fdir = spec_path.parent / "fixtures"
+    fdir.mkdir(exist_ok=True)
+    # Two rows: an assigned boarding and a no-run ghost boarding (blank Trip,
+    # blank Seq).
+    (fdir / "sample.csv").write_text(
+        "Id,When,Seq,Kind,Bus,Trip\n"
+        "e1,2026-07-01 08:00:00 -0400,1,ON,42,T-100\n"
+        "e2,2026-07-01 05:30:00 -0400,,ON,42,\n",
+        encoding="utf-8",
+    )
+    (fdir / "sample.csv.expected.json").write_text(
+        json.dumps(
+            {"total_rows": 2, "mapped": 2, "quarantined": 0, "filtered": 0}
+        ),
+        encoding="utf-8",
+    )
+    return fdir / "sample.csv"
+
+
+def test_unassigned_block_emits_no_run_boarding(tmp_path: Path) -> None:
+    spec_path = _write_spec(tmp_path, UNASSIGNED_TIDES_SPEC, fixture=False)
+    fixture = _write_unassigned_fixture(spec_path)
+    spec, result = _run(spec_path, fixture)
+    assert (result.total_rows, result.mapped_count, result.filtered_count,
+            result.quarantined_count) == (2, 2, 0, 0)
+    events = {r.passenger_event_id: r for r in result.passenger_events}
+    assert events["e1"].revenue_classification == "assigned"
+    assert events["e1"].trip_id == "T-100" and events["e1"].trip_stop_sequence == 1
+    # the no-run row: emitted, marked unassigned, trip + sequence NULL
+    assert events["e2"].revenue_classification == "unassigned"
+    assert events["e2"].trip_id is None and events["e2"].trip_stop_sequence is None
+    assert any(
+        f.issue_type == "adapter_unassigned_boardings_emitted"
+        for f in result.findings
+    )
+
+
+def test_unassigned_block_deterministic(tmp_path: Path) -> None:
+    spec_path = _write_spec(tmp_path, UNASSIGNED_TIDES_SPEC, fixture=False)
+    fixture = _write_unassigned_fixture(spec_path)
+    _, a = _run(spec_path, fixture)
+    _, b = _run(spec_path, fixture)
+    assert [repr(r) for r in a.passenger_events] == [
+        repr(r) for r in b.passenger_events
+    ]
+
+
+def test_unassigned_drop_field_must_be_mapped(tmp_path: Path) -> None:
+    """drop_fields must name a field the spec maps — a phantom drop is a
+    config error, refused loudly at load time (never a silent no-op)."""
+    bad = UNASSIGNED_TIDES_SPEC.replace(
+        "drop_fields: [trip_id_performed, trip_stop_sequence]",
+        "drop_fields: [trip_id_performed, event_count]",
+    )
+    with pytest.raises(SpecError, match="drop_fields"):
+        load_spec(_write_spec(tmp_path, bad, fixture=False))
+
+
+def test_unassigned_block_rejected_on_dr_target(tmp_path: Path) -> None:
+    """The unassigned block is a passenger-event concept — the schema
+    refuses it on a demand_response_trip spec."""
+    import yaml
+
+    doc = yaml.safe_load(UNASSIGNED_TIDES_SPEC)
+    doc["target_contract"] = "demand_response_trip"
+    p = tmp_path / "m.yaml"
+    p.write_text(yaml.safe_dump(doc), encoding="utf-8")
+    with pytest.raises(SpecError):
+        load_spec(p)

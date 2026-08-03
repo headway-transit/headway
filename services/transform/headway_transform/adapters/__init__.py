@@ -18,7 +18,15 @@ adapters, never pipeline forks). This package is the transform-side runtime:
                  mapping-spec version that mapped it;
 - ``harness``  — the validation harness core behind ``adapters/validate``
                  (every fixture row mapped or explicitly quarantined with a
-                 reason; contract validation green; deterministic round-trip).
+                 reason; contract validation green; deterministic round-trip);
+- ``resolution`` — per-agency trip resolution (handoff 0031): load + validate
+                 ``resolution.v0.yaml`` against
+                 ``contracts/adapter-resolution.v0.schema.json``, and resolve
+                 each mapped row's vendor trip identifier against the
+                 agency's schedule with three explicit outcomes (resolved /
+                 ambiguous / unmatched) — ambiguity and misses become DQ
+                 findings, never guesses, and the vendor's identifier is
+                 preserved alongside any resolved canonical id.
 
 Placement decision (documented per handoff 0015 design point 2): the runtime
 is transform-side Python because both v0 target contracts land in Python
@@ -29,6 +37,12 @@ idempotent writer paths) instead of duplicating them in Go.
 
 from .engine import AdapterRunResult, run_adapter
 from .registry import AdapterRegistry, RegistryError
+from .resolution import (
+    ResolutionSpec,
+    ResolutionSpecError,
+    TripResolver,
+    load_resolution_spec,
+)
 from .spec import MappingSpec, SpecError, load_spec
 
 __all__ = [
@@ -36,7 +50,11 @@ __all__ = [
     "AdapterRunResult",
     "MappingSpec",
     "RegistryError",
+    "ResolutionSpec",
+    "ResolutionSpecError",
     "SpecError",
+    "TripResolver",
+    "load_resolution_spec",
     "load_spec",
     "run_adapter",
 ]

@@ -8,6 +8,15 @@ item is one line plus the source that demands it. The roadmap is governed in the
 
 ## Now (next ~3 waves)
 
+- **Revenue classification of boardings (NEXT — agency-confirmed 2026-07-31)** — a
+  live diagnostic with the partner agency found ~3.3% of APC boardings are
+  non-revenue prep / pull-out / pull-in activity (staff boarding an unlogged vehicle),
+  clustered at the edges of the service day. Wave: schedule-derived revenue windows +
+  no-run detection, auto-classify the clear cases, and a human-in-the-loop review
+  queue where an analyst validates the ambiguous ones and records a **justification
+  note** that becomes part of the figure's receipt. Detours already count correctly
+  (surface, don't fix). Full design in `docs/handoffs/0040-*.md`.
+
 - ~~**Fresh-box installer test**~~ **DONE 2026-07-22**: first complete guided install,
   by a partner agency ITS manager on a fresh Ubuntu 26.04 VM. *(HANDOFF.md state table)*
 - **In-app connection experience** — from the first agency UAT (2026-07-28, first
@@ -49,6 +58,31 @@ item is one line plus the source that demands it. The roadmap is governed in the
   bus-mode VRM (D1 negligible for miles, D2 bus-exempt), pending D3 per-agency
   confirmation and D4 fidelity validation; then work D2–D6 closure in order.
   *(REGULATORY_TRACKER.md "Reportability position" + Divergence analysis)*
+  **PRIORITY RAISED (2026-07-28, first partner agency):** the mode dimension is not a
+  refinement, it is the whole job at a real agency. The first partner runs four modes
+  across four separate vendor systems (fixed route, paratransit, on-demand, vanpool) —
+  no vendor's own reporting can produce that agency's NTD submission, because no vendor
+  sees more than its own mode. Combining them with per-mode figures, each traceable to
+  the system that produced it, is the reason a cross-vendor platform exists. Vanpool in
+  particular arrives as fleet telematics (odometer/GPS distance + duty hours), not as a
+  transit system's export — a distinct connector shape worth designing for.
+
+- **Deadhead + total-vehicle figures** (first-agency ask, 2026-07-29): today's VRM/VRH
+  exclude deadhead **by construction** (only trip-assigned positions count; the p. 129
+  exclusion and deadhead definitions are already quoted in the tracker) — but deadhead is
+  never *measured*, and NTD's forms also want total actual vehicle miles/hours, not only
+  revenue. The increment: quote the total-vs-revenue form lines verbatim first (NTD
+  Compliance), then compute total vehicle movement (positions outside trip assignment for
+  fixed route; the fleet-telematics contract for vanpool — its distance-vs-revenue wall
+  was built for exactly this) and report deadhead as the audited difference, never a
+  plug. *(REGULATORY_TRACKER.md pp. 128–136 quotes; contracts/fleet-telematics.v0)*
+
+- **Block-label mapping rides the vendor-drop path** (handoff 0038 open question): today
+  an agency refreshes its block-name mapping (`canonical.block_labels`) by re-running
+  `tools/block-labels/derive.py` against a new trip→block export. The self-service
+  increment: accept the mapping file through the existing vendor-drop folder so the
+  agency refreshes it like any other delivery, with the same derivation report landing
+  as findings instead of console output.
 
 ## Next
 
@@ -96,8 +130,26 @@ item is one line plus the source that demands it. The roadmap is governed in the
 ## Later
 
 - **Native database / data-lake connectors** — SQL Server, Oracle, Snowflake, etc.;
-  today's supported path is the documented CSV export + drop/push, and no commitment
-  exists yet. *(docs/connecting-your-data.md §4)*
+  today's supported path is the documented CSV export + drop/push, and no dated
+  commitment exists yet. *(docs/connecting-your-data.md §4)*
+  **Framing corrected 2026-07-29 (project lead):** an earlier note argued against this on
+  trust grounds — that Headway would "hold credentials into the agency's warehouse." That
+  reasoning imported a SaaS model that does not apply. Headway runs **on the agency's own
+  premises, operated by the agency**; a service account from one internal system to
+  another is ordinary enterprise integration, and the agency's own analytics team is
+  typically already doing exactly that (e.g. landing vendor data in Snowflake for BI).
+  There is no third party in the loop to be asymmetric with. The design shape that
+  survives the real objections:
+  - **Generic connector, agency-supplied query.** Ship a source connector that reads a
+    **view or query the agency provides in configuration** — never vendor table and column
+    names encoded in this repository. That keeps proprietary schemas out of an
+    open-source artifact, keeps least privilege in the agency's hands, and survives a
+    vendor upgrade changing its internals.
+  - **The warehouse is a first-class source, possibly better than the vendor DW** — already
+    curated, already permissioned, already the analytics team's supported surface, and it
+    adds no load to an operational system.
+  - **Not a substitute for the export path**, which stays supported: it is the only option
+    for agencies with no warehouse and no DBA, which is most of them.
 - **Remaining source fleet** — J1939/telematics (verify every PGN/SPN against the SAE
   Digital Annex), farebox/AFC, EV charging + SoC (OCPP where it applies),
   paratransit/DRT, maintenance management, validated manual entry.

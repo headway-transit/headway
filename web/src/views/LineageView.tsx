@@ -5,6 +5,7 @@ import { ApiError, getLineage } from "../api/client";
 import type { LineageNode } from "../api/types";
 import { Breadcrumbs } from "../components/Breadcrumbs";
 import { LineageGraph } from "../components/LineageGraph";
+import { RawRecordInspector } from "../components/RawRecordInspector";
 import { Skeleton } from "../components/Skeleton";
 import { copy } from "../copy";
 
@@ -20,13 +21,27 @@ import { copy } from "../copy";
  *    the three tiers (LineageGraph) — progressive enhancement;
  *  - the TEXT view: the full nested <ul>/<li> tree, unsummarized, with every
  *    node and complete record id. Nodes with inputs get a toggle button
- *    carrying aria-expanded; leaves (raw records) are plain items.
+ *    carrying aria-expanded; leaves (raw records) open into the inspector.
+ *
+ * Handoff 0035: the raw leaves are no longer dead ends. Each one opens into
+ * the RawRecordInspector — label, integrity check, bounded preview, exact
+ * bytes — and the graph view reaches the SAME inspector by selecting a raw
+ * node, so neither rendering is the only way to inspect the evidence.
+ *
+ * The leaf opens ON DEMAND rather than loading every label with the tree:
+ * a real trail bottoms out in hundreds or thousands of raw records, and
+ * fetching a label for each one on page load is the mistake handoff 0030
+ * spent a wave removing from /dq, in a new costume.
  */
 export function LineageView() {
   const { id } = useParams<{ id: string }>();
   const [root, setRoot] = useState<LineageNode | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [view, setView] = useState<"graph" | "text">("graph");
+  //: The raw record selected in the GRAPH view. The text view opens leaves
+  //: in place; the graph reaches the same inspector through this panel, so
+  //: both renderings have the same reach (handoff 0007 pillar 2 parity).
+  const [selectedRaw, setSelectedRaw] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -90,7 +105,24 @@ export function LineageView() {
             </ToggleButton>
           </div>
           {view === "graph" ? (
-            <LineageGraph root={root} />
+            <>
+              <LineageGraph root={root} onSelectRaw={setSelectedRaw} />
+              {selectedRaw && (
+                <section
+                  className="lineage-raw-panel"
+                  aria-label={copy.rawRecord.openLabel(selectedRaw)}
+                >
+                  <h2>
+                    {copy.lineage.kindLabels["raw.records"]}{" "}
+                    <code>{selectedRaw}</code>
+                  </h2>
+                  <button type="button" onClick={() => setSelectedRaw(null)}>
+                    {copy.rawRecord.close}
+                  </button>
+                  <RawRecordInspector recordId={selectedRaw} />
+                </section>
+              )}
+            </>
           ) : (
             <ul className="lineage-tree">
               <LineageTreeNode node={root} />
@@ -108,9 +140,12 @@ function kindLabel(kind: string): string {
 
 function LineageTreeNode({ node }: { node: LineageNode }) {
   const [open, setOpen] = useState(true);
+  //: Raw leaves open into the inspector, one at a time, on demand.
+  const [inspecting, setInspecting] = useState(false);
   const inputs = node.inputs ?? [];
   const hasInputs = inputs.length > 0;
   const label = `${kindLabel(node.kind)} ${node.id}`;
+  const isRaw = node.kind === "raw.records";
 
   return (
     <li className="lineage-node">
@@ -125,8 +160,17 @@ function LineageTreeNode({ node }: { node: LineageNode }) {
             )}
           </span>
         )}
-        {node.kind === "raw.records" && (
-          <span className="transform">{copy.lineage.rawLeaf}</span>
+        {isRaw && <span className="transform">{copy.lineage.rawLeaf}</span>}
+        {isRaw && (
+          <button
+            type="button"
+            aria-expanded={inspecting}
+            onClick={() => setInspecting((v) => !v)}
+          >
+            {inspecting
+              ? copy.rawRecord.close
+              : copy.rawRecord.openLabel(node.id)}
+          </button>
         )}
         {hasInputs && (
           <button
@@ -138,6 +182,7 @@ function LineageTreeNode({ node }: { node: LineageNode }) {
           </button>
         )}
       </div>
+      {isRaw && inspecting && <RawRecordInspector recordId={node.id} />}
       {hasInputs && open && (
         <ul>
           {inputs.map((input) => (

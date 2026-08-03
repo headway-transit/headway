@@ -366,9 +366,10 @@ def mr20_golden_expected() -> dict:
 def positions_to_rows(positions: list[VehiclePosition]) -> list[tuple]:
     """Render VehiclePositions as reader result rows (the handoff-0001
     canonical.vehicle_positions columns plus the trips.block_id join, handoff
-    0003, and the routes.mode join, handoff 0009), in the reader's SQL order
-    (vehicle_id, time, source_record_id) — the fake stands in for the
-    database, so it honors the ORDER BY."""
+    0003, the routes.mode join, handoff 0009, and — handoff 0032 — the
+    vehicle_label column, migration 0037, and the routes.short_name join),
+    in the reader's SQL order (vehicle_id, time, source_record_id) — the
+    fake stands in for the database, so it honors the ORDER BY."""
     ordered = sorted(positions, key=lambda p: (p.vehicle_id, p.time, p.source_record_id))
     return [
         (
@@ -380,6 +381,8 @@ def positions_to_rows(positions: list[VehiclePosition]) -> list[tuple]:
             p.source_record_id,
             p.block_id,
             p.mode,
+            p.vehicle_label,
+            p.route_short_name,
         )
         for p in ordered
     ]
@@ -408,6 +411,7 @@ def events_to_rows(events: list[PassengerEvent]) -> list[tuple]:
             e.source,
             e.source_record_id,
             e.mode,
+            e.revenue_classification,  # migration 0039 / handoff 0040
         )
         for e in ordered
     ]
@@ -493,6 +497,15 @@ class FakeUndefinedTable(Exception):
     sqlstate = "42P01"
 
 
+class FakeUndefinedColumn(Exception):
+    """Duck-types a driver's column-does-not-exist error (SQLSTATE 42703),
+    the way psycopg3 exposes it (an ``sqlstate`` attribute) — the
+    pre-migration-0037 signature the position reader falls back on
+    (handoff 0032)."""
+
+    sqlstate = "42703"
+
+
 class RecordingCursor:
     def __init__(self, conn: "RecordingConnection"):
         self._conn = conn
@@ -548,6 +561,46 @@ class RecordingCursor:
             elif "canonical.agencies" in sql:
                 # The ops timezone SELECT (handoff 0014, migration 0026).
                 self._pending_all = list(conn.agency_timezone_rows)
+            elif "information_schema.columns" in sql:
+                # headway_calc.dq's migration-0035 column probe (handoff
+                # 0029). Present by default; the missing flag models a
+                # pre-0035 database, where routing must still land every
+                # finding with its pre-0029 columns.
+                row = None if conn.subject_context_column_missing else (1,)
+                self._pending_one = row
+                self._pending_all = [] if row is None else [row]
+            elif "information_schema.tables" in sql:
+                # headway_calc.subjects' migration-0038 table probe
+                # (handoff 0038): does canonical.block_labels exist?
+                # Present by default; the missing flag models a pre-0038
+                # database, where labels must still resolve via the
+                # 7-column pre-0038 SELECT.
+                row = None if conn.block_labels_table_missing else (1,)
+                self._pending_one = row
+                self._pending_all = [] if row is None else [row]
+            elif "t.block_id, t.route_id" in sql:
+                # headway_calc.subjects' label SELECT (handoff 0029; the
+                # handoff-0038 variant additionally joins
+                # canonical.block_labels and reads bl.block_label as an 8th
+                # column). Its bounded aggregate also names
+                # canonical.stop_times, so this branch must come BEFORE the
+                # geometry branch. The canned rows must match the SELECT the
+                # module chose: 8-tuples for the 0038 variant, 7-tuples for
+                # the pre-0038 one.
+                self._pending_all = list(conn.trip_label_rows)
+            elif "MIN(st.departure_seconds)" in sql:
+                # The revenue-window SELECT (handoff 0040) — names
+                # canonical.stop_times AND canonical.vehicle_positions, so it
+                # must be dispatched BEFORE the geometry/positions branches.
+                # A pre-migration-0019 database (no canonical.stop_times) is
+                # modeled by the missing flag (SQLSTATE 42P01). Empty by
+                # default: most tests carry no schedule, so no window is
+                # derived and every no-run boarding is held pending review.
+                if conn.stop_times_table_missing:
+                    raise FakeUndefinedTable(
+                        'relation "canonical.stop_times" does not exist'
+                    )
+                self._pending_all = list(conn.revenue_window_rows)
             elif "st.arrival_seconds" in sql:
                 # The ops schedule SELECT (handoff 0014) — names
                 # canonical.stop_times too, so this branch must come FIRST.
@@ -558,9 +611,25 @@ class RecordingCursor:
                 # come FIRST.
                 self._pending_all = list(conn.stop_time_rows)
             elif "canonical.passenger_events" in sql:
+                # A pre-migration-0039 database is modeled by the missing
+                # flag: the 0039 SELECT raises 42703 and the reader falls back
+                # to the classification-free SELECT (handoff 0040).
+                if (
+                    conn.revenue_classification_column_missing
+                    and "e.revenue_classification" in sql
+                ):
+                    raise FakeUndefinedColumn(
+                        "column e.revenue_classification does not exist"
+                    )
                 self._pending_all = list(conn.passenger_event_rows)
             elif "SELECT DISTINCT trip_id" in sql:
                 self._pending_all = list(conn.operated_trip_rows)
+            elif "SELECT metric_value_id FROM computed.metric_values" in sql:
+                # persist_result's identical-figure probe. Checked BEFORE
+                # the generic metric_values branch (both name the table).
+                rows = list(conn.identical_metric_value_rows)
+                self._pending_all = rows
+                self._pending_one = rows[0] if rows else None
             elif "FROM computed.metric_values" in sql:
                 # mr20's latest-per-(metric, scope) SELECT (handoff 0009);
                 # the fake serves pre-deduplicated canned rows.
@@ -584,6 +653,17 @@ class RecordingCursor:
                 # derivation over canonical.vehicle_positions).
                 self._pending_all = list(conn.operated_mode_rows)
             else:
+                # The position SELECT (with or without p.vehicle_label —
+                # handoff 0032). A pre-0037 database is modeled by the
+                # missing flag: the 0037 SELECT raises 42703 and the reader
+                # must fall back to the label-free SELECT.
+                if (
+                    conn.vehicle_label_column_missing
+                    and "p.vehicle_label" in sql
+                ):
+                    raise FakeUndefinedColumn(
+                        'column p.vehicle_label does not exist'
+                    )
                 self._pending_all = list(conn.position_rows)
         elif "INSERT INTO dq.issues" in sql:
             if conn.fail_on == "dq.issues":
@@ -623,15 +703,35 @@ class RecordingConnection:
         dr_trip_rows: list[tuple] | None = None,
         ops_schedule_rows: list[tuple] | None = None,
         agency_timezone_rows: list[tuple] | None = None,
+        revenue_window_rows: list[tuple] | None = None,
         attestation_rows: list[tuple] | None = None,
         attestations_table_missing: bool = False,
         service_day_override_rows: list[tuple] | None = None,
         service_day_overrides_table_missing: bool = False,
+        trip_label_rows: list[tuple] | None = None,
+        subject_context_column_missing: bool = False,
+        vehicle_label_column_missing: bool = False,
+        identical_metric_value_rows: list[tuple] | None = None,
+        block_labels_table_missing: bool = False,
+        revenue_classification_column_missing: bool = False,
+        stop_times_table_missing: bool = False,
     ):
+        self.revenue_classification_column_missing = (
+            revenue_classification_column_missing
+        )
+        self.stop_times_table_missing = stop_times_table_missing
         self.position_rows = position_rows or []
+        # persist_result's identical-figure probe: rows served to the
+        # SELECT metric_value_id dedupe query. Default empty — every
+        # persist inserts, exactly as before the dedupe existed.
+        self.identical_metric_value_rows = identical_metric_value_rows or []
         # The ops slice (handoff 0014): schedule + agency timezone reads.
         self.ops_schedule_rows = ops_schedule_rows or []
         self.agency_timezone_rows = agency_timezone_rows or []
+        # Revenue-window bounds per service date (handoff 0040): (service_date,
+        # min departure seconds, max arrival seconds). Empty by default — no
+        # schedule, no window, so a no-run boarding is held pending review.
+        self.revenue_window_rows = revenue_window_rows or []
         self.passenger_event_rows = passenger_event_rows or []
         self.operated_trip_rows = operated_trip_rows or []
         # pmt_v0's geometry rows (handoff 0011, migration 0019).
@@ -661,6 +761,24 @@ class RecordingConnection:
             SEEDED_SETTINGS_ROWS if settings_rows is None else settings_rows
         )
         self.settings_table_missing = settings_table_missing
+        # Finding-subject label rows (handoff 0029, migration 0035; 0038
+        # appended block_label): (trip_id, block_id, route_id, short_name,
+        # long_name, first_departure_seconds, last_departure_seconds,
+        # block_label) — or the 7-column pre-0038 shape when
+        # block_labels_table_missing is set. Empty by default — every trip
+        # then resolves as UNMATCHED, which is the honest reading of "this
+        # database knows nothing about that trip".
+        self.trip_label_rows = trip_label_rows or []
+        # Models a pre-0035 database (the dq.issues.subject_context column
+        # does not exist yet).
+        self.subject_context_column_missing = subject_context_column_missing
+        # Models a pre-0037 database (the canonical.vehicle_positions
+        # .vehicle_label column does not exist yet — handoff 0032).
+        self.vehicle_label_column_missing = vehicle_label_column_missing
+        # Models a pre-0038 database (the canonical.block_labels mapping
+        # table does not exist yet — handoff 0038). The probe then reports
+        # absence and subjects.py uses its pre-0038 7-column label SELECT.
+        self.block_labels_table_missing = block_labels_table_missing
         self.fail_on = fail_on
         self.executed: list[tuple[str, tuple | None]] = []
         # Each commit records how many statements were executed at that point,

@@ -91,7 +91,7 @@ def test_upsert_stops_and_stop_times_sql(fake_connection) -> None:
 
     stop_sql, stop_params = fake_connection.sql_for("canonical.stops")[0]
     assert "ON CONFLICT (stop_id) DO UPDATE" in stop_sql
-    assert stop_params == ("S1", "First St", 42.35, -71.06)
+    assert stop_params == ("S1", "First St", 42.35, -71.06, None)
 
     st_sql, st_params = fake_connection.sql_for("canonical.stop_times")[0]
     assert "ON CONFLICT (trip_id, stop_sequence) DO UPDATE" in st_sql
@@ -108,7 +108,7 @@ def test_upsert_stop_and_stop_time_nulls_bind_null(fake_connection) -> None:
         [CanonicalStopTime("T1", "S2", 2, None, None, None)]
     )
     _sql, stop_params = fake_connection.sql_for("canonical.stops")[0]
-    assert stop_params == ("node-1", None, None, None)
+    assert stop_params == ("node-1", None, None, None, None)
     _sql, st_params = fake_connection.sql_for("canonical.stop_times")[0]
     assert st_params == ("T1", "S2", 2, None, None, None)
 
@@ -127,6 +127,7 @@ def test_insert_vehicle_positions_conflict_do_nothing_on_unique_key(
         speed_mps=None,
         odometer_m=None,
         source_record_id="cd" * 32,
+        vehicle_label="5335",
     )
     DbWriter(fake_connection).insert_vehicle_positions([row])
 
@@ -134,7 +135,8 @@ def test_insert_vehicle_positions_conflict_do_nothing_on_unique_key(
     assert "INSERT INTO canonical.vehicle_positions" in sql
     assert 'ON CONFLICT (vehicle_id, "time", source_record_id) DO NOTHING' in sql
     assert params == (
-        TIME, "bus-1", "T1", "R1", 44.9, -93.2, None, None, None, "cd" * 32
+        TIME, "bus-1", "T1", "R1", 44.9, -93.2, None, None, None, "cd" * 32,
+        "5335",
     )
 
 
@@ -172,6 +174,9 @@ def test_insert_passenger_events_conflict_do_nothing_on_unique_key(
         2,
         "tides_simulated",
         "cd" * 32,
+        None,  # vendor_trip_ref — NULL when no resolution ran (0036)
+        None,  # trip_resolution — NULL when no resolution ran (0036)
+        None,  # revenue_classification — NULL when not classified (0040)
     )
     # No tenant_id column anywhere (ADR-0004).
     assert "tenant" not in sql.lower()
@@ -356,3 +361,79 @@ def test_insert_trip_update_trip_level_row_binds_nulls(fake_connection) -> None:
         TIME, "T-gone", None, None, None, None, None, None, None, None,
         None, None, "CANCELED", None, "cd" * 32,
     )
+
+
+def test_multi_row_methods_issue_one_executemany_per_batch() -> None:
+    """The handoff-0032 stall lesson: a GTFS static message at MBTA scale
+    must not cost one DB round trip per row. Every multi-row method issues
+    exactly ONE executemany per call (and none at all for an empty batch)."""
+
+    class BatchCursor:
+        def __init__(self, log):
+            self._log = log
+
+        def execute(self, sql, params=()):
+            self._log.append(("execute", sql, params))
+
+        def executemany(self, sql, params_seq):
+            self._log.append(("executemany", sql, list(params_seq)))
+
+        def close(self):
+            pass
+
+    class BatchConnection:
+        def __init__(self):
+            self.log = []
+
+        def cursor(self):
+            return BatchCursor(self.log)
+
+        def commit(self):
+            pass
+
+        def rollback(self):
+            pass
+
+    conn = BatchConnection()
+    writer = DbWriter(conn)
+    rows = [
+        CanonicalVehiclePosition(
+            time=TIME,
+            vehicle_id=f"bus-{i}",
+            trip_id=None,
+            route_id=None,
+            latitude=44.9,
+            longitude=-93.2,
+            bearing=None,
+            speed_mps=None,
+            odometer_m=None,
+            source_record_id="cd" * 32,
+            vehicle_label=None,
+        )
+        for i in range(3)
+    ]
+    writer.insert_vehicle_positions(rows)
+
+    [(kind, _sql, params_seq)] = conn.log
+    assert kind == "executemany"
+    assert len(params_seq) == 3
+
+    conn.log.clear()
+    writer.insert_vehicle_positions([])
+    assert conn.log == []  # an empty batch executes nothing at all
+
+
+def test_insert_raw_record_base64_with_payload_ref_registers_durable(
+    fake_connection,
+) -> None:
+    """Handoff 0036: a base64 envelope whose connector landed the bytes
+    (payload_ref set) registers in raw.records as durably held —
+    payload_encoding='object_ref' + payload_ref — like every other source."""
+    doc = make_envelope_dict(b"frame-bytes")
+    key = f"raw/gtfs_rt/{doc['record_id']}.pb"
+    doc["payload_ref"] = key
+    envelope = validate_envelope(doc)
+    DbWriter(fake_connection).insert_raw_record(envelope)
+    [(_sql, params)] = fake_connection.executed
+    assert params[5] == "object_ref"
+    assert params[6] == key

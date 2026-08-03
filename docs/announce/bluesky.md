@@ -4,7 +4,7 @@
 - Handle: `@headway-transit.bsky.social` — **created 2026-07-12**. Upgrade path: a domain handle (e.g. `@headway.bekus.co`) via DNS TXT record `_atproto.<domain>` → `did=did:plc:<account DID>` in Bluesky Settings → Change Handle; followers and posts survive handle changes.
 - Display name: Headway
 - Bio (≤256): Open-source transit data platform where every number can prove itself. Deterministic NTD reporting, full lineage to raw records, the FTA rule quoted inside every figure. AI assists — never computes a reported number. Apache-2.0.
-- Avatar: the 🚌 mark / favicon from web/public (export as PNG); banner: the Receipt screenshot (docs/images/receipt.png).
+- Avatar: the 🚌 mark / favicon from web/public (export as PNG); banner: the revenue review queue (`docs/images/review-queue.png`) — it puts the whole argument on one screen: Headway declining to guess a boarding, handing it to a person, and holding it out of the figure meanwhile. (Was `receipt.png`; that file was retired in the 2026-08-02 screenshot refresh.)
 
 ## Announcement thread — POSTED 2026-07-12 from @headway-transit.bsky.social
 

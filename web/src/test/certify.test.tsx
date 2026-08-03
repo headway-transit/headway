@@ -23,11 +23,12 @@ import {
   signInAs,
 } from "./helpers";
 import type { MockedResponse } from "./helpers";
-import type { MetricValue } from "../api/types";
+import type { DqIssueSummary, MetricValue } from "../api/types";
 import {
   attestedBlockingIssue,
   attestedUptValue,
   blockingIssue,
+  dqCountsFor,
   certificateFixture,
   certificationIntentFixture,
   certifiedValue,
@@ -89,12 +90,19 @@ const verifiedVrh: MetricValue = { ...vrhValue, calc_version: "1.0.0" };
 
 function mockCockpit(
   values: MetricValue[],
-  issues: unknown[] = [],
+  issues: DqIssueSummary[] = [],
   extra: Parameters<typeof mockApi>[0] = {},
 ) {
   return mockApi({
     "GET /metrics/values": { status: 200, body: values },
-    "GET /dq/issues": { status: 200, body: issues },
+    // The blockers panel reads the SERVER's whole-queue counts (handoff
+    // 0030) — the issue list pages now, so the cockpit never downloads it.
+    "GET /dq/issues/counts": (call) => {
+      const status = new URL(call.url, "http://test").searchParams.get(
+        "status",
+      );
+      return { status: 200, body: dqCountsFor(issues, status) };
+    },
     // The server's fixed signing statements: the ceremony signs against
     // THESE words (GET /certifications/intent), never its own.
     "GET /certifications/intent": {
@@ -139,9 +147,13 @@ describe("/certify (certification cockpit)", () => {
       screen.queryByRole("button", { name: SIGN_BUTTON }),
     ).not.toBeInTheDocument();
     expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
-    // No certify-related fetch happened; the only call is the app shell's
-    // unauthenticated GET /branding (handoff 0008 pillar C).
-    expect(calls.filter((c) => c.path !== "/branding")).toHaveLength(0);
+    // No certify-related fetch happened. The only calls are the app
+    // shell's own: the unauthenticated GET /branding (handoff 0008 pillar
+    // C) and the command bar's "as computed" run stamp, which reads the
+    // newest calculation run on every surface (handoff 0044, output 1).
+    expect(
+      calls.filter((c) => c.path !== "/branding" && c.path !== "/calc/runs"),
+    ).toHaveLength(0);
 
     await expectNoAxeViolations();
   });
@@ -170,7 +182,12 @@ describe("/certify (certification cockpit)", () => {
     const params = new URL(valueGets[0].url, "http://test").searchParams;
     expect(params.get("period_start")).toMatch(/^\d{4}-\d{2}-01$/);
     expect(params.get("period_end")).toMatch(/^\d{4}-\d{2}-(28|29|30|31)$/);
-    expect(calls.filter((c) => c.path === "/dq/issues")).toHaveLength(1);
+    // The blockers tally is the server's counts (handoff 0030): one call
+    // per unresolved status, and NO whole-queue list download.
+    expect(calls.filter((c) => c.path === "/dq/issues")).toHaveLength(0);
+    expect(
+      calls.filter((c) => c.path === "/dq/issues/counts"),
+    ).toHaveLength(2);
 
     // EVERY figure renders as a full Receipt (story, coverage, FTA rule,
     // flags, walk to raw records)…
@@ -428,7 +445,7 @@ describe("/certify (certification cockpit)", () => {
     signInAs("certifying_official");
     mockApi({
       "GET /metrics/values": { status: 200, body: [verifiedVrm] },
-      "GET /dq/issues": { status: 200, body: [] },
+      "GET /dq/issues/counts": { status: 200, body: dqCountsFor([], null) },
       "GET /certifications/intent": {
         status: 404,
         body: { detail: "Not Found" },
@@ -590,7 +607,7 @@ describe("/certify (certification cockpit)", () => {
         if (figureCalls === 1) return firstResponse;
         return { status: 200, body: [verifiedVrh] };
       },
-      "GET /dq/issues": { status: 200, body: [] },
+      "GET /dq/issues/counts": { status: 200, body: dqCountsFor([], null) },
       "GET /certifications/intent": {
         status: 200,
         body: certificationIntentFixture,

@@ -37,6 +37,7 @@ jobs:
       client: ${{ steps.filter.outputs.client }}
       web: ${{ steps.filter.outputs.web }}
       integration: ${{ steps.filter.outputs.integration }}
+      installer: ${{ steps.filter.outputs.installer }}
       adapters: ${{ steps.filter.outputs.adapters }}
       notebooks: ${{ steps.filter.outputs.notebooks }}
     steps:
@@ -71,6 +72,7 @@ jobs:
             echo "client=$(hit '^clients/python/|^\.github/workflows/')"
             echo "web=$(hit '^web/|^scripts/license|^\.github/workflows/')"
             echo "integration=$(hit '^services/api/|^db/|^tests/integration/|^\.github/workflows/')"
+            echo "installer=$(hit '^install/|^deploy/compose/|^\.github/workflows/')"
             echo "adapters=$(hit '^adapters/|^contracts/|^services/transform/|^\.github/workflows/')"
             echo "notebooks=$(hit '^notebooks/|^\.github/workflows/')"
           } >> "$GITHUB_OUTPUT"
@@ -105,6 +107,12 @@ jobs:
       fail-fast: false
       matrix:
         service: [calc, transform, api, ai]
+        include:
+          # api's raw-record inspector tests (handoff 0035) decode GTFS-Realtime
+          # frames, so they need the ingest extra's protobuf bindings — the same
+          # pairing the integration job below already installs.
+          - service: api
+            extras: test,ingest
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
@@ -117,7 +125,7 @@ jobs:
         # (calc: pytest+hypothesis; transform: pytest; api: pytest+httpx; ai: pytest)
         # headway-calc is a sibling path package, not on PyPI — install it alongside
         # so api's `headway-calc>=0.5` resolves (harmless no-op for the other services)
-        run: python -m pip install -e services/calc -e "services/${{ matrix.service }}[test]"
+        run: python -m pip install -e services/calc -e "services/${{ matrix.service }}[${{ matrix.extras || 'test' }}]"
       - name: pytest
         working-directory: services/${{ matrix.service }}
         run: python -m pytest -q
@@ -206,7 +214,7 @@ jobs:
           git diff --exit-code openapi.json
       - uses: actions/setup-node@v6
         with:
-          node-version: "20"
+          node-version: "22"
       - name: quotes.json matches the regulatory tracker (regenerate + diff)
         # extract-quotes.mjs is a dependency-free node script reading
         # services/calc/REGULATORY_TRACKER.md — no npm ci needed.
@@ -215,9 +223,13 @@ jobs:
           git diff --exit-code web/src/regulatory/quotes.json
 
   db-static:
-    name: python / db migrations (static)
+    name: python / static checks (migrations, installer)
     needs: changes
-    if: needs.changes.outputs.python == 'true'
+    # `installer` is in this filter too: install/install.sh is the front door
+    # every first-time operator uses, and until 2026-08-02 nothing automated
+    # touched it — which is how a default install that started no application
+    # shipped.
+    if: needs.changes.outputs.python == 'true' || needs.changes.outputs.installer == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -226,10 +238,15 @@ jobs:
           python-version: "3.12"
       - name: install pytest
         # db/test_migrations_static.py is stdlib-only static analysis of the
-        # migration SQL; no live database and no psycopg needed.
-        run: python -m pip install pytest
-      - name: pytest (static migration checks)
-        run: python -m pytest -q db/test_migrations_static.py
+        # migration SQL; no live database and no psycopg needed. pyyaml is for
+        # install/test_installer_static.py, which asserts guarantees that live
+        # in compose.yaml (bounded logs, env vars a service declares it needs)
+        # — those have to be read from the file that makes the promise, and a
+        # regex is the wrong tool for YAML. Same package the yaml-validate job
+        # already installs.
+        run: python -m pip install pytest pyyaml
+      - name: pytest (static migration + installer checks)
+        run: python -m pytest -q db/test_migrations_static.py install/test_installer_static.py
 
   integration-postgres:
     # Standing protection for the 2026-07-10 autocommit bug class: the API
@@ -296,7 +313,7 @@ jobs:
       - uses: actions/setup-node@v6
         if: steps.guard.outputs.present == 'true'
         with:
-          node-version: "20"
+          node-version: "22"
           cache: npm
           cache-dependency-path: web/package-lock.json
       - name: npm ci
@@ -307,6 +324,17 @@ jobs:
         if: steps.guard.outputs.present == 'true'
         working-directory: web
         run: npm run lint
+      # The palette's WCAG 2.1 AA guarantee, enforced rather than asserted.
+      # Every token pair in styles.css carries its contrast ratio in a
+      # comment; those comments are a claim, and this is the check that the
+      # claim is still true. It shipped 2026-07-09 and was never once run by
+      # CI until now, which is exactly how a checked palette decays into a
+      # remembered one. jsdom cannot compute contrast, so this is NOT
+      # covered by the vitest suite below.
+      - name: contrast (WCAG AA token pairs)
+        if: steps.guard.outputs.present == 'true'
+        working-directory: web
+        run: npm run check:contrast
       - name: build
         if: steps.guard.outputs.present == 'true'
         working-directory: web
@@ -381,12 +409,13 @@ jobs:
             -e "services/transform[test,kafka,db]" \
             -e "services/api[test,ingest]" \
             -e "services/ai[test,ollama]" \
+            -e "services/mcp[test]" \
             -e "clients/python[pandas,test]" \
             -r db/requirements.txt
       - uses: actions/setup-node@v6
         if: hashFiles('web/package.json') != ''
         with:
-          node-version: "20"
+          node-version: "22"
           cache: npm
           cache-dependency-path: web/package-lock.json
       - name: npm ci (populate web/node_modules for the node scan)

@@ -257,6 +257,12 @@ def summarize_report(report: dict) -> dict:
                 "outcome": "persisted" if m.get("persisted") else "refused",
                 "value": m.get("value"),
                 "metric_value_id": m.get("metric_value_id"),
+                # Identical re-run over unchanged data: the runner reused
+                # the EXISTING metric row instead of writing a duplicate
+                # (headway_calc.persist dedupe). Absent on pre-dedupe
+                # reports; the UI states it so a re-run never reads as a
+                # second figure.
+                "already_on_record": bool(m.get("already_on_record", False)),
                 "coverage": m.get("coverage"),
                 "blocking_issue_ids": list(m.get("routed_blocking_ids", [])),
                 "warning_issue_ids": list(m.get("routed_warning_ids", [])),

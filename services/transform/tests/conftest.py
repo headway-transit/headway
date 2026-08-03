@@ -54,8 +54,22 @@ class FakeCursor:
         self._log = log
         self.closed = False
 
-    def execute(self, sql: str, params: tuple) -> None:
+    def execute(self, sql: str, params: tuple = ()) -> None:
         self._log.append((sql, params))
+
+    def executemany(self, sql: str, params_seq: list[tuple]) -> None:
+        # Recorded per parameter set, THROUGH self.execute: assertions keep
+        # seeing one (sql, params) entry per row exactly as before the
+        # handoff-0032 batching, and failure injection (FailingCursor
+        # overrides execute) applies to batched statements too — matching
+        # psycopg 3, where executemany runs the statement once per set.
+        for params in params_seq:
+            self.execute(sql, params)
+
+    def fetchall(self) -> list:
+        # Parameterless SELECTs (the schedule-index reads) get an empty
+        # schedule: resolution against a fake connection sees no trips.
+        return []
 
     def close(self) -> None:
         self.closed = True
@@ -76,7 +90,7 @@ class FakeConnection:
         outer = self
 
         class FailingCursor(FakeCursor):
-            def execute(self, sql: str, params: tuple) -> None:
+            def execute(self, sql: str, params: tuple = ()) -> None:
                 if outer.fail_on_sql_containing in sql:
                     raise RuntimeError(
                         f"injected failure on SQL containing "

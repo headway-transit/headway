@@ -130,7 +130,12 @@ def test_one_warning_per_excised_trip_citing_that_trips_records_only():
     warning = result.warnings[0]
     assert warning.issue_type == "telemetry_gap_excluded"
     assert warning.severity == "warning"
-    assert "trip-2" in warning.title and "blk-1" in warning.title
+    # Route, vehicle, when (handoff 0032): the title leads with the vehicle
+    # handle; trip and block ids stay in the description and subject.
+    assert "Vehicle veh-1" in warning.title
+    assert "telemetry silence" in warning.title
+    assert "trip-2" in warning.description and "blk-1" in warning.description
+    assert warning.subject.ids == ("trip-2",)
     # ONLY the excised trip's records — never its clean neighbors'.
     assert set(warning.source_record_ids) == trip_2_ids
 
@@ -200,7 +205,11 @@ def test_null_block_fallback_excises_per_trip_and_keeps_the_info():
     assert result.detail.excluded_groups == 1  # trip-2's fallback group
     assert [i.issue_type for i in result.infos] == ["block_unavailable"]
     assert [w.issue_type for w in result.warnings] == ["telemetry_gap_excluded"]
-    assert "vehicle veh-1 trip trip-2" in result.warnings[0].title
+    # Title leads with the vehicle handle (handoff 0032); the trip id stays
+    # in the description and subject.
+    assert "Vehicle veh-1" in result.warnings[0].title
+    assert "trip-2" in result.warnings[0].description
+    assert result.warnings[0].subject.ids == ("trip-2",)
 
 
 def test_surviving_layover_still_capped_with_warning():

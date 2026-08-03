@@ -15,12 +15,15 @@ code cannot drift from the checked-in contract without failing loudly).
   against the actual contract file; invalid → typed `EnvelopeValidationError`
   (quarantined by the consumer, never dropped).
 - `headway_transform/gtfs_rt_positions.py` — `normalize_gtfs_rt_positions`
-  v0.1.0: base64 GTFS-Realtime FeedMessage → `CanonicalVehiclePosition` rows
+  v0.2.0: base64 GTFS-Realtime FeedMessage → `CanonicalVehiclePosition` rows
   + one `lineage.edges` row per canonical row
   (`output_id = '<vehicle_id>|<time RFC3339>|<record_id>'`) + `DQFinding`s
   for undecodable payloads / malformed entities. Event-time policy: entity
   timestamp, else header timestamp (noted as an info DQ finding), else the
-  entity is a DQ finding — a time is never guessed.
+  entity is a DQ finding — a time is never guessed. v0.2.0 (handoff 0032,
+  migration 0037) maps `VehicleDescriptor.label` verbatim into
+  `vehicle_label` — the fleet number dispatch actually uses; absent or
+  empty stores NULL, never an invented name.
 - `headway_transform/trip_updates.py` — `normalize_gtfs_rt_trip_updates`
   v0.1.0 (handoff 0014, migration 0025): base64 GTFS-Realtime FeedMessage →
   `CanonicalTripUpdate` rows — one per (TripUpdate, StopTimeUpdate), plus a
@@ -33,8 +36,15 @@ code cannot drift from the checked-in contract without failing loudly).
   from delay + schedule here), and in-frame duplicate trip/stop keys are
   kept-first + warned (the writer's ON CONFLICT would otherwise absorb
   them silently).
-- `headway_transform/gtfs_static.py` — `normalize_gtfs_static` v0.4.0
-  (0.4.0: parses `agency.txt` → `CanonicalAgency`/`canonical.agencies`,
+- `headway_transform/gtfs_static.py` — `normalize_gtfs_static` v0.5.0
+  (0.5.0, handoff 0031/migration 0036: parses `calendar.txt` +
+  `calendar_dates.txt` → `canonical.service_calendars`/`_calendar_dates`
+  stored as the feed states them — calendar.txt is Conditionally Required
+  per gtfs.org, so only a feed with NEITHER file gets the "defines no
+  service days" warning; unrecognized weekday flags / exception_types
+  quarantine, never read as a guess — and `stops.txt` `stop_code`,
+  preserved NULL when absent, never defaulted to `stop_id`.
+  0.4.0: parses `agency.txt` → `CanonicalAgency`/`canonical.agencies`,
   handoff 0014/migration 0026 — the feed-declared `agency_timezone` that
   anchors otp_v0's schedule comparison; a row without a usable timezone is
   quarantined, never guessed. 0.3.1: decompression budget + per-row parse
@@ -83,6 +93,49 @@ code cannot drift from the checked-in contract without failing loudly).
   downstream, never a fabricated 0. The envelope `source` (`dr` |
   `dr_simulated` | a vendor label bound to the pushing machine key) is
   carried verbatim onto every row.
+- `headway_transform/telematics_vehicle_days.py` —
+  `normalize_telematics_vehicle_days` v0.1.0 (handoff 0028, migration 0034):
+  one fleet-telematics API response page (the vendor's own JSON bytes) →
+  `CanonicalTelematicsDay` rows, ONE per (vehicle, service date, measure,
+  basis), plus one lineage edge per row
+  (`output_id = '<vehicle_id>|<service_date>|<measure>|<basis>|<record_id>'`).
+  **THE HONESTY WALL: telematics distance is NOT revenue miles and engine
+  time is NOT revenue hours.** This module computes no NTD figure and
+  nothing in `services/calc/` reads its output; making these measurements
+  reportable is a separate, compliance-gated wave (handoff 0028, Open
+  Questions). The only arithmetic is `last recorded reading − first recorded
+  reading` for a cumulative counter, with BOTH endpoints stored alongside it
+  — and migration 0034 enforces that structurally (a stored value that is
+  not exactly that difference is rejected by the database). Measurement
+  bases are kept DISTINCT (one row each), so substituting a GPS figure for a
+  missing engine-computer odometer is not expressible. Nothing is repaired:
+  fewer than two readings, or a counter that went BACKWARDS (a replaced
+  gateway), leave `value` NULL with both endpoints kept and a finding;
+  `max_sample_gap_seconds` states how blind the measurement is between its
+  endpoints and is never interpolated across. Findings:
+  `telematics_ecu_odometer_absent`, `telematics_counter_regression`,
+  `telematics_sample_gap`, `telematics_implausible_distance` (a Headway
+  review prompt, explicitly NOT a vendor or regulatory limit),
+  `telematics_insufficient_samples`, `telematics_unmapped_series`,
+  `malformed_telematics_sample`, `empty_telematics_page`. Two fail-closed
+  refusals write ZERO canonical rows and a blocking issue: an UNREGISTERED
+  source label (the enum is loaded from the checked-in
+  `contracts/fleet-telematics.v0.schema.json` at import, so it cannot drift)
+  and an UNDECLARED service-day timezone
+  (`HEADWAY_TELEMATICS_SERVICE_DAY_TZ`) — a service date is a local wall
+  date and is never derived from a guessed zone. Service-day windows are
+  DST-correct (23/25 hours); a date whose local midnight does not exist is
+  quarantined rather than moved. The vendor stat-type → (measure, basis,
+  unit) map is derived from Samsara's published OpenAPI document
+  (`info.version` 2025-10-23, retrieved 2026-07-29) and cited in-code.
+  **Data minimization (handoff 0028 governance addition):** fleet telematics
+  is employee-monitoring data, so the Samsara connector reduces every
+  response to an allow-list (vehicle `id`/`name`; `time`/`value` per reading)
+  BEFORE landing — driver-identified and unrequested fields never reach the
+  raw store, so they can never reach this normalizer either. The
+  `telematics_unmapped_series` finding therefore fires only for records that
+  predate minimization or come from another vendor's connector; it is kept as
+  the downstream safety net.
 - `headway_transform/adapters/` — the vendor adapter framework runtime v0
   (handoff 0015). PLACEMENT DECISION (design point 2 said "Go or
   transform-side Python — implementer chooses"): transform-side Python,
@@ -112,11 +165,33 @@ code cannot drift from the checked-in contract without failing loudly).
   and one adapter lineage edge per canonical row carrying
   `adapter:<source_label>` + the spec's content hash), `harness.py` (the
   core of `adapters/validate`: full row accounting, pinned expected counts
-  incl. `emitted` for fan-out specs, deterministic round-trip). The consumer routes `raw.vendor.files` through
-  the registry: an UNREGISTERED envelope source label is refused with a
-  blocking `unregistered_adapter_source` dq.issues row (raw record retained,
-  zero canonical writes — fail closed, never guessed). Reference adapter +
-  contributor docs: `adapters/` at the repo root.
+  incl. `emitted` for fan-out specs, deterministic round-trip; also loads +
+  cross-checks any `resolution.v0.yaml`), and `resolution.py` (handoff
+  0031: per-agency trip resolution — `resolution.v0.yaml` validated against
+  `contracts/adapter-resolution.v0.schema.json` with cross-spec checks
+  against the sibling mapping spec; a `TripResolver` binds one spec to one
+  `ScheduleIndex` and yields the three explicit outcomes resolved /
+  ambiguous / unmatched. Resolved rows get the canonical `trip_id` with the
+  vendor's identifier PRESERVED in `vendor_trip_ref` plus a
+  `resolve_trips:<label>` lineage edge to `canonical.trips`; ambiguous and
+  unmatched rows keep the vendor identifier and become aggregated warning
+  findings that name candidates or the parse — never a pick. An unconfirmed
+  direction convention REFUSES per file with
+  `trip_resolution_not_confirmed`). The consumer routes `raw.vendor.files`
+  through the registry: an UNREGISTERED envelope source label is refused
+  with a blocking `unregistered_adapter_source` dq.issues row (raw record
+  retained, zero canonical writes — fail closed, never guessed); when a
+  resolution spec is registered for the label, the schedule index is read
+  per file from the writer's connection (never cached across files — a
+  fresher static feed must win). Reference adapter + contributor docs:
+  `adapters/` at the repo root.
+- `headway_transform/schedule_index.py` — the agency's schedule flattened
+  for trip resolution (handoff 0031): `canonical.trips` + route short names
+  + each trip's first scheduled departure + the GTFS service calendar
+  (migration 0036 `canonical.service_calendars` / `_calendar_dates`, rules
+  applied at read time: weekday flags in inclusive bounds, exceptions win) +
+  stop identifiers by field. Answers "which scheduled trips have this key?"
+  with ALL matches, sorted — choosing is never its business.
 - `headway_transform/row_guard.py` — per-row CSV parse guards shared by the
   CSV/GTFS normalizers (2026-07-13 hardening pass): mid-iteration
   `csv.Error` capture (oversized field), NUL-byte rejection at field level
@@ -165,6 +240,44 @@ cd services/transform && python3 -m pytest tests/ -q
 ```
 
 ## Verification status
+
+- **2026-07-29 (fleet telematics + Samsara, handoff 0028):** `python3 -m
+  pytest tests/ -q` → **182 passed** (was 144). New:
+  `tests/test_telematics_vehicle_days.py` (38 tests) — happy path with one
+  row per (measure, basis) and per-row contract conformance validated
+  against the checked-in `contracts/fleet-telematics.v0.schema.json`;
+  exact-Decimal handling of the vendor's double-typed GPS distance;
+  DST-correct 23/25-hour service-day windows and local-date (not UTC-date)
+  bucketing; missing ECU odometer flagged and NEVER substituted; two
+  disagreeing bases both landing unreconciled; counter regression →
+  `value` NULL with endpoints kept; single-sample day unmeasured, never 0;
+  configurable gap threshold; implausible distance flagged while the
+  measured value is kept as measured; engine-time estimate kept on its own
+  basis; both fail-closed refusals (unregistered source label, undeclared /
+  unresolvable timezone) writing zero rows; malformed samples quarantined
+  while good ones land; unmapped series recorded; writer SQL/params exactly
+  matching migration 0034 (including NULL binds for an unmeasured day);
+  consumer routing through the object fetcher; replay dedupe keys;
+  determinism; and a parametrized check that every contract `basis` is
+  either mapped or deliberately reserved. `cd db && python3 -m pytest
+  test_migrations_static.py -q` → **30 passed** (was 29), the new one
+  asserting migration 0034's structural honesty wall.
+  **LIVE-VERIFIED the same day** against the running Compose stack with
+  SYNTHETIC vendor-shaped pages (source label `samsara_simulated`, never
+  `samsara` — no live Samsara account has ever been contacted): the real
+  connector produced 3 pages to `raw.telematics.vehicle_stats`; this
+  consumer (`KafkaMessageSource` → `run_loop` → `DbWriter`, side group)
+  wrote **6 `canonical.vehicle_telematics_days` rows, 6 lineage edges, 3
+  raw records and 6 dq.issues** into the live TimescaleDB, psql-verified
+  from a separate connection — including a NULL `value` with both endpoints
+  retained for the reset-counter vehicle and a GPS-only vehicle with no ECU
+  row. A byte-identical re-poll produced the SAME three `record_id`s and a
+  second consumer group replaying all 6 messages wrote **zero new rows in
+  every table**. The database's own structural guards were exercised live
+  and refused: a fabricated `value` (`vtd_value_is_the_recorded_difference`),
+  a distance basis smuggled onto an engine-time row
+  (`vtd_basis_matches_measure`), and a reading filed outside its window
+  (`vtd_first_reading_inside_window`). Full evidence in handoff 0028.
 
 - **2026-07-16 (first REAL vendor adapter — TripSpark Streets APC, handoff
   0015 follow-up):** `python3 -m pytest tests/ -q` → **144 passed** (was

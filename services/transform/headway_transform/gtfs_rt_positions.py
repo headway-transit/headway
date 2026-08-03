@@ -36,7 +36,11 @@ from .model import (
 )
 
 TRANSFORM_NAME = "normalize_gtfs_rt_positions"
-TRANSFORM_VERSION = "0.1.0"
+# 0.2.0 (handoff 0032): VehicleDescriptor.label mapped into
+# canonical.vehicle_positions.vehicle_label (migration 0037). Verbatim when
+# present, NULL when absent or empty — the label is the identifier dispatch
+# actually uses (fleet numbers), and it was previously discarded here.
+TRANSFORM_VERSION = "0.2.0"
 
 TOPIC = "raw.gtfs_rt.vehicle_positions"
 OUTPUT_KIND = "canonical.vehicle_positions"
@@ -57,6 +61,11 @@ class CanonicalVehiclePosition:
     speed_mps: float | None  # REAL
     odometer_m: float | None  # DOUBLE PRECISION
     source_record_id: str  # TEXT NOT NULL REFERENCES raw.records
+    # TEXT, nullable (migration 0037, handoff 0032): the feed's
+    # VehicleDescriptor.label verbatim — the user-visible vehicle identifier
+    # (typically the fleet number dispatch uses). None when the feed carries
+    # no label or an empty one; a label is NEVER invented or derived.
+    vehicle_label: str | None = None
 
     @property
     def output_id(self) -> str:
@@ -243,6 +252,10 @@ def normalize(
                 else None
             ),
             source_record_id=record_id,
+            # VehicleDescriptor.label verbatim (handoff 0032): the fleet
+            # number dispatch scans for. proto3 renders an absent string
+            # field as "" — both absent and empty store NULL, never "".
+            vehicle_label=(vehicle.vehicle.label or None),
         )
         rows.append(row)
         edges.append(

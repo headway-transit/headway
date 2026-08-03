@@ -279,6 +279,10 @@
               "items": {"type": "string", "minLength": 1},
               "minItems": 1,
               "description": "Positional column names for a headerless export (header: false), in file order, one name per position. Names are spec-local labels for the positions the agency's sample demonstrated; 'from'/filter/concat references resolve against this list. Unique; declared only when header is false."
+            },
+            "skip_optional_header": {
+              "type": "boolean",
+              "description": "Headerless formats only (header: false). When true, a FIRST row whose values exactly equal the declared positional 'columns' is dropped as an optional column-name header, so an export made with OR without the header row both process (an operator need not know to disable 'include column headers'). A row that is not the exact header is kept - only the literal header is ever skipped, so no data row is lost."
             }
           },
           "allOf": [
@@ -321,6 +325,36 @@
       "minItems": 1,
       "items": {"$ref": "#/$defs/emission"},
       "description": "OPTIONAL fan-out: one source row emits zero or more contract records, one per listed emission (in order). Each emission merges its field overrides over the base 'fields' and may declare 'when' suppression predicates with reasons (e.g. a stop-visit row carrying both a boardings column and an alightings column becomes a 'Passenger boarded' record and/or a 'Passenger alighted' record; a zero count suppresses that emission with a reason). Without 'emit', a spec maps exactly one record per kept row (unchanged v0 behavior). A row is quarantined atomically: if any non-suppressed emission fails coercion or contract validation, NO record from that row is emitted and the row is quarantined with every problem found."
+    },
+    "unassigned": {
+      "type": "object",
+      "required": ["when", "revenue_classification", "reason"],
+      "additionalProperties": false,
+      "description": "OPTIONAL no-run classification (handoff 0040, tides_passenger_events only). A row matching ALL of 'when' carried NO run assignment at all - a 'ghost' boarding a vehicle fired while moving with the APC on but not logged into a run (prep / pull-out / pull-in, or rarely a catch-up bus dispatched without a trip). Such a row is NOT filtered and NOT quarantined: it is MAPPED like any other, but the run-identity fields listed in 'drop_fields' are DROPPED (a no-run row has no trip, stop or stop-sequence), and every emitted record is stamped with revenue_classification. This is an ASSIGNMENT STATUS the transform records, never the revenue verdict - the calc library decides whether an unassigned boarding is non-revenue prep (excluded from UPT) or a real catch-up rider (counted). The 'when' predicates are evaluated per KEPT row before mapping; a row that does NOT match is a normal assigned row and, when this block is present, is stamped revenue_classification 'assigned'. Without this block, revenue_classification is left absent (NULL) on every row - the pre-handoff-0040 behavior, byte-identical.",
+      "properties": {
+        "when": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/predicate"},
+          "description": "Predicates (ALL must hold) identifying a no-run row - typically the trip identifier being empty. Reasons are shown verbatim in the aggregated 'no-run boardings emitted' info finding."
+        },
+        "revenue_classification": {
+          "type": "string",
+          "const": "unassigned",
+          "description": "The assignment status stamped onto a matching row's records. Only 'unassigned' is representable - the block exists precisely to name the no-run case; a matched row is unassigned by definition."
+        },
+        "drop_fields": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1},
+          "uniqueItems": true,
+          "description": "Target-contract field names dropped from the mapping on a matching row (a no-run row has no trip, stop or stop-sequence to map). Each must be a field the spec maps (base 'fields' or an emission override) - dropping a field the spec never maps would be a no-op that hides a config error. The target contract's normalizer must accept these as absent for an unassigned row (tides_passenger_events makes trip_stop_sequence optional when revenue_classification is 'unassigned')."
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 10,
+          "description": "REQUIRED plain-language reason these rows are no-run boardings, shown in the aggregated DQ finding."
+        }
+      }
     },
     "provenance": {
       "type": "object",
@@ -554,6 +588,16 @@
             ]
           }
         }
+      }
+    },
+    {
+      "if": {"required": ["unassigned"]},
+      "then": {
+        "properties": {
+          "target_contract": {"const": "tides_passenger_events"}
+        },
+        "required": ["target_contract"],
+        "description": "The 'unassigned' no-run block (handoff 0040) is a passenger-event concept: only tides_passenger_events carries a revenue_classification. A demand_response_trip is a completed booking that has no no-run analogue."
       }
     },
     {

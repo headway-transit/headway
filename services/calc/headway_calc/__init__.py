@@ -92,18 +92,23 @@ from headway_calc.reader import (
     load_vehicle_positions,
 )
 from headway_calc.types import (
+    SUBJECT_KINDS,
+    SUBJECT_TRIPS,
     BlockingIssue,
+    BoardingReviewItem,
     CalcResult,
     CoverageDetail,
     DrTrip,
     Finding,
     HeadwayAdherenceDetail,
+    HumanBoardingVerdict,
     OpsScheduledStop,
     OtpDetail,
     PassengerEvent,
     PmtDetail,
     StopPassage,
     StopTime,
+    SubjectRef,
     UptDetail,
     VehiclePosition,
     VomsDetail,
@@ -117,6 +122,12 @@ from headway_calc.vrh import (
     compute_vrh_v0_2,
     compute_vrh_v0_3,
 )
+from headway_calc.vp import (
+    compute_vp_upt,
+    compute_vp_voms,
+    compute_vp_vrh,
+    compute_vp_vrm,
+)
 
 # NOTE: the runner (headway_calc.runner: run_period, RunReport) and the
 # MR-20 generator (headway_calc.mr20: build_mr20_package) are NOT
@@ -128,18 +139,23 @@ from headway_calc.vrh import (
 # `from headway_calc.mr20 import build_mr20_package`.
 
 __all__ = [
+    "SUBJECT_KINDS",
+    "SUBJECT_TRIPS",
     "BlockingIssue",
+    "BoardingReviewItem",
     "CalcResult",
     "CoverageDetail",
     "DrTrip",
     "Finding",
     "HeadwayAdherenceDetail",
+    "HumanBoardingVerdict",
     "OpsScheduledStop",
     "OtpDetail",
     "PassengerEvent",
     "PmtDetail",
     "StopPassage",
     "StopTime",
+    "SubjectRef",
     "UptDetail",
     "VehiclePosition",
     "VomsDetail",
@@ -174,6 +190,10 @@ __all__ = [
     "compute_vrh_v0_1",
     "compute_vrh_v0_2",
     "compute_vrh_v0_3",
+    "compute_vp_upt",
+    "compute_vp_voms",
+    "compute_vp_vrh",
+    "compute_vp_vrm",
     "load_agency_timezones",
     "load_dr_trips",
     "load_operated_trip_ids",

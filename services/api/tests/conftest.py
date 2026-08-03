@@ -27,7 +27,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-from headway_api import auth, machine_auth, signing  # noqa: E402
+from headway_api import auth, machine_auth, raw_payloads, signing  # noqa: E402
 from headway_api.app import Settings, create_app  # noqa: E402
 
 TEST_SECRET = "test-only-session-secret-not-for-production"
@@ -50,6 +50,25 @@ _HASHES = {u: auth.hash_password(p) for u, p in _PASSWORDS.items()}
 UTC = dt.timezone.utc
 
 
+def _dq_filters(q: str, params) -> list[tuple[str, object]]:
+    """Read back the queue filters ``dq.list_issues`` built, in its order.
+
+    The router appends ``status`` then ``severity`` (handoff 0030), each
+    with one positional parameter, before any cursor/limit parameters — so
+    walking the query text and the parameters together in that order
+    reconstructs the filter exactly, without this fake having to parse SQL.
+    """
+    out: list[tuple[str, object]] = []
+    i = 0
+    if "status = %s" in q:
+        out.append(("status", params[i]))
+        i += 1
+    if "severity = %s" in q:
+        out.append(("severity", params[i]))
+        i += 1
+    return out
+
+
 class FakeCursor:
     def __init__(self, rows, rowcount=None):
         self._rows = list(rows)
@@ -70,6 +89,12 @@ class FakeConn:
         self.metric_values: dict[str, dict] = {}
         self.dq_issues: dict[str, dict] = {}
         self.lineage_edges: list[dict] = []
+        # Stands in for migration 0005's ``edges_output_idx``. Without it the
+        # walk below is a sequential scan per frontier node, which is
+        # quadratic in the edge count — so a test that seeds a realistically
+        # large lineage graph measures this double's scan instead of the
+        # product. Invalidated by ``add_edge``.
+        self._lineage_by_output: dict[tuple[str, str], list[dict]] | None = None
         self.certifications: list[dict] = []
         self.audit_events: list[dict] = []
         self.api_keys: dict[str, dict] = {}
@@ -100,6 +125,15 @@ class FakeConn:
         self.canonical_routes: dict[str, dict] = {}
         self.canonical_trips: dict[str, dict] = {}
         self.stop_times: list[dict] = []
+        # Revenue review queue (handoff 0040 / migration 0040): no-run
+        # boardings the calculation held out of the figure pending a human
+        # decision, keyed by passenger_event_id.
+        self.boarding_reviews: dict[str, dict] = {}
+        # Single sign-on (handoff 0046 / migration 0043): the one provider
+        # row, the claim->role grants, and in-flight authorization requests.
+        self.oidc_provider: dict | None = None
+        self.oidc_role_mappings: dict[str, dict] = {}
+        self.oidc_login_states: dict[str, dict] = {}
         self._next_classification_id = 1
         self._next_event_id = 1
         self.executed: list[tuple[str, tuple]] = []
@@ -126,6 +160,10 @@ class FakeConn:
                 self.attestations,
                 self.service_day_overrides,
                 self.calc_runs,
+                self.boarding_reviews,
+                self.oidc_provider,
+                self.oidc_role_mappings,
+                self.oidc_login_states,
                 self._next_classification_id,
                 self._next_event_id,
             )
@@ -150,6 +188,10 @@ class FakeConn:
                 self.attestations,
                 self.service_day_overrides,
                 self.calc_runs,
+                self.boarding_reviews,
+                self.oidc_provider,
+                self.oidc_role_mappings,
+                self.oidc_login_states,
                 self._next_classification_id,
                 self._next_event_id,
             ) = snapshot
@@ -175,6 +217,14 @@ class FakeConn:
                 else []
             )
             return FakeCursor(rows)
+
+        if q.startswith("SELECT role, is_active FROM auth.users WHERE username"):
+            # auth._live_account — run on EVERY authenticated request so that a
+            # demotion or a deactivation takes effect immediately instead of
+            # when the token expires. Modelled honestly: a username with no row
+            # returns no row, which is how a deleted account ends its session.
+            u = self.users.get(params[0])
+            return FakeCursor([(u["role"], u["is_active"])] if u else [])
 
         # -- users admin (handoff 0025 / migration 0032) ---------------------
         if q.startswith(
@@ -203,16 +253,18 @@ class FakeConn:
                 ]
             )
 
-        if q.startswith("INSERT INTO auth.users"):
+        # The LOCAL-account insert specifically; the federated insert names a
+        # different column list and is handled with the rest of single sign-on.
+        if q.startswith("INSERT INTO auth.users (username, password_hash, role)"):
             username, password_hash, role = params
             # Honest model of the ON CONFLICT (username) DO NOTHING clause:
             # an existing username returns NO row.
             if username in self.users:
                 return FakeCursor([])
-            # The migration-0009/0032 CHECK + defaults, modeled honestly.
+            # The migration-0009/0032/0042 CHECK + defaults, modeled honestly.
             assert role in (
                 "viewer", "data_steward", "report_preparer",
-                "certifying_official",
+                "certifying_official", "auditor",
             )
             u = {
                 "user_id": str(uuid.uuid4()),
@@ -220,6 +272,10 @@ class FakeConn:
                 "password_hash": password_hash,
                 "role": role,
                 "is_active": True,
+                "auth_source": "local",
+                "idp_issuer": None,
+                "idp_subject": None,
+                "last_login_at": None,
                 "created_at": dt.datetime.now(UTC),
             }
             self.users[username] = u
@@ -241,7 +297,9 @@ class FakeConn:
             u["is_active"] = bool(is_active)
             return FakeCursor([(u["user_id"],)])
 
-        if q.startswith("UPDATE auth.users SET role"):
+        # The admin Users API updates by USERNAME; the federated role sync
+        # updates by user_id and is handled with the rest of single sign-on.
+        if q.startswith("UPDATE auth.users SET role = %s WHERE username"):
             role, username = params
             u = self.users.get(username)
             if u is None:
@@ -317,6 +375,13 @@ class FakeConn:
                         r["computed_at"], str(r["metric_value_id"]),
                     )
                 )
+            elif "ORDER BY period_start, metric, computed_at DESC" in q:
+                # /metrics/values: newest FIRST within one metric/period/scope,
+                # so "which of these is current?" has an answer. Two stable
+                # sorts rather than one composite key, because only the last
+                # term is descending.
+                rows.sort(key=lambda r: r["computed_at"], reverse=True)
+                rows.sort(key=lambda r: (r["period_start"], r["metric"]))
             else:
                 rows.sort(key=lambda r: (r["period_start"], r["metric"]))
             if "LIMIT %s" in q:
@@ -338,6 +403,38 @@ class FakeConn:
         if "WITH RECURSIVE walk" in q:
             return FakeCursor(self._walk_lineage(params[0]))
 
+        if q.startswith(
+            "SELECT older.metric_value_id, older.metric, older.scope, older.value"
+        ):
+            # certify._SELECT_SUPERSEDED — every named figure that has a NEWER
+            # figure for the same metric, scope and period. Modelled with the
+            # SAME join keys and the SAME ordering (newest first) as the SQL,
+            # so a test cannot pass here against semantics Postgres would not
+            # produce.
+            wanted = {str(i) for i in params[0]}
+            rows = []
+            for older in self.metric_values.values():
+                if str(older["metric_value_id"]) not in wanted:
+                    continue
+                newer = [
+                    n for n in self.metric_values.values()
+                    if n["metric"] == older["metric"]
+                    and n["scope"] == older["scope"]
+                    and n["period_start"] == older["period_start"]
+                    and n["period_end"] == older["period_end"]
+                    and n["computed_at"] > older["computed_at"]
+                ]
+                for n in sorted(newer, key=lambda r: r["computed_at"], reverse=True):
+                    rows.append(
+                        (
+                            older["metric_value_id"], older["metric"],
+                            older["scope"], older["value"],
+                            n["metric_value_id"], n["value"],
+                        )
+                    )
+            rows.sort(key=lambda r: str(r[0]))
+            return FakeCursor(rows)
+
         if q.startswith("SELECT metric_value_id FROM computed.metric_values"):
             mv = self.metric_values.get(str(params[0]))
             return FakeCursor([(mv["metric_value_id"],)] if mv else [])
@@ -351,19 +448,38 @@ class FakeConn:
             ]
             return FakeCursor(rows)
 
-        if q.startswith("SELECT severity, status, count(*) FROM dq.issues"):
+        if q.startswith("SELECT severity, status, count(*), "):
             # /dq/issues/counts (handoff 0023): the SQL-side GROUP BY over
-            # exactly the rows /dq/issues serves under the same filter.
+            # exactly the rows /dq/issues serves under the same filter,
+            # carrying the effort sum since handoff 0030.
             rows = list(self.dq_issues.values())
             if "WHERE status = %s" in q:
                 rows = [r for r in rows if r["status"] == params[0]]
-            grouped: dict[tuple, int] = {}
+            grouped: dict[tuple, list[int]] = {}
             for r in rows:
                 key = (r["severity"], r["status"])
-                grouped[key] = grouped.get(key, 0) + 1
+                cell = grouped.setdefault(key, [0, 0])
+                cell[0] += 1
+                cell[1] += r["resolution_minutes"] or 0
             return FakeCursor(
-                [(sev, st, n) for (sev, st), n in sorted(grouped.items())]
+                [
+                    (sev, st, n, minutes)
+                    for (sev, st), (n, minutes) in sorted(grouped.items())
+                ]
             )
+
+        if (
+            q.startswith("SELECT count(*) FROM dq.issues")
+            # ...but NOT the certification gate below, which pins its
+            # severity and status as SQL literals.
+            and "'blocking'" not in q
+        ):
+            # The page total (handoff 0030): counted over EXACTLY the rows
+            # the page's own filters select — never derived from the page.
+            rows = list(self.dq_issues.values())
+            for cond, value in _dq_filters(q, params):
+                rows = [r for r in rows if r[cond] == value]
+            return FakeCursor([(len(rows),)])
 
         if "count(*) FROM dq.issues" in q:
             n = sum(
@@ -482,6 +598,195 @@ class FakeConn:
                     n += 1
             return FakeCursor([], rowcount=n)
 
+
+        # ---- single sign-on (handoff 0046 / migration 0043) ----------------
+        # Modelled at the same fidelity as the real schema: the provider row
+        # is a singleton, claim_value is UNIQUE (so a duplicate INSERT
+        # returns no row), and consuming a login state is a CONDITIONAL
+        # UPDATE that exactly one caller can win.
+
+        if q.startswith("SELECT discovery_url, client_id, client_secret_encrypted"):
+            p_ = self.oidc_provider
+            if p_ is None:
+                return FakeCursor([])
+            return FakeCursor([(
+                p_["discovery_url"], p_["client_id"],
+                p_["client_secret_encrypted"], p_["redirect_uri"],
+                p_["groups_claim"], p_["username_claim"],
+                p_["clock_skew_seconds"], p_["ca_bundle_path"],
+                p_["button_label"], p_["is_enabled"],
+                p_["updated_by"], p_["updated_at"],
+            )])
+
+        if q.startswith("INSERT INTO auth.oidc_provider"):
+            (discovery_url, client_id, secret, redirect_uri, groups_claim,
+             username_claim, skew, ca_bundle, button_label, is_enabled,
+             updated_by) = params
+            now = dt.datetime.now(UTC)
+            self.oidc_provider = {
+                "discovery_url": discovery_url,
+                "client_id": client_id,
+                "client_secret_encrypted": secret,
+                "redirect_uri": redirect_uri,
+                "groups_claim": groups_claim,
+                "username_claim": username_claim,
+                "clock_skew_seconds": skew,
+                "ca_bundle_path": ca_bundle,
+                "button_label": button_label,
+                "is_enabled": is_enabled,
+                "updated_by": updated_by,
+                "updated_at": now,
+            }
+            return FakeCursor([(now,)])
+
+        if q.startswith("SELECT mapping_id, claim_value, headway_role"):
+            rows = sorted(
+                self.oidc_role_mappings.values(), key=lambda m: m["claim_value"]
+            )
+            return FakeCursor([
+                (m["mapping_id"], m["claim_value"], m["headway_role"],
+                 m["note"], m["created_by"], m["created_at"])
+                for m in rows
+            ])
+
+        if q.startswith("INSERT INTO auth.oidc_role_mappings"):
+            claim_value, headway_role, note, created_by = params
+            # migration 0043's CHECK: the IdP can never be given the
+            # certifying_official role, at the database level too.
+            assert headway_role in (
+                "viewer", "data_steward", "report_preparer", "auditor"
+            ), "migration 0043 CHECK would reject this role"
+            if any(
+                m["claim_value"] == claim_value
+                for m in self.oidc_role_mappings.values()
+            ):
+                return FakeCursor([])  # ON CONFLICT (claim_value) DO NOTHING
+            mapping_id = str(uuid.uuid4())
+            created_at = dt.datetime.now(UTC)
+            self.oidc_role_mappings[mapping_id] = {
+                "mapping_id": mapping_id,
+                "claim_value": claim_value,
+                "headway_role": headway_role,
+                "note": note,
+                "created_by": created_by,
+                "created_at": created_at,
+            }
+            return FakeCursor([(mapping_id, created_at)])
+
+        if q.startswith("DELETE FROM auth.oidc_role_mappings"):
+            m = self.oidc_role_mappings.pop(params[0], None)
+            if m is None:
+                return FakeCursor([])
+            return FakeCursor([(m["claim_value"], m["headway_role"])])
+
+        if q.startswith("INSERT INTO auth.oidc_login_states"):
+            state, nonce, verifier, binding, redirect_uri, expires_at = params
+            self.oidc_login_states[state] = {
+                "state": state,
+                "nonce": nonce,
+                "code_verifier": verifier,
+                "browser_binding": binding,
+                "redirect_uri": redirect_uri,
+                "expires_at": expires_at,
+                "consumed_at": None,
+            }
+            return FakeCursor([])
+
+        if q.startswith("UPDATE auth.oidc_login_states SET consumed_at"):
+            row = self.oidc_login_states.get(params[0])
+            now = dt.datetime.now(UTC)
+            # The WHERE clause verbatim: unknown, already consumed, or
+            # expired all return NO row, so the caller cannot tell them apart.
+            if row is None or row["consumed_at"] is not None or row["expires_at"] <= now:
+                return FakeCursor([])
+            row["consumed_at"] = now
+            return FakeCursor([(
+                row["nonce"], row["code_verifier"], row["browser_binding"],
+                row["redirect_uri"],
+            )])
+
+        if q.startswith("DELETE FROM auth.oidc_login_states WHERE expires_at"):
+            now = dt.datetime.now(UTC)
+            stale = [k for k, v in self.oidc_login_states.items()
+                     if v["expires_at"] < now]
+            for k in stale:
+                del self.oidc_login_states[k]
+            return FakeCursor([], rowcount=len(stale))
+
+        if q.startswith("SELECT user_id, username, role, is_active FROM auth.users WHERE idp_issuer"):
+            issuer, subject = params
+            for u in self.users.values():
+                if u.get("idp_issuer") == issuer and u.get("idp_subject") == subject:
+                    return FakeCursor([(
+                        u["user_id"], u["username"], u["role"], u["is_active"]
+                    )])
+            return FakeCursor([])
+
+        if q.startswith("SELECT user_id, role, is_active, auth_source FROM auth.users"):
+            u = self.users.get(params[0])
+            if u is None:
+                return FakeCursor([])
+            return FakeCursor([(
+                u["user_id"], u["role"], u["is_active"], u["auth_source"]
+            )])
+
+        if q.startswith("INSERT INTO auth.users (username, role, auth_source"):
+            username, role, issuer, subject = params
+            assert role in (
+                "viewer", "data_steward", "report_preparer", "auditor"
+            ), "the IdP may not grant this role"
+            if username in self.users:
+                return FakeCursor([])  # ON CONFLICT (username) DO NOTHING
+            u = {
+                "user_id": str(uuid.uuid4()),
+                "username": username,
+                "password_hash": None,  # migration 0043: federated = no password
+                "role": role,
+                "is_active": True,
+                "auth_source": "oidc",
+                "idp_issuer": issuer,
+                "idp_subject": subject,
+                "last_login_at": None,
+                "created_at": dt.datetime.now(UTC),
+            }
+            self.users[username] = u
+            return FakeCursor([(u["user_id"],)])
+
+        if q.startswith("UPDATE auth.users SET role = %s WHERE user_id"):
+            role, user_id = params
+            for u in self.users.values():
+                if u["user_id"] == user_id:
+                    u["role"] = role
+                    return FakeCursor([(u["username"],)])
+            return FakeCursor([])
+
+        if q.startswith("UPDATE auth.users SET last_login_at"):
+            for u in self.users.values():
+                if u["user_id"] == params[0]:
+                    u["last_login_at"] = dt.datetime.now(UTC)
+                    return FakeCursor([], rowcount=1)
+            return FakeCursor([], rowcount=0)
+
+        # ---- the audit trail, read back (handoff 0046, the auditor role) ---
+        if q.startswith("SELECT event_id, at, actor, action, subject_kind"):
+            rows = sorted(
+                self.audit_events, key=lambda e: e["event_id"], reverse=True
+            )
+            i = 0
+            for column in ("actor", "action", "subject_kind", "subject_id"):
+                if f"{column} = %s" in q:
+                    rows = [e for e in rows if e[column] == params[i]]
+                    i += 1
+            if "event_id < %s" in q:
+                rows = [e for e in rows if e["event_id"] < params[i]]
+                i += 1
+            rows = rows[: params[i]]  # LIMIT
+            return FakeCursor([
+                (e["event_id"], e["at"], e["actor"], e["action"],
+                 e["subject_kind"], e["subject_id"], e["detail"])
+                for e in rows
+            ])
+
         if q.startswith("INSERT INTO audit.events"):
             actor, action, subject_kind, subject_id, detail = params
             event = {
@@ -498,23 +803,177 @@ class FakeConn:
             return FakeCursor([(event["event_id"],)])
 
         if q.startswith("SELECT issue_id, issue_type"):
+            # Handoff 0030: the queue columns are a strict PREFIX of the
+            # per-issue columns — source_record_ids rides last and only on
+            # the detail query, which is the whole point of the change.
+            detail = "source_record_ids" in q
             rows = list(self.dq_issues.values())
             if "WHERE issue_id = %s" in q:
                 # GET /dq/issues/{id} (handoff 0026 deep link).
                 rows = [r for r in rows if r["issue_id"] == str(params[0])]
-            elif "WHERE status = %s" in q:
-                rows = [r for r in rows if r["status"] == params[0]]
-            rows.sort(key=lambda r: r["created_at"])
+            else:
+                for cond, value in _dq_filters(q, params):
+                    rows = [r for r in rows if r[cond] == value]
+            # Deterministic AND total: the primary key breaks every tie, so
+            # paging can neither skip nor repeat a row (handoff 0030).
+            rows.sort(key=lambda r: (r["created_at"], str(r["issue_id"])))
+            if "(created_at, issue_id) > (%s, %s)" in q:
+                after = tuple(params[-3:-1])
+                rows = [
+                    r
+                    for r in rows
+                    if (r["created_at"], str(r["issue_id"]))
+                    > (after[0], str(after[1]))
+                ]
+            if " LIMIT %s" in q:
+                rows = rows[: params[-1]]
+
+            def _row(r):
+                queue_columns = (
+                    r["issue_id"], r["issue_type"], r["severity"], r["status"],
+                    r["owner"], r["title"], r["description"],
+                    r["created_at"], r["resolved_at"], r["resolution"],
+                    r["resolution_minutes"],
+                    # Migration 0035 (handoff 0029): the frozen,
+                    # agency-vocabulary context. None for every pre-0035
+                    # row — the default here, because that is the shape
+                    # 97,067 live rows have.
+                    r["subject_context"],
+                )
+                if detail:
+                    return queue_columns + (r["source_record_ids"],)
+                return queue_columns
+
+            return FakeCursor([_row(r) for r in rows])
+
+        # -- revenue review queue (handoff 0040 / migration 0040) ------------
+        # Registered BEFORE the generic dq.issues resolve handler below: the
+        # review router closes a boarding's finding with a two-parameter
+        # UPDATE whose prefix would otherwise be swallowed by the
+        # three-parameter DQ one.
+        if q.startswith(
+            "UPDATE dq.issues SET status = 'resolved', resolved_at = now(), "
+            "resolution = %s WHERE issue_id"
+        ):
+            resolution, issue_id = params
+            issue = self.dq_issues.get(str(issue_id))
+            if issue is None or issue["status"] not in ("open", "owned"):
+                return FakeCursor([])
+            issue["status"] = "resolved"
+            issue["resolved_at"] = dt.datetime.now(UTC)
+            issue["resolution"] = resolution
+            return FakeCursor([])
+
+        if q.startswith(
+            "SELECT issue_id FROM dq.issues WHERE issue_type = %s "
+            "AND status IN ('open', 'owned') AND %s = ANY(source_record_ids)"
+        ):
+            issue_type, record_id = params
+            rows = sorted(
+                (
+                    i
+                    for i in self.dq_issues.values()
+                    if i["issue_type"] == issue_type
+                    and i["status"] in ("open", "owned")
+                    and record_id in (i["source_record_ids"] or [])
+                ),
+                key=lambda i: (i["created_at"], str(i["issue_id"])),
+            )
+            return FakeCursor([(r["issue_id"],) for r in rows[:1]])
+
+        if q.startswith("SELECT count(*) FROM dq.boarding_revenue_reviews"):
+            pending_only = "WHERE verdict IS NULL" in q
+            rows = [
+                r
+                for r in self.boarding_reviews.values()
+                if (r["verdict"] is None) == pending_only
+            ]
+            return FakeCursor([(len(rows),)])
+
+        if q.startswith(
+            "SELECT verdict, count(*), coalesce(sum(event_count), 0) "
+            "FROM dq.boarding_revenue_reviews"
+        ):
+            grouped: dict = {}
+            for r in self.boarding_reviews.values():
+                bucket = grouped.setdefault(r["verdict"], [0, 0])
+                bucket[0] += 1
+                bucket[1] += r["event_count"]
+            return FakeCursor(
+                [(v, c, s) for v, (c, s) in grouped.items()]
+            )
+
+        if q.startswith("SELECT passenger_event_id, source_record_id"):
+            def _review_row(r):
+                return (
+                    r["passenger_event_id"], r["source_record_id"],
+                    r["service_date"], r["event_timestamp"], r["vehicle_id"],
+                    r["event_count"], r["suggested_verdict"],
+                    r["suggested_reason"], r["calc_name"], r["calc_version"],
+                    r["period_start"], r["period_end"], r["first_seen_at"],
+                    r["verdict"], r["justification"], r["classified_by"],
+                    r["classified_at"], r["dq_issue_id"],
+                )
+
+            if "WHERE passenger_event_id = %s" in q:
+                r = self.boarding_reviews.get(str(params[0]))
+                return FakeCursor([_review_row(r)] if r else [])
+            pending_only = "WHERE verdict IS NULL" in q
+            rows = [
+                r
+                for r in self.boarding_reviews.values()
+                if (r["verdict"] is None) == pending_only
+            ]
+            rows.sort(
+                key=lambda r: (r["event_timestamp"], r["passenger_event_id"])
+            )
+            rest = list(params)
+            if "(event_timestamp, passenger_event_id) > (%s, %s)" in q:
+                after_ts, after_id = rest[0], rest[1]
+                rows = [
+                    r
+                    for r in rows
+                    if (r["event_timestamp"], r["passenger_event_id"])
+                    > (after_ts, after_id)
+                ]
+                rest = rest[2:]
+            limit = rest[0]
+            return FakeCursor([_review_row(r) for r in rows[:limit]])
+
+        if q.startswith("UPDATE dq.boarding_revenue_reviews SET verdict"):
+            verdict, justification, actor, dq_issue_id, event_id = params
+            r = self.boarding_reviews.get(str(event_id))
+            if r is None or r["verdict"] is not None:
+                return FakeCursor([])
+            r["verdict"] = verdict
+            r["justification"] = justification
+            r["classified_by"] = actor
+            r["classified_at"] = dt.datetime.now(UTC)
+            r["dq_issue_id"] = dq_issue_id
+            return FakeCursor([(r["classified_at"],)])
+
+        if q.startswith(
+            "SELECT metric_value_id, period_start, period_end, scope "
+            "FROM computed.metric_values"
+        ):
+            metric, on_date, _same = params
+            rows = sorted(
+                (
+                    v
+                    for v in self.metric_values.values()
+                    if v["metric"] == metric
+                    and v["certification_status"] == "certified"
+                    and v["period_start"] <= on_date < v["period_end"]
+                ),
+                key=lambda v: v["period_start"],
+            )
             return FakeCursor(
                 [
                     (
-                        r["issue_id"], r["issue_type"], r["severity"], r["status"],
-                        r["owner"], r["title"], r["description"],
-                        r["source_record_ids"], r["created_at"],
-                        r["resolved_at"], r["resolution"],
-                        r["resolution_minutes"],
+                        v["metric_value_id"], v["period_start"],
+                        v["period_end"], v["scope"],
                     )
-                    for r in rows
+                    for v in rows[:1]
                 ]
             )
 
@@ -568,6 +1027,68 @@ class FakeConn:
             return FakeCursor(
                 [(issue["resolution_minutes"],)] if issue else []
             )
+
+        # -- raw-record inspector (handoff 0035) ----------------------------
+        # The BATCHED read first (handoff 0047's evidence bundle labels every
+        # leaf under a certification in one round trip). It shares a prefix
+        # with the single-record query below and is told apart by ANY(%s),
+        # exactly as the two statements differ in raw_records.py.
+        if (
+            q.startswith("SELECT record_id, source, connector, connector_version")
+            and "ANY(%s)" in q
+        ):
+            wanted = {str(i) for i in params[0]}
+            rows = [
+                (
+                    r["record_id"], r["source"], r["connector"],
+                    r["connector_version"], r["content_type"],
+                    r["payload_encoding"], r["payload_ref"], r["fetched_at"],
+                    r["landed_at"], r["parse_status"], r["parse_error"],
+                )
+                for r in sorted(self.raw_records, key=lambda r: r["record_id"])
+                if r["record_id"] in wanted
+            ]
+            return FakeCursor(rows)
+
+        if q.startswith("SELECT record_id, source, connector, connector_version"):
+            rows = [
+                (
+                    r["record_id"], r["source"], r["connector"],
+                    r["connector_version"], r["content_type"],
+                    r["payload_encoding"], r["payload_ref"], r["fetched_at"],
+                    r["landed_at"], r["parse_status"], r["parse_error"],
+                )
+                for r in self.raw_records
+                if r["record_id"] == params[0]
+            ]
+            return FakeCursor(rows)
+
+        # The integrity-failure finding's idempotence probe: is there
+        # already an unresolved issue of this type against this record?
+        if q.startswith("SELECT issue_id FROM dq.issues WHERE issue_type"):
+            issue_type, record_id = params
+            rows = [
+                (i["issue_id"],)
+                for i in self.dq_issues.values()
+                if i["issue_type"] == issue_type
+                and i["status"] != "resolved"
+                and record_id in (i["source_record_ids"] or [])
+            ]
+            return FakeCursor(rows[:1])
+
+        if q.startswith("INSERT INTO dq.issues (issue_type, severity, status, "
+                        "title, description, source_record_ids)"):
+            issue_type, severity, status, title, description, ids = params
+            issue = self.add_dq_issue(
+                issue_type=issue_type,
+                severity=severity,
+                status=status,
+                title=title,
+                description=description,
+                source_record_ids=list(ids),
+                created_at=dt.datetime.now(UTC),
+            )
+            return FakeCursor([(issue["issue_id"],)])
 
         # -- machine API keys (handoff 0006) --------------------------------
         if "FROM auth.api_keys WHERE key_hash" in q:
@@ -1431,37 +1952,61 @@ class FakeConn:
         return rows
 
     def _walk_lineage(self, root_id):
+        if self._lineage_by_output is None:
+            index: dict[tuple[str, str], list[dict]] = {}
+            for e in self.lineage_edges:
+                index.setdefault((e["output_kind"], e["output_id"]), []).append(e)
+            self._lineage_by_output = index
         rows = []
         frontier = [("computed.metric_values", str(root_id))]
         seen = set()
         while frontier:
-            kind, node_id = frontier.pop(0)
-            if (kind, node_id) in seen:
+            key = frontier.pop(0)
+            if key in seen:
                 continue
-            seen.add((kind, node_id))
-            for e in self.lineage_edges:
-                if e["output_kind"] == kind and e["output_id"] == node_id:
-                    rows.append(
-                        (
-                            e["output_kind"], e["output_id"],
-                            e["transform_name"], e["transform_version"],
-                            e["input_kind"], e["input_id"],
-                        )
+            seen.add(key)
+            for e in self._lineage_by_output.get(key, ()):
+                rows.append(
+                    (
+                        e["output_kind"], e["output_id"],
+                        e["transform_name"], e["transform_version"],
+                        e["input_kind"], e["input_id"],
                     )
-                    frontier.append((e["input_kind"], e["input_id"]))
+                )
+                frontier.append((e["input_kind"], e["input_id"]))
         return rows
 
     # -- seeding helpers ----------------------------------------------------
-    def add_user(self, username, role, *, is_active=True, password_hash=None):
+    def add_user(self, username, role, *, is_active=True, password_hash=None,
+                 auth_source="local", idp_issuer=None, idp_subject=None):
+        """Seed one account.
+
+        Migration 0043's CHECK is modelled honestly: a federated account has
+        NO password hash and MUST carry both IdP identifiers; a local account
+        has a hash and neither. A test that gets this wrong fails here rather
+        than passing against a fake that is more permissive than Postgres.
+        """
+        if auth_source == "oidc":
+            assert password_hash is None
+            assert idp_issuer and idp_subject
+            stored_hash = None
+        else:
+            stored_hash = password_hash or _HASHES[username]
+            assert idp_issuer is None and idp_subject is None
         self.users[username] = {
             "user_id": str(uuid.uuid4()),
             "username": username,
-            "password_hash": password_hash or _HASHES[username],
+            "password_hash": stored_hash,
             "role": role,
             "is_active": is_active,
+            "auth_source": auth_source,
+            "idp_issuer": idp_issuer,
+            "idp_subject": idp_subject,
+            "last_login_at": None,
             "created_at": dt.datetime(2026, 7, 1, 8, 0, tzinfo=UTC)
             + dt.timedelta(minutes=len(self.users)),
         }
+        return self.users[username]
 
     def add_metric_value(self, **overrides):
         mv = {
@@ -1513,10 +2058,51 @@ class FakeConn:
             "resolution": None,
             "resolution_minutes": None,  # migration 0016 — null when unmeasured
             "category": "ntd",  # column default (migration 0024)
+            # Migration 0035 (handoff 0029). NULL by default on purpose:
+            # every issue in the live queue predates the column, so the
+            # default fixture IS the graceful-degradation case.
+            "subject_context": None,
         }
         issue.update(overrides)
         self.dq_issues[issue["issue_id"]] = issue
         return issue
+
+    # -- revenue review queue seeder (handoff 0040 / migration 0040) --------
+    def add_boarding_review(self, **overrides):
+        """Seed one dq.boarding_revenue_reviews row — a no-run boarding the
+        calculation held out of the figure pending a human decision.
+
+        Pending by default (all four human columns NULL), because pending IS
+        the queue: a classified row is what a test creates deliberately.
+        """
+        review = {
+            "passenger_event_id": f"pe-{uuid.uuid4()}",
+            "source_record_id": "c" * 64,
+            "service_date": dt.date(2026, 7, 9),
+            "event_timestamp": dt.datetime(2026, 7, 9, 15, 12, tzinfo=UTC),
+            "vehicle_id": "3684",
+            "event_count": 4,
+            "suggested_verdict": "pending_review",
+            "suggested_reason": (
+                "no run assignment but WITHIN the day's revenue-service "
+                "window — ambiguous (could be a catch-up bus dispatched "
+                "without a formal trip assignment); held pending human "
+                "review, never counted or excluded silently"
+            ),
+            "calc_name": "upt_v0",
+            "calc_version": "0.4.0",
+            "period_start": dt.date(2026, 7, 1),
+            "period_end": dt.date(2026, 8, 1),
+            "first_seen_at": dt.datetime(2026, 7, 15, 9, 0, tzinfo=UTC),
+            "verdict": None,
+            "justification": None,
+            "classified_by": None,
+            "classified_at": None,
+            "dq_issue_id": None,
+        }
+        review.update(overrides)
+        self.boarding_reviews[review["passenger_event_id"]] = review
+        return review
 
     # -- Map wave seeders (handoff 0023) ------------------------------------
     def add_vehicle_position(self, **overrides):
@@ -1539,14 +2125,19 @@ class FakeConn:
         return p
 
     def add_raw_record(self, **overrides):
-        """Seed one raw.records registry row (handoff 0025 sources status)."""
+        """Seed one raw.records registry row (handoff 0025 sources status;
+        the full column set the inspector reads, handoff 0035)."""
         now = dt.datetime.now(UTC)
         r = {
             "record_id": uuid.uuid4().hex * 2,  # 64 hex chars, like sha256
             "source": "gtfs_rt",
             "connector": "headway-gtfs-rt",
             "connector_version": "0.1.0",
+            "content_type": "application/x-protobuf",
+            "payload_encoding": "base64",
+            "payload_ref": None,
             "parse_status": "ok",
+            "parse_error": None,
             "fetched_at": now,
             "landed_at": now,
         }
@@ -1867,6 +2458,7 @@ class FakeConn:
 
     def add_edge(self, output_kind, output_id, transform_name, transform_version,
                  input_kind, input_id):
+        self._lineage_by_output = None
         self.lineage_edges.append(
             {
                 "output_kind": output_kind,
@@ -1905,6 +2497,21 @@ class FakeObjectStore:
         self.call_log.append(("store.delete", key))
         self.objects.pop(key, None)
 
+    # -- raw-record inspector seams (handoff 0035), mirroring MinioObjectStore
+    def stat(self, key):
+        """Size without reading, None when the object is not there."""
+        self.call_log.append(("store.stat", key))
+        data = self.objects.get(key)
+        return None if data is None else len(data)
+
+    def stream(self, key, chunk_size=1024 * 1024):
+        self.call_log.append(("store.stream", key))
+        data = self.objects.get(key)
+        if data is None:
+            return None, None
+        chunks = [data[i : i + chunk_size] for i in range(0, len(data), chunk_size)]
+        return len(data), iter(chunks or [b""])
+
 
 class FakeProducer:
     def __init__(self, call_log=None):
@@ -1914,6 +2521,27 @@ class FakeProducer:
     def produce(self, topic, key, value):
         self.call_log.append(("producer.produce", topic, key))
         self.produced.append((topic, key, value))
+
+
+class FakeEnvelopeStream:
+    """Stands in for the broker in the raw-record inspector (handoff 0035).
+
+    GTFS-Realtime payloads are never written to the object store: the
+    connector base64-encodes the exact bytes into the ingest envelope and
+    produces it keyed by record_id (contracts/topics.v0.md), so the broker
+    is the only place those bytes exist. This fake replaces ONLY the bounded
+    topic lookup — the routing, the hashing and the decoding under test are
+    the real ones. A record_id absent from ``messages`` reproduces the real
+    "the broker no longer retains that message" path.
+    """
+
+    def __init__(self):
+        self.messages: dict[str, bytes] = {}
+        self.lookups: list[tuple[str, tuple]] = []
+
+    def __call__(self, record, topics):
+        self.lookups.append((record.record_id, tuple(topics)))
+        return self.messages.get(record.record_id)
 
 
 class FakeCalcRunLauncher:
@@ -1944,6 +2572,244 @@ class FakeWebhookSender:
                 raise outcome
             return outcome
         return 200
+
+
+
+# ---------------------------------------------------------------------------
+# A fake identity provider with REAL cryptography (handoff 0046)
+# ---------------------------------------------------------------------------
+#
+# The point of this fake is that almost nothing about it is fake. It holds
+# real RSA keys, publishes a real JWKS, and mints real RS256-signed ID
+# tokens, so every assertion about signature verification, algorithm
+# allow-listing and key rotation exercises the production verifier rather
+# than a stub that agrees with it. What is faked is only the transport: no
+# socket is opened.
+#
+# Its token endpoint verifies PKCE for real (S256 over the stored challenge)
+# and checks the client credentials, so a test that breaks PKCE or the client
+# secret fails HERE, the way a provider would fail it.
+
+_RSA_KEYS: dict[str, object] = {}
+
+
+def _rsa_key(name: str):
+    """RSA keys are expensive to generate; make each one once per session."""
+    from cryptography.hazmat.primitives.asymmetric import rsa
+
+    if name not in _RSA_KEYS:
+        _RSA_KEYS[name] = rsa.generate_private_key(
+            public_exponent=65537, key_size=2048
+        )
+    return _RSA_KEYS[name]
+
+
+def _jwk_from_rsa(private_key, kid: str) -> dict:
+    import base64 as _b64
+
+    numbers = private_key.public_key().public_numbers()
+
+    def b64u(value: int) -> str:
+        raw = value.to_bytes((value.bit_length() + 7) // 8, "big")
+        return _b64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+    return {
+        "kty": "RSA",
+        "use": "sig",
+        "alg": "RS256",
+        "kid": kid,
+        "n": b64u(numbers.n),
+        "e": b64u(numbers.e),
+    }
+
+
+class FakeIdentityProvider:
+    """A standards-shaped OIDC provider: discovery, JWKS, token endpoint."""
+
+    def __init__(
+        self,
+        issuer="https://idp.example.gov/realms/agency",
+        client_id="headway-api",
+        client_secret="provider-issued-client-secret",
+    ):
+        self.issuer = issuer
+        self.client_id = client_id
+        self.client_secret = client_secret
+        self.discovery_url = issuer + "/.well-known/openid-configuration"
+        self.jwks_uri = issuer + "/protocol/openid-connect/certs"
+        self.token_endpoint = issuer + "/protocol/openid-connect/token"
+        self.authorization_endpoint = issuer + "/protocol/openid-connect/auth"
+        self.signing_kid = "key-2026-a"
+        self._published_kids = [self.signing_kid]
+        self.codes: dict[str, dict] = {}
+        self.token_calls: list[dict] = []
+        self.jwks_fetches = 0
+        self.discovery_fetches = 0
+        #: Set to a JSON error body to make the token endpoint refuse.
+        self.token_error: tuple[int, dict] | None = None
+
+    # -- keys ------------------------------------------------------------
+    def rotate_signing_key(self, kid="key-2026-b", *, publish=True):
+        """Start signing with a NEW key. When ``publish`` is true the new key
+        is added to the JWKS, which is exactly what a provider does — and
+        what a relying party with a pinned key cannot survive."""
+        self.signing_kid = kid
+        if publish and kid not in self._published_kids:
+            self._published_kids.append(kid)
+
+    def jwks(self) -> dict:
+        self.jwks_fetches += 1
+        return {
+            "keys": [_jwk_from_rsa(_rsa_key(kid), kid) for kid in self._published_kids]
+        }
+
+    def discovery(self) -> dict:
+        self.discovery_fetches += 1
+        return {
+            "issuer": self.issuer,
+            "authorization_endpoint": self.authorization_endpoint,
+            "token_endpoint": self.token_endpoint,
+            "jwks_uri": self.jwks_uri,
+            "code_challenge_methods_supported": ["S256", "plain"],
+            "token_endpoint_auth_methods_supported": [
+                "client_secret_basic", "client_secret_post"
+            ],
+            "id_token_signing_alg_values_supported": ["RS256"],
+        }
+
+    # -- the browser hop, without a browser --------------------------------
+    def authorize(self, authorization_url: str) -> str:
+        """Play the part of the user consenting. Records the nonce and the
+        PKCE challenge exactly as a provider would, and returns the code."""
+        from urllib.parse import parse_qs, urlparse
+
+        params = parse_qs(urlparse(authorization_url).query)
+        assert params["response_type"] == ["code"], "implicit flow must never be used"
+        assert params["code_challenge_method"] == ["S256"]
+        code = "code-" + uuid.uuid4().hex
+        self.codes[code] = {
+            "nonce": params["nonce"][0],
+            "code_challenge": params["code_challenge"][0],
+            "redirect_uri": params["redirect_uri"][0],
+            "used": False,
+        }
+        return code
+
+    # -- ID tokens ---------------------------------------------------------
+    def id_token(self, *, sub="idp-subject-0001", nonce, username="sso.steward",
+                 groups=("transit-data-stewards",), kid=None, **overrides) -> str:
+        import jwt as _jwt
+
+        now = dt.datetime.now(UTC)
+        claims = {
+            "iss": self.issuer,
+            "sub": sub,
+            "aud": self.client_id,
+            "exp": int((now + dt.timedelta(minutes=5)).timestamp()),
+            "iat": int(now.timestamp()),
+            "nonce": nonce,
+            "preferred_username": username,
+            "email": f"{username}@example.gov",
+            "groups": list(groups),
+        }
+        claims.update(overrides)
+        claims = {k: v for k, v in claims.items() if v is not _ABSENT}
+        kid = kid or self.signing_kid
+        alg = overrides.pop("_alg", "RS256")
+        return _jwt.encode(
+            claims, _rsa_key(kid), algorithm=alg, headers={"kid": kid}
+        )
+
+    def token_response(self, code: str, code_verifier: str) -> dict:
+        record = self.codes[code]
+        # PKCE, verified for real.
+        import base64 as _b64
+        import hashlib as _hashlib
+
+        expected = _b64.urlsafe_b64encode(
+            _hashlib.sha256(code_verifier.encode("ascii")).digest()
+        ).decode("ascii").rstrip("=")
+        assert expected == record["code_challenge"], "PKCE verifier did not match"
+        record["used"] = True
+        return {
+            "access_token": "provider-access-token",
+            "token_type": "Bearer",
+            "id_token": self.id_token(nonce=record["nonce"], **record.get("claims", {})),
+        }
+
+
+class _Absent:
+    def __repr__(self):
+        return "<absent>"
+
+
+#: Pass as a claim value to OMIT that claim entirely (as opposed to setting
+#: it to null, which is a different test).
+_ABSENT = _Absent()
+ABSENT = _ABSENT
+
+
+class FakeOidcHttp:
+    """The transport seam. Serves the fake provider's documents; refuses any
+    other address the way the real client would."""
+
+    def __init__(self, idp: FakeIdentityProvider, ca_bundle_path=None):
+        self.idp = idp
+        self.ca_bundle_path = ca_bundle_path
+        self.requested: list[str] = []
+
+    def get_json(self, url: str) -> dict:
+        from headway_api.oidc import OidcConfigurationError
+
+        self.requested.append(url)
+        if url == self.idp.discovery_url:
+            return self.idp.discovery()
+        if url == self.idp.jwks_uri:
+            return self.idp.jwks()
+        raise OidcConfigurationError(
+            f"Headway could not reach {url} (ConnectError). Check that the "
+            f"Headway server can reach your identity provider."
+        )
+
+    def _check_client(self, data, auth):
+        secret = None
+        if auth is not None:
+            client_id, secret = auth
+        else:
+            client_id = data.get("client_id")
+            secret = data.get("client_secret")
+        if client_id != self.idp.client_id or secret != self.idp.client_secret:
+            return {"error": "invalid_client"}
+        return None
+
+    def post_form(self, url: str, data: dict, *, auth=None) -> dict:
+        from headway_api.oidc import OidcError
+
+        self.requested.append(url)
+        self.idp.token_calls.append({"data": dict(data), "auth": auth})
+        if self.idp.token_error is not None:
+            status, body = self.idp.token_error
+            raise OidcError(
+                f"token endpoint refused the code exchange: HTTP {status} "
+                f"{body.get('error', 'unknown_error')}"
+            )
+        bad = self._check_client(data, auth)
+        if bad is not None:
+            raise OidcError("token endpoint refused the code exchange: HTTP 401 invalid_client")
+        record = self.idp.codes.get(data.get("code"))
+        if record is None or record["used"]:
+            raise OidcError("token endpoint refused the code exchange: HTTP 400 invalid_grant")
+        return self.idp.token_response(data["code"], data["code_verifier"])
+
+    def post_form_probe(self, url: str, data: dict, *, auth=None):
+        self.requested.append(url)
+        self.idp.token_calls.append({"data": dict(data), "auth": auth, "probe": True})
+        bad = self._check_client(data, auth)
+        if bad is not None:
+            return 401, bad
+        # A made-up code, refused after the credentials were accepted —
+        # exactly what the admin test action reads as a pass.
+        return 400, {"error": "invalid_grant"}
 
 
 @pytest.fixture
@@ -1995,8 +2861,24 @@ def fake_calc_launcher():
 
 
 @pytest.fixture
+def fake_envelope_stream():
+    return FakeEnvelopeStream()
+
+
+@pytest.fixture
+def fake_payload_reader(fake_store, fake_envelope_stream):
+    """The REAL composite reader over a fake store and a fake broker
+    (handoff 0035): routing by payload_encoding, streaming reads, hashing
+    and decoding are all the production code paths."""
+    return raw_payloads.CompositeRawPayloadReader(
+        raw_payloads.ObjectStorePayloadReader(fake_store),
+        raw_payloads.EnvelopeStreamPayloadReader(fake_envelope_stream),
+    )
+
+
+@pytest.fixture
 def app(fake_db, settings, fake_store, fake_producer, fake_webhook_sender,
-        test_signer, fake_calc_launcher):
+        test_signer, fake_calc_launcher, fake_payload_reader, oidc_metadata):
     application = create_app(
         settings=settings,
         db=fake_db,
@@ -2004,7 +2886,12 @@ def app(fake_db, settings, fake_store, fake_producer, fake_webhook_sender,
         producer=fake_producer,
         webhook_sender=fake_webhook_sender,
         calc_run_launcher=fake_calc_launcher,
+        raw_payload_reader=fake_payload_reader,
+        oidc_metadata=oidc_metadata,
     )
+    # The at-rest encryption key for configuration secrets (handoff 0046),
+    # injected like every other external seam.
+    application.state.secret_key = TEST_SECRET_ENCRYPTION_KEY
     # The installation signing key (handoff 0019), injected like every other
     # external seam — signing.get_signer serves this cached instance.
     application.state.signer = test_signer
@@ -2015,6 +2902,100 @@ def app(fake_db, settings, fake_store, fake_producer, fake_webhook_sender,
 def client(app):
     with TestClient(app) as c:
         yield c
+
+
+
+@pytest.fixture
+def fake_idp():
+    """A standards-shaped identity provider with real RSA keys."""
+    return FakeIdentityProvider()
+
+
+@pytest.fixture
+def fake_oidc_http(fake_idp):
+    return FakeOidcHttp(fake_idp)
+
+
+@pytest.fixture
+def oidc_metadata(fake_idp, fake_oidc_http):
+    """The REAL discovery/JWKS cache over a fake transport: caching, TTLs,
+    rotation-on-unknown-kid and the refresh rate limit are all production
+    code paths in every test that touches sign-in."""
+    from headway_api.oidc import ProviderMetadata
+
+    return ProviderMetadata(http_factory=lambda ca: fake_oidc_http)
+
+
+#: Deterministic AES-256 key for the at-rest encryption of configuration
+#: secrets — NEVER a production key.
+TEST_SECRET_ENCRYPTION_KEY = bytes.fromhex("cd" * 32)
+
+
+def configure_sso(db: FakeConn, idp: FakeIdentityProvider, *, enabled=True,
+                  client_secret=None, groups_claim="groups",
+                  clock_skew_seconds=120, ca_bundle_path=None):
+    """Seed a provider configuration, with the client secret encrypted at
+    rest by the production code path."""
+    from headway_api import secrets_at_rest
+
+    secret = idp.client_secret if client_secret is None else client_secret
+    db.oidc_provider = {
+        "discovery_url": idp.discovery_url,
+        "client_id": idp.client_id,
+        "client_secret_encrypted": (
+            secrets_at_rest.encrypt(
+                secret,
+                associated_data=secrets_at_rest.AD_OIDC_CLIENT_SECRET,
+                key=TEST_SECRET_ENCRYPTION_KEY,
+            )
+            if secret
+            else None
+        ),
+        "redirect_uri": "https://headway.example.gov/auth/callback",
+        "groups_claim": groups_claim,
+        "username_claim": "preferred_username",
+        "clock_skew_seconds": clock_skew_seconds,
+        "ca_bundle_path": ca_bundle_path,
+        "button_label": "Sign in with County SSO",
+        "is_enabled": enabled,
+        "updated_by": "cora",
+        "updated_at": dt.datetime(2026, 8, 1, 9, 0, tzinfo=UTC),
+    }
+
+
+def map_claim(db: FakeConn, claim_value: str, role: str, *, created_by="cora"):
+    mapping_id = str(uuid.uuid4())
+    db.oidc_role_mappings[mapping_id] = {
+        "mapping_id": mapping_id,
+        "claim_value": claim_value,
+        "headway_role": role,
+        "note": None,
+        "created_by": created_by,
+        "created_at": dt.datetime(2026, 8, 1, 9, 0, tzinfo=UTC),
+    }
+    return mapping_id
+
+
+def sso_sign_in(client, idp: FakeIdentityProvider, **id_token_claims):
+    """Drive a whole authorization-code + PKCE sign-in through the API.
+
+    Returns the callback response. ``id_token_claims`` are applied to the ID
+    token the provider mints, so a test can bend exactly one thing (a wrong
+    audience, a stale nonce, an unmapped group) and leave the rest genuine.
+    """
+    started = client.post("/auth/oidc/start")
+    assert started.status_code == 200, started.text
+    body = started.json()
+    code = idp.authorize(body["authorization_url"])
+    idp.codes[code]["claims"] = id_token_claims
+    return client.post(
+        "/auth/oidc/callback",
+        json={
+            "code": code,
+            "state": body["state"],
+            "browser_token": body["browser_token"],
+        },
+    )
 
 
 def token_for(db: FakeConn, username: str, *, ttl_seconds: int = 600) -> str:
@@ -2030,6 +3011,13 @@ def token_for(db: FakeConn, username: str, *, ttl_seconds: int = 600) -> str:
 
 def auth_header(db: FakeConn, username: str, **kwargs) -> dict:
     return {"Authorization": f"Bearer {token_for(db, username, **kwargs)}"}
+
+
+def add_auditor(db: FakeConn, username: str = "audra"):
+    """Seed an auditor account (handoff 0046). It gets a real bcrypt hash so
+    it is an ordinary LOCAL account in every respect but its role — the
+    read-only behaviour must come from the role, never from how it signs in."""
+    return db.add_user(username, "auditor", password_hash=_HASHES["vera"])
 
 
 def machine_header(full_key: str) -> dict:

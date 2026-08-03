@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { screen, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
   expectNoAxeViolations,
@@ -7,46 +7,43 @@ import {
   renderApp,
   signInAs,
 } from "./helpers";
-import type { DqIssue, DqIssueCounts } from "../api/types";
+import type { DqIssue } from "../api/types";
 import type { RouteHandler } from "./helpers";
 import {
   attestationRecord,
   attestedBlockingIssue,
   blockingIssue,
+  dqCountsFor,
+  dqPage,
   resolvedIssue,
   revokedAttestationRecord,
   warningIssue,
 } from "./fixtures";
 
 /**
- * Server-side counts over EXACTLY the mocked issue rows — the mock mirrors
- * the 0017/0023 cards-match-table guarantee (same rows, same optional
- * status filter), so the header cards the view now builds from GET
- * /dq/issues/counts (handoff 0024 #3) always agree with the mocked list.
+ * The list route (one PAGE, query-aware — handoff 0030: status and
+ * severity filter on the server) + the counts route (query-aware), for one
+ * fixture set. The mock mirrors the 0017/0023 cards-match-table guarantee:
+ * counts and pages are built from the same rows under the same filters.
  */
-function countsFor(issues: DqIssue[], status: string | null): DqIssueCounts {
-  const rows = status ? issues.filter((i) => i.status === status) : issues;
-  const tally = (pick: (i: DqIssue) => string) => {
-    const out: Record<string, number> = {};
-    for (const i of rows) out[pick(i)] = (out[pick(i)] ?? 0) + 1;
-    return out;
-  };
-  return {
-    total: rows.length,
-    by_severity: tally((i) => i.severity),
-    by_status: tally((i) => i.status),
-  };
-}
-
-/** The list route + the counts route (query-aware), for one fixture set. */
 function dqRoutes(issues: DqIssue[]): Record<string, RouteHandler> {
   return {
-    "GET /dq/issues": { status: 200, body: issues },
+    "GET /dq/issues": (call) => {
+      const q = new URL(call.url, "http://test").searchParams;
+      const status = q.get("status");
+      const severity = q.get("severity");
+      const rows = issues.filter(
+        (i) =>
+          (status === null || i.status === status) &&
+          (severity === null || i.severity === severity),
+      );
+      return { status: 200, body: dqPage(rows) };
+    },
     "GET /dq/issues/counts": (call) => {
       const status = new URL(call.url, "http://test").searchParams.get(
         "status",
       );
-      return { status: 200, body: countsFor(issues, status) };
+      return { status: 200, body: dqCountsFor(issues, status) };
     },
   };
 }
@@ -117,11 +114,18 @@ describe("/dq", () => {
     ).toBeInTheDocument();
 
     // Severity is conveyed by TEXT on each card (plus icon and color in CSS).
-    const blockingCard = screen
-      .getByRole("heading", {
+    //
+    // AWAITED, not queried synchronously: the page heading above renders as
+    // soon as the route mounts, while the cards arrive with the issues fetch.
+    // Querying them in the same tick was a race this test had been winning by
+    // luck, and any change that shifts the scheduler by a few microseconds
+    // loses it. The remaining cards stay synchronous — once one card is on
+    // screen they all are, from the same render.
+    const blockingCard = (
+      await screen.findByRole("heading", {
         name: "Bus 1207 sent no location data for 42 minutes on March 3",
       })
-      .closest("article") as HTMLElement;
+    ).closest("article") as HTMLElement;
     const warningCard = screen
       .getByRole("heading", { name: /GPS miles and odometer miles disagree/ })
       .closest("article") as HTMLElement;
@@ -168,7 +172,12 @@ describe("/dq", () => {
     // loaded list (the endpoint returns the whole queue): 1 blocking open,
     // 1 warning open ("owned" still counts as open — it is not resolved),
     // 0 info open, 1 resolved. Each card IS a filter toggle.
-    const summary = screen.getByRole("region", { name: "Queue at a glance" });
+    // findBy (async): the summary renders from the COUNTS request, which can
+    // resolve after the list under parallel-suite load — the CI-observed
+    // flake (2026-07-28) was exactly this query racing that fetch.
+    const summary = await screen.findByRole("region", {
+      name: "Queue at a glance",
+    });
     const cardRow = within(summary).getByRole("list", {
       name: "Show issues by severity",
     });
@@ -197,16 +206,26 @@ describe("/dq", () => {
     expect(blockingToggle).toHaveAttribute("aria-pressed", "false");
     await user.click(blockingToggle);
     expect(blockingToggle).toHaveAttribute("aria-pressed", "true");
+    // The filtered page is a fresh SERVER response (handoff 0030) —
+    // wait for it rather than assuming it beat the click.
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("heading", { name: /GPS miles/ }),
+      ).not.toBeInTheDocument(),
+    );
     expect(
       screen.getByRole("heading", { name: /Bus 1207/ }),
     ).toBeInTheDocument();
+    // Filtering hides nothing silently (handoff 0030: the filter runs on
+    // the SERVER): the page line states what is shown and how many match,
+    // and the cards above keep covering the whole queue — in words.
     expect(
-      screen.queryByRole("heading", { name: /GPS miles/ }),
-    ).not.toBeInTheDocument();
-    // Filtering hides nothing silently: the held-back count is stated and
-    // the cards above keep covering the whole queue.
+      await screen.findByText(
+        /Showing issues 1–1 of 1 that match/,
+      ),
+    ).toBeInTheDocument();
     expect(summary).toHaveTextContent(
-      "Showing 1 of 3 issues. The counts above always cover the whole queue.",
+      "These counts cover all 3 issues in the queue, not just the page shown below.",
     );
     expect(resolvedToggle).toHaveTextContent("1");
 
@@ -214,25 +233,31 @@ describe("/dq", () => {
     // never made to look resolved (or gone) by a filter.
     await user.click(resolvedToggle);
     expect(
-      screen.getByText(/No issues match these filters/),
+      await screen.findByText(/No issues match these filters/),
     ).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Show all issues" }));
-    expect(screen.getAllByRole("article")).toHaveLength(3);
+    await waitFor(() =>
+      expect(screen.getAllByRole("article")).toHaveLength(3),
+    );
 
     // Full keyboard path: a card toggle is focusable and operable with Enter.
     warningToggle.focus();
     await user.keyboard("{Enter}");
     expect(warningToggle).toHaveAttribute("aria-pressed", "true");
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("heading", { name: /Bus 1207/ }),
+      ).not.toBeInTheDocument(),
+    );
     expect(
       screen.getByRole("heading", { name: /GPS miles/ }),
     ).toBeInTheDocument();
-    expect(
-      screen.queryByRole("heading", { name: /Bus 1207/ }),
-    ).not.toBeInTheDocument();
     // Pressing the same card again clears it.
     await user.keyboard("{Enter}");
     expect(warningToggle).toHaveAttribute("aria-pressed", "false");
-    expect(screen.getAllByRole("article")).toHaveLength(3);
+    await waitFor(() =>
+      expect(screen.getAllByRole("article")).toHaveLength(3),
+    );
 
     await expectNoAxeViolations();
   });
@@ -301,18 +326,29 @@ describe("/dq", () => {
 
   it("records optional time spent (whole minutes), shows it on the resolved card, and totals documented effort in the header", async () => {
     signInAs("data_steward");
+    // STATEFUL: the POST records the minutes on the mocked row, so the
+    // counts the view refetches afterwards carry the new whole-queue
+    // effort sum — the effort line is the SERVER's since handoff 0030.
+    const queue: DqIssue[] = [{ ...blockingIssue }, resolvedIssue];
     const calls = mockApi({
-      ...dqRoutes([blockingIssue, resolvedIssue]),
-      "POST /dq/issues/dq-1/resolve": {
-        status: 200,
-        body: {
-          issue_id: "dq-1",
+      ...dqRoutes(queue),
+      "POST /dq/issues/dq-1/resolve": () => {
+        queue[0] = {
+          ...queue[0],
           status: "resolved",
-          resolved_at: "2026-03-05T10:00:00Z",
-          resolution: "Radio outage confirmed.",
           resolution_minutes: 30,
-          audit_event_id: 12,
-        },
+        };
+        return {
+          status: 200,
+          body: {
+            issue_id: "dq-1",
+            status: "resolved",
+            resolved_at: "2026-03-05T10:00:00Z",
+            resolution: "Radio outage confirmed.",
+            resolution_minutes: 30,
+            audit_event_id: 12,
+          },
+        };
       },
     });
     const user = userEvent.setup();
@@ -371,9 +407,13 @@ describe("/dq", () => {
       .closest("article") as HTMLElement;
     expect(card).toHaveTextContent("Time spent resolving");
     expect(card).toHaveTextContent("30 minutes");
-    // …and the header total now covers 90 + 30 minutes = 2.0 hours.
-    expect(summary).toHaveTextContent(
-      "≈2.0 hours of documented data-quality work",
+    // …and the header total now covers 90 + 30 minutes = 2.0 hours —
+    // recounted by the (mocked) server over the whole queue, never
+    // adjusted locally (waitFor: it arrives on its own request).
+    await waitFor(() =>
+      expect(summary).toHaveTextContent(
+        "≈2.0 hours of documented data-quality work",
+      ),
     );
 
     await expectNoAxeViolations();
@@ -462,12 +502,12 @@ describe("/dq", () => {
     // same server-recount contract the live API provides.
     let queue: DqIssue[] = [openRefusalIssue, blockingIssue];
     const calls = mockApi({
-      "GET /dq/issues": { status: 200, body: queue },
+      "GET /dq/issues": () => ({ status: 200, body: dqPage(queue) }),
       "GET /dq/issues/counts": (call) => {
         const status = new URL(call.url, "http://test").searchParams.get(
           "status",
         );
-        return { status: 200, body: countsFor(queue, status) };
+        return { status: 200, body: dqCountsFor(queue, status) };
       },
       "GET /attestations": {
         status: 200,
@@ -505,10 +545,17 @@ describe("/dq", () => {
     expect(
       screen.queryByRole("button", { name: /^Attest:.*Bus 1207/ }),
     ).not.toBeInTheDocument();
-    // Both blocking issues are open before the closure.
+    // Both blocking issues are open before the closure. findBy + waitFor:
+    // the summary paints from the separate counts request (see the flake
+    // note above) — never assume it beat the list.
     expect(
-      screen.getByRole("button", { name: /Blocking open/ }),
-    ).toHaveTextContent("2");
+      await screen.findByRole("button", { name: /Blocking open/ }),
+    ).toBeInTheDocument();
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: /Blocking open/ }),
+      ).toHaveTextContent("2"),
+    );
 
     await user.click(attestButton);
     const dialog = await screen.findByRole("dialog", {
@@ -576,10 +623,13 @@ describe("/dq", () => {
       within(card).queryByRole("button", { name: /^Attest:/ }),
     ).not.toBeInTheDocument();
     // The attested issue no longer counts open — screen and server tell
-    // the same story as the certification gate.
-    expect(
-      screen.getByRole("button", { name: /Blocking open/ }),
-    ).toHaveTextContent("1");
+    // the same story as the certification gate. waitFor: the count comes
+    // from the post-attest counts REFETCH, which is its own request.
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: /Blocking open/ }),
+      ).toHaveTextContent("1"),
+    );
 
     await expectNoAxeViolations();
   }, 15000);
@@ -670,32 +720,201 @@ describe("/dq", () => {
     expect(card).toHaveTextContent("open");
   });
 
-  it("caps the number of drawn issue cards LOUDLY (counts still cover the whole queue) — the 2026-07-14 live-scale finding", async () => {
+  it("reads the queue one honest page at a time (handoff 0030): range line, whole-queue cards, Next/Previous, no unbounded download", async () => {
     signInAs("viewer");
-    // 250 open info issues: over the 200-card render cap.
-    const many = Array.from({ length: 250 }, (_, i) => ({
+    // 130 open info issues — three pages of 50. The mock serves PAGES the
+    // way the real endpoint does: bounded, cursored, with the whole-queue
+    // total on every response.
+    const many = Array.from({ length: 130 }, (_, i) => ({
       ...warningIssue,
       issue_id: `dq-bulk-${i}`,
       severity: "info",
       status: "open",
       title: `Bulk issue ${i}`,
     }));
-    mockApi(dqRoutes(many));
+    mockApi({
+      "GET /dq/issues": (call) => {
+        const q = new URL(call.url, "http://test").searchParams;
+        const limit = Number(q.get("limit") ?? "50");
+        // The cursor is opaque to the client; this mock uses the index.
+        const from = Number(q.get("cursor") ?? "0");
+        const rows = many.slice(from, from + limit);
+        const hasMore = from + limit < many.length;
+        return {
+          status: 200,
+          body: dqPage(rows, {
+            total: many.length,
+            limit,
+            has_more: hasMore,
+            next_cursor: hasMore ? String(from + limit) : null,
+          }),
+        };
+      },
+      "GET /dq/issues/counts": (call) => {
+        const status = new URL(call.url, "http://test").searchParams.get(
+          "status",
+        );
+        return { status: 200, body: dqCountsFor(many, status) };
+      },
+    });
+    const user = userEvent.setup();
     renderApp("/dq");
 
     await screen.findByRole("heading", { name: "Data-quality issues" });
-    // The cap is STATED, with both numbers.
+    // Page one: 50 cards, and the range line says what is NOT shown.
+    await waitFor(() =>
+      expect(screen.getAllByRole("article")).toHaveLength(50),
+    );
     expect(
-      screen.getByText(/Only the first 200 of 250 matching issues are drawn/),
+      screen.getByText(/Showing issues 1–50 of 130 in the queue/),
     ).toBeInTheDocument();
-    // Exactly the cap's worth of cards is drawn…
-    expect(screen.getAllByRole("article")).toHaveLength(200);
-    // …and the summary counts still cover the WHOLE queue (findBy: the
-    // server-counted cards settle on their own request, not the list's).
+    // The cards cover the WHOLE queue, and say so in words.
     const summary = screen.getByRole("region", { name: "Queue at a glance" });
     expect(
       await within(summary).findByRole("button", { name: /Info open/ }),
-    ).toHaveTextContent("250");
+    ).toHaveTextContent("130");
+    expect(summary).toHaveTextContent(
+      "These counts cover all 130 issues in the queue, not just the page shown below.",
+    );
+
+    // Previous is disabled on page one — an edge stated, not a dead end.
+    const nav = screen.getByRole("navigation", {
+      name: "Data-quality queue pages",
+    });
+    expect(
+      within(nav).getByRole("button", { name: "Previous page" }),
+    ).toBeDisabled();
+
+    // Next: page two, new range line, Previous now live.
+    await user.click(
+      within(nav).getByRole("button", { name: "Next page" }),
+    );
+    expect(
+      await screen.findByText(
+        /Showing issues 51–100 of 130 in the queue/,
+        undefined,
+        { timeout: 5000 },
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Bulk issue 50" }),
+    ).toBeInTheDocument();
+    expect(
+      within(nav).getByRole("button", { name: "Previous page" }),
+    ).toBeEnabled();
+
+    // The LAST page: 30 cards, Next disabled — the walk ends honestly.
+    await user.click(
+      within(nav).getByRole("button", { name: "Next page" }),
+    );
+    expect(
+      await screen.findByText(
+        /Showing issues 101–130 of 130 in the queue/,
+        undefined,
+        { timeout: 5000 },
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getAllByRole("article")).toHaveLength(30);
+    expect(
+      within(nav).getByRole("button", { name: "Next page" }),
+    ).toBeDisabled();
+
+    // And back: Previous returns to page two — a step through markers the
+    // client already holds, never a re-guess.
+    await user.click(
+      within(nav).getByRole("button", { name: "Previous page" }),
+    );
+    expect(
+      await screen.findByText(
+        /Showing issues 51–100 of 130 in the queue/,
+        undefined,
+        { timeout: 5000 },
+      ),
+    ).toBeInTheDocument();
+
+    await expectNoAxeViolations();
+    // Explicit timeout, like the other heavy tests here: three paged renders
+    // plus an axe pass exceeds the 5 s default under full-suite parallel load
+    // (the CI flake seen 2026-07-30).
+  }, 15000);
+
+  it("fetches a finding's source records only when the disclosure is opened (handoff 0030), complete and copyable", async () => {
+    signInAs("viewer");
+    const calls = mockApi({
+      ...dqRoutes([blockingIssue]),
+      [`GET /dq/issues/${blockingIssue.issue_id}`]: {
+        status: 200,
+        body: blockingIssue,
+      },
+    });
+    const user = userEvent.setup();
+    renderApp("/dq");
+
+    const toggle = await screen.findByText(
+      "Source records: the raw data behind this finding",
+    );
+    // Nothing fetched until a reader asks — the whole point of moving the
+    // ids off the queue payload.
+    expect(
+      calls.filter((c) => c.path === `/dq/issues/${blockingIssue.issue_id}`),
+    ).toHaveLength(0);
+
+    await user.click(toggle);
+    expect(
+      await screen.findByText(/1 raw record/),
+    ).toBeInTheDocument();
+    expect(screen.getByText("sha256:aaaa1111")).toBeInTheDocument();
+    expect(
+      calls.filter((c) => c.path === `/dq/issues/${blockingIssue.issue_id}`),
+    ).toHaveLength(1);
+
+    await expectNoAxeViolations();
+  });
+
+  it("states a run-level finding cites no individual records, and a load failure loudly with a retry", async () => {
+    signInAs("viewer");
+    const runLevel: DqIssue = {
+      ...warningIssue,
+      issue_id: "dq-run-level",
+      source_record_ids: null,
+    };
+    let failFirst = true;
+    mockApi({
+      ...dqRoutes([runLevel]),
+      "GET /dq/issues/dq-run-level": () => {
+        if (failFirst) {
+          failFirst = false;
+          return {
+            status: 503,
+            body: { detail: "The data-quality service is unavailable." },
+          };
+        }
+        return { status: 200, body: runLevel };
+      },
+    });
+    const user = userEvent.setup();
+    renderApp("/dq");
+
+    // First open: the failure is stated, never a quiet "no records".
+    await user.click(
+      await screen.findByText(
+        "Source records: the raw data behind this finding",
+      ),
+    );
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(
+      "The source records for this finding could not be loaded.",
+    );
+
+    // Retry: the honest null renders as "cites no individual raw records".
+    await user.click(
+      screen.getByRole("button", {
+        name: "Try loading the source records again",
+      }),
+    );
+    expect(
+      await screen.findByText(/cites no individual raw records/),
+    ).toBeInTheDocument();
   });
 });
 

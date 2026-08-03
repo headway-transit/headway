@@ -26,6 +26,7 @@ from typing import Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
+from ..client_identity import client_address
 from ..db import get_db
 from ..machine_auth import enforce_rate_limit
 from .certify import VerificationResult, verify_certification_row
@@ -118,7 +119,7 @@ def list_certified_values(
 ) -> list[PublicMetricValue]:
     # UNAUTHENTICATED by design (see module docstring) — so no identity
     # dependency, and the only per-caller control is the IP token bucket.
-    client_ip = request.client.host if request.client else "unknown"
+    client_ip = client_address(request)
     enforce_rate_limit(request.app.state.public_rate_limiter, client_ip)
     rows = db.execute(_SELECT_CERTIFIED, ()).fetchall()
     certification_refs = _certification_refs_by_metric_value(db)
@@ -159,7 +160,7 @@ def public_verify_certification(
     never the document, never any auth material. Rate-limited per client IP
     exactly like /public/metrics/certified (which serves the
     certification_id + fingerprint this endpoint verifies)."""
-    client_ip = request.client.host if request.client else "unknown"
+    client_ip = client_address(request)
     enforce_rate_limit(request.app.state.public_rate_limiter, client_ip)
     row = db.execute(_SELECT_CERTIFICATION_ROW, (certification_id,)).fetchone()
     if row is None:

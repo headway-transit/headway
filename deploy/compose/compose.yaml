@@ -47,6 +47,16 @@ services:
   kafka:
     image: apache/kafka:3.9.1
     restart: unless-stopped
+    # Bounded logs. Docker's json-file default has NO rotation, so a service
+    # writes until something destroys its container — and on this stack the
+    # only thing that does is an update, which is also what erases the
+    # evidence (see install.sh capture_service_logs). Two agency VMs have
+    # already hit storage exhaustion (docs/sizing.md, 2026-07-29); unbounded
+    # logs are a contributor nobody had measured. 30 MB per service is
+    # generous for diagnosis and bounded for a disk.
+    logging: &bounded-logs
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
     networks: [headway]
     ports:
       # Host-side listener for local development/debugging only.
@@ -87,6 +97,7 @@ services:
   timescaledb:
     image: timescale/timescaledb:latest-pg16
     restart: unless-stopped
+    logging: *bounded-logs
     networks: [headway]
     ports:
       - "127.0.0.1:5432:5432"
@@ -118,6 +129,7 @@ services:
   apicurio:
     image: apicurio/apicurio-registry:3.0.6
     restart: unless-stopped
+    logging: *bounded-logs
     networks: [headway]
     depends_on:
       kafka:
@@ -139,12 +151,24 @@ services:
       start_period: 45s
 
   # ---------------------------------------------------------------------------
-  # MinIO — S3-compatible object store (raw payload objects, GTFS zips).
+  # MinIO — S3-compatible object store (raw payload objects, GTFS zips,
+  # GTFS-Realtime frames since handoff 0036).
   # Stands in identically for S3 on-prem and in gov-cloud (parity guardrail).
+  #
+  # NO LIFECYCLE / EXPIRY RULES on the raw bucket — deliberately. If you came
+  # here to add `mc ilm` / object-expiry to keep disk usage down: don't. The
+  # raw bucket holds the source documents behind every reported figure (the
+  # NTD auditor's "source documents", retained per the agency's records
+  # policy with a federal three-year floor — ADR-0012). Deletion is a
+  # records-management act with a citation and a tombstone, executed through
+  # the platform's retention policy (ADR-0012), never an infra knob. A
+  # lifecycle rule here would silently destroy evidence out from under
+  # certified figures. Disk pressure is a sizing question: docs/sizing.md.
   # ---------------------------------------------------------------------------
   minio:
     image: minio/minio:RELEASE.2025-04-22T22-12-26Z
     restart: unless-stopped
+    logging: *bounded-logs
     networks: [headway]
     command: server /data --console-address ":9001"
     ports:
@@ -168,6 +192,7 @@ services:
   prometheus:
     image: prom/prometheus:v3.4.1
     restart: unless-stopped
+    logging: *bounded-logs
     networks: [headway]
     ports:
       - "127.0.0.1:9090:9090"
@@ -187,6 +212,7 @@ services:
   grafana:
     image: grafana/grafana-oss:12.0.2
     restart: unless-stopped
+    logging: *bounded-logs
     networks: [headway]
     depends_on:
       - prometheus
@@ -233,7 +259,8 @@ services:
           raw.gtfs_rt.alerts \
           raw.tides.passenger_events \
           raw.dr.trips \
-          raw.vendor.files
+          raw.vendor.files \
+          raw.telematics.vehicle_stats
         do
           /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 \
             --create --if-not-exists --topic "$$topic" \
@@ -243,6 +270,9 @@ services:
 
   # Creates the raw-payload bucket via the standard minio/mc init-container
   # pattern (mc mb --ignore-existing is idempotent).
+  # NOTE: no `mc ilm add` here and none should ever be added — see the
+  # NO LIFECYCLE / EXPIRY RULES comment on the minio service above
+  # (ADR-0012: deletion is tombstoned records policy, not an infra knob).
   bootstrap-minio:
     image: minio/mc:RELEASE.2025-04-16T18-13-26Z
     restart: "no"
@@ -292,6 +322,7 @@ services:
       context: ../../services/ingestion
     image: ghcr.io/headway-transit/headway-ingestion:${HEADWAY_IMAGE_TAG:-local}
     restart: unless-stopped
+    logging: *bounded-logs
     networks: [headway]
     depends_on:
       kafka:
@@ -311,6 +342,10 @@ services:
       # is the source of truth for its config; see its README).
       KAFKA_BROKERS: kafka:9092
       SCHEMA_REGISTRY_URL: http://apicurio:8080 # not yet read by the service; schema registration is a next increment (ADR-0006)
+      # S3_* is required by EVERY payload-landing connector — including the
+      # GTFS-RT pollers since handoff 0036 (frames land at
+      # raw/gtfs_rt/<record_id>.pb BEFORE producing; a connector that cannot
+      # store durably refuses to produce).
       S3_ENDPOINT: minio:9000
       S3_ACCESS_KEY: ${MINIO_ROOT_USER:-headway}
       S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in deploy/compose/.env}
@@ -327,18 +362,62 @@ services:
       # into ./tides-drop on the host. SIMULATED data must use source
       # tides_simulated (binding rule, contracts/topics.v0.md).
       TIDES_DROP_DIR: /data/tides-drop
+      # Host-side path of the same folder (handoff 0037): only used so a
+      # permission error can print its fix command against a path the
+      # operator's shell can reach. Relative to the Headway folder.
+      TIDES_DROP_DIR_HOST: deploy/compose/tides-drop
       TIDES_SOURCE: ${TIDES_SOURCE:-tides_simulated}
       # Native vendor-export drop (handoff 0015). OFF unless BOTH vars are
       # set in .env (the connector refuses a drop dir with no source label —
       # fail-closed). VENDOR_SOURCE must name a registered adapter label
       # (e.g. tripspark_streets); the folder is scanned every POLL_INTERVAL.
       VENDOR_DROP_DIR: ${VENDOR_DROP_DIR:-}
+      # Host-side path of the vendor drop (handoff 0037; see
+      # TIDES_DROP_DIR_HOST above). The compose file always mounts
+      # ./vendor-drop, so this is where the fix command must point.
+      VENDOR_DROP_DIR_HOST: deploy/compose/vendor-drop
       VENDOR_SOURCE: ${VENDOR_SOURCE:-}
+      # Generic SQL-source connector (handoff 0033). OFF unless
+      # SQLSOURCE_ENABLED=true is set in .env; the connector then REFUSES to
+      # start (plain-language message) until the DSN, view, column list,
+      # cursor column and adapter label are all set — fail-closed, nothing
+      # is guessed. The DSN carries credentials: set it only in
+      # deploy/compose/.env (never commit it) and it is never logged.
+      # SQLSOURCE_COLUMNS must be EXACTLY the registered adapter's declared
+      # positional columns, in the adapter's order (mapping.v0.yaml).
+      SQLSOURCE_ENABLED: ${SQLSOURCE_ENABLED:-}
+      SQLSOURCE_DSN: ${SQLSOURCE_DSN:-}
+      SQLSOURCE_VIEW: ${SQLSOURCE_VIEW:-}
+      SQLSOURCE_COLUMNS: ${SQLSOURCE_COLUMNS:-}
+      SQLSOURCE_CURSOR_COLUMN: ${SQLSOURCE_CURSOR_COLUMN:-}
+      SQLSOURCE_ADAPTER_LABEL: ${SQLSOURCE_ADAPTER_LABEL:-}
+      SQLSOURCE_POLL_INTERVAL: ${SQLSOURCE_POLL_INTERVAL:-}
+      SQLSOURCE_BATCH_MAX_ROWS: ${SQLSOURCE_BATCH_MAX_ROWS:-}
+      SQLSOURCE_QUERY_TIMEOUT: ${SQLSOURCE_QUERY_TIMEOUT:-}
+      SQLSOURCE_STATE_DIR: /data/sqlsource-state
+      # Samsara fleet-telematics poller (handoff 0028). OFF unless
+      # SAMSARA_ENABLED=true. The API token is a SECRET: set it only in
+      # deploy/compose/.env (never commit, never logged — it travels as a
+      # request header). Request the LEAST-PRIVILEGE token — "Read Vehicle
+      # Statistics" scope, restricted to the vanpool tag (SAMSARA_TAG_IDS) —
+      # never a whole-account read token. SAMSARA_SOURCE=samsara for a real
+      # account; SAMSARA_SERVICE_DAY_TZ is the agency's IANA zone (no default,
+      # fail-closed). Restrict the poll to the vanpool with SAMSARA_TAG_IDS.
+      SAMSARA_ENABLED: ${SAMSARA_ENABLED:-}
+      SAMSARA_API_TOKEN: ${SAMSARA_API_TOKEN:-}
+      SAMSARA_SOURCE: ${SAMSARA_SOURCE:-}
+      SAMSARA_SERVICE_DAY_TZ: ${SAMSARA_SERVICE_DAY_TZ:-}
+      SAMSARA_BASE_URL: ${SAMSARA_BASE_URL:-}
+      SAMSARA_TAG_IDS: ${SAMSARA_TAG_IDS:-}
+      SAMSARA_VEHICLE_IDS: ${SAMSARA_VEHICLE_IDS:-}
     volumes:
       # Writable: the connector moves handled files to processed/ inside it.
       - ./tides-drop:/data/tides-drop
       # Writable for the same reason; harmless when the vendor drop is off.
       - ./vendor-drop:/data/vendor-drop
+      # Writable: the SQL-source high-water mark persists here so restarts
+      # never re-read warehouse history. Harmless when the connector is off.
+      - ./sqlsource-state:/data/sqlsource-state
 
   # Python normalization: Kafka raw.* -> canonical.* with lineage + DQ
   # quarantine (services/transform). Build context is the REPO ROOT — the
@@ -350,6 +429,7 @@ services:
       dockerfile: services/transform/Dockerfile
     image: ghcr.io/headway-transit/headway-transform:${HEADWAY_IMAGE_TAG:-local}
     restart: unless-stopped
+    logging: *bounded-logs
     networks: [headway]
     depends_on:
       kafka:
@@ -379,6 +459,23 @@ services:
       S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in deploy/compose/.env}
       S3_BUCKET: ${S3_BUCKET:-headway-raw}
       S3_USE_SSL: "false" # in-network MinIO; TLS termination is a hardening increment
+      # The agency's LOCAL timezone as an IANA name (e.g. America/Los_Angeles).
+      # REQUIRED for telematics: a service date is a local wall date, and the
+      # normalizer refuses every raw.telematics.vehicle_stats page as a
+      # BLOCKING finding rather than derive one from a guessed zone. That
+      # refusal is right; the missing wiring was not.
+      #
+      # It was documented in services/transform/README.md and plumbed
+      # NOWHERE — not here, not .env.example, not the installer. So an
+      # operator could buy a Samsara token, scope it correctly, enable the
+      # connector, land the raw records, and watch every page refused forever
+      # with no way to satisfy the guard. Found live 2026-08-03 at the partner
+      # agency, whose telematics had been silently refusing since Friday.
+      #
+      # Empty is left empty deliberately: the refusal is the correct behaviour
+      # for an installation that has not declared a zone, and guessing one
+      # would silently date a federal figure to the wrong day.
+      HEADWAY_TELEMATICS_SERVICE_DAY_TZ: ${HEADWAY_TELEMATICS_SERVICE_DAY_TZ:-}
     # No healthcheck: the consumer exposes no port. The process IS the
     # container (PID 1) — if the loop dies the container exits and
     # restart: unless-stopped brings it back; docker ps shows the flapping.
@@ -397,6 +494,7 @@ services:
       dockerfile: services/api/Dockerfile
     image: ghcr.io/headway-transit/headway-api:${HEADWAY_IMAGE_TAG:-local}
     restart: unless-stopped
+    logging: *bounded-logs
     networks: [headway]
     ports:
       - "127.0.0.1:8000:8000"
@@ -445,6 +543,21 @@ services:
       # (install/install.sh --reconfigure-access); empty = CORS off, correct
       # for the default same-origin/localhost layout.
       HEADWAY_CORS_ORIGINS: ${HEADWAY_CORS_ORIGINS:-}
+      # Whose X-Forwarded-For the API believes (services/api/headway_api/
+      # client_identity.py). WITHOUT this, every request through the `lan`
+      # profile's Caddy arrives as Caddy's own container address, so the whole
+      # office shares ONE rate-limit bucket and ONE failure-audit bucket, and
+      # every audit row records the proxy instead of the person.
+      #
+      # The default is Docker's private address pool, which is safe HERE
+      # because of the port mapping above: the API binds 127.0.0.1:8000 only,
+      # so nothing on the office network can reach it directly to forge the
+      # header — the only possible peers are this box and containers on the
+      # headway network. Change the binding and this default must be
+      # revisited. A host-side proxy instead of Caddy needs 127.0.0.1 added.
+      # An invalid value refuses to start rather than silently trusting
+      # nothing, which would look identical to working.
+      HEADWAY_TRUSTED_PROXIES: ${HEADWAY_TRUSTED_PROXIES:-172.16.0.0/12}
     healthcheck:
       # python:3.12-slim ships no curl/wget; the interpreter probes the
       # unauthenticated OpenAPI document.
@@ -467,6 +580,7 @@ services:
         VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8000}
     image: ghcr.io/headway-transit/headway-web:local
     restart: unless-stopped
+    logging: *bounded-logs
     networks: [headway]
     ports:
       - "127.0.0.1:8080:8080" # nginx listens unprivileged (non-root)
@@ -518,6 +632,7 @@ services:
     # open-license posture as every other infra image in this stack.
     image: caddy:2.10.2
     restart: unless-stopped
+    logging: *bounded-logs
     networks: [headway]
     ports:
       # THE one deliberate non-localhost binding in this stack: the doorway

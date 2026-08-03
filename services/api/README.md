@@ -24,18 +24,23 @@ preserved end to end; floating point never touches a figure).
 | GET | `/geometry/stops` | any signed-in role | GeoJSON FeatureCollection of `canonical.stops` (Point per stop, `[lon, lat]`; properties `stop_id`, `name`). Stops with NULL coordinates (legal per GTFS) are EXCLUDED AND COUNTED (`stops_without_coordinates`), never given an invented point. Ops-category foreign members; strong content-hash `ETag` (canonical.stops has no ingest-time column — recorded choice) + `Cache-Control: private, max-age=300`; matching `If-None-Match` → 304. Cap 50,000 with truncation honesty. |
 | GET | `/geometry/routes` | any signed-in role | v0 **HONEST SCHEMATIC** (handoff 0023): per route, a LineString through the ordered stops of its most common trip pattern (straight lines between stops; deterministic tie-break). Labeled `geometry_kind: "schematic_stop_sequence"` at collection level AND per feature — shapes.txt has never been ingested and the map must not imply street geometry (shapes.txt ingestion is the recorded v1). Undrawable routes (<2 located stops) excluded and counted; per-feature `stops_missing_coordinates`. The pattern aggregation walks every `stop_times` row (~3.6 s live over 3.1M rows) so the collection is cached per process ≤ 900 s — staleness bounded and STATED (`computed_at` + `cache_ttl_seconds` in the response) — with a content-hash `ETag` for cheap revalidation. |
 | GET | `/metrics/values/{id}/lineage` | any signed-in role, **or** machine key scope `read:metrics` | "Explain this number": recursive traversal of `lineage.edges` (recursive CTE) from the figure down to `raw.records`, returned as a tree `{kind, id, transform_name, transform_version, inputs: [...]}`. A figure with no lineage is a loud 500, never an empty 200. Machine path rate-limited per key + audited (actor `key:<prefix>`); every auth failure is one generic 401 that never reveals which credential type was expected. |
+| GET | `/raw/records/{id}` | any signed-in role | **The label on the last link of the chain of custody** (handoff 0035): source, connector + version, `fetched_at`/`landed_at`, content type, payload encoding, `parse_status` (+ the parser's own `parse_error`, verbatim), where the bytes live and how big they are, the content address, the sensitivity rule that governs the contents, and which decoder the preview would use. Every field is a `raw.records` column or a measurement taken now — nothing is inferred, and an absent value is served absent. Deliberately does NOT read the payload: a trail can bottom out in thousands of records (one live VRH figure has 1,138), so the label costs one metadata call (2.4 ms live) and never a whole-object read. An object store that is down degrades to a label with an honest note, never an error page. |
+| POST | `/raw/records/{id}/verify` | any signed-in role | **Integrity as an action, not a claim**: re-reads the stored bytes (streamed, a megabyte at a time), re-computes the SHA-256, and reports the verdict with BOTH digests. `match` → 200. **`mismatch` → 409** plus a **blocking `dq.issues` row** (`raw_record_integrity_mismatch`, idempotent — pressing the button five times does not file five findings) so a tampered or corrupted payload lands in the steward's queue and not only on one screen. Bytes missing from the object store → 404 + a `raw_record_payload_missing` finding (a raw record is supposed to be permanent, so its absence is a real finding). Bytes that rode inline in the ingest envelope and have aged out of the broker's retention → **410, and NOT a finding**: that is a deployment setting, said plainly. Storage unconfigured/unreachable → 503. The non-2xx statuses are the point: a caller that checks only the status cannot mistake a failure for a pass. Open to every signed-in role INCLUDING for payloads whose contents are withheld — a hash discloses nothing, and nobody should be told that proving integrity is above their pay grade. Audited with the verdict. |
+| GET | `/raw/records/{id}/payload` | any signed-in role, **subject to the payload's sensitivity class** | **The window**: a bounded, decoded preview with every cap stated in the response. GTFS-Realtime protobuf → the feed header plus the first 25 entities with their real values (vehicle, route, trip, coordinates, event time, status), decoded with the SAME pinned Apache-2.0 bindings the transform service normalizes with. `text/csv` from a connector whose CONTRACT declares a comma-delimited header row (`headway-tides`, `headway-dr`, `headway-api-ingest`) → the file's own header + first 20 rows. Any other text/JSON → the first 20 lines verbatim, with NO column names invented (what a vendor export's columns mean is defined only by its registered mapping spec, which this API does not hold). Anything else → its type, its size, and the exact bytes to download — never a rendering the API cannot vouch for. Decoding reads at most 4 MiB; a byte-truncated last row is dropped rather than shown half-real. Audited. |
+| GET | `/raw/records/{id}/download` | any signed-in role, **same sensitivity gate** | The exact stored bytes, streamed, with the record's own content type, `X-Headway-Record-Id` and `X-Headway-Content-Address` headers. Never truncated, never transformed — hashing the saved file reproduces the record id (proven live on a 2.7 KB realtime frame and a 24 MB GTFS static zip). Audited. |
 | POST | `/certifications` | `certifying_official` only | The SIGNING certification (handoff 0019): the certifier's typed full name + title are entered against the intent statement; the server assembles the canonical document (figures + receipt hashes + certifier identity + acknowledgments incl. statistician attestations + timestamp), signs it Ed25519 with the installation key, inserts `cert.certifications` (document + signature + key fingerprint, migration 0030), marks the figures `certified`, and writes the `audit.events` row — all in ONE transaction. Refuses 409 while any blocking DQ issue is open/owned (`resolved` and `attested` are the closed states); refuses 503 (nothing written) when no signing key is configured — a certification is never recorded unsigned. |
 | GET | `/certifications` | any signed-in role | Certification records: covered ids, certifier, timestamp, signed flag, key fingerprint, typed signer name/title (parsed from the signed document). Pre-signature records read `signed=false` honestly — never backfilled. |
 | GET | `/certifications/intent` | any signed-in role | The fixed ESIGN-style intent statement the ceremony renders and the honest-scope statement printed on the certificate (installation key = integrity + attribution within this system, NOT PKI non-repudiation; per-certifier WebAuthn keys are the documented v1). |
 | GET | `/certifications/{id}` | any signed-in role | The certificate view: signature block (typed name/title, fingerprint, signature), the stored canonical document (raw signed text + parsed object), and a LIVE verification result. |
 | GET | `/certifications/{id}/verify` | any signed-in role | Re-verifies the STORED document bytes against the STORED signature under the installation key AND checks the document is bound to this very row (certification_id + covered figure ids). Verdicts: `verified` / `failed` (LOUD — treat as tampered) / `unsigned_legacy` / `key_mismatch` (rotated key — honestly inconclusive, not proof of tampering). |
+| GET | `/certifications/{id}/evidence` | any signed-in role | **The evidence bundle** (handoff 0047) — the downloadable, self-describing file an auditor takes away: the certification's signed bytes + signature block + server verdict; every covered figure verbatim (exact NUMERIC as a string) with its receipt object and a `matches_signed_document` check; every figure's lineage walk (the SAME `routers.metrics.lineage_tree` the explain endpoint serves); every raw-record leaf's label, digest and sensitivity class; a `withheld` list; a `gaps` list; and a manifest with `bundle_sha256`. **Role-sensitive** — withholding is evaluated for the calling account (`authz.may_read_sensitivity`), so an auditor's copy names the rider-location records it does not carry. Labels and digests only: no bulk byte re-verification. Audited `evidence_bundle_generated`. See the section below. |
 | POST | `/attestations` | `certifying_official` only | Record a statistician's p. 146 factoring approval (migration 0029, append-only): name, credentials summary, method, external document reference, scope (ONE metric `upt`/`pmt`, fnmatch scope pattern, half-open date range). From the next calc run, a covered >2% missing-data share factors up under it and the figure carries the attestation provenance permanently. Audited. Role choice documented in `routers/attestations.py` (smallest honest fit). |
 | GET | `/attestations` (+ `/{id}`) | any signed-in role | Attestations (filter `metric`, `include_revoked=false`); revoked rows serve by default — revocation is history, not deletion. |
 | POST | `/attestations/{id}/revoke` | `certifying_official` only | Revoke (never delete): sets revoked_at/by/reason once — the migration-0029 trigger enforces exactly that shape. Figures already factored keep their provenance; FUTURE runs stop factoring under it. Audited. |
 | POST | `/dq/issues/{id}/attest` | `data_steward` or above | Close ONE p. 146 refusal issue (`apc_missing_trips_above_fta_threshold`) to the explicit `attested` state, referencing a live attestation; the resolution text is built server-side from the attestation. Refuses any other issue_type — no other gap has a statistician cure ('agencies must not collect a smaller sample than the chosen sampling plan prescribes', p. 149). Audited. |
-| GET | `/dq/issues` | any signed-in role | Data-quality issues; filter by `status`. Rows include `resolution_minutes` (migration 0016) — null when the effort was not recorded. |
-| GET | `/dq/issues/{id}` | any signed-in role | One finding by id (handoff 0026) — the deep-link target a calculation refusal points at (`/dq?issue=<id>` in the UI): served directly so the linked finding never waits on the whole-queue download (97k rows / ~877 MB JSON live). 404 in plain words for unknown or malformed ids. |
-| GET | `/dq/issues/counts` | any signed-in role | Severity/status counts for the /dq summary cards (handoff 0017): counted by the database in ONE `GROUP BY` over EXACTLY the rows `/dq/issues` serves under the same `status` filter (handoff 0023 — the previous fetch-all-rows-and-count-in-Python implementation measured 4.8–5.9 s on a 41,646-issue live queue; this measures 33–49 ms, no pre-aggregation, no staleness), missing buckets explicit zeros. |
+| GET | `/dq/issues` | any signed-in role | ONE BOUNDED PAGE of the data-quality queue (handoff 0030); filter by `status` and `severity` (both server-side). `limit` defaults to 50, hard maximum 200 — anything outside 1..200 is a 422, so an unbounded request is impossible, not discouraged. Pages walk by opaque keyset `cursor` over the total ordering `(created_at, issue_id)`; the response states the WHOLE-queue `total` under the same filters plus `has_more`/`next_cursor`. Rows include `resolution_minutes` (migration 0016) — null when the effort was not recorded — and NOT `source_record_ids`: the provenance array moved to `GET /dq/issues/{id}` (it measured 716 MB of the 850 MB whole-queue response; the ids are not gone, they are served where they are used). |
+| GET | `/dq/issues/{id}` | any signed-in role | One finding by id (handoff 0026) — the deep-link target a calculation refusal points at (`/dq?issue=<id>` in the UI), and since handoff 0030 the home of `source_record_ids`: the complete, never-truncated provenance array for this one finding. 404 in plain words for unknown or malformed ids. |
+| GET | `/dq/issues/counts` | any signed-in role | Severity/status counts for the /dq summary cards (handoff 0017): counted by the database in ONE `GROUP BY` over EXACTLY the rows `/dq/issues` serves under the same `status` filter (handoff 0023 — the previous fetch-all-rows-and-count-in-Python implementation measured 4.8–5.9 s on a 41,646-issue live queue; this measures 33–49 ms, no pre-aggregation, no staleness), missing buckets explicit zeros. Since handoff 0030 this is the ONLY whole-queue tally (the list pages), and it also carries `resolution_minutes_total` — the recorded effort summed over the same rows, so no client sums a loaded page and calls it the queue. |
 | POST | `/dq/issues/{id}/resolve` | `data_steward` or above | Resolves an issue with a resolution note + audit event, in one transaction. Optional `resolution_minutes` (int ≥ 0; plain-language 422 otherwise) records the effort, audited old→new. Post-commit, dispatches the `dq.issue.resolved` webhook (best-effort — a delivery problem never fails the resolve). |
 | GET | `/reports/mr20?month=YYYY-MM` | any signed-in role | The `headway_calc.mr20` MR-20 preview package for the month, served **VERBATIM** (NOT-REPORTABLE banner + caveats included; this API never edits a figure). Plain-language 422 on a bad month. |
 | GET | `/reports/mr20/export` | any signed-in role | The MR-20 package as CSV/XLSX (`month`, `format`): one row per (scope, metric) cell, values verbatim, missing cells with their explicit reasons; the NOT-REPORTABLE banner + every enumerated caveat lead the CSV / form the XLSX first sheet (handoff 0017 export discipline — see `/metrics/values/export`). |
@@ -605,3 +610,257 @@ python3 -m pytest tests/ -q
   environment must not touch the live stack; the first environment cleared
   to do so must run the suite against live services before this increment is
   declared Done.
+
+---
+
+## `dq.issues.subject_context` served (handoff 0029, migration 0035)
+
+`GET /dq/issues`, `GET /dq/issues/{id}` now return `subject_context` — what
+the finding is ABOUT, in the agency's own vocabulary: affected trips grouped
+by block, each group carrying its route(s) and the span from first to last
+scheduled departure. The calc runner resolves it ONCE when the finding is
+raised and freezes it on the row; **the API serves it verbatim and never
+re-resolves or fills in a label**, which is what makes it readable the same
+way in an audit years later.
+
+`null` is the normal case, not an error: every finding raised before the
+migration (97,067 rows in the live queue) carries null, and so does every
+finding about the run as a whole rather than about identifiable rows
+(`coverage_below_threshold`). The response model types it as a free-form
+object because the blob versions itself (`version`) — a client that does not
+recognise the version falls back to the same null path.
+
+- `pytest tests/ -q`: **404 passed** (was 400; +4 in `tests/test_dq.py`):
+  the frozen context served verbatim on the list and the by-id deep link,
+  absence preserved as absence inside it (null block, empty routes),
+  pre-migration rows serving `subject_context: null`, and the field behind
+  the same authentication as every other.
+- `openapi.json` regenerated: OpenAPI 3.1.0, **63 paths** (unchanged count —
+  the change is one added property on `DqIssue`).
+- Live (2026-07-29, host uvicorn on 127.0.0.1:8000 against the compose
+  TimescaleDB): `GET /dq/issues/9896da03-…` returns the re-run upt_v0
+  refusal with `version 1, total 2307, group_count 660, groups 25 (capped),
+  unmatched 211`; `GET /dq/issues/c8aa6ac3-…` (a July-16 row) returns
+  `subject_context: null`.
+- **Recorded, NOT this wave's regression:** `GET /dq/issues` still returns
+  the WHOLE queue — 97,782 rows, ~900 MB, 18 s, which freezes a browser tab.
+  86% of that payload is `source_record_ids`; `subject_context` is 0.2 MB
+  (0.0%). Pagination/projection on this endpoint is the follow-up.
+  *(Done — see the next section, handoff 0030.)*
+
+---
+
+## The DQ queue is bounded (handoff 0030)
+
+`GET /dq/issues` serves ONE PAGE, always. Measured on the live queue before
+the change: **98,497 rows, 850 MB of JSON, ~17.5 s server time, frozen tab**.
+After: **58 KB and ~0.1 s** for the default 50-row page; every page of a
+40,000-row walk answered in 82–115 ms with zero rows repeated or skipped.
+
+Decisions worth naming:
+
+- **Keyset, not offset.** Pages follow an opaque `cursor` encoding the last
+  row's `(created_at, issue_id)` — the primary key breaks every tie (the
+  live queue holds 98k rows across only 31 distinct `created_at` values), so
+  the ordering is deterministic and TOTAL, and a finding landing mid-walk
+  can neither push an unread row past the reader nor serve one twice.
+  Oldest-first: new findings append past the end, so page positions hold
+  steady while a calc run writes. An unreadable cursor is a 422 in plain
+  words, never a silent reset to page one.
+- **The cap is enforced, not advertised.** `limit` outside 1..200 is a 422 —
+  refused, not clamped, because a clamped `limit=100000` would look like it
+  had returned everything.
+- **Provenance moved to where it is used.** `source_record_ids` — 716 MB of
+  the 850 MB, 11.5 million identifiers, up to 34,835 on one issue — left the
+  list rows and is served complete and untruncated by `GET /dq/issues/{id}`.
+  Every consumer of the list field was checked and fixed: web (`/dq` now
+  fetches it on demand per finding; `/dashboard` and `/certify` read the
+  counts endpoint instead of downloading the queue), `clients/python`
+  (`dq_issues()` returns a `DqIssuePage`, `iter_dq_issues()` walks pages,
+  `dq_issue(id)` serves the array; frames drop the column and say where it
+  went), notebook `03-dq-triage`, and the integration suite. The exports
+  paths never consumed this endpoint.
+- **`/dq/issues/counts` stays the one whole-queue tally** and gains
+  `resolution_minutes_total`, because the /dq header used to sum effort
+  minutes from the fully downloaded queue — a page-sum would have quietly
+  become "effort on the 50 issues you can see".
+
+Verification: `pytest tests/ -q` **418 passed** (+14 pagination/edge tests in
+`tests/test_dq.py`: default bound, cap refusal in every direction, full-walk
+exactly-once coverage, last-page edge at an exact multiple, beyond-the-end
+cursor, unreadable cursor 422, insert-behind-the-reader stability,
+provenance relocation, server-side severity filter, counts/page agreement).
+`openapi.json` regenerated: OpenAPI 3.1.0, 63 paths (`DqIssuePage`,
+`DqIssueSummary` added; `DqIssue` keeps `source_record_ids` on the by-id
+response only). Live measurements in handoff 0030's evidence.
+
+## The raw-record inspector (handoff 0035)
+
+First-agency UAT, the sharpest finding of the week: an ITS manager walked a
+VRH figure back through its lineage to the source — exactly what this
+platform is built for — and hit a wall of hashes labelled *"raw source record
+as received — the end of the trail."* His verdict: **"It doesn't really
+provide any data to validate or verify."**
+
+He was right. A content address genuinely proves tamper-evidence, but proof
+you cannot *inspect* asks for trust at the exact step where this platform must
+never ask for it. `routers/raw_records.py` + `raw_payloads.py` give the sealed
+evidence bag a label, a window, and a seal the auditor can test:
+`GET /raw/records/{id}`, `POST .../verify`, `GET .../payload`,
+`GET .../download` (table above).
+
+### Where the bytes actually are — and why that is two places
+
+`raw.records` is an INDEX, not a payload table (migration 0002). The payload
+lives in one of two places, and the record says which:
+
+| `payload_encoding` | Where the bytes are | Read back by |
+| --- | --- | --- |
+| `object_ref` | The object store, at `payload_ref` (GTFS static zips, TIDES/DR/vendor CSVs, telematics JSON) | `ObjectStorePayloadReader` — MinIO `stat` for the label's size, streamed `get_object` for verify/download |
+| `base64` | **Inline in the ingest envelope on the Kafka topic** — the GTFS-Realtime connector never writes to the object store (contracts/topics.v0.md; `services/ingestion/connectors/gtfsrt`) | `EnvelopeStreamPayloadReader` — a BOUNDED lookup: seek the topic by `fetched_at` (minus 5 min), scan at most 400 messages for the message keyed with this `record_id`, and **re-hash the payload before returning it** (the key alone is not trusted) |
+
+This mattered more than it looks. The realtime frames are exactly the records
+a VRH walk bottoms out in, so an inspector that only read the object store
+would have failed on the one case the UAT finding was about. It also surfaced
+a real platform gap, recorded honestly rather than papered over: **once the
+broker's retention window passes, a GTFS-Realtime record's bytes are gone**
+and Headway says so (410 `not_retained`) instead of pretending. Durable
+retention for realtime frames is an ingestion/deployment decision, not
+something this endpoint can fix.
+
+`KAFKA_BROKERS` is therefore now read by the API for a SECOND purpose
+(previously producer-only). Without it, `base64` payloads refuse with a plain
+503 naming the missing setting — never an empty preview.
+
+### The sensitivity rule (docs/data-classification.md)
+
+Sensitivity follows the payload, not the storage layer. The rule, in one
+sentence: **a raw record's CONTENTS are withheld from the broadest read role
+when the payload can carry rider pickup/dropoff coordinates; its LABEL and its
+INTEGRITY CHECK are never withheld from anyone.**
+
+| Class | Applies to | Minimum role | Why |
+| --- | --- | --- | --- |
+| `rider_location` | Demand-response / paratransit payloads — connector `headway-dr`, or an object key under `raw/dr/` (the machine-ingest connector lands both TIDES and DR files, so the key prefix is the discriminator) | `data_steward` | Pickup and dropoff coordinates are rider home and destination addresses, and an ADA paratransit trip record can disclose disability status by its mere existence. Migration 0028 already withholds exactly these columns from the read-only analyst role; a raw record is as sensitive as the payload inside it, so the same withholding applies here. |
+| `undetermined` | Every vendor export (`headway-vendor-file`) | `data_steward` | What a vendor export MEANS is defined only by its registered mapping spec (`adapters/<vendor>/<product>/mapping.v0.yaml`), which the API does not hold — and one reference spec (acme/paravan) targets `demand_response_trip`. Fail closed rather than assume the safer answer. |
+| `internal` | Everything else (GTFS-RT, GTFS static, TIDES, telematics) | `viewer` | Agency operational data. Telematics is deliberately NOT tightened here: the platform's stated control for employee-monitoring data is minimisation at the connector (handoff 0028), not withholding at read, and inventing a second rule would be inventing policy. |
+
+Decided from the record's own ingest metadata, never from downstream evidence:
+a paratransit file that has landed but not yet been transformed must be
+withheld from the second it exists, not from the moment a transform proves
+what it was. Refusals are 403s that say why, in words.
+
+### Audit
+
+Every look INSIDE a record is an append-only audit row —
+`raw_record_payload_preview` and `raw_record_download`, whatever the
+sensitivity class — because this is the only surface in Headway that serves
+raw record CONTENT, and "who opened the evidence, and when" is a question an
+auditor is entitled to ask. `raw_record_verify` records the verdict (and the
+DQ issue id when one was raised). Reading the LABEL is not audited, like every
+other signed-in GET.
+
+### Honest scope (v0)
+
+Read-only, all of it: `raw.records` is immutable at the database level and
+this router only ever SELECTs. No re-parsing, no editing, no re-ingestion.
+The decoder set is GTFS-Realtime + text/CSV; everything else states its type
+and hands over bytes. Bulk verification of a whole figure's evidence chain is
+the natural v1 (recorded in the handoff), not v0.
+
+## The evidence bundle (handoff 0047, design point 5)
+
+`GET /certifications/{id}/evidence` — `routers/evidence.py`.
+
+Everything else in this API answers a question while you are looking at the
+screen. This is the one surface that produces a document an auditor carries
+out of the building, reads next year, and shows to someone who has never heard
+of Headway. So it is self-describing: it states what it is, who it was
+generated for, what it contains, what it deliberately does not, and how to
+check nobody edited it after download.
+
+### What is in it
+
+| Section | Contents |
+| --- | --- |
+| `certification` | The signed bytes verbatim (`canonical_document`), the parsed document, the signature block, and the server-computed `verification` verdict — the same `verify_certification_row` the certificate screen shows, never a second opinion. |
+| `figures[]` | Every covered figure as the calculation library persisted it: `value` is the exact NUMERIC **as a string** (floating point never touches a reported figure), plus the receipt object served WHOLE (including its own `receipt_sha256` key, so a reader needs no field list to re-hash it), plus `signed_receipt_sha256` / `matches_signed_document`. |
+| `figures[].lineage` | The provenance tree from `routers.metrics.lineage_tree` — literally the walk `GET /metrics/values/{id}/lineage` serves, extracted so the bundle and "explain this number" cannot disagree. A test asserts the two payloads are equal. |
+| `raw_records[]` | Every leaf's id (which IS the SHA-256 of its bytes), its label, and its sensitivity classification. `contents_included` is always `false` and says so as a field. |
+| `withheld[]` | Everything left out because of content sensitivity, with Headway's own refusal **verbatim**. |
+| `gaps[]` | Everything that could not be produced (a different list — see below). |
+| `manifest` | Every artifact with its SHA-256, plus `bundle_sha256` over the whole document. |
+
+### Scope: labels and digests, never bulk bytes
+
+Handoff 0047's open question 1, decided. A raw record's id **is** the SHA-256
+of its bytes, so the manifest already carries every digest without re-reading
+anything. Re-reading them would need the batched broker read handoff 0035 left
+unbuilt, and past the broker's retention window most realtime leaves answer
+`410 not_retained` anyway — a bundle that stalled for minutes and then reported
+"unverifiable" for most of its own contents would be worse than one honest
+about its scope. Per-record verification stays the auditor's own deliberate
+action: `POST /raw/records/{id}/verify`, which handoff 0047 made reachable by
+the `auditor` role precisely so this is possible.
+
+`MAX_RAW_RECORD_LABELS` (5,000) bounds the LABEL list only — a single VRH
+figure can bottom out in 1,138 leaves. Every leaf id is in the lineage walk
+regardless, and when the cap bites the bundle adds a `raw_record_labels_capped`
+gap naming the exact number omitted and the endpoint to fetch them from.
+
+### The bundle is role-sensitive, and says so
+
+Content sensitivity is evaluated for the **calling account** through
+`authz.may_read_sensitivity`, which puts an `auditor` at *viewer* breadth on
+purpose (`raw_payloads.RESTRICTED_MINIMUM_ROLE` — the API's own rule, not
+migration 0028, which is the parallel SQL-layer rule for the analyst role).
+So two accounts asking for the same certification
+legitimately get different `withheld` lists — a data steward's copy carries the
+demand-response record's label with `readable_by_this_account: true`, an
+auditor's copy carries the same label plus a `withheld` entry with the refusal
+in full. `generated_for` records which account it was made for, so a reader
+handed the file can never mistake *withheld from that account* for *not in
+Headway*.
+
+### `withheld` and `gaps` are two lists, never one
+
+- **`withheld`** — left out ON PURPOSE, by the sensitivity rule, quoting the
+  server's refusal verbatim.
+- **`gaps`** — could NOT be produced: `covered_figure_missing`,
+  `lineage_unavailable`, `raw_record_not_in_index`,
+  `figure_changed_since_signing`, `raw_record_labels_capped`.
+
+Collapsing them would let a privacy decision read as a data defect, or a data
+defect read as a privacy decision. Either misreading produces a wrong finding
+against an agency that did nothing wrong.
+
+### How `bundle_sha256` is computed (reproduce it yourself)
+
+A hash nobody can recompute is decoration. The recipe is printed on the bundle
+(`manifest.bundle_sha256_recipe`, `manifest.canonicalization`,
+`manifest.excluded_field`) and is exactly three steps:
+
+1. Take the whole JSON document.
+2. **Delete** the single field `manifest.bundle_sha256` — delete the field
+   itself, do not blank it and do not set it to `null`. (It cannot cover
+   itself.)
+3. Serialize what is left with
+   `json.dumps(bundle, sort_keys=True, separators=(',', ':'), ensure_ascii=True, allow_nan=False).encode('utf-8')`
+   and take the lowercase-hex SHA-256 of those bytes.
+
+That is `signing.canonical_bytes` — the same canonicalization the certification
+signature itself uses, so an auditor who learned it once knows it here. It is
+deterministic (keys sorted at every level, no whitespace, non-ASCII escaped), so
+the order your JSON library read the fields in does not matter. Every figure is
+a JSON string rather than a number, so no decimal rounding can change the bytes
+you hash. `tests/test_evidence_bundle.py` recomputes it from the parsed response
+body — all an auditor will have — and asserts that one edited digit, or a
+deleted `withheld` list, breaks the seal.
+
+### Audit
+
+Generating a bundle writes an append-only `evidence_bundle_generated` row:
+actor, certification id, the counts, the **ids and classifications** of what was
+withheld, the verification verdict, and the bundle's own hash. Never the
+withheld content, never the figures — the record of a refusal must not become a
+copy of the thing refused.

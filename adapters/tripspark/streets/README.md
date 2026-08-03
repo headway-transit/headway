@@ -45,7 +45,7 @@ connector at a drop directory with `VENDOR_SOURCE=tripspark_streets`
 | 14 | `StopName` | — | display text; deliberately not carried |
 | 15 | `StopCode` | `passenger_event_id` (part) | the stop identifier (matches the agency's GTFS `stop_code`); preserved inside the event id — see open questions |
 | 16 | `PatternPointRank` | `trip_stop_sequence` | the stop's rank within the pattern (integer; TIDES minimum 1 enforced by contract validation) |
-| 17 | `DirectionKey` | — | not mapped in v0 (direction is derivable from the trip/pattern identity) |
+| 17 | `DirectionKey` | trip resolution | read by `resolution.v0.yaml` (handoff 0031): the direction discriminant of the trip join key — measured as the difference between 37% ambiguous and near-unique on the agency's live feed. Its value→GTFS `direction_id` mapping awaits agency confirmation (see below) |
 | 18 | `EventDateISO` | `event_timestamp` | `datetime` `%Y-%m-%dT%H:%M:%S`, localized to America/Los_Angeles, emitted UTC |
 | — | — | `service_date` | `local_date_of` event_timestamp (see caveat below) |
 
@@ -59,14 +59,46 @@ filtered.
 **Filter:** rows with a blank `TripName` (unassigned APC reports) are out of
 scope by declaration — this spec maps the *assigned* export.
 
+## Trip resolution (`resolution.v0.yaml`, handoff 0031)
+
+The former open question #1 is now a committed per-agency configuration:
+`resolution.v0.yaml` (contract:
+`contracts/adapter-resolution.v0.schema.json`, prose:
+`contracts/adapter-resolution.v0.md`). It declares the `TripName` parse
+(`route - pattern - start_time`, split on `" - "`), the join key (route
+short name + first scheduled departure + `DirectionKey` + the services
+active on the row's `service_date`), and the stop check (`StopCode`
+against GTFS `stop_code` first, then `stop_id` — declared order, because
+this feed's `stop_id == stop_code` on all 851 stops is a coincidence, not
+a rule). Key uniqueness was measured on the agency's live published feed
+(2,704 trips, 2026-07-29): 1 colliding key covering 2 trips with
+direction; 500 keys covering 1,000 trips without it.
+
+**Resolution is currently REFUSING, on purpose.** Two settings await the
+agency:
+
+- `trip.match.direction.confirmed: false` — which `DirectionKey` value
+  means which GTFS `direction_id` must come from the agency (GTFS gives
+  0/1 no inherent meaning). Until confirmed, every file maps normally but
+  nothing resolves, and one plain-language finding per file says exactly
+  what to confirm. Never a coin flip.
+- `service_day_rollover: not_confirmed` — see caveat 3 below; a real
+  export spanning midnight settles it.
+
+When rows do resolve, `trip_id` becomes the canonical GTFS trip while the
+export's own `TripName` is preserved in
+`canonical.passenger_events.vendor_trip_ref` (migration 0036) — the audit
+path back into the agency's system is never overwritten. Ambiguous and
+unmatched rows keep the vendor identifier, carry their outcome in
+`trip_resolution`, and become DQ findings that name candidates or state
+the parse — never a guess.
+
 ## Caveats and open questions
 
-1. **Trip-identifier resolution (future, per-agency join config).**
-   `TripName` is carried verbatim into `trip_id_performed`. Joining it to
-   canonical GTFS `trip_id`s (route short name + pattern + start time →
-   scheduled trip) needs a per-agency resolution config; until then,
-   trip-level metrics that join APC events to GTFS trips will not match
-   these events.
+1. **Trip-identifier resolution** — addressed by `resolution.v0.yaml`
+   (above), pending the agency's direction confirmation. Trip-level
+   metrics that join APC events to GTFS trips will not match these events
+   until that confirmation lands.
 2. **`StopCode` → GTFS `stop_id` resolution.** The canonical
    `passenger_events` subset carries no stop-identity column yet (the same
    gap that leaves rail PMT events unplaceable — handoff 0011). `StopCode`

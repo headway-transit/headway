@@ -72,3 +72,11 @@ CLAUDE.local.md
 .claude/*
 !.claude/roles/
 deploy/compose/vendor-drop/
+
+# Adversarial-review packs (inlined diff+source; generated, never committed)
+review-packs/
+
+# Service logs kept by install.sh before an update recreates the containers
+# (capture_service_logs). Real operational data from a real installation —
+# never committed, but never deleted by us either.
+install/logs/

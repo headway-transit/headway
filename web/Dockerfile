@@ -20,7 +20,11 @@ RUN npm run build
 FROM nginx:1.29-alpine-slim
 # Patch base-image packages: the release gate blocks fixable vulns (see .grype.yaml policy)
 RUN apk upgrade --no-cache
-COPY deploy/nginx.conf /etc/nginx/nginx.conf
+# --chmod: COPY preserves the HOST file's mode, and this image runs nginx
+# as non-root — a restrictive mode on the checked-out file (corporate
+# umask, found live on the first agency VM 2026-07-28: 13 Permission
+# denied crash loop) must never decide whether the container boots.
+COPY --chmod=644 deploy/nginx.conf /etc/nginx/nginx.conf
 # Drop the stock server config: nginx.conf above is the whole config and the
 # image entrypoint's IPv6 tweak script must not race a root-owned file.
 RUN rm -f /etc/nginx/conf.d/default.conf
