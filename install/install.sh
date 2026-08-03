@@ -1009,6 +1009,63 @@ ask_access_mode() {
   log "access mode chosen: $ACCESS_MODE"
 }
 
+# Keep the running services' logs BEFORE anything recreates their containers.
+#
+# Docker container logs die with the container, and an update rebuilds every
+# one of them. So the operation an operator runs to FIX a problem is the
+# operation that destroys the evidence of it — found live 2026-08-03, when a
+# partner agency ran --update-from-source to pick up an adapter fix and it
+# took with it the transform logs holding the reason their file had produced
+# no rows. There was nothing left to read.
+#
+# Written beside install.log, which is already the durable host-side record of
+# an installer run. Bounded by --tail so a chatty service cannot fill the disk
+# on the way out, and NEVER fatal: a failure to keep logs must not stop an
+# update the operator needs.
+LOG_KEEP_LINES=20000
+
+#: How many captures to keep. Bounding the container logs and then leaving an
+#: unbounded pile of copies of them would be the same bug one level up — a
+#: single capture measured 3.9 MB on a one-day-old installation, and an update
+#: can be run many times in a week.
+LOG_KEEP_CAPTURES=10
+
+capture_service_logs() {
+  local reason="$1"
+  local dir="$SCRIPT_DIR/logs"
+  local stamp
+  stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+  local dest="$dir/$stamp-$reason.log"
+
+  mkdir -p "$dir" 2>/dev/null || {
+    note "Could not create $dir, so the current logs were not kept."
+    return 0
+  }
+  # 2>&1 into the file: compose writes its own diagnostics to stderr, and a
+  # log capture that drops them is the half you need when it went wrong.
+  if docker compose --project-directory "$COMPOSE_DIR" logs \
+       --no-color --timestamps --tail "$LOG_KEEP_LINES" > "$dest" 2>&1; then
+    ok "Kept the current service logs: $dest"
+    say "         Container logs are erased when services are rebuilt, so this"
+    say "         copy is what remains of what happened before this run."
+  else
+    note "Could not read the current service logs; continuing anyway."
+    rm -f "$dest" 2>/dev/null
+  fi
+
+  # Keep the newest LOG_KEEP_CAPTURES and delete the rest. Timestamped names
+  # sort chronologically, so this needs no date parsing. Deletes only files
+  # this function created — the glob is anchored to its own naming.
+  local old_captures
+  old_captures="$(ls -1 "$dir"/*-*.log 2>/dev/null | sort | head -n -"$LOG_KEEP_CAPTURES")"
+  if [ -n "$old_captures" ]; then
+    printf '%s\n' "$old_captures" | while IFS= read -r stale; do
+      rm -f "$stale" 2>/dev/null
+    done
+  fi
+  return 0
+}
+
 # Add/remove one profile token in COMPOSE_PROFILES (comma-separated) in .env,
 # preserving whatever else is there. Idempotent by construction.
 add_compose_profile() {
@@ -1637,6 +1694,10 @@ update_from_source() {
   # collector's locked-down account (uid 65532) cannot use. Detect and
   # offer the least-privilege repair before the services restart.
   ensure_drop_dirs update
+
+  # BEFORE the rebuild: the containers about to be replaced are the only
+  # place their own history exists.
+  capture_service_logs "before-update"
 
   blank
   say "--- Rebuilding and restarting the Headway services ---"
@@ -3467,6 +3528,7 @@ run_upgrade() {
   ;; esac
 
   # 4. Restart onto the new images.
+  capture_service_logs "before-upgrade"
   say "Restarting Headway's services on the new version..."
   blank
   if ! dc up -d 2>&1 | tee -a "$LOG_FILE"; then

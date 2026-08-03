@@ -159,6 +159,77 @@ def test_check_ports_does_not_call_docker_once_per_port(source):
     assert body.count("headway_owned_ports") == 1
 
 
+def test_logs_are_kept_before_anything_recreates_a_container(source):
+    """Container logs die with the container, and both update paths recreate
+    every one of them.
+
+    Found live 2026-08-03: a partner agency ran --update-from-source to pick up
+    an adapter fix, and it took with it the transform logs holding the reason
+    their file had produced no rows. The operation run to FIX a problem
+    destroyed the evidence of it. There was nothing left to read.
+
+    Asserted per call site rather than by counting: a THIRD recreate path added
+    later must also capture, and a test that just counts would pass while the
+    new path silently threw its logs away.
+    """
+    update = _function_body(source, "update_from_source")
+    assert "capture_service_logs" in update, (
+        "--update-from-source rebuilds every container without keeping their "
+        "logs first. That is the 2026-08-03 evidence loss."
+    )
+    # The capture has to come BEFORE the rebuild, or it captures the new
+    # containers, which have no history.
+    assert update.index("capture_service_logs") < update.index("up -d --build"), (
+        "capture_service_logs runs after the rebuild, so it reads the fresh "
+        "containers instead of the ones being replaced."
+    )
+
+
+def test_keeping_logs_never_blocks_an_update(source):
+    """An operator running an update needs the update. A failure to keep logs
+    is worth a note, never a stop — the whole point is that it runs on a box
+    already in trouble."""
+    body = _function_body(source, "capture_service_logs")
+    assert "return 0" in body
+    for fatal in ("exit 1", "fail "):
+        assert fatal not in body, (
+            f"capture_service_logs can {fatal!r} — a logging failure must not "
+            f"abort the update it precedes."
+        )
+    # Bounded: a chatty service must not fill the disk on the way out.
+    assert "--tail" in body
+    # And bounded in the OTHER direction. A single capture measured 3.9 MB on
+    # a one-day-old installation; keeping one per update forever would be the
+    # same unbounded-growth bug this change exists to fix, one level up.
+    assert "LOG_KEEP_CAPTURES" in body, (
+        "captures are never pruned — bounding the container logs and then "
+        "leaving an unbounded pile of copies of them fixes nothing."
+    )
+
+
+def test_every_long_running_service_has_bounded_logs():
+    """Docker's json-file default has NO rotation, so a service writes until
+    something destroys its container. Two agency VMs have already hit storage
+    exhaustion. Read from compose.yaml because that is where the guarantee
+    lives."""
+    import yaml
+
+    compose = yaml.safe_load(
+        (INSTALLER.parent.parent / "deploy" / "compose" / "compose.yaml").read_text()
+    )
+    missing = [
+        name
+        for name, svc in compose["services"].items()
+        if isinstance(svc, dict)
+        and svc.get("restart") == "unless-stopped"
+        and "logging" not in svc
+    ]
+    assert missing == [], (
+        f"these long-running services have unbounded logs: {missing}. "
+        f"json-file with no max-size grows until the container is destroyed."
+    )
+
+
 def test_every_access_mode_is_handled_somewhere(source):
     """--help documents three modes. A fourth added without wiring would fall
     into the else branch silently."""
