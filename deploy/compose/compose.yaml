@@ -459,6 +459,23 @@ services:
       S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in deploy/compose/.env}
       S3_BUCKET: ${S3_BUCKET:-headway-raw}
       S3_USE_SSL: "false" # in-network MinIO; TLS termination is a hardening increment
+      # The agency's LOCAL timezone as an IANA name (e.g. America/Los_Angeles).
+      # REQUIRED for telematics: a service date is a local wall date, and the
+      # normalizer refuses every raw.telematics.vehicle_stats page as a
+      # BLOCKING finding rather than derive one from a guessed zone. That
+      # refusal is right; the missing wiring was not.
+      #
+      # It was documented in services/transform/README.md and plumbed
+      # NOWHERE — not here, not .env.example, not the installer. So an
+      # operator could buy a Samsara token, scope it correctly, enable the
+      # connector, land the raw records, and watch every page refused forever
+      # with no way to satisfy the guard. Found live 2026-08-03 at the partner
+      # agency, whose telematics had been silently refusing since Friday.
+      #
+      # Empty is left empty deliberately: the refusal is the correct behaviour
+      # for an installation that has not declared a zone, and guessing one
+      # would silently date a federal figure to the wrong day.
+      HEADWAY_TELEMATICS_SERVICE_DAY_TZ: ${HEADWAY_TELEMATICS_SERVICE_DAY_TZ:-}
     # No healthcheck: the consumer exposes no port. The process IS the
     # container (PID 1) — if the loop dies the container exits and
     # restart: unless-stopped brings it back; docker ps shows the flapping.

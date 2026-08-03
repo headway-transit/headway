@@ -230,6 +230,45 @@ def test_every_long_running_service_has_bounded_logs():
     )
 
 
+def test_every_env_var_a_service_reads_is_actually_plumbed():
+    """A guard an operator cannot satisfy is worse than no guard.
+
+    HEADWAY_TELEMATICS_SERVICE_DAY_TZ was documented in
+    services/transform/README.md and wired NOWHERE — not compose.yaml, not
+    .env.example, not the installer. The transform container received eleven
+    environment variables and that was not one of them, so every telematics
+    page was refused as a blocking finding with no way for an operator to
+    satisfy the requirement. Found live 2026-08-03 at the partner agency,
+    whose Samsara feed had been silently refusing since Friday.
+
+    Checked against the SERVICE's own declared requirement rather than a
+    hand-kept list: if the transform README names an env var as required, the
+    compose file has to pass it.
+    """
+    import re
+
+    import yaml
+
+    root = INSTALLER.parent.parent
+    compose = yaml.safe_load((root / "deploy" / "compose" / "compose.yaml").read_text())
+    transform_env = compose["services"]["transform"].get("environment") or {}
+    readme = (root / "services" / "transform" / "README.md").read_text()
+    env_example = (root / "deploy" / "compose" / ".env.example").read_text()
+
+    named = set(re.findall(r"HEADWAY_[A-Z0-9_]+", readme))
+    missing = sorted(v for v in named if v not in transform_env)
+    assert missing == [], (
+        f"services/transform/README.md names {missing} but compose.yaml does "
+        f"not pass them to the transform service. An operator has no way to "
+        f"set them, so any guard depending on them can never be satisfied."
+    )
+    for var in sorted(named):
+        assert var in env_example, (
+            f"{var} reaches the container but is absent from .env.example, so "
+            f"an operator has no way to discover it exists."
+        )
+
+
 def test_every_access_mode_is_handled_somewhere(source):
     """--help documents three modes. A fourth added without wiring would fall
     into the else branch silently."""
