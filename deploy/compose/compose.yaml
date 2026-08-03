@@ -47,6 +47,16 @@ services:
   kafka:
     image: apache/kafka:3.9.1
     restart: unless-stopped
+    # Bounded logs. Docker's json-file default has NO rotation, so a service
+    # writes until something destroys its container — and on this stack the
+    # only thing that does is an update, which is also what erases the
+    # evidence (see install.sh capture_service_logs). Two agency VMs have
+    # already hit storage exhaustion (docs/sizing.md, 2026-07-29); unbounded
+    # logs are a contributor nobody had measured. 30 MB per service is
+    # generous for diagnosis and bounded for a disk.
+    logging: &bounded-logs
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
     networks: [headway]
     ports:
       # Host-side listener for local development/debugging only.
@@ -87,6 +97,7 @@ services:
   timescaledb:
     image: timescale/timescaledb:latest-pg16
     restart: unless-stopped
+    logging: *bounded-logs
     networks: [headway]
     ports:
       - "127.0.0.1:5432:5432"
@@ -118,6 +129,7 @@ services:
   apicurio:
     image: apicurio/apicurio-registry:3.0.6
     restart: unless-stopped
+    logging: *bounded-logs
     networks: [headway]
     depends_on:
       kafka:
@@ -156,6 +168,7 @@ services:
   minio:
     image: minio/minio:RELEASE.2025-04-22T22-12-26Z
     restart: unless-stopped
+    logging: *bounded-logs
     networks: [headway]
     command: server /data --console-address ":9001"
     ports:
@@ -179,6 +192,7 @@ services:
   prometheus:
     image: prom/prometheus:v3.4.1
     restart: unless-stopped
+    logging: *bounded-logs
     networks: [headway]
     ports:
       - "127.0.0.1:9090:9090"
@@ -198,6 +212,7 @@ services:
   grafana:
     image: grafana/grafana-oss:12.0.2
     restart: unless-stopped
+    logging: *bounded-logs
     networks: [headway]
     depends_on:
       - prometheus
@@ -307,6 +322,7 @@ services:
       context: ../../services/ingestion
     image: ghcr.io/headway-transit/headway-ingestion:${HEADWAY_IMAGE_TAG:-local}
     restart: unless-stopped
+    logging: *bounded-logs
     networks: [headway]
     depends_on:
       kafka:
@@ -413,6 +429,7 @@ services:
       dockerfile: services/transform/Dockerfile
     image: ghcr.io/headway-transit/headway-transform:${HEADWAY_IMAGE_TAG:-local}
     restart: unless-stopped
+    logging: *bounded-logs
     networks: [headway]
     depends_on:
       kafka:
@@ -460,6 +477,7 @@ services:
       dockerfile: services/api/Dockerfile
     image: ghcr.io/headway-transit/headway-api:${HEADWAY_IMAGE_TAG:-local}
     restart: unless-stopped
+    logging: *bounded-logs
     networks: [headway]
     ports:
       - "127.0.0.1:8000:8000"
@@ -545,6 +563,7 @@ services:
         VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8000}
     image: ghcr.io/headway-transit/headway-web:local
     restart: unless-stopped
+    logging: *bounded-logs
     networks: [headway]
     ports:
       - "127.0.0.1:8080:8080" # nginx listens unprivileged (non-root)
@@ -596,6 +615,7 @@ services:
     # open-license posture as every other infra image in this stack.
     image: caddy:2.10.2
     restart: unless-stopped
+    logging: *bounded-logs
     networks: [headway]
     ports:
       # THE one deliberate non-localhost binding in this stack: the doorway

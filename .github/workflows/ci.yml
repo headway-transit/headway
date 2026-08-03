@@ -238,8 +238,13 @@ jobs:
           python-version: "3.12"
       - name: install pytest
         # db/test_migrations_static.py is stdlib-only static analysis of the
-        # migration SQL; no live database and no psycopg needed.
-        run: python -m pip install pytest
+        # migration SQL; no live database and no psycopg needed. pyyaml is for
+        # install/test_installer_static.py, which asserts guarantees that live
+        # in compose.yaml (bounded logs, env vars a service declares it needs)
+        # — those have to be read from the file that makes the promise, and a
+        # regex is the wrong tool for YAML. Same package the yaml-validate job
+        # already installs.
+        run: python -m pip install pytest pyyaml
       - name: pytest (static migration + installer checks)
         run: python -m pytest -q db/test_migrations_static.py install/test_installer_static.py
 
