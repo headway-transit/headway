@@ -302,6 +302,12 @@ volumes — permanent, requires typing a confirmation phrase; (3) decide
 whether to keep the configuration file (default: keep). Nothing is
 deleted without a typed confirmation.
 
+## Testing a first install on a clean machine
+
+If you are checking that Headway installs cleanly for someone else — before an
+acceptance test, or before a release — `docs/uat-first-install.md` is the
+checklist, including the handful of things only a real machine can tell you.
+
 ## Getting help
 
 Open an issue on the Headway project's issue tracker and attach
