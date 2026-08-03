@@ -192,3 +192,83 @@
   font-size: 1.05rem;
   line-height: 1;
 }
+
+/* ---------------------------------------------------------------------------
+   The relationship trail — the chain from a flag to the number it moved.
+
+   Every link was already on this panel: finding, block, route, calculation,
+   owner, source records, in that order, as consecutive headings. Reading it as
+   a CHAIN required knowing that consecutive meant connected, and nothing on
+   screen said so. The spine says it.
+
+   The marker is a LABEL, never a code: the heading beside it carries the
+   meaning, so a reader who ignores the letters loses nothing. Sizing is in
+   `em` so the whole trail scales with the panel's own type.
+--------------------------------------------------------------------------- */
+
+.chain-trail {
+  --chain-marker: 1.55em;
+  --chain-gutter: var(--space-3);
+  list-style: none;
+  margin: var(--space-2) 0 0;
+  padding: 0;
+}
+
+.chain-step {
+  position: relative;
+  display: grid;
+  grid-template-columns: var(--chain-marker) 1fr;
+  gap: var(--chain-gutter);
+  padding-bottom: var(--space-3);
+}
+
+/* The spine. Drawn from each marker down to the next one, so the LAST rung
+   has no trailing line into empty space — the chain ends where the evidence
+   ends. */
+.chain-step::before {
+  content: "";
+  position: absolute;
+  left: calc(var(--chain-marker) / 2 - 1px);
+  top: var(--chain-marker);
+  bottom: 0;
+  width: 2px;
+  background: var(--color-border);
+}
+.chain-step:last-child::before {
+  display: none;
+}
+
+.chain-step-marker {
+  display: grid;
+  place-items: center;
+  width: var(--chain-marker);
+  height: var(--chain-marker);
+  border-radius: 50%;
+  border: 2px solid var(--color-border);
+  background: var(--color-bg);
+  font-family: var(--font-display);
+  font-size: 0.68em;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.04em;
+  color: var(--color-text-muted);
+}
+
+.chain-step-body {
+  min-width: 0;
+}
+
+/* The heading is already the uppercase micro-label; inside a rung it sits on
+   the marker's baseline instead of carrying its own top margin. */
+.chain-step-body > h3:first-child {
+  margin-top: 0;
+  line-height: var(--chain-marker);
+}
+
+.chain-step-body > :last-child {
+  margin-bottom: 0;
+}
+
+/* Nothing animates here. A provenance chain is read, not performed — and the
+   reduced-motion contract on this surface reserves motion for the attention
+   pulse on a flag, which is the one thing asking to be looked at. */

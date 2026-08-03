@@ -25,7 +25,7 @@
  * lists, it says so and shows the true count beside the sample.
  */
 
-import { useRef } from "react";
+import { useRef, type ReactNode } from "react";
 import { FocusScope, useDialog } from "react-aria";
 import { Link } from "react-router-dom";
 import { SeverityIcon } from "../components/SeverityIcon";
@@ -111,10 +111,12 @@ export function RelationshipInspector({
         <h3>{t.chainHeading}</h3>
         <p className="chart-desc">{t.chainIntro}</p>
 
+        {/* The chain as a CHAIN. Every link below was already rendered; the
+            list draws the spine that says they are consecutive. */}
+        <ol className="chain-trail">
         {/* --- block --- */}
         {chain.blocks.length > 0 && (
-          <>
-            <h3>{t.blocksHeading}</h3>
+          <ChainStep marker="B" heading={t.blocksHeading}>
             <ul>
               {chain.blocks.map((block, index) => (
                 <li key={`${block.block_id ?? "none"}-${index}`}>
@@ -138,7 +140,7 @@ export function RelationshipInspector({
                 </li>
               ))}
             </ul>
-          </>
+          </ChainStep>
         )}
         {chain.unmatchedTripCount > 0 && (
           <p className="chart-desc">
@@ -151,8 +153,7 @@ export function RelationshipInspector({
 
         {/* --- route --- */}
         {chain.routes.length > 0 && (
-          <>
-            <h3>{t.routesHeading}</h3>
+          <ChainStep marker="R" heading={t.routesHeading}>
             <ul>
               {chain.routes.map((route) => (
                 <li key={route.route_id}>
@@ -176,11 +177,11 @@ export function RelationshipInspector({
               ))}
             </ul>
             <p className="chart-desc">{t.relatedNote}</p>
-          </>
+          </ChainStep>
         )}
 
         {/* --- calculation --- */}
-        <h3>{t.calcsHeading}</h3>
+        <ChainStep marker="C" heading={t.calcsHeading}>
         {chain.calcs.length === 0 ? (
           <p className="chart-desc">{t.calcsEmpty}</p>
         ) : (
@@ -205,13 +206,15 @@ export function RelationshipInspector({
             ))}
           </ul>
         )}
+        </ChainStep>
 
         {/* --- owner --- */}
-        <h3>{t.ownerHeading}</h3>
-        <p>{chain.owner ? t.ownerNamed(chain.owner) : t.ownerNone}</p>
+        <ChainStep marker="D" heading={t.ownerHeading}>
+          <p>{chain.owner ? t.ownerNamed(chain.owner) : t.ownerNone}</p>
+        </ChainStep>
 
         {/* --- provenance: the raw records the finding cited --- */}
-        <h3>{t.recordsHeading}</h3>
+        <ChainStep marker="S" heading={t.recordsHeading}>
         {sourceRecordsLoading && (
           <p className="chart-desc">{t.recordsLoading}</p>
         )}
@@ -227,12 +230,50 @@ export function RelationshipInspector({
           ) : (
             <p className="chart-desc">{t.recordsNone}</p>
           ))}
+        </ChainStep>
+        </ol>
 
         <p>
           <Link to="/dq">{t.queueLink}</Link>
         </p>
       </div>
     </FocusScope>
+  );
+}
+
+/**
+ * One rung on the relationship trail.
+ *
+ * The chain from a flag to the number it moved was already all here — finding,
+ * block, route, calculation, owner, raw records — as a run of headings and
+ * lists. Reading it required knowing that consecutive headings meant
+ * consecutive LINKS. Nothing on screen said so.
+ *
+ * The rung draws that: a lettered marker on a continuous spine, so the eye
+ * follows the chain the way the data does. The heading stays a real <h3> and
+ * the content is untouched — this is a frame around what was already true,
+ * never a second rendering of it.
+ */
+function ChainStep({
+  marker,
+  heading,
+  children,
+}: {
+  /** One letter. The trail is read, not decoded — it labels, never encodes. */
+  marker: string;
+  heading: string;
+  children: ReactNode;
+}) {
+  return (
+    <li className="chain-step">
+      <span className="chain-step-marker" aria-hidden="true">
+        {marker}
+      </span>
+      <div className="chain-step-body">
+        <h3>{heading}</h3>
+        {children}
+      </div>
+    </li>
   );
 }
 
