@@ -74,6 +74,7 @@ from .consumer import (
     run_loop,
 )
 from .kafka_source import KafkaMessageSource
+from .service_day_timezone import resolve_service_day_timezone
 from .writer import DbWriter
 
 logger = logging.getLogger("headway_transform")
@@ -241,16 +242,24 @@ def main() -> int:
     adapter_registry = adapter_registry_from_env()
     idle_sleep = float(os.environ.get("IDLE_SLEEP_SECONDS", "1"))
 
-    telematics_tz = os.environ.get("HEADWAY_TELEMATICS_SERVICE_DAY_TZ", "").strip()
+    telematics_tz, tz_source = resolve_service_day_timezone(connection)
     if TOPIC_TELEMATICS_VEHICLE_STATS in topics and not telematics_tz:
         # Loud degraded mode, not a startup refusal: a deployment with no
         # telematics feed must still start. Pages that DO arrive are refused
         # with a blocking dq.issues row rather than dated by a guessed zone.
         logger.warning(
-            "HEADWAY_TELEMATICS_SERVICE_DAY_TZ is not set: %s pages will be "
-            "refused as blocking dq.issues (a service date is a local wall "
-            "date and is never derived from a guessed timezone).",
+            "No service-day timezone is declared, so %s pages will be refused "
+            "as blocking dq.issues (a service date is a local wall date and is "
+            "never derived from a guessed timezone). Set it in Headway under "
+            "Admin -> Settings -> service_day_timezone; no file editing and no "
+            "restart is needed.",
             TOPIC_TELEMATICS_VEHICLE_STATS,
+        )
+    elif telematics_tz:
+        # WHICH SOURCE, always. Two homes for one value is a support burden
+        # unless the running service says which one it read (ADR-0015).
+        logger.info(
+            "service-day timezone %s (from %s)", telematics_tz, tz_source
         )
 
     logger.info("consuming %s from %s", topics, brokers)
