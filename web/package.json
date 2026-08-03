@@ -19,25 +19,25 @@
     "maplibre-gl": "^6.0.0",
     "pmtiles": "^4.4.1",
     "protomaps-themes-base": "^4.5.0",
-    "react": "^19.2.7",
+    "react": "^19.2.8",
     "react-aria": "^3.50.0",
     "react-aria-components": "^1.19.0",
-    "react-dom": "^19.2.7",
-    "react-router-dom": "^7.18.1"
+    "react-dom": "^19.2.8",
+    "react-router-dom": "^7.18.2"
   },
   "devDependencies": {
-    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/jest-dom": "^7.0.0",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.1",
-    "@types/node": "^24.13.2",
+    "@types/node": "^26.1.2",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
-    "@vitejs/plugin-react": "^6.0.3",
+    "@vitejs/plugin-react": "^6.0.4",
     "axe-core": "^4.12.1",
-    "jsdom": "^29.1.1",
-    "oxlint": "^1.71.0",
-    "typescript": "~6.0.2",
-    "vite": "^8.1.1",
+    "jsdom": "^30.0.0",
+    "oxlint": "^1.76.0",
+    "typescript": "~7.0.2",
+    "vite": "^8.1.5",
     "vitest": "^4.1.10"
   }
 }
