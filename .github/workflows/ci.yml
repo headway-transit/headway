@@ -214,7 +214,7 @@ jobs:
           git diff --exit-code openapi.json
       - uses: actions/setup-node@v6
         with:
-          node-version: "22"
+          node-version: "24"
       - name: quotes.json matches the regulatory tracker (regenerate + diff)
         # extract-quotes.mjs is a dependency-free node script reading
         # services/calc/REGULATORY_TRACKER.md — no npm ci needed.
@@ -313,7 +313,7 @@ jobs:
       - uses: actions/setup-node@v6
         if: steps.guard.outputs.present == 'true'
         with:
-          node-version: "22"
+          node-version: "24"
           cache: npm
           cache-dependency-path: web/package-lock.json
       - name: npm ci
@@ -428,7 +428,7 @@ jobs:
       - uses: actions/setup-node@v6
         if: hashFiles('web/package.json') != ''
         with:
-          node-version: "22"
+          node-version: "24"
           cache: npm
           cache-dependency-path: web/package-lock.json
       - name: npm ci (populate web/node_modules for the node scan)
