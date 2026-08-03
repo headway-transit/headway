@@ -1,7 +1,7 @@
 # headway-ingest — walking-skeleton ingestion connectors (ADR-0009).
 # NOTE: this image is UNTESTED — Docker was not available in the authoring
 # environment. Build with:  docker build -t headway-ingest services/ingestion
-FROM golang:1.25-alpine AS build
+FROM golang:1.26-alpine AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
