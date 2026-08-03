@@ -114,11 +114,18 @@ describe("/dq", () => {
     ).toBeInTheDocument();
 
     // Severity is conveyed by TEXT on each card (plus icon and color in CSS).
-    const blockingCard = screen
-      .getByRole("heading", {
+    //
+    // AWAITED, not queried synchronously: the page heading above renders as
+    // soon as the route mounts, while the cards arrive with the issues fetch.
+    // Querying them in the same tick was a race this test had been winning by
+    // luck, and any change that shifts the scheduler by a few microseconds
+    // loses it. The remaining cards stay synchronous — once one card is on
+    // screen they all are, from the same render.
+    const blockingCard = (
+      await screen.findByRole("heading", {
         name: "Bus 1207 sent no location data for 42 minutes on March 3",
       })
-      .closest("article") as HTMLElement;
+    ).closest("article") as HTMLElement;
     const warningCard = screen
       .getByRole("heading", { name: /GPS miles and odometer miles disagree/ })
       .closest("article") as HTMLElement;

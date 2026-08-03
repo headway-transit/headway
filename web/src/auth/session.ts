@@ -1,11 +1,37 @@
 /**
  * In-memory session store (module state).
  *
- * SECURITY NOTE — deliberate walking-skeleton choice: the bearer token lives
- * only in JS memory, never in localStorage/sessionStorage (no persistence for
- * an XSS payload to steal at rest). A page reload signs the user out. The
- * hardening increment is a server-set httpOnly, Secure, SameSite cookie
- * session, which removes the token from JS reach entirely (tracked in
+ * SECURITY NOTE — WHERE THE TOKEN LIVES, AND WHY IT MOVED.
+ *
+ * It used to live only in JS memory, so nothing persisted for an XSS payload
+ * to steal at rest. The accepted cost, written here, was "a page reload signs
+ * the user out". On a desktop that is an occasional annoyance. On a phone it
+ * is unusable: pull-to-refresh is a gesture people make by accident, and being
+ * signed out for it makes the app feel broken (reported from the field
+ * 2026-08-03).
+ *
+ * It is now in sessionStorage, which survives a reload and dies with the tab.
+ * That is a real trade and worth stating plainly: an XSS payload could now
+ * read the token. Three things bound what that buys an attacker, and two of
+ * them did not exist when the original note was written:
+ *
+ *   1. The token expires in 30 minutes (auth.DEFAULT_TOKEN_TTL_SECONDS).
+ *   2. Every authenticated request re-reads the account from the database
+ *      (auth._live_account), so a stolen token stops working the moment the
+ *      account is deactivated or demoted — it no longer runs to expiry.
+ *   3. sessionStorage is already how this app carries auth material through
+ *      the OIDC redirect: migration 0043 keeps the browser_token there, and
+ *      that token is the ONLY thing binding a callback to the browser that
+ *      started it.
+ *
+ * An XSS on this origin can already call the API as the user for as long as
+ * the page is open, so the honest description of what persistence adds is
+ * "and after they navigate away", not "and now they have your session".
+ *
+ * THE HARDENING INCREMENT IS UNCHANGED: a server-set httpOnly, Secure,
+ * SameSite cookie removes the token from JS reach entirely. This is not that.
+ * It is the smaller change that makes the product usable on a phone today,
+ * and it does not make the cookie work any harder later (tracked in
  * web/README.md).
  *
  * Role checks here are UX ONLY (what to render). Authorization is enforced
@@ -21,7 +47,51 @@ export interface Session {
   role: Role;
 }
 
-let current: Session | null = null;
+/** One key, versioned, so a shape change cannot be read as a valid session. */
+const STORAGE_KEY = "headway-session-v1";
+
+/**
+ * Read a stored session, refusing anything that is not exactly the shape we
+ * wrote. A half-valid session is worse than none: it would render a signed-in
+ * shell whose every request 401s, and the user would have no way to tell that
+ * from an outage.
+ */
+function restore(): Session | null {
+  try {
+    const raw = window.sessionStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    const value: unknown = JSON.parse(raw);
+    if (
+      typeof value !== "object" ||
+      value === null ||
+      typeof (value as Session).token !== "string" ||
+      typeof (value as Session).username !== "string" ||
+      typeof (value as Session).role !== "string" ||
+      !(value as Session).token
+    ) {
+      window.sessionStorage.removeItem(STORAGE_KEY);
+      return null;
+    }
+    return value as Session;
+  } catch {
+    // Storage blocked (private mode, embedded webview) or unparseable. Signed
+    // out is the safe reading, and the app still works — it just forgets on
+    // reload, exactly as it always did.
+    return null;
+  }
+}
+
+function persist(session: Session | null): void {
+  try {
+    if (session === null) window.sessionStorage.removeItem(STORAGE_KEY);
+    else window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify(session));
+  } catch {
+    // Never fatal. A browser that refuses storage still gets a working
+    // session for as long as the page is open.
+  }
+}
+
+let current: Session | null = restore();
 const listeners = new Set<() => void>();
 
 function emit() {
@@ -34,11 +104,15 @@ export function getSession(): Session | null {
 
 export function setSession(session: Session): void {
   current = session;
+  persist(session);
   emit();
 }
 
 export function clearSession(): void {
   current = null;
+  // Signing out must clear the stored copy too, or the next reload signs the
+  // user straight back in — the exact opposite of what they asked for.
+  persist(null);
   emit();
 }
 
