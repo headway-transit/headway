@@ -72,7 +72,7 @@ jobs:
           upload-release-assets: false
 
       - name: "grype scan (gate: severity >= high — Security-role policy)"
-        uses: anchore/scan-action@v6
+        uses: anchore/scan-action@v7
         with:
           sbom: headway-source-${{ github.ref_name }}.cdx.json
           fail-build: true
@@ -156,7 +156,7 @@ jobs:
 
       - name: "grype scan (gate: severity >= high — Security-role policy)"
         # Runs BEFORE push: a red gate means the image never reaches ghcr.
-        uses: anchore/scan-action@v6
+        uses: anchore/scan-action@v7
         with:
           sbom: ${{ matrix.image }}-image-${{ github.ref_name }}.cdx.json
           fail-build: true
