@@ -127,7 +127,11 @@ def query_metric_values(
     sql = _SELECT_VALUES
     if clauses:
         sql += " WHERE " + " AND ".join(clauses)
-    sql += " ORDER BY period_start, metric"
+    # computed_at DESC breaks the tie WITHIN one metric/period/scope, so the
+    # newest figure is always first and the order is total. Without it a
+    # recomputed period returned two rows in whatever order the scan produced
+    # — and "which of these is current?" had no answer on screen.
+    sql += " ORDER BY period_start, metric, computed_at DESC"
     rows = db.execute(sql, tuple(params)).fetchall()
     return [
         MetricValue(
