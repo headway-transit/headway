@@ -269,6 +269,40 @@ def test_every_env_var_a_service_reads_is_actually_plumbed():
         )
 
 
+def test_ci_tests_on_the_node_version_the_product_ships():
+    """CI must run the web suite on the Node the web image is BUILT with.
+
+    Found 2026-08-03 while clearing the Dependabot queue: CI pinned
+    node-version 20 in three places while web/Dockerfile built on node:22.
+    They had drifted silently, and the cost was invisible until a dependency
+    bump (jsdom 30) needed an undici API that Node 20 does not have — so the
+    upgrade failed on a version the product does not actually ship on, and the
+    failure looked like the dependency's fault.
+
+    Version drift between the test environment and the shipped environment is
+    the quiet kind: everything passes until the day it matters. This pins them
+    together, so a base-image bump that forgets CI fails HERE with a sentence
+    explaining why, instead of days later inside somebody else's PR.
+    """
+    import re
+
+    root = INSTALLER.parent.parent
+    dockerfile = (root / "web" / "Dockerfile").read_text()
+    workflow = (root / ".github" / "workflows" / "ci.yml").read_text()
+
+    built_on = re.search(r"^FROM node:(\d+)", dockerfile, flags=re.M)
+    assert built_on, "web/Dockerfile no longer pins a Node major"
+    shipped = built_on.group(1)
+
+    tested_on = set(re.findall(r'node-version:\s*"(\d+)"', workflow))
+    assert tested_on, "ci.yml no longer pins a Node version"
+    assert tested_on == {shipped}, (
+        f"web/Dockerfile builds on Node {shipped} but CI tests on "
+        f"{sorted(tested_on)}. Bump them together: a suite that passes on a "
+        f"Node the product never runs proves less than it appears to."
+    )
+
+
 def test_every_access_mode_is_handled_somewhere(source):
     """--help documents three modes. A fourth added without wiring would fall
     into the else branch silently."""
