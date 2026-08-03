@@ -17,6 +17,7 @@ from . import __version__, auth, client_identity, webhooks
 from .db import lifespan
 from .machine_auth import FailureAuditThrottle, RateLimiter
 from .routers import (
+    datasets,
     attestations,
     audit_trail,
     branding,
@@ -286,6 +287,7 @@ def create_app(
     app.include_router(machine_keys.router)
     app.include_router(machine_read.router)
     app.include_router(settings_router.router)
+    app.include_router(datasets.router)
     app.include_router(ingest.router)
     app.include_router(webhooks.router)
     app.include_router(reports.router)

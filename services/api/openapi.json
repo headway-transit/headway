@@ -2174,6 +2174,124 @@
         }
       }
     },
+    "/datasets": {
+      "get": {
+        "tags": [
+          "datasets"
+        ],
+        "summary": "List Datasets",
+        "description": "The agency's reported-dataset registry, with observed arrival.\n\nReadable by any signed-in role: knowing what the agency reports and who\nowns it is orientation, not privilege.",
+        "operationId": "list_datasets_datasets_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatasetPage"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/datasets/{dataset_key}": {
+      "put": {
+        "tags": [
+          "datasets"
+        ],
+        "summary": "Upsert Dataset",
+        "description": "Record or update one dataset. Certifying official only, and audited.\n\nSame authority as the policy settings: this registry says who is\naccountable for a federal figure's inputs, and that is not a note anyone\nshould be able to change unattributed.",
+        "operationId": "upsert_dataset_datasets__dataset_key__put",
+        "parameters": [
+          {
+            "name": "dataset_key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Dataset Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpsertDatasetRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReportedDataset"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "datasets"
+        ],
+        "summary": "Delete Dataset",
+        "description": "Remove a dataset from the registry. Audited like every other change.",
+        "operationId": "delete_dataset_datasets__dataset_key__delete",
+        "parameters": [
+          {
+            "name": "dataset_key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Dataset Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Delete Dataset Datasets  Dataset Key  Delete"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/ingest/tides/passenger-events": {
       "post": {
         "tags": [
@@ -7137,6 +7255,27 @@
         ],
         "title": "CreateUserResponse"
       },
+      "DatasetPage": {
+        "properties": {
+          "datasets": {
+            "items": {
+              "$ref": "#/components/schemas/ReportedDataset"
+            },
+            "type": "array",
+            "title": "Datasets"
+          },
+          "registry_note": {
+            "type": "string",
+            "title": "Registry Note",
+            "default": "This list is your agency's own record of what you report, who owns it, and which system it comes from. Headway never fills it in for you: an ownership matrix that is subtly wrong is worse than an empty one, because it sends someone to the wrong department in the middle of a filing. Where a dataset names a source Headway receives, the 'last received' column is measured from the records themselves \u2014 not from anything typed here."
+          }
+        },
+        "type": "object",
+        "required": [
+          "datasets"
+        ],
+        "title": "DatasetPage"
+      },
       "DeadlinesResponse": {
         "properties": {
           "month": {
@@ -10461,6 +10600,105 @@
         "title": "RawRecordLabel",
         "description": "The label on the evidence bag. Every field is a ``raw.records`` column\nor a measurement taken now; nothing is inferred."
       },
+      "ReportedDataset": {
+        "properties": {
+          "dataset_key": {
+            "type": "string",
+            "title": "Dataset Key"
+          },
+          "display_name": {
+            "type": "string",
+            "title": "Display Name"
+          },
+          "owner": {
+            "type": "string",
+            "title": "Owner"
+          },
+          "system_of_record": {
+            "type": "string",
+            "title": "System Of Record"
+          },
+          "expected_interval_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Interval Seconds"
+          },
+          "ntd_forms": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Ntd Forms",
+            "default": []
+          },
+          "headway_sources": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Headway Sources",
+            "default": []
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          },
+          "updated_by": {
+            "type": "string",
+            "title": "Updated By"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "last_received_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Received At"
+          },
+          "arrival_state": {
+            "type": "string",
+            "title": "Arrival State"
+          },
+          "arrival_note": {
+            "type": "string",
+            "title": "Arrival Note"
+          }
+        },
+        "type": "object",
+        "required": [
+          "dataset_key",
+          "display_name",
+          "owner",
+          "system_of_record",
+          "updated_by",
+          "updated_at",
+          "arrival_state",
+          "arrival_note"
+        ],
+        "title": "ReportedDataset"
+      },
       "RequirementResponse": {
         "properties": {
           "mode": {
@@ -12442,6 +12680,71 @@
           "audit_event_id"
         ],
         "title": "UpdateSettingResponse"
+      },
+      "UpsertDatasetRequest": {
+        "properties": {
+          "display_name": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Display Name"
+          },
+          "owner": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Owner"
+          },
+          "system_of_record": {
+            "type": "string",
+            "minLength": 1,
+            "title": "System Of Record"
+          },
+          "expected_interval_seconds": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Interval Seconds"
+          },
+          "ntd_forms": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Ntd Forms",
+            "default": []
+          },
+          "headway_sources": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Headway Sources",
+            "default": []
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "display_name",
+          "owner",
+          "system_of_record"
+        ],
+        "title": "UpsertDatasetRequest"
       },
       "UserRecord": {
         "properties": {
