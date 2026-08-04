@@ -3204,6 +3204,24 @@ export const copy = {
       partialNote: (derived: number, read: number) =>
         `${derived} block ${derived === 1 ? "name" : "names"} came out of ${read} rows. A partial mapping is normal and safe: blocks Headway could not name keep the id your feed uses, and no name is ever guessed.`,
 
+      scheduleDateLabel: "Which schedule period does this export cover? (optional)",
+      scheduleDateHint:
+        "Your GTFS feed holds every schedule period at once, so a service day like 'Saturday Service' can match more than one of them. Naming any date inside the period this export covers tells Headway which one you mean. Leave it blank to start — the report below will say if it would have helped.",
+      scheduleDateNudge:
+        "Some service days below could not be matched to a schedule period. If this export covers one particular period, enter a date inside it above and check the file again.",
+
+      serviceDaysHeading: "How your service days were used",
+      serviceDaysIntro:
+        "Your file names a service day on each row. Where Headway could tell which schedule a service day refers to, it used it to separate blocks that run the same route at the same time on different days. Where it could not, it says so and nothing was narrowed — the rows were treated exactly as they would have been without the column.",
+      serviceDayUsed: "Used",
+      serviceDayNotUsed: "Not used",
+      columnServiceDay: "Service day",
+      columnUsed: "Used to separate blocks",
+      columnTripsNamed: "Trips it names",
+      columnWhy: "Why",
+      serviceDayTrips: (n: number) =>
+        `${n.toLocaleString("en-US")} trip${n === 1 ? "" : "s"} named`,
+
       conflictsHeading: "Blocks left out because two rows disagreed",
       conflictsIntro:
         "Each of these blocks was given more than one name in your file. Headway leaves them out rather than picking one, because the wrong name on a finding is worse than no name.",

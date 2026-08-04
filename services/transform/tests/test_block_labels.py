@@ -20,6 +20,8 @@ from headway_transform.adapters.resolution import (
 )
 from headway_transform.block_labels import (
     AMBIGUOUS,
+    ServiceDayPairing,
+    pair_service_days,
     MATCHED,
     UNMATCHED,
     UNPARSEABLE,
@@ -88,17 +90,23 @@ def _spec(tmp_path: Path):
     return load_resolution_spec(path)
 
 
-def trip(trip_id, short_name, departure, block_id):
+def trip(trip_id, short_name, departure, block_id, service_id=None):
     return TripWithBlock(
         trip_id=trip_id,
         route_short_name=short_name,
         first_departure_seconds=departure,
         block_id=block_id,
+        service_id=service_id,
     )
 
 
-def row(line_no, trip_name, block_name):
-    return MappingRow(line_no=line_no, trip_name=trip_name, block_name=block_name)
+def row(line_no, trip_name, block_name, service_day=None):
+    return MappingRow(
+        line_no=line_no,
+        trip_name=trip_name,
+        block_name=block_name,
+        service_day=service_day,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -416,3 +424,230 @@ def test_load_block_labels_with_an_empty_mapping_writes_nothing(tmp_path):
         == 0
     )
     assert conn.log == []
+
+
+# ---------------------------------------------------------------------------
+# The service day (2026-08-04). Measured on two real feeds: the base
+# (route, start) key is ambiguous for 43.7% of keys on Link Transit's
+# published feed and 17.7% of trip names in the partner agency's export,
+# because one route and start belongs to different blocks on a weekday and
+# a Saturday. Adding direction moves it to 43.3% — nothing. Narrowing to
+# the row's own service takes it to 24.3%.
+# ---------------------------------------------------------------------------
+
+
+def _two_service_schedule():
+    """Route 42 at 13:00 runs on TWO services, on two different blocks.
+
+    This is the exact shape that makes the base key ambiguous, and the only
+    shape where the service day can earn its place.
+    """
+    return [
+        trip("wk-1", "42", 13 * 3600, "block-weekday", service_id="svc-wk"),
+        trip("wk-2", "42", 14 * 3600, "block-weekday", service_id="svc-wk"),
+        trip("sa-1", "42", 13 * 3600, "block-saturday", service_id="svc-sa"),
+        trip("sa-2", "42", 15 * 3600, "block-saturday", service_id="svc-sa"),
+    ]
+
+
+def test_without_a_service_day_the_shared_key_is_still_ambiguous(tmp_path):
+    """The behaviour that has to stay intact: a two-column file loses
+    nothing and gains nothing."""
+    spec = _spec(tmp_path)
+    result = derive_block_labels(
+        spec, [row(1, "42 - 42WD - 13:00", "42-1")], _two_service_schedule()
+    )
+    assert result.counts.get(AMBIGUOUS) == 1
+    assert result.mapping == ()
+
+
+def test_a_confidently_paired_service_day_resolves_the_ambiguity(tmp_path):
+    spec = _spec(tmp_path)
+    rows = [
+        row(1, "42 - 42WD - 13:00", "42-1", service_day="Weekday"),
+        row(2, "42 - 42WD - 14:00", "42-1", service_day="Weekday"),
+    ]
+    trips = _two_service_schedule()
+    pairings = pair_service_days(spec, rows, trips)
+
+    assert pairings["Weekday"].confident
+    assert pairings["Weekday"].service_id == "svc-wk"
+
+    result = derive_block_labels(spec, rows, trips, pairings)
+    assert result.counts.get(AMBIGUOUS, 0) == 0
+    assert result.counts.get(MATCHED) == 2
+    assert result.mapping == (("block-weekday", "42-1", 2),)
+
+
+def test_the_name_itself_is_never_read(tmp_path):
+    """'MUT', 'MUWT', 'F', 'Training' — 46 labels in the partner export, and
+    only a couple are guessable. The pairing must work from the trips a
+    label covers, so an opaque label pairs exactly as well as a plain one."""
+    spec = _spec(tmp_path)
+    rows = [
+        row(1, "42 - 42WD - 13:00", "42-1", service_day="MUWT"),
+        row(2, "42 - 42WD - 14:00", "42-1", service_day="MUWT"),
+    ]
+    pairings = pair_service_days(spec, rows, _two_service_schedule())
+    assert pairings["MUWT"].confident
+    assert pairings["MUWT"].service_id == "svc-wk"
+
+
+def test_two_services_that_explain_a_label_equally_are_refused(tmp_path):
+    """Overlapping schedule versions — Link Transit runs two Saturday
+    services, one seasonal. A label cannot choose between them and must not
+    try: the rows fall back to the unnarrowed key instead."""
+    spec = _spec(tmp_path)
+    trips = [
+        trip("a", "42", 13 * 3600, "block-a", service_id="svc-sat-1"),
+        trip("b", "42", 13 * 3600, "block-b", service_id="svc-sat-2"),
+    ]
+    rows = [row(1, "42 - 42WD - 13:00", "42-1", service_day="Saturday Service")]
+    pairing = pair_service_days(spec, rows, trips)["Saturday Service"]
+
+    assert not pairing.confident
+    assert pairing.service_id is None
+    assert "equally closely" in pairing.reason
+
+    # And the derivation stays exactly as honest as it was before.
+    result = derive_block_labels(spec, rows, trips, {"Saturday Service": pairing})
+    assert result.counts.get(AMBIGUOUS) == 1
+    assert result.mapping == ()
+
+
+def test_a_label_no_single_service_explains_is_refused(tmp_path):
+    """'Training' had 6,330 rows in the partner export and resolved zero
+    blocks — a label can correspond to no GTFS service at all."""
+    spec = _spec(tmp_path)
+    trips = [trip("a", "42", 13 * 3600, "block-a", service_id="svc-wk")]
+    rows = [
+        row(1, "42 - 42WD - 13:00", "42-1", service_day="Training"),
+        row(2, "42 - 42WD - 21:00", "42-2", service_day="Training"),
+        row(3, "42 - 42WD - 22:00", "42-3", service_day="Training"),
+    ]
+    pairing = pair_service_days(spec, rows, trips)["Training"]
+    assert not pairing.confident
+    assert "no single service explains" in pairing.reason
+
+
+def test_narrowing_never_turns_a_match_into_an_unmatched_row(tmp_path):
+    """THE SAFETY RULE. If the pairing does not describe a row, the
+    unnarrowed candidates stand. Precision that loses a correct answer is
+    not precision."""
+    spec = _spec(tmp_path)
+    trips = [trip("only", "42", 13 * 3600, "block-only", service_id="svc-sa")]
+    rows = [row(1, "42 - 42WD - 13:00", "42-1", service_day="Weekday")]
+    # A pairing that points somewhere this row's candidates do not live.
+    bogus = {
+        "Weekday": ServiceDayPairing(
+            service_day="Weekday", service_id="svc-wk", keys_in_export=1,
+            keys_explained=1, coverage=1.0, similarity=1.0,
+            runner_up_coverage=0.0, confident=True, reason="fixture",
+        )
+    }
+    result = derive_block_labels(spec, rows, trips, bogus)
+    assert result.counts.get(MATCHED) == 1
+    assert result.mapping == (("block-only", "42-1", 1),)
+
+
+def test_the_pairing_states_its_evidence(tmp_path):
+    """A narrowing nobody can inspect is a narrowing nobody should trust."""
+    spec = _spec(tmp_path)
+    rows = [
+        row(1, "42 - 42WD - 13:00", "42-1", service_day="Weekday"),
+        row(2, "42 - 42WD - 14:00", "42-1", service_day="Weekday"),
+    ]
+    pairing = pair_service_days(spec, rows, _two_service_schedule())["Weekday"]
+    assert pairing.keys_in_export == 2
+    assert pairing.coverage == 1.0
+    assert pairing.similarity == 1.0
+    assert "covers 100%" in pairing.reason
+    assert "matches it most closely" in pairing.reason
+
+
+def test_a_service_that_is_a_subset_of_another_is_still_identified(tmp_path):
+    """THE BUG A REAL FEED FOUND. Coverage alone cannot tell a service from a
+    SUPERSET of it: on Link Transit every one of Sunday's 404 (route, start)
+    keys also appears in the Saturday service's 470, so both "cover" the
+    Sunday label 100% and a coverage contest ties. The pairing was refused
+    for a label whose service was obvious.
+
+    Similarity breaks the tie honestly by also penalising a service for the
+    trips the label does NOT name.
+    """
+    spec = _spec(tmp_path)
+    # Sunday: one trip. Saturday: that same trip plus two more.
+    trips = [
+        trip("sun", "42", 13 * 3600, "block-sun", service_id="svc-sun"),
+        trip("sat-a", "42", 13 * 3600, "block-sat", service_id="svc-sat"),
+        trip("sat-b", "42", 16 * 3600, "block-sat", service_id="svc-sat"),
+        trip("sat-c", "42", 17 * 3600, "block-sat", service_id="svc-sat"),
+    ]
+    rows = [row(1, "42 - 42WD - 13:00", "42-1", service_day="Sunday Service")]
+    pairing = pair_service_days(spec, rows, trips)["Sunday Service"]
+
+    # Both services cover the label completely — that is the trap.
+    assert pairing.coverage == 1.0
+    # Similarity does not tie: 1/1 against 1/3.
+    assert pairing.confident
+    assert pairing.service_id == "svc-sun"
+
+    result = derive_block_labels(spec, rows, trips, {"Sunday Service": pairing})
+    assert result.mapping == (("block-sun", "42-1", 1),)
+
+
+def test_naming_the_schedule_period_resolves_a_label_two_signups_share(
+    tmp_path,
+):
+    """STEP 2. A feed carries every signup at once. Link Transit publishes two
+    Saturday services — one running Jul 11-Aug 29, one from Sep 5 — and a
+    label saying "Saturday Service" cannot choose between them, so step 1
+    correctly refuses it and narrows nothing.
+
+    Naming the period the export describes removes the other signup from the
+    contest. The label then pairs, and the rows it covers stop being
+    ambiguous.
+    """
+    spec = _spec(tmp_path)
+    trips = [
+        # Summer Saturday signup.
+        trip("sum-1", "42", 13 * 3600, "block-summer", service_id="sat-summer"),
+        # Autumn Saturday signup: same route, same start, different block.
+        trip("aut-1", "42", 13 * 3600, "block-autumn", service_id="sat-autumn"),
+    ]
+    rows = [row(1, "42 - 42WD - 13:00", "42-1", service_day="Saturday Service")]
+
+    # Without a period: two services explain the label equally — refused.
+    unscoped = pair_service_days(spec, rows, trips)["Saturday Service"]
+    assert not unscoped.confident
+    assert derive_block_labels(
+        spec, rows, trips, {"Saturday Service": unscoped}
+    ).mapping == ()
+
+    # Declaring the summer signup leaves exactly one candidate.
+    scoped = pair_service_days(
+        spec, rows, trips, active_service_ids={"sat-summer"}
+    )["Saturday Service"]
+    assert scoped.confident
+    assert scoped.service_id == "sat-summer"
+    assert derive_block_labels(
+        spec, rows, trips, {"Saturday Service": scoped}
+    ).mapping == (("block-summer", "42-1", 1),)
+
+
+def test_a_wrong_schedule_period_cannot_strand_a_row(tmp_path):
+    """THE SAFETY RULE, EXTENDED TO STEP 2. Scoping applies to the PAIRING,
+    never to the candidate trips. So a date naming a signup this export does
+    not describe can only fail to improve things — it can never turn a row
+    that matches today into an unmatched one."""
+    spec = _spec(tmp_path)
+    trips = [trip("only", "42", 13 * 3600, "block-only", service_id="summer")]
+    rows = [row(1, "42 - 42WD - 13:00", "42-1", service_day="Saturday Service")]
+
+    pairings = pair_service_days(
+        spec, rows, trips, active_service_ids={"a-different-signup"}
+    )
+    result = derive_block_labels(spec, rows, trips, pairings)
+    assert result.counts.get(MATCHED) == 1
+    assert result.counts.get(UNMATCHED, 0) == 0
+    assert result.mapping == (("block-only", "42-1", 1),)

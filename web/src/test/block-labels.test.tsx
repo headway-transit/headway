@@ -38,6 +38,7 @@ function body(over: Record<string, unknown> = {}) {
     unmatched_examples: [],
     unparseable_examples: [],
     conflict_notes: [],
+    service_days: [],
     examples_capped_at: 20,
     note: "Nothing has been saved. This is what the file would do.",
     ...over,
@@ -203,6 +204,103 @@ describe("block-name upload", () => {
     // The counts are complete; the examples are not. Saying so stops a
     // reader treating one listed row as the only problem row.
     expect(screen.getByText(/counts above are complete/i)).toBeTruthy();
+  });
+
+  it("says which service days were used to separate blocks, and which were not", async () => {
+    // A reader who sees only the improved counts would assume every service
+    // day was separated. Both outcomes have to be on the page.
+    signInAs("certifying_official");
+    mockApi({
+      "POST /admin/block-labels/preview": () =>
+        result({
+          service_days: [
+            {
+              service_day: "Weekday",
+              used: true,
+              trips_named: 5610,
+              explanation:
+                "Used to tell blocks apart — service '18' covers 97% of the 5,610 trips this label names, and the next best service covers only 12%.",
+            },
+            {
+              service_day: "Training",
+              used: false,
+              trips_named: 5848,
+              explanation:
+                "Not used — no single service explains this label, so the label is left unpaired rather than guessed at.",
+            },
+          ],
+        }),
+    });
+    const user = userEvent.setup();
+    renderApp("/admin/block-labels");
+
+    await screen.findByRole("heading", { name: /block names/i, level: 1 });
+    await chooseFile(user);
+    await user.click(screen.getByRole("button", { name: /check this file/i }));
+
+    await screen.findByText("Weekday");
+    expect(screen.getByText("Training")).toBeTruthy();
+    // Text, never colour alone.
+    expect(screen.getByText(/Used to tell blocks apart/)).toBeTruthy();
+    expect(screen.getByText(/left unpaired rather than guessed at/)).toBeTruthy();
+    // Something did not pair, so the screen offers the period as a fix.
+    expect(screen.getByText(/enter a date inside it above/i)).toBeTruthy();
+  });
+
+  it("sends the schedule period when one is given, and omits it otherwise", async () => {
+    signInAs("certifying_official");
+    const calls = mockApi({
+      "POST /admin/block-labels/preview": () => result(),
+    });
+    const user = userEvent.setup();
+    renderApp("/admin/block-labels");
+
+    await screen.findByRole("heading", { name: /block names/i, level: 1 });
+    await chooseFile(user);
+    await user.click(screen.getByRole("button", { name: /check this file/i }));
+    await screen.findByText("33,202");
+
+    // Nothing entered: the request carries no period at all, so behaviour is
+    // exactly what it was before step 2 existed.
+    const first = calls.at(-1)?.body as FormData;
+    expect(first.get("schedule_date")).toBeNull();
+
+    await user.type(
+      screen.getByLabelText(/which schedule period/i),
+      "2026-08-01",
+    );
+    await user.click(screen.getByRole("button", { name: /check this file/i }));
+
+    await waitFor(() => {
+      const last = calls.at(-1)?.body as FormData;
+      expect(last.get("schedule_date")).toBe("2026-08-01");
+    });
+  });
+
+  it("suggests a schedule period only when one would have helped", async () => {
+    signInAs("certifying_official");
+    mockApi({
+      "POST /admin/block-labels/preview": () =>
+        result({
+          service_days: [
+            {
+              service_day: "Weekday",
+              used: true,
+              trips_named: 916,
+              explanation: "Used to tell blocks apart — service '18' covers 100%.",
+            },
+          ],
+        }),
+    });
+    const user = userEvent.setup();
+    renderApp("/admin/block-labels");
+    await screen.findByRole("heading", { name: /block names/i, level: 1 });
+    await chooseFile(user);
+    await user.click(screen.getByRole("button", { name: /check this file/i }));
+
+    await screen.findByText("Weekday");
+    // Everything paired — an always-on nudge would just be noise.
+    expect(screen.queryByText(/enter a date inside it above/i)).toBeNull();
   });
 
   it("warns about Excel before the file picker, not after the upload", async () => {

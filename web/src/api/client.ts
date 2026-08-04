@@ -1072,6 +1072,14 @@ export interface BlockLabelProblemRow {
   reason: string;
 }
 
+/** What the upload concluded about one service day in the file. */
+export interface ServiceDayNote {
+  service_day: string;
+  used: boolean;
+  trips_named: number;
+  explanation: string;
+}
+
 /** What an upload would do (preview) or did (load). Counts are complete;
  *  only the example lists are capped, and `examples_capped_at` says so. */
 export interface BlockLabelPreview {
@@ -1086,22 +1094,38 @@ export interface BlockLabelPreview {
   unmatched_examples: BlockLabelProblemRow[];
   unparseable_examples: BlockLabelProblemRow[];
   conflict_notes: string[];
+  service_days: ServiceDayNote[];
   examples_capped_at: number;
   note: string;
 }
 
-/** POST /admin/block-labels/preview — reports only. Writes nothing. */
-export function previewBlockLabels(file: File): Promise<BlockLabelPreview> {
+function blockLabelForm(file: File, scheduleDate?: string): FormData {
   const form = new FormData();
   form.append("file", file);
-  return request<BlockLabelPreview>("POST", "/admin/block-labels/preview", form);
+  // Optional. A feed carries every signup at once, so naming the period the
+  // export describes is what lets a service-day label pair to one schedule.
+  if (scheduleDate) form.append("schedule_date", scheduleDate);
+  return form;
+}
+
+/** POST /admin/block-labels/preview — reports only. Writes nothing. */
+export function previewBlockLabels(
+  file: File,
+  scheduleDate?: string,
+): Promise<BlockLabelPreview> {
+  return request<BlockLabelPreview>(
+    "POST", "/admin/block-labels/preview", blockLabelForm(file, scheduleDate),
+  );
 }
 
 /** POST /admin/block-labels/load — derives again and writes the mapping. */
-export function loadBlockLabels(file: File): Promise<BlockLabelPreview> {
-  const form = new FormData();
-  form.append("file", file);
-  return request<BlockLabelPreview>("POST", "/admin/block-labels/load", form);
+export function loadBlockLabels(
+  file: File,
+  scheduleDate?: string,
+): Promise<BlockLabelPreview> {
+  return request<BlockLabelPreview>(
+    "POST", "/admin/block-labels/load", blockLabelForm(file, scheduleDate),
+  );
 }
 
 // ---- users admin (handoff 0025, design point 1) ----

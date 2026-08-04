@@ -30,11 +30,16 @@ def _seed_schedule(fake_db):
     fake_db.add_canonical_trip("t4", "route-unknown", block_id="blk-C")
 
 
-def _upload(client, fake_db, csv_text: str, *, path: str, user: str = "cora"):
+def _upload(client, fake_db, csv_text: str, *, path: str, user: str = "cora",
+            schedule_date: str | None = None):
+    kwargs = {}
+    if schedule_date is not None:
+        kwargs["data"] = {"schedule_date": schedule_date}
     return client.post(
         path,
         files={"file": ("tripblock.csv", io.BytesIO(csv_text.encode()), "text/csv")},
         headers=auth_header(fake_db, user),
+        **kwargs,
     )
 
 
@@ -163,12 +168,13 @@ def test_a_header_row_is_tolerated_because_ssms_omits_one(client, fake_db):
     assert body["matched"] == 3
 
 
-def test_extra_columns_are_ignored_so_the_service_day_can_ride_along(
+def test_a_third_column_is_read_as_the_service_day_not_discarded(
     client, fake_db
 ):
-    """The real export carries a third column (service day). It is not part of
-    the join key, and rejecting the file over it would send an operator back to
-    SSMS for nothing."""
+    """The real export carries a third column (service day). It used to be
+    thrown away. Measured 2026-08-04, it is the ONLY thing that separates a
+    weekday block from a Saturday one — 43.7% of keys on a real feed are
+    ambiguous without it."""
     _seed_schedule(fake_db)
     three_col = "67 - 1E - 06:12,67-1,Weekday\n225 - 2N - 05:30,225-6,Saturday Service\n"
     body = _upload(
@@ -176,6 +182,72 @@ def test_extra_columns_are_ignored_so_the_service_day_can_ride_along(
     ).json()
     assert body["matched"] == 2
     assert body["labels_derived"] == 2
+    # Every service day in the file gets a line saying what was done with it.
+    assert {d["service_day"] for d in body["service_days"]} == {
+        "Weekday", "Saturday Service"
+    }
+
+
+def _two_service_schedule(fake_db):
+    """Route 42 at 13:00 runs on two services, on two different blocks — the
+    exact shape that makes the base (route, start) key ambiguous."""
+    fake_db.add_scheduled_trip("wk1", "42", 13 * 3600, "blk-wk", service_id="wk")
+    fake_db.add_scheduled_trip("wk2", "42", 14 * 3600, "blk-wk", service_id="wk")
+    fake_db.add_scheduled_trip("sa1", "42", 13 * 3600, "blk-sa", service_id="sa")
+    fake_db.add_scheduled_trip("sa2", "42", 15 * 3600, "blk-sa", service_id="sa")
+
+
+def test_the_service_day_turns_an_ambiguous_row_into_a_named_block(
+    client, fake_db
+):
+    """The whole point of step 1. Same rows, same schedule — the only
+    difference is whether the file carries its third column."""
+    _two_service_schedule(fake_db)
+    two_col = "42 - 42WD - 13:00,42-1\n42 - 42WD - 14:00,42-1\n"
+    without = _upload(
+        client, fake_db, two_col, path="/admin/block-labels/preview"
+    ).json()
+    # The 13:00 row is ambiguous (both services run it); the 14:00 row is
+    # uniquely weekday, so the block still gets named — off ONE row. This is
+    # why 43.7% ambiguous keys did not mean 43.7% unnamed blocks.
+    assert without["ambiguous"] == 1
+    assert without["matched"] == 1
+    assert without["labels_derived"] == 1
+
+    three_col = ("42 - 42WD - 13:00,42-1,Weekday\n"
+                 "42 - 42WD - 14:00,42-1,Weekday\n")
+    with_day = _upload(
+        client, fake_db, three_col, path="/admin/block-labels/preview"
+    ).json()
+    # Same one block, but now BOTH rows support it rather than one — the
+    # ambiguity is gone, not merely survived.
+    assert with_day["ambiguous"] == 0
+    assert with_day["matched"] == 2
+    assert with_day["labels_derived"] == 1
+
+    used = [d for d in with_day["service_days"] if d["used"]]
+    assert len(used) == 1
+    assert "Used to tell blocks apart" in used[0]["explanation"]
+
+
+def test_a_service_day_that_cannot_be_paired_says_so_and_narrows_nothing(
+    client, fake_db
+):
+    """Two services explaining one label equally well — overlapping schedule
+    versions. The screen has to say it was NOT used, or a reader assumes the
+    separation happened."""
+    fake_db.add_scheduled_trip("a", "42", 13 * 3600, "blk-a", service_id="s1")
+    fake_db.add_scheduled_trip("b", "42", 13 * 3600, "blk-b", service_id="s2")
+    body = _upload(
+        client, fake_db, "42 - 42WD - 13:00,42-1,Saturday Service\n",
+        path="/admin/block-labels/preview",
+    ).json()
+
+    assert body["ambiguous"] == 1
+    assert body["labels_derived"] == 0
+    note = body["service_days"][0]
+    assert note["used"] is False
+    assert "Not used" in note["explanation"]
 
 
 def test_an_empty_or_single_column_file_says_what_is_wrong(client, fake_db):
@@ -214,3 +286,63 @@ def test_preview_and_load_agree_because_they_derive_identically(
     for field in ("rows_read", "matched", "ambiguous", "unmatched",
                   "unparseable", "labels_derived", "conflicts"):
         assert preview[field] == loaded[field], field
+
+
+def test_naming_the_schedule_period_pairs_a_label_two_signups_share(
+    client, fake_db
+):
+    """STEP 2. Two Saturday signups run the same route at the same time on
+    different blocks. The label cannot choose between them — until the
+    operator says which period the export describes."""
+    import datetime as dt
+
+    from conftest import UTC
+
+    summer = dt.datetime(2026, 8, 1, tzinfo=UTC).date()
+    autumn = dt.datetime(2026, 10, 3, tzinfo=UTC).date()
+    fake_db.add_service_dates("sat-summer", summer)
+    fake_db.add_service_dates("sat-autumn", autumn)
+    fake_db.add_scheduled_trip("s1", "42", 13 * 3600, "blk-summer",
+                               service_id="sat-summer")
+    fake_db.add_scheduled_trip("a1", "42", 13 * 3600, "blk-autumn",
+                               service_id="sat-autumn")
+    csv_text = "42 - 42WD - 13:00,42-1,Saturday Service\n"
+
+    without = _upload(
+        client, fake_db, csv_text, path="/admin/block-labels/preview"
+    ).json()
+    assert without["ambiguous"] == 1
+    assert without["labels_derived"] == 0
+    assert without["service_days"][0]["used"] is False
+
+    scoped = _upload(
+        client, fake_db, csv_text, path="/admin/block-labels/preview",
+        schedule_date="2026-08-01",
+    ).json()
+    assert scoped["ambiguous"] == 0
+    assert scoped["matched"] == 1
+    assert scoped["labels_derived"] == 1
+    assert scoped["service_days"][0]["used"] is True
+
+
+def test_an_unreadable_schedule_date_says_what_shape_to_use(client, fake_db):
+    _seed_schedule(fake_db)
+    r = _upload(client, fake_db, GOOD, path="/admin/block-labels/preview",
+                schedule_date="last August")
+    assert r.status_code == 422
+    assert "2026-08-01" in r.json()["detail"]
+
+
+def test_the_declared_period_is_recorded_in_the_audit_trail(client, fake_db):
+    """It changes which blocks get named, so it belongs beside the file's
+    digest — not only in the operator's memory."""
+    import json
+
+    _seed_schedule(fake_db)
+    _upload(client, fake_db, GOOD, path="/admin/block-labels/load",
+            schedule_date="2026-08-01")
+    event = [
+        e for e in fake_db.audit_events if e["action"] == "block_labels_loaded"
+    ][-1]
+    detail = json.loads(event["detail"]) if isinstance(event["detail"], str) else event["detail"]
+    assert detail["schedule_date"] == "2026-08-01"

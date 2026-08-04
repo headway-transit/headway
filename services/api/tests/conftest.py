@@ -128,6 +128,8 @@ class FakeConn:
         self.canonical_trips: dict[str, dict] = {}
         # canonical.block_labels (migration 0038), keyed by block_id.
         self.block_labels: dict[str, dict] = {}
+        # canonical.service_calendar_dates: service_id -> dates it runs.
+        self.service_dates: dict[str, list] = {}
         self.stop_times: list[dict] = []
         # Revenue review queue (handoff 0040 / migration 0040): no-run
         # boardings the calculation held out of the figure pending a human
@@ -473,6 +475,16 @@ class FakeConn:
             rows.sort(key=lambda r: str(r[0]))
             return FakeCursor(rows)
 
+        if q.startswith("SELECT DISTINCT service_id FROM canonical.service_calendar_dates"):
+            # block_labels.SELECT_ACTIVE_SERVICES_SQL — the signup the
+            # operator declared, resolved to the services running that week.
+            on_date = params[0]
+            out = {
+                sid for sid, dates in self.service_dates.items()
+                if any(abs((d - on_date).days) <= 7 for d in dates)
+            }
+            return FakeCursor([(sid,) for sid in sorted(out)])
+
         if q.startswith("SELECT t.trip_id, r.short_name, f.departure_seconds"):
             # block_labels.SELECT_TRIPS_WITH_BLOCKS_SQL. The LEFT JOINs are
             # modelled honestly: a trip with no route or no stop_times yields
@@ -490,6 +502,7 @@ class FakeConn:
                     route.get("short_name") if route else None,
                     times[0].get("departure_seconds") if times else None,
                     t.get("block_id"),
+                    t.get("service_id"),
                 ))
             return FakeCursor(out)
 
@@ -2276,11 +2289,13 @@ class FakeConn:
         }
         return self.canonical_routes[route_id]
 
-    def add_canonical_trip(self, trip_id, route_id, block_id=None):
+    def add_canonical_trip(self, trip_id, route_id, block_id=None,
+                           service_id=None):
         self.canonical_trips[trip_id] = {
             "trip_id": trip_id,
             "route_id": route_id,
             "block_id": block_id,
+            "service_id": service_id,
         }
         return self.canonical_trips[trip_id]
 
@@ -2291,14 +2306,22 @@ class FakeConn:
                 {"trip_id": trip_id, "stop_id": stop_id, "stop_sequence": seq}
             )
 
+    def add_service_dates(self, service_id, *dates):
+        """The days one GTFS service runs — what a declared schedule date is
+        resolved against."""
+        self.service_dates.setdefault(service_id, []).extend(dates)
+
     def add_scheduled_trip(self, trip_id, route_short_name, departure_seconds,
-                           block_id):
+                           block_id, service_id=None):
         """One trip the block-label deriver can address: a route short name, a
-        first departure, and the feed's own opaque block id."""
+        first departure, the feed's own opaque block id, and the service it
+        runs under (which is what separates a weekday block from a Saturday
+        one — measured 2026-08-04)."""
         route_id = f"route-{route_short_name}"
         if route_id not in self.canonical_routes:
             self.add_canonical_route(route_id, short_name=route_short_name)
-        self.add_canonical_trip(trip_id, route_id, block_id=block_id)
+        self.add_canonical_trip(trip_id, route_id, block_id=block_id,
+                                service_id=service_id)
         self.stop_times.append({
             "trip_id": trip_id, "stop_id": f"{trip_id}-s1",
             "stop_sequence": 1, "departure_seconds": departure_seconds,

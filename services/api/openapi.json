@@ -5630,6 +5630,14 @@
             "title": "Conflict Notes",
             "default": []
           },
+          "service_days": {
+            "items": {
+              "$ref": "#/components/schemas/ServiceDayNote"
+            },
+            "type": "array",
+            "title": "Service Days",
+            "default": []
+          },
           "examples_capped_at": {
             "type": "integer",
             "title": "Examples Capped At",
@@ -5894,6 +5902,17 @@
             "type": "string",
             "contentMediaType": "application/octet-stream",
             "title": "File"
+          },
+          "schedule_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Schedule Date"
           }
         },
         "type": "object",
@@ -5908,6 +5927,17 @@
             "type": "string",
             "contentMediaType": "application/octet-stream",
             "title": "File"
+          },
+          "schedule_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Schedule Date"
           }
         },
         "type": "object",
@@ -11918,6 +11948,35 @@
           "preview_allowed"
         ],
         "title": "SensitivityBlock"
+      },
+      "ServiceDayNote": {
+        "properties": {
+          "service_day": {
+            "type": "string",
+            "title": "Service Day"
+          },
+          "used": {
+            "type": "boolean",
+            "title": "Used"
+          },
+          "trips_named": {
+            "type": "integer",
+            "title": "Trips Named"
+          },
+          "explanation": {
+            "type": "string",
+            "title": "Explanation"
+          }
+        },
+        "type": "object",
+        "required": [
+          "service_day",
+          "used",
+          "trips_named",
+          "explanation"
+        ],
+        "title": "ServiceDayNote",
+        "description": "What the upload concluded about one of the export's service days."
       },
       "ServiceDayOverride": {
         "properties": {
