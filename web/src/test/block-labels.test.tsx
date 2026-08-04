@@ -38,6 +38,7 @@ function body(over: Record<string, unknown> = {}) {
     unmatched_examples: [],
     unparseable_examples: [],
     conflict_notes: [],
+    service_days: [],
     examples_capped_at: 20,
     note: "Nothing has been saved. This is what the file would do.",
     ...over,
@@ -203,6 +204,45 @@ describe("block-name upload", () => {
     // The counts are complete; the examples are not. Saying so stops a
     // reader treating one listed row as the only problem row.
     expect(screen.getByText(/counts above are complete/i)).toBeTruthy();
+  });
+
+  it("says which service days were used to separate blocks, and which were not", async () => {
+    // A reader who sees only the improved counts would assume every service
+    // day was separated. Both outcomes have to be on the page.
+    signInAs("certifying_official");
+    mockApi({
+      "POST /admin/block-labels/preview": () =>
+        result({
+          service_days: [
+            {
+              service_day: "Weekday",
+              used: true,
+              trips_named: 5610,
+              explanation:
+                "Used to tell blocks apart — service '18' covers 97% of the 5,610 trips this label names, and the next best service covers only 12%.",
+            },
+            {
+              service_day: "Training",
+              used: false,
+              trips_named: 5848,
+              explanation:
+                "Not used — no single service explains this label, so the label is left unpaired rather than guessed at.",
+            },
+          ],
+        }),
+    });
+    const user = userEvent.setup();
+    renderApp("/admin/block-labels");
+
+    await screen.findByRole("heading", { name: /block names/i, level: 1 });
+    await chooseFile(user);
+    await user.click(screen.getByRole("button", { name: /check this file/i }));
+
+    await screen.findByText("Weekday");
+    expect(screen.getByText("Training")).toBeTruthy();
+    // Text, never colour alone.
+    expect(screen.getByText(/Used to tell blocks apart/)).toBeTruthy();
+    expect(screen.getByText(/left unpaired rather than guessed at/)).toBeTruthy();
   });
 
   it("warns about Excel before the file picker, not after the upload", async () => {

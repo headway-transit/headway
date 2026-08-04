@@ -163,12 +163,13 @@ def test_a_header_row_is_tolerated_because_ssms_omits_one(client, fake_db):
     assert body["matched"] == 3
 
 
-def test_extra_columns_are_ignored_so_the_service_day_can_ride_along(
+def test_a_third_column_is_read_as_the_service_day_not_discarded(
     client, fake_db
 ):
-    """The real export carries a third column (service day). It is not part of
-    the join key, and rejecting the file over it would send an operator back to
-    SSMS for nothing."""
+    """The real export carries a third column (service day). It used to be
+    thrown away. Measured 2026-08-04, it is the ONLY thing that separates a
+    weekday block from a Saturday one — 43.7% of keys on a real feed are
+    ambiguous without it."""
     _seed_schedule(fake_db)
     three_col = "67 - 1E - 06:12,67-1,Weekday\n225 - 2N - 05:30,225-6,Saturday Service\n"
     body = _upload(
@@ -176,6 +177,72 @@ def test_extra_columns_are_ignored_so_the_service_day_can_ride_along(
     ).json()
     assert body["matched"] == 2
     assert body["labels_derived"] == 2
+    # Every service day in the file gets a line saying what was done with it.
+    assert {d["service_day"] for d in body["service_days"]} == {
+        "Weekday", "Saturday Service"
+    }
+
+
+def _two_service_schedule(fake_db):
+    """Route 42 at 13:00 runs on two services, on two different blocks — the
+    exact shape that makes the base (route, start) key ambiguous."""
+    fake_db.add_scheduled_trip("wk1", "42", 13 * 3600, "blk-wk", service_id="wk")
+    fake_db.add_scheduled_trip("wk2", "42", 14 * 3600, "blk-wk", service_id="wk")
+    fake_db.add_scheduled_trip("sa1", "42", 13 * 3600, "blk-sa", service_id="sa")
+    fake_db.add_scheduled_trip("sa2", "42", 15 * 3600, "blk-sa", service_id="sa")
+
+
+def test_the_service_day_turns_an_ambiguous_row_into_a_named_block(
+    client, fake_db
+):
+    """The whole point of step 1. Same rows, same schedule — the only
+    difference is whether the file carries its third column."""
+    _two_service_schedule(fake_db)
+    two_col = "42 - 42WD - 13:00,42-1\n42 - 42WD - 14:00,42-1\n"
+    without = _upload(
+        client, fake_db, two_col, path="/admin/block-labels/preview"
+    ).json()
+    # The 13:00 row is ambiguous (both services run it); the 14:00 row is
+    # uniquely weekday, so the block still gets named — off ONE row. This is
+    # why 43.7% ambiguous keys did not mean 43.7% unnamed blocks.
+    assert without["ambiguous"] == 1
+    assert without["matched"] == 1
+    assert without["labels_derived"] == 1
+
+    three_col = ("42 - 42WD - 13:00,42-1,Weekday\n"
+                 "42 - 42WD - 14:00,42-1,Weekday\n")
+    with_day = _upload(
+        client, fake_db, three_col, path="/admin/block-labels/preview"
+    ).json()
+    # Same one block, but now BOTH rows support it rather than one — the
+    # ambiguity is gone, not merely survived.
+    assert with_day["ambiguous"] == 0
+    assert with_day["matched"] == 2
+    assert with_day["labels_derived"] == 1
+
+    used = [d for d in with_day["service_days"] if d["used"]]
+    assert len(used) == 1
+    assert "Used to tell blocks apart" in used[0]["explanation"]
+
+
+def test_a_service_day_that_cannot_be_paired_says_so_and_narrows_nothing(
+    client, fake_db
+):
+    """Two services explaining one label equally well — overlapping schedule
+    versions. The screen has to say it was NOT used, or a reader assumes the
+    separation happened."""
+    fake_db.add_scheduled_trip("a", "42", 13 * 3600, "blk-a", service_id="s1")
+    fake_db.add_scheduled_trip("b", "42", 13 * 3600, "blk-b", service_id="s2")
+    body = _upload(
+        client, fake_db, "42 - 42WD - 13:00,42-1,Saturday Service\n",
+        path="/admin/block-labels/preview",
+    ).json()
+
+    assert body["ambiguous"] == 1
+    assert body["labels_derived"] == 0
+    note = body["service_days"][0]
+    assert note["used"] is False
+    assert "Not used" in note["explanation"]
 
 
 def test_an_empty_or_single_column_file_says_what_is_wrong(client, fake_db):

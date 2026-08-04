@@ -28,6 +28,7 @@ import {
   previewBlockLabels,
   type BlockLabelPreview,
   type BlockLabelProblemRow,
+  type ServiceDayNote,
 } from "../api/client";
 import { canCertify, useSession } from "../auth/session";
 import { Breadcrumbs } from "../components/Breadcrumbs";
@@ -87,6 +88,45 @@ function ProblemTable({
   );
 }
 
+/**
+ * What each service day in the file was used for. This is shown whether or
+ * not it helped, because a narrowing nobody can inspect is a narrowing
+ * nobody should trust — and a reader who sees only the improved counts would
+ * assume every service day was separated when some were left alone.
+ */
+function ServiceDays({ notes }: { notes: ServiceDayNote[] }) {
+  if (notes.length === 0) return null;
+  return (
+    <>
+      <h4>{t.serviceDaysHeading}</h4>
+      <p>{t.serviceDaysIntro}</p>
+      <div className="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th scope="col">{t.columnServiceDay}</th>
+              <th scope="col">{t.columnUsed}</th>
+              <th scope="col">{t.columnTripsNamed}</th>
+              <th scope="col">{t.columnWhy}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {notes.map((n) => (
+              <tr key={n.service_day}>
+                <td>{n.service_day}</td>
+                {/* Text, never colour alone — WCAG AA. */}
+                <td>{n.used ? t.serviceDayUsed : t.serviceDayNotUsed}</td>
+                <td>{t.serviceDayTrips(n.trips_named)}</td>
+                <td>{n.explanation}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
+  );
+}
+
 function Result({
   result,
   saved,
@@ -129,6 +169,8 @@ function Result({
         // read the leftover count as a failure.
         <p>{t.partialNote(result.labels_derived, result.rows_read)}</p>
       )}
+
+      <ServiceDays notes={result.service_days} />
 
       {result.conflict_notes.length > 0 && (
         <>

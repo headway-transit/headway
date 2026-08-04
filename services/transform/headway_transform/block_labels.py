@@ -78,6 +78,10 @@ class MappingRow:
     line_no: int
     trip_name: str
     block_name: str
+    #: The export's own service-day label ("Weekday", "Saturday Service",
+    #: "MUT", "Training", ...) when the file carries one. NEVER interpreted
+    #: as text — see pair_service_days for why.
+    service_day: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -88,6 +92,9 @@ class TripWithBlock:
     route_short_name: Optional[str]
     first_departure_seconds: Optional[int]
     block_id: Optional[str]
+    #: GTFS service_id. Opaque on purpose: it is matched by the trips it
+    #: covers, never by what it is called.
+    service_id: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -210,20 +217,171 @@ def read_mapping_csv(path: Path | str) -> tuple[list[MappingRow], str]:
     return rows, sha256
 
 
+#: A service-day name is paired to a GTFS service only when that service
+#: covers nearly all of the name's trips. Below this, the pairing is not
+#: evidence, it is a hunch, and the rows fall back to the unnarrowed key.
+MIN_PAIRING_COVERAGE = 0.90
+
+#: ...and only when it is a CLEAR winner. If the runner-up is close behind,
+#: two services explain the name about equally well (overlapping signups),
+#: and choosing either would put an invented block name on a finding.
+MIN_PAIRING_MARGIN = 0.20
+
+
+@dataclass(frozen=True)
+class ServiceDayPairing:
+    """Which GTFS service an export's service-day label was found to mean.
+
+    NOTHING HERE READS THE NAME. An export says "Weekday", "Saturday
+    Service", "MUT", "MUWT", "F", "Training" — 46 distinct labels in the
+    partner agency's file — and only the first two are guessable. "MUT"
+    might be Monday/Tuesday, or Monday-Tuesday-Thursday; "Training" almost
+    certainly corresponds to no GTFS service at all. A wrong guess here
+    silently attaches the wrong block name to a federal figure, which is
+    strictly worse than the ambiguity it was trying to remove.
+
+    So the pairing is measured instead: each label covers a set of
+    (route, start) keys, each GTFS service covers a set of the same, and a
+    label is paired to the service that actually explains its trips.
+    """
+
+    service_day: str
+    #: The winning service, or None when nothing was confident enough.
+    service_id: Optional[str]
+    keys_in_export: int
+    keys_explained: int
+    coverage: float
+    runner_up_coverage: float
+    confident: bool
+    reason: str
+
+
+def _export_keys_by_service_day(
+    spec: ResolutionSpec, rows: Iterable[MappingRow]
+) -> dict[str, set[tuple[str, int]]]:
+    keys: dict[str, set[tuple[str, int]]] = {}
+    for row in rows:
+        if not row.service_day:
+            continue
+        parsed = parse_trip_name(spec, row.trip_name)
+        if not parsed.ok or parsed.start_seconds is None:
+            continue
+        assert parsed.parsed is not None
+        keys.setdefault(row.service_day, set()).add(
+            (parsed.parsed[spec.route_component], parsed.start_seconds)
+        )
+    return keys
+
+
+def pair_service_days(
+    spec: ResolutionSpec,
+    rows: Iterable[MappingRow],
+    trips: Iterable[TripWithBlock],
+) -> dict[str, ServiceDayPairing]:
+    """Pair each export service-day label to the GTFS service it describes.
+
+    Measured, never guessed: a label's (route, start) keys are compared to
+    each service's, and the label is paired to the service that covers it —
+    but only when that service covers nearly all of it AND beats the
+    runner-up clearly. Anything less is reported as not confident, and those
+    rows keep today's behaviour rather than being narrowed on a hunch.
+    """
+    rows = list(rows)
+    trips = list(trips)
+    export_keys = _export_keys_by_service_day(spec, rows)
+
+    service_keys: dict[str, set[tuple[str, int]]] = {}
+    for trip in trips:
+        if (
+            trip.service_id is None
+            or trip.route_short_name is None
+            or trip.first_departure_seconds is None
+        ):
+            continue
+        service_keys.setdefault(trip.service_id, set()).add(
+            (trip.route_short_name, trip.first_departure_seconds)
+        )
+
+    pairings: dict[str, ServiceDayPairing] = {}
+    for service_day, keys in sorted(export_keys.items()):
+        if not keys:
+            continue
+        scored = sorted(
+            (
+                (len(keys & covered) / len(keys), service_id)
+                for service_id, covered in service_keys.items()
+            ),
+            key=lambda pair: (-pair[0], pair[1]),
+        )
+        best_cov, best_id = scored[0] if scored else (0.0, None)
+        runner_up = scored[1][0] if len(scored) > 1 else 0.0
+        confident = (
+            best_id is not None
+            and best_cov >= MIN_PAIRING_COVERAGE
+            and (best_cov - runner_up) >= MIN_PAIRING_MARGIN
+        )
+        if confident:
+            reason = (
+                f"service {best_id!r} covers {best_cov:.0%} of the "
+                f"{len(keys)} trips this label names, and the next best "
+                f"service covers only {runner_up:.0%}"
+            )
+        elif best_id is None:
+            reason = "the loaded schedule carries no services to compare against"
+        elif best_cov < MIN_PAIRING_COVERAGE:
+            reason = (
+                f"no single service explains this label — the best covers "
+                f"only {best_cov:.0%} of its {len(keys)} trips, so the label "
+                f"is left unpaired rather than guessed at"
+            )
+        else:
+            reason = (
+                f"two services explain this label about equally well "
+                f"({best_cov:.0%} and {runner_up:.0%}) — overlapping "
+                f"schedule versions, left unpaired rather than chosen between"
+            )
+        pairings[service_day] = ServiceDayPairing(
+            service_day=service_day,
+            service_id=best_id if confident else None,
+            keys_in_export=len(keys),
+            keys_explained=int(round(best_cov * len(keys))),
+            coverage=best_cov,
+            runner_up_coverage=runner_up,
+            confident=confident,
+            reason=reason,
+        )
+    return pairings
+
+
 def derive_block_labels(
     spec: ResolutionSpec,
     rows: Iterable[MappingRow],
     trips: Iterable[TripWithBlock],
+    service_day_pairings: Optional[dict[str, ServiceDayPairing]] = None,
 ) -> DerivationResult:
     """Join mapping rows to feed blocks through the resolver's own parse.
 
-    The join key is (route short name, first scheduled departure) across the
-    WHOLE schedule — deliberately without service day or direction: the
-    mapping file carries neither, and the key only has to name one BLOCK,
-    not one trip. Several scheduled trips may share the key (weekday and
-    Saturday variants); the row still matches when they all agree on the
-    block. The moment they do not — two distinct block_ids, or a candidate
-    with no block at all — the row is ambiguous and says so.
+    The base join key is (route short name, first scheduled departure). It
+    only has to name one BLOCK, not one trip, so several scheduled trips may
+    share it and the row still matches when they all agree on the block.
+
+    THE SERVICE DAY, WHEN THE EXPORT CARRIES ONE. Measured on two real feeds
+    (2026-08-04), that base key is ambiguous for 43.7% of keys on Link
+    Transit's published feed and 17.7% of trip names in the partner agency's
+    export. The cause is the same both times: a feed carries several service
+    patterns at once, so one route and start time belongs to DIFFERENT blocks
+    on a weekday and a Saturday, and the key collapses them.
+
+    Adding direction does NOT help — measured at 43.7% -> 43.3%, because
+    colliding trips are the same direction, the same pattern on different
+    days. Narrowing candidates to the row's own service takes it to 24.3%.
+
+    NARROWING CAN ONLY HELP, NEVER HURT. It applies to a row only when the
+    pairing was confident, and if it would leave NO candidate the row falls
+    back to the unnarrowed set. So every row that matches today still
+    matches; some rows that were ambiguous become matched. A row can never
+    become unmatched because of this, and a block can never acquire a name
+    it would not otherwise have had from a different service's trips.
     """
     by_key: dict[tuple[str, int], list[TripWithBlock]] = {}
     for trip in trips:
@@ -257,6 +415,19 @@ def derive_block_labels(
         assert name_parse.start_seconds is not None
         route_value = name_parse.parsed[spec.route_component]
         candidates = by_key.get((route_value, name_parse.start_seconds), [])
+
+        # Narrow to the row's own service when — and only when — the label
+        # was confidently paired. An empty result means the pairing does not
+        # describe this row, so the unnarrowed set stands: turning a match
+        # into an unmatched row would be a regression dressed as precision.
+        pairing = (service_day_pairings or {}).get(row.service_day or "")
+        if pairing is not None and pairing.confident and candidates:
+            narrowed = [
+                c for c in candidates if c.service_id == pairing.service_id
+            ]
+            if narrowed:
+                candidates = narrowed
+
         if not candidates:
             outcomes.append(
                 RowOutcome(
@@ -357,7 +528,8 @@ def derive_block_labels(
 #: feed's block_id. The 0031 SELECT with block_id added; same LATERAL, same
 #: deterministic ORDER BY.
 SELECT_TRIPS_WITH_BLOCKS_SQL = (
-    "SELECT t.trip_id, r.short_name, f.departure_seconds, t.block_id "
+    "SELECT t.trip_id, r.short_name, f.departure_seconds, t.block_id, "
+    "t.service_id "
     "FROM canonical.trips AS t "
     "LEFT JOIN canonical.routes AS r ON r.route_id = t.route_id "
     "LEFT JOIN LATERAL ("
@@ -396,8 +568,10 @@ def load_scheduled_trips(connection: Any) -> list[TripWithBlock]:
                     None if departure is None else int(departure)
                 ),
                 block_id=block_id,
+                service_id=None if service_id is None else str(service_id),
             )
-            for trip_id, short_name, departure, block_id in cursor.fetchall()
+            for trip_id, short_name, departure, block_id, service_id
+            in cursor.fetchall()
         ]
     finally:
         close = getattr(cursor, "close", None)

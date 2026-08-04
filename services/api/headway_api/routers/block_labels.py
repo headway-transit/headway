@@ -77,6 +77,15 @@ class ProblemRow(BaseModel):
     reason: str
 
 
+class ServiceDayNote(BaseModel):
+    """What the upload concluded about one of the export's service days."""
+
+    service_day: str
+    used: bool
+    trips_named: int
+    explanation: str
+
+
 class BlockLabelPreview(BaseModel):
     #: Complete counts, never sampled.
     rows_read: int
@@ -92,6 +101,10 @@ class BlockLabelPreview(BaseModel):
     unmatched_examples: list[ProblemRow] = []
     unparseable_examples: list[ProblemRow] = []
     conflict_notes: list[str] = []
+    #: One line per service day in the file, saying whether it was used to
+    #: separate blocks and why. A narrowing nobody can inspect is a narrowing
+    #: nobody should trust.
+    service_days: list[ServiceDayNote] = []
     examples_capped_at: int = SAMPLE_CAP
     note: str
 
@@ -138,6 +151,7 @@ def _derive(raw: bytes):
         MappingRow,
         derive_block_labels,
         load_scheduled_trips,
+        pair_service_days,
     )
 
     try:
@@ -164,6 +178,10 @@ def _derive(raw: bytes):
                 ),
             )
         trip_name, block_name = fields[0].strip(), fields[1].strip()
+        # Column 3, when present, is the export's service day. It used to be
+        # discarded ("extra columns are ignored"); measured 2026-08-04, it is
+        # the single thing that separates a weekday block from a Saturday one.
+        service_day = fields[2].strip() if len(fields) > 2 else None
         # A header row is tolerated rather than required — SSMS omits headers
         # when saving a grid, and demanding one would fail the common case.
         if line_no == 1 and trip_name.lower().replace(" ", "") == "tripname":
@@ -171,7 +189,8 @@ def _derive(raw: bytes):
         if not trip_name or not block_name:
             continue
         rows.append(MappingRow(line_no=line_no, trip_name=trip_name,
-                               block_name=block_name))
+                               block_name=block_name,
+                               service_day=service_day or None))
     if not rows:
         raise HTTPException(
             status_code=422,
@@ -184,7 +203,7 @@ def _derive(raw: bytes):
         spec = load_resolution_spec(_spec_path())
     except MappingFileError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
-    return spec, rows, load_scheduled_trips, derive_block_labels
+    return spec, rows, load_scheduled_trips, derive_block_labels, pair_service_days
 
 
 def _samples(outcomes, status: str) -> list[ProblemRow]:
@@ -200,7 +219,8 @@ def _samples(outcomes, status: str) -> list[ProblemRow]:
     ][:SAMPLE_CAP]
 
 
-def _to_preview(result, rows_read: int, note: str) -> BlockLabelPreview:
+def _to_preview(result, rows_read: int, note: str, pairings=None
+) -> BlockLabelPreview:
     from headway_transform.block_labels import (
         AMBIGUOUS,
         MATCHED,
@@ -219,6 +239,22 @@ def _to_preview(result, rows_read: int, note: str) -> BlockLabelPreview:
         ambiguous_examples=_samples(result.outcomes, AMBIGUOUS),
         unmatched_examples=_samples(result.outcomes, UNMATCHED),
         unparseable_examples=_samples(result.outcomes, UNPARSEABLE),
+        service_days=[
+            ServiceDayNote(
+                service_day=p.service_day,
+                used=p.confident,
+                trips_named=p.keys_in_export,
+                explanation=(
+                    f"Used to tell blocks apart — {p.reason}."
+                    if p.confident
+                    else f"Not used — {p.reason}."
+                ),
+            )
+            for p in sorted(
+                (pairings or {}).values(),
+                key=lambda x: (not x.confident, x.service_day),
+            )
+        ],
         conflict_notes=[
             f"Block {c.block_id} was given {len(c.labels)} different names "
             f"({', '.join(sorted(c.labels))}) — left out rather than guessed at."
@@ -236,11 +272,14 @@ def preview_block_labels(
 ) -> BlockLabelPreview:
     """Read the export and report what WOULD happen. Writes nothing."""
     raw = _read_upload(file)
-    spec, rows, load_trips, derive = _derive(raw)
-    result = derive(spec, rows, load_trips(db))
+    spec, rows, load_trips, derive, pair = _derive(raw)
+    trips = load_trips(db)
+    pairings = pair(spec, rows, trips)
+    result = derive(spec, rows, trips, pairings)
     return _to_preview(
         result,
         len(rows),
+        pairings=pairings,
         note=(
             "Nothing has been saved. This is what the file would do if you "
             "load it. Rows listed as ambiguous, unmatched or unreadable are "
@@ -264,8 +303,10 @@ def load_block_label_mapping(
     from headway_transform.block_labels import load_block_labels
 
     raw = _read_upload(file)
-    spec, rows, load_trips, derive = _derive(raw)
-    result = derive(spec, rows, load_trips(db))
+    spec, rows, load_trips, derive, pair = _derive(raw)
+    trips = load_trips(db)
+    pairings = pair(spec, rows, trips)
+    result = derive(spec, rows, trips, pairings)
 
     # The same provenance the CLI writes (tools/block-labels/derive.py): the
     # bytes' own digest, and the parse config that read them. Both are needed
@@ -309,6 +350,7 @@ def load_block_label_mapping(
     return _to_preview(
         result,
         len(rows),
+        pairings=pairings,
         note=(
             f"Saved. {written} blocks will now be named the way your run board "
             f"names them, on findings raised from here on. Findings raised "

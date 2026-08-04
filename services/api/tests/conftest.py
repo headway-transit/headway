@@ -490,6 +490,7 @@ class FakeConn:
                     route.get("short_name") if route else None,
                     times[0].get("departure_seconds") if times else None,
                     t.get("block_id"),
+                    t.get("service_id"),
                 ))
             return FakeCursor(out)
 
@@ -2276,11 +2277,13 @@ class FakeConn:
         }
         return self.canonical_routes[route_id]
 
-    def add_canonical_trip(self, trip_id, route_id, block_id=None):
+    def add_canonical_trip(self, trip_id, route_id, block_id=None,
+                           service_id=None):
         self.canonical_trips[trip_id] = {
             "trip_id": trip_id,
             "route_id": route_id,
             "block_id": block_id,
+            "service_id": service_id,
         }
         return self.canonical_trips[trip_id]
 
@@ -2292,13 +2295,16 @@ class FakeConn:
             )
 
     def add_scheduled_trip(self, trip_id, route_short_name, departure_seconds,
-                           block_id):
+                           block_id, service_id=None):
         """One trip the block-label deriver can address: a route short name, a
-        first departure, and the feed's own opaque block id."""
+        first departure, the feed's own opaque block id, and the service it
+        runs under (which is what separates a weekday block from a Saturday
+        one — measured 2026-08-04)."""
         route_id = f"route-{route_short_name}"
         if route_id not in self.canonical_routes:
             self.add_canonical_route(route_id, short_name=route_short_name)
-        self.add_canonical_trip(trip_id, route_id, block_id=block_id)
+        self.add_canonical_trip(trip_id, route_id, block_id=block_id,
+                                service_id=service_id)
         self.stop_times.append({
             "trip_id": trip_id, "stop_id": f"{trip_id}-s1",
             "stop_sequence": 1, "departure_seconds": departure_seconds,

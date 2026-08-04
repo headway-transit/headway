@@ -1072,6 +1072,14 @@ export interface BlockLabelProblemRow {
   reason: string;
 }
 
+/** What the upload concluded about one service day in the file. */
+export interface ServiceDayNote {
+  service_day: string;
+  used: boolean;
+  trips_named: number;
+  explanation: string;
+}
+
 /** What an upload would do (preview) or did (load). Counts are complete;
  *  only the example lists are capped, and `examples_capped_at` says so. */
 export interface BlockLabelPreview {
@@ -1086,6 +1094,7 @@ export interface BlockLabelPreview {
   unmatched_examples: BlockLabelProblemRow[];
   unparseable_examples: BlockLabelProblemRow[];
   conflict_notes: string[];
+  service_days: ServiceDayNote[];
   examples_capped_at: number;
   note: string;
 }
