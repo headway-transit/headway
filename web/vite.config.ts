@@ -100,5 +100,24 @@ export default defineConfig({
      * which is the trade a green gate exists to make.
      */
     maxWorkers: 4,
+    /**
+     * Timeout headroom (2026-08-03). Capping the pool stops the suite
+     * saturating ITSELF, but does nothing when the machine is loaded from
+     * outside — which is exactly what a shared CI runner is. `maxWorkers: 4`
+     * on a 4-core ubuntu-latest runner is fully subscribed with no headroom.
+     *
+     * Under external load this suite fails 1-3 tests per run, a DIFFERENT
+     * one each time (sso-login, disclosure, safety, sampling), and every
+     * single failure reads `Test timed out in 5000ms` — never an assertion.
+     * Six such timeouts across three loaded runs; four unloaded runs were
+     * 506/506 green. One of them turned a real CI red into two reds and sent
+     * me looking for a second bug that was not there.
+     *
+     * Raising the ceiling cannot slow a green run: a timeout only elapses
+     * when a test is ALREADY hanging. So this trades nothing for a gate that
+     * fails on defects instead of on scheduling.
+     */
+    testTimeout: 20000,
+    hookTimeout: 20000,
   },
 });
