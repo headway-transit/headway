@@ -39,6 +39,14 @@ dependencies = [
                           # (`pip install services/calc`); the api Docker
                           # image must do the same — Dockerfile follow-up,
                           # see README "MR-20 preview report".
+    "headway-transform>=0.1",
+                          # Apache-2.0 — SIBLING PATH PACKAGE (services/
+                          # transform, not on PyPI). POST /admin/block-labels
+                          # reuses headway_transform.block_labels so the
+                          # upload screen and tools/block-labels/derive.py
+                          # run THE SAME derivation. Re-implementing it here
+                          # would give an agency two answers about what a
+                          # block is called, and only one of them audited.
 ]
 
 [project.optional-dependencies]

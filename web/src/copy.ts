@@ -3158,6 +3158,69 @@ export const copy = {
       },
     },
 
+    blockLabels: {
+      title: "Block names",
+      description:
+        "Findings name a block the way your GTFS feed does, which is often an internal number nobody says out loud. Upload your scheduling system's trip-to-block export and Headway will use your run board's names instead.",
+      link: "Upload block names",
+
+      heading: "Block names",
+      intro:
+        "Your GTFS feed identifies each block with an internal id. Your dispatchers, drivers and run board use a different name for the same block. Upload the export that lists both and Headway will show the name your staff actually use.",
+      notAllowed:
+        "Only a certifying official can load block names, because these names appear on findings an auditor reads.",
+
+      howToHeading: "Getting the file out of your scheduling system",
+      howTo: [
+        "Run the query your Headway contact gave you against your scheduling database. It returns two columns: the trip name and the block name.",
+        "In the results grid, right-click and choose Save Results As, then save it as a CSV file.",
+        "Upload that file below. A header row is fine, and an extra column such as the service day is ignored.",
+      ],
+      excelWarning:
+        "Do not open the file in Excel before uploading it. Excel silently turns block names like 1-1 into dates (1-Jan), and Headway cannot tell a real name from a mangled one — so a name it changed would end up on a federal report.",
+
+      fileLabel: "Your trip-to-block export",
+      fileHint:
+        "A CSV file: trip name in the first column, block name in the second. Up to 16 MB.",
+      chooseFirst: "Choose a file first.",
+      previewButton: "Check this file",
+      previewBusy: "Reading the file…",
+      loadButton: "Save these block names",
+      loadBusy: "Saving…",
+      startOver: "Upload a different file",
+
+      resultHeading: "What is in this file",
+      readLabel: "Rows read",
+      matchedLabel: "Rows matched to a scheduled trip",
+      ambiguousLabel: "Rows matching more than one block",
+      unmatchedLabel: "Rows with no matching scheduled trip",
+      unparseableLabel: "Rows whose trip name could not be read",
+      derivedLabel: "Blocks that would be named",
+      derivedLabelSaved: "Blocks now named",
+      conflictsLabel: "Blocks two rows disagreed about",
+
+      nothingToSave:
+        "No block names could be derived from this file, so there is nothing to save. The rows below say why.",
+      partialNote: (derived: number, read: number) =>
+        `${derived} block ${derived === 1 ? "name" : "names"} came out of ${read} rows. A partial mapping is normal and safe: blocks Headway could not name keep the id your feed uses, and no name is ever guessed.`,
+
+      conflictsHeading: "Blocks left out because two rows disagreed",
+      conflictsIntro:
+        "Each of these blocks was given more than one name in your file. Headway leaves them out rather than picking one, because the wrong name on a finding is worse than no name.",
+
+      problemsHeading: "Rows Headway could not use",
+      capNote: (cap: number) =>
+        `The counts above are complete. Only the first ${cap} examples of each kind are listed here.`,
+      columnLine: "Line",
+      columnTrip: "Trip name",
+      columnBlock: "Block name",
+      columnReason: "Why it was left out",
+
+      whatHappensNext:
+        "Saving affects findings raised from now on. Findings already raised keep the names they were raised with — Headway does not rewrite history.",
+      loadError: "Headway could not read that file.",
+    },
+
     settings: {
       heading: "Settings",
       intro:
