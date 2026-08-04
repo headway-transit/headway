@@ -3236,6 +3236,22 @@ export const copy = {
 
       whatHappensNext:
         "Saving affects findings raised from now on. Findings already raised keep the names they were raised with — Headway does not rewrite history.",
+
+      // The last mile. Saving the mapping changes NOTHING a person can see
+      // until a calculation runs and they open the right screen, and the
+      // first operator to use this went looking on the certification screen
+      // — where block names do not appear and never will. Saying "findings
+      // raised from here on" was true and useless; it named neither the
+      // screen nor the step.
+      nextStepsHeading: "Two more steps before you see the new names",
+      nextSteps: [
+        "Run the calculation for the period you are working on. Block names attach to findings when they are raised, so a finding that already exists keeps the name it was raised with.",
+        "Then open Data Quality. This is the only screen that shows block names — they do not appear on the certification screens, which report figures rather than the buses behind them.",
+      ],
+      nextStepsCalcLink: "Go to Calculations",
+      nextStepsDqLink: "Go to Data Quality",
+      nextStepsNoData:
+        "If nothing new appears after a calculation run, check Data sources first — a block name can only reach a finding that something raised, and no finding is raised from data that never arrived.",
       loadError: "Headway could not read that file.",
     },
 

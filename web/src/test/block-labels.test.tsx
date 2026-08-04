@@ -303,6 +303,60 @@ describe("block-name upload", () => {
     expect(screen.queryByText(/enter a date inside it above/i)).toBeNull();
   });
 
+  it("after saving, names the two steps and links the screen that shows them", async () => {
+    // THE GAP THIS CLOSES: the first operator to use this went looking on the
+    // certification screen, where block names do not appear and never will.
+    // Saving changes nothing visible until a calculation runs and Data
+    // Quality is opened; the screen has to say both.
+    signInAs("certifying_official");
+    mockApi({
+      "POST /admin/block-labels/preview": () => result(),
+      "POST /admin/block-labels/load": () => result({ labels_derived: 66 }),
+    });
+    const user = userEvent.setup();
+    renderApp("/admin/block-labels");
+
+    await screen.findByRole("heading", { name: /block names/i, level: 1 });
+    await chooseFile(user);
+    await user.click(screen.getByRole("button", { name: /check this file/i }));
+    // Not offered before the save — nothing has happened yet to follow up on.
+    expect(screen.queryByRole("link", { name: /go to data quality/i })).toBeNull();
+
+    await user.click(
+      await screen.findByRole("button", { name: /save these block names/i }),
+    );
+
+    await screen.findByText(/two more steps/i);
+    expect(
+      screen.getByRole("link", { name: /go to calculations/i }),
+    ).toHaveAttribute("href", "/calc-runs");
+    expect(
+      screen.getByRole("link", { name: /go to data quality/i }),
+    ).toHaveAttribute("href", "/dq");
+    // And it says plainly where block names do NOT appear.
+    expect(screen.getByText(/do not appear on the certification screens/i)).toBeTruthy();
+    // Ingestion is upstream of all of it.
+    expect(screen.getByText(/no finding is raised from data that never arrived/i)).toBeTruthy();
+  });
+
+  it("a save that named nothing does not offer next steps", async () => {
+    signInAs("certifying_official");
+    mockApi({
+      "POST /admin/block-labels/preview": () => result({ labels_derived: 1 }),
+      "POST /admin/block-labels/load": () => result({ labels_derived: 0 }),
+    });
+    const user = userEvent.setup();
+    renderApp("/admin/block-labels");
+    await screen.findByRole("heading", { name: /block names/i, level: 1 });
+    await chooseFile(user);
+    await user.click(screen.getByRole("button", { name: /check this file/i }));
+    await user.click(
+      await screen.findByRole("button", { name: /save these block names/i }),
+    );
+    await screen.findByText(/nothing to save/i);
+    expect(screen.queryByText(/two more steps/i)).toBeNull();
+  });
+
   it("warns about Excel before the file picker, not after the upload", async () => {
     signInAs("certifying_official");
     mockApi({});

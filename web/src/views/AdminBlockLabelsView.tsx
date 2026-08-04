@@ -22,6 +22,7 @@
  */
 
 import { useId, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import {
   ApiError,
   loadBlockLabels,
@@ -124,6 +125,37 @@ function ServiceDays({ notes }: { notes: ServiceDayNote[] }) {
         </table>
       </div>
     </>
+  );
+}
+
+/**
+ * The last mile, shown only after a save actually wrote something.
+ *
+ * Saving changes nothing a person can see until a calculation runs AND they
+ * open Data Quality. The first operator to use this screen went looking on
+ * the certification screen, where block names do not appear and never will —
+ * `block_label` is rendered in exactly one view. "Findings raised from here
+ * on" was true and useless: it named neither the screen nor the step.
+ */
+function NextSteps({ derived }: { derived: number }) {
+  if (derived === 0) return null;
+  return (
+    <section className="card">
+      <h3>{t.nextStepsHeading}</h3>
+      <ol>
+        {t.nextSteps.map((step) => (
+          <li key={step.slice(0, 24)}>{step}</li>
+        ))}
+      </ol>
+      <p className="block-label-actions">
+        <Link to="/calc-runs">{t.nextStepsCalcLink}</Link>
+        <Link to="/dq">{t.nextStepsDqLink}</Link>
+      </p>
+      {/* Ingestion is upstream of all of it: a name can only reach a finding
+          that something raised. Worth saying here rather than leaving an
+          operator to conclude the upload failed. */}
+      <p className="field-hint">{t.nextStepsNoData}</p>
+    </section>
   );
 }
 
@@ -367,7 +399,10 @@ export function AdminBlockLabelsView() {
       </section>
 
       {saved ? (
-        <Result result={saved} saved />
+        <>
+          <Result result={saved} saved />
+          <NextSteps derived={saved.labels_derived} />
+        </>
       ) : (
         preview && <Result result={preview} saved={false} />
       )}
