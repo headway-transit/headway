@@ -126,6 +126,8 @@ class FakeConn:
         self.stops: dict[str, dict] = {}
         self.canonical_routes: dict[str, dict] = {}
         self.canonical_trips: dict[str, dict] = {}
+        # canonical.block_labels (migration 0038), keyed by block_id.
+        self.block_labels: dict[str, dict] = {}
         self.stop_times: list[dict] = []
         # Revenue review queue (handoff 0040 / migration 0040): no-run
         # boardings the calculation held out of the figure pending a human
@@ -202,6 +204,40 @@ class FakeConn:
         self.tx_log.append("commit")
 
     # -- SQL dispatch ------------------------------------------------------
+    def cursor(self):
+        """A DB-API cursor over this same fake.
+
+        headway_transform.block_labels takes ANY DB-API connection — that is
+        what lets POST /admin/block-labels and tools/block-labels/derive.py
+        share ONE derivation. Modelling cursor() honestly here is what proves
+        the API can actually drive it, rather than proving a mock can.
+        """
+        conn = self
+
+        class _Cursor:
+            def __init__(self):
+                self._rows = []
+
+            def execute(self, sql, params=None):
+                self._rows = conn.execute(sql, params).fetchall()
+                return self
+
+            def executemany(self, sql, seq):
+                for params in seq:
+                    conn.execute(sql, params)
+                return self
+
+            def fetchall(self):
+                return list(self._rows)
+
+            def fetchone(self):
+                return self._rows[0] if self._rows else None
+
+            def close(self):
+                return None
+
+        return _Cursor()
+
     def execute(self, sql, params=None):
         q = " ".join(sql.split())
         params = params or ()
@@ -436,6 +472,35 @@ class FakeConn:
                     )
             rows.sort(key=lambda r: str(r[0]))
             return FakeCursor(rows)
+
+        if q.startswith("SELECT t.trip_id, r.short_name, f.departure_seconds"):
+            # block_labels.SELECT_TRIPS_WITH_BLOCKS_SQL. The LEFT JOINs are
+            # modelled honestly: a trip with no route or no stop_times yields
+            # NULLs, which the deriver treats as "not addressable by a
+            # route+start key" rather than as a match.
+            out = []
+            for tid, t in sorted(self.canonical_trips.items()):
+                route = self.canonical_routes.get(t.get("route_id"))
+                times = sorted(
+                    (x for x in self.stop_times if x["trip_id"] == tid),
+                    key=lambda x: x["stop_sequence"],
+                )
+                out.append((
+                    tid,
+                    route.get("short_name") if route else None,
+                    times[0].get("departure_seconds") if times else None,
+                    t.get("block_id"),
+                ))
+            return FakeCursor(out)
+
+        if q.startswith("INSERT INTO canonical.block_labels"):
+            block_id, label, source, derivation, loaded_by = params
+            self.block_labels[str(block_id)] = {
+                "block_id": str(block_id), "block_label": label,
+                "source": source, "derivation": derivation,
+                "loaded_by": loaded_by, "loaded_at": dt.datetime.now(UTC),
+            }
+            return FakeCursor([])
 
         if q.startswith("SELECT dataset_key, display_name, owner"):
             rows = sorted(
@@ -2211,10 +2276,11 @@ class FakeConn:
         }
         return self.canonical_routes[route_id]
 
-    def add_canonical_trip(self, trip_id, route_id):
+    def add_canonical_trip(self, trip_id, route_id, block_id=None):
         self.canonical_trips[trip_id] = {
             "trip_id": trip_id,
             "route_id": route_id,
+            "block_id": block_id,
         }
         return self.canonical_trips[trip_id]
 
@@ -2224,6 +2290,19 @@ class FakeConn:
             self.stop_times.append(
                 {"trip_id": trip_id, "stop_id": stop_id, "stop_sequence": seq}
             )
+
+    def add_scheduled_trip(self, trip_id, route_short_name, departure_seconds,
+                           block_id):
+        """One trip the block-label deriver can address: a route short name, a
+        first departure, and the feed's own opaque block id."""
+        route_id = f"route-{route_short_name}"
+        if route_id not in self.canonical_routes:
+            self.add_canonical_route(route_id, short_name=route_short_name)
+        self.add_canonical_trip(trip_id, route_id, block_id=block_id)
+        self.stop_times.append({
+            "trip_id": trip_id, "stop_id": f"{trip_id}-s1",
+            "stop_sequence": 1, "departure_seconds": departure_seconds,
+        })
 
     def add_api_key(self, name="test key", *, scopes=("ingest:tides",),
                     source_label="tides_simulated", revoked=False):

@@ -765,6 +765,13 @@ export function AdminView() {
           to="/admin/settings"
           link={t.cards.settings.link}
         />
+        {/* Block names (task #34): the door that replaces a shell command. */}
+        <DoorCard
+          title={t.blockLabels.title}
+          description={t.blockLabels.description}
+          to="/admin/block-labels"
+          link={t.blockLabels.link}
+        />
 
         {/* Single sign-on: a real card now (handoff 0046). The status line
             is the LIVE state, read from the server — not a claim. */}

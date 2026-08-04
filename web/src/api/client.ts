@@ -1057,6 +1057,53 @@ export function uploadLogo(file: File): Promise<LogoUploadResponse> {
   return request<LogoUploadResponse>("POST", "/branding/logo", form);
 }
 
+// ---- block labels (handoff 0038 / task #34) ----
+//
+// Both certifying_official-only, enforced server-side. The file is sent
+// TWICE on purpose: preview derives and reports, load derives again from the
+// exact bytes it writes. Nothing is cached between them, so an operator can
+// never approve numbers that describe a different file from the one saved.
+
+/** One row the derivation could not use, with the reason in plain words. */
+export interface BlockLabelProblemRow {
+  line: number;
+  trip_name: string;
+  block_name: string;
+  reason: string;
+}
+
+/** What an upload would do (preview) or did (load). Counts are complete;
+ *  only the example lists are capped, and `examples_capped_at` says so. */
+export interface BlockLabelPreview {
+  rows_read: number;
+  matched: number;
+  ambiguous: number;
+  unmatched: number;
+  unparseable: number;
+  labels_derived: number;
+  conflicts: number;
+  ambiguous_examples: BlockLabelProblemRow[];
+  unmatched_examples: BlockLabelProblemRow[];
+  unparseable_examples: BlockLabelProblemRow[];
+  conflict_notes: string[];
+  examples_capped_at: number;
+  note: string;
+}
+
+/** POST /admin/block-labels/preview — reports only. Writes nothing. */
+export function previewBlockLabels(file: File): Promise<BlockLabelPreview> {
+  const form = new FormData();
+  form.append("file", file);
+  return request<BlockLabelPreview>("POST", "/admin/block-labels/preview", form);
+}
+
+/** POST /admin/block-labels/load — derives again and writes the mapping. */
+export function loadBlockLabels(file: File): Promise<BlockLabelPreview> {
+  const form = new FormData();
+  form.append("file", file);
+  return request<BlockLabelPreview>("POST", "/admin/block-labels/load", form);
+}
+
 // ---- users admin (handoff 0025, design point 1) ----
 //
 // ALL certifying_official-only, enforced server-side; every change is

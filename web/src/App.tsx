@@ -10,6 +10,7 @@ import {
 import { setUnauthorizedHandler } from "./api/client";
 import { landingPathFor, useSession } from "./auth/session";
 import { Layout } from "./components/Layout";
+import { AdminBlockLabelsView } from "./views/AdminBlockLabelsView";
 import { AdminSettingsView } from "./views/AdminSettingsView";
 import { AdminSourcesView } from "./views/AdminSourcesView";
 import { AdminUsersView } from "./views/AdminUsersView";
@@ -183,6 +184,10 @@ export function AppRoutes() {
           <Route path="/admin/users" element={<AdminUsersView />} />
           <Route path="/admin/sources" element={<AdminSourcesView />} />
           <Route path="/admin/settings" element={<AdminSettingsView />} />
+          <Route
+            path="/admin/block-labels"
+            element={<AdminBlockLabelsView />}
+          />
         </Route>
       </Route>
     </Routes>

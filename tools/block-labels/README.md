@@ -6,6 +6,18 @@ invents a name it does not have, so findings over such a feed can only show
 the opaque id — unless the agency supplies the mapping. This tool loads it
 (handoff 0038).
 
+## Use the screen unless you have a reason not to
+
+Headway has an **Admin → Block names** page that does exactly what this tool
+does, from a browser: it checks the file and reports what would happen before
+anything is written, then loads it. Same derivation, same refusals, same
+provenance (file sha256 + parse-config hash) — the screen calls this repo's
+`headway_transform.block_labels`, so the two doors cannot give different
+answers.
+
+This command-line tool remains for scripted or unattended loads, and for
+anyone who would rather work in a shell.
+
 ## What it needs
 
 1. **Your trip→block export**: a two-column CSV, `TripName,BlockName`, one

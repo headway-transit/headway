@@ -125,7 +125,7 @@ jobs:
         # (calc: pytest+hypothesis; transform: pytest; api: pytest+httpx; ai: pytest)
         # headway-calc is a sibling path package, not on PyPI — install it alongside
         # so api's `headway-calc>=0.5` resolves (harmless no-op for the other services)
-        run: python -m pip install -e services/calc -e "services/${{ matrix.service }}[${{ matrix.extras || 'test' }}]"
+        run: python -m pip install -e services/calc -e services/transform -e "services/${{ matrix.service }}[${{ matrix.extras || 'test' }}]"
       - name: pytest
         working-directory: services/${{ matrix.service }}
         run: python -m pytest -q
@@ -206,7 +206,7 @@ jobs:
       - name: install API service (the exporter imports the app factory)
         # headway-calc is a sibling path package, not on PyPI — install it
         # alongside so api's `headway-calc>=0.5` resolves.
-        run: python -m pip install -e services/calc -e services/api
+        run: python -m pip install -e services/calc -e services/transform -e services/api
       - name: openapi.json matches the app (regenerate + diff)
         working-directory: services/api
         run: |
@@ -287,7 +287,7 @@ jobs:
           cache-dependency-path: services/api/pyproject.toml
       - name: install API service + integration suite deps
         # services/calc first: headway-calc is a sibling path package, not on PyPI
-        run: python -m pip install -e services/calc -e "services/api[test]" -r tests/integration/requirements.txt
+        run: python -m pip install -e services/calc -e services/transform -e "services/api[test]" -r tests/integration/requirements.txt
       - name: pytest (integration, real postgres)
         run: python -m pytest tests/integration -q
 
