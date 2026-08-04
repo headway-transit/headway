@@ -27,9 +27,28 @@ RUN useradd --system --uid 65532 --user-group --home-dir /nonexistent \
 # contracts ship inside transform's: the block-label upload parses trip names
 # with the agency's declared rules, and a spec that could drift from the code
 # reading it is a spec nobody can trust.
-RUN install -d -m 0755 /app/adapters/tripspark/streets
+#
+# The wire contracts ship too, and they are NOT optional. headway_transform's
+# adapter modules load their JSON schemas at IMPORT time — spec.py, then
+# resolution.py, then envelope.py all `open()` a contract at module scope. So
+# `from headway_transform.adapters.resolution import ...` raises
+# FileNotFoundError before a single line of block-label code runs. Shipping
+# the spec without the contracts produced exactly that: a 500 on the first
+# real upload, on a machine, after every test passed. The unit tests import
+# from a source checkout where the default repo-root contracts/ path
+# resolves; only the container has neither.
+#
+# Same five files and the same env var as services/transform/Dockerfile, so
+# the two images cannot validate against different contract versions.
+RUN install -d -m 0755 /app/adapters/tripspark/streets /app/contracts
 COPY --chmod=644 adapters/tripspark/streets/resolution.v0.yaml \
      /app/adapters/tripspark/streets/resolution.v0.yaml
+COPY --chmod=644 contracts/raw-record-envelope.v0.schema.json \
+     contracts/adapter-mapping.v0.schema.json \
+     contracts/demand-response-trip.v0.schema.json \
+     contracts/adapter-resolution.v0.schema.json \
+     contracts/fleet-telematics.v0.schema.json /app/contracts/
+ENV HEADWAY_CONTRACTS_DIR=/app/contracts
 
 COPY --from=build /wheels /tmp/wheels
 RUN pip install --no-cache-dir --no-index --find-links=/tmp/wheels \
