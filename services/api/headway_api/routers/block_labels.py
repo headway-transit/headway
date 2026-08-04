@@ -37,11 +37,13 @@ reads.
 from __future__ import annotations
 
 import csv
+import datetime as dt
 import hashlib
 import io
 from pathlib import Path
+from typing import Optional
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 
 from ..audit import write_event
@@ -109,6 +111,28 @@ class BlockLabelPreview(BaseModel):
     note: str
 
 
+def _parse_schedule_date(raw: Optional[str]):
+    """The schedule period the operator declared, or None.
+
+    Optional on purpose: an upload without one behaves exactly as it did
+    before, and the report says which service days went unpaired as a
+    result — so the date is offered as a fix for a stated problem rather
+    than demanded up front.
+    """
+    if raw is None or not raw.strip():
+        return None
+    try:
+        return dt.date.fromisoformat(raw.strip())
+    except ValueError:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"{raw!r} is not a date Headway can read. Use the year, "
+                f"month and day — for example 2026-08-01."
+            ),
+        )
+
+
 def _spec_path() -> Path:
     for candidate in _SPEC_CANDIDATES:
         if candidate.is_file():
@@ -150,6 +174,7 @@ def _derive(raw: bytes):
         MappingFileError,
         MappingRow,
         derive_block_labels,
+        load_active_service_ids,
         load_scheduled_trips,
         pair_service_days,
     )
@@ -203,7 +228,8 @@ def _derive(raw: bytes):
         spec = load_resolution_spec(_spec_path())
     except MappingFileError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
-    return spec, rows, load_scheduled_trips, derive_block_labels, pair_service_days
+    return (spec, rows, load_scheduled_trips, derive_block_labels,
+            pair_service_days, load_active_service_ids)
 
 
 def _samples(outcomes, status: str) -> list[ProblemRow]:
@@ -267,14 +293,17 @@ def _to_preview(result, rows_read: int, note: str, pairings=None
 @router.post("/admin/block-labels/preview", response_model=BlockLabelPreview)
 def preview_block_labels(
     file: UploadFile = File(...),
+    schedule_date: Optional[str] = Form(default=None),
     identity: Identity = Depends(require_certifying_official),
     db=Depends(get_db),
 ) -> BlockLabelPreview:
     """Read the export and report what WOULD happen. Writes nothing."""
     raw = _read_upload(file)
-    spec, rows, load_trips, derive, pair = _derive(raw)
+    on_date = _parse_schedule_date(schedule_date)
+    spec, rows, load_trips, derive, pair, load_active = _derive(raw)
     trips = load_trips(db)
-    pairings = pair(spec, rows, trips)
+    active = load_active(db, on_date) if on_date else None
+    pairings = pair(spec, rows, trips, active)
     result = derive(spec, rows, trips, pairings)
     return _to_preview(
         result,
@@ -291,6 +320,7 @@ def preview_block_labels(
 @router.post("/admin/block-labels/load", response_model=BlockLabelPreview)
 def load_block_label_mapping(
     file: UploadFile = File(...),
+    schedule_date: Optional[str] = Form(default=None),
     identity: Identity = Depends(require_certifying_official),
     db=Depends(get_db),
 ) -> BlockLabelPreview:
@@ -303,9 +333,11 @@ def load_block_label_mapping(
     from headway_transform.block_labels import load_block_labels
 
     raw = _read_upload(file)
-    spec, rows, load_trips, derive, pair = _derive(raw)
+    on_date = _parse_schedule_date(schedule_date)
+    spec, rows, load_trips, derive, pair, load_active = _derive(raw)
     trips = load_trips(db)
-    pairings = pair(spec, rows, trips)
+    active = load_active(db, on_date) if on_date else None
+    pairings = pair(spec, rows, trips, active)
     result = derive(spec, rows, trips, pairings)
 
     # The same provenance the CLI writes (tools/block-labels/derive.py): the
@@ -316,7 +348,9 @@ def load_block_label_mapping(
     derivation = (
         f"admin upload by {identity.username}: TripName parsed per "
         f"{_spec_path().name} (config {spec.spec_sha12}), matched on "
-        f"(route_short_name, first scheduled departure) against "
+        f"(route_short_name, first scheduled departure"
+        + (f", service day scoped to {on_date.isoformat()}" if on_date else "")
+        + f") against "
         f"canonical.trips; only rows whose every candidate trip shares one "
         f"feed block_id landed; ambiguous/unmatched/conflicting rows "
         f"reported, never guessed (handoff 0038)."
@@ -345,6 +379,7 @@ def load_block_label_mapping(
                 "unparseable": result.counts.get("unparseable", 0),
                 "conflicts": len(result.conflicts),
                 "file_sha256": digest,
+                "schedule_date": on_date.isoformat() if on_date else None,
             },
         )
     return _to_preview(

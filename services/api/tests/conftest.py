@@ -128,6 +128,8 @@ class FakeConn:
         self.canonical_trips: dict[str, dict] = {}
         # canonical.block_labels (migration 0038), keyed by block_id.
         self.block_labels: dict[str, dict] = {}
+        # canonical.service_calendar_dates: service_id -> dates it runs.
+        self.service_dates: dict[str, list] = {}
         self.stop_times: list[dict] = []
         # Revenue review queue (handoff 0040 / migration 0040): no-run
         # boardings the calculation held out of the figure pending a human
@@ -472,6 +474,16 @@ class FakeConn:
                     )
             rows.sort(key=lambda r: str(r[0]))
             return FakeCursor(rows)
+
+        if q.startswith("SELECT DISTINCT service_id FROM canonical.service_calendar_dates"):
+            # block_labels.SELECT_ACTIVE_SERVICES_SQL — the signup the
+            # operator declared, resolved to the services running that week.
+            on_date = params[0]
+            out = {
+                sid for sid, dates in self.service_dates.items()
+                if any(abs((d - on_date).days) <= 7 for d in dates)
+            }
+            return FakeCursor([(sid,) for sid in sorted(out)])
 
         if q.startswith("SELECT t.trip_id, r.short_name, f.departure_seconds"):
             # block_labels.SELECT_TRIPS_WITH_BLOCKS_SQL. The LEFT JOINs are
@@ -2293,6 +2305,11 @@ class FakeConn:
             self.stop_times.append(
                 {"trip_id": trip_id, "stop_id": stop_id, "stop_sequence": seq}
             )
+
+    def add_service_dates(self, service_id, *dates):
+        """The days one GTFS service runs — what a declared schedule date is
+        resolved against."""
+        self.service_dates.setdefault(service_id, []).extend(dates)
 
     def add_scheduled_trip(self, trip_id, route_short_name, departure_seconds,
                            block_id, service_id=None):

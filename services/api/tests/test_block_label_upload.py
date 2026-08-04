@@ -30,11 +30,16 @@ def _seed_schedule(fake_db):
     fake_db.add_canonical_trip("t4", "route-unknown", block_id="blk-C")
 
 
-def _upload(client, fake_db, csv_text: str, *, path: str, user: str = "cora"):
+def _upload(client, fake_db, csv_text: str, *, path: str, user: str = "cora",
+            schedule_date: str | None = None):
+    kwargs = {}
+    if schedule_date is not None:
+        kwargs["data"] = {"schedule_date": schedule_date}
     return client.post(
         path,
         files={"file": ("tripblock.csv", io.BytesIO(csv_text.encode()), "text/csv")},
         headers=auth_header(fake_db, user),
+        **kwargs,
     )
 
 
@@ -281,3 +286,63 @@ def test_preview_and_load_agree_because_they_derive_identically(
     for field in ("rows_read", "matched", "ambiguous", "unmatched",
                   "unparseable", "labels_derived", "conflicts"):
         assert preview[field] == loaded[field], field
+
+
+def test_naming_the_schedule_period_pairs_a_label_two_signups_share(
+    client, fake_db
+):
+    """STEP 2. Two Saturday signups run the same route at the same time on
+    different blocks. The label cannot choose between them — until the
+    operator says which period the export describes."""
+    import datetime as dt
+
+    from conftest import UTC
+
+    summer = dt.datetime(2026, 8, 1, tzinfo=UTC).date()
+    autumn = dt.datetime(2026, 10, 3, tzinfo=UTC).date()
+    fake_db.add_service_dates("sat-summer", summer)
+    fake_db.add_service_dates("sat-autumn", autumn)
+    fake_db.add_scheduled_trip("s1", "42", 13 * 3600, "blk-summer",
+                               service_id="sat-summer")
+    fake_db.add_scheduled_trip("a1", "42", 13 * 3600, "blk-autumn",
+                               service_id="sat-autumn")
+    csv_text = "42 - 42WD - 13:00,42-1,Saturday Service\n"
+
+    without = _upload(
+        client, fake_db, csv_text, path="/admin/block-labels/preview"
+    ).json()
+    assert without["ambiguous"] == 1
+    assert without["labels_derived"] == 0
+    assert without["service_days"][0]["used"] is False
+
+    scoped = _upload(
+        client, fake_db, csv_text, path="/admin/block-labels/preview",
+        schedule_date="2026-08-01",
+    ).json()
+    assert scoped["ambiguous"] == 0
+    assert scoped["matched"] == 1
+    assert scoped["labels_derived"] == 1
+    assert scoped["service_days"][0]["used"] is True
+
+
+def test_an_unreadable_schedule_date_says_what_shape_to_use(client, fake_db):
+    _seed_schedule(fake_db)
+    r = _upload(client, fake_db, GOOD, path="/admin/block-labels/preview",
+                schedule_date="last August")
+    assert r.status_code == 422
+    assert "2026-08-01" in r.json()["detail"]
+
+
+def test_the_declared_period_is_recorded_in_the_audit_trail(client, fake_db):
+    """It changes which blocks get named, so it belongs beside the file's
+    digest — not only in the operator's memory."""
+    import json
+
+    _seed_schedule(fake_db)
+    _upload(client, fake_db, GOOD, path="/admin/block-labels/load",
+            schedule_date="2026-08-01")
+    event = [
+        e for e in fake_db.audit_events if e["action"] == "block_labels_loaded"
+    ][-1]
+    detail = json.loads(event["detail"]) if isinstance(event["detail"], str) else event["detail"]
+    assert detail["schedule_date"] == "2026-08-01"

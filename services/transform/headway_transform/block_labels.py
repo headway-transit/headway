@@ -287,14 +287,26 @@ def pair_service_days(
     spec: ResolutionSpec,
     rows: Iterable[MappingRow],
     trips: Iterable[TripWithBlock],
+    active_service_ids: Optional[set[str]] = None,
 ) -> dict[str, ServiceDayPairing]:
     """Pair each export service-day label to the GTFS service it describes.
 
     Measured, never guessed: a label's (route, start) keys are compared to
-    each service's, and the label is paired to the service that covers it —
-    but only when that service covers nearly all of it AND beats the
-    runner-up clearly. Anything less is reported as not confident, and those
-    rows keep today's behaviour rather than being narrowed on a hunch.
+    each service's, and the label is paired to the service that matches it
+    most closely — but only when that service covers nearly all of it AND
+    beats the runner-up clearly. Anything less is reported as not confident,
+    and those rows keep today's behaviour rather than being narrowed.
+
+    ``active_service_ids`` is the schedule period the operator declared. A
+    feed carries every signup at once — Link Transit publishes two Saturday
+    services, one running Jul 11-Aug 29 and one from Sep 5 — and a label
+    saying "Saturday Service" cannot choose between them, so it is refused
+    and nothing is narrowed. Naming the period the export describes removes
+    the other signup from the contest, and the label pairs cleanly.
+
+    Scoping is applied HERE and not to the candidate trips, deliberately. A
+    wrong date can then only fail to improve a pairing; it can never strand
+    a row whose trip lives in a different signup.
     """
     rows = list(rows)
     trips = list(trips)
@@ -307,6 +319,8 @@ def pair_service_days(
             or trip.route_short_name is None
             or trip.first_departure_seconds is None
         ):
+            continue
+        if active_service_ids is not None and trip.service_id not in active_service_ids:
             continue
         service_keys.setdefault(trip.service_id, set()).add(
             (trip.route_short_name, trip.first_departure_seconds)
@@ -557,6 +571,29 @@ SELECT_TRIPS_WITH_BLOCKS_SQL = (
     "ORDER BY st.stop_sequence LIMIT 1) AS f ON TRUE "
     "ORDER BY t.trip_id"
 )
+
+#: Which services run in the week around a declared date. A week rather than
+#: a day because one date is one day type: a Wednesday would name the weekday
+#: service and leave Saturday and Sunday unpaired, which is most of the
+#: ambiguity. Seven days either side names every day type of ONE signup.
+SELECT_ACTIVE_SERVICES_SQL = (
+    "SELECT DISTINCT service_id FROM canonical.service_calendar_dates "
+    "WHERE service_date BETWEEN %s - INTERVAL '7 days' "
+    "AND %s + INTERVAL '7 days'"
+)
+
+
+def load_active_service_ids(connection: Any, service_date) -> set[str]:
+    """The services running in the week around ``service_date``."""
+    cursor = connection.cursor()
+    try:
+        cursor.execute(SELECT_ACTIVE_SERVICES_SQL, (service_date, service_date))
+        return {str(r[0]) for r in cursor.fetchall() if r[0] is not None}
+    finally:
+        close = getattr(cursor, "close", None)
+        if close is not None:
+            close()
+
 
 #: Upsert: a reloaded mapping file refreshes labels in place. Existing
 #: findings are untouched by design — labels were frozen onto

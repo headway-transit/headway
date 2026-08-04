@@ -594,3 +594,60 @@ def test_a_service_that_is_a_subset_of_another_is_still_identified(tmp_path):
 
     result = derive_block_labels(spec, rows, trips, {"Sunday Service": pairing})
     assert result.mapping == (("block-sun", "42-1", 1),)
+
+
+def test_naming_the_schedule_period_resolves_a_label_two_signups_share(
+    tmp_path,
+):
+    """STEP 2. A feed carries every signup at once. Link Transit publishes two
+    Saturday services — one running Jul 11-Aug 29, one from Sep 5 — and a
+    label saying "Saturday Service" cannot choose between them, so step 1
+    correctly refuses it and narrows nothing.
+
+    Naming the period the export describes removes the other signup from the
+    contest. The label then pairs, and the rows it covers stop being
+    ambiguous.
+    """
+    spec = _spec(tmp_path)
+    trips = [
+        # Summer Saturday signup.
+        trip("sum-1", "42", 13 * 3600, "block-summer", service_id="sat-summer"),
+        # Autumn Saturday signup: same route, same start, different block.
+        trip("aut-1", "42", 13 * 3600, "block-autumn", service_id="sat-autumn"),
+    ]
+    rows = [row(1, "42 - 42WD - 13:00", "42-1", service_day="Saturday Service")]
+
+    # Without a period: two services explain the label equally — refused.
+    unscoped = pair_service_days(spec, rows, trips)["Saturday Service"]
+    assert not unscoped.confident
+    assert derive_block_labels(
+        spec, rows, trips, {"Saturday Service": unscoped}
+    ).mapping == ()
+
+    # Declaring the summer signup leaves exactly one candidate.
+    scoped = pair_service_days(
+        spec, rows, trips, active_service_ids={"sat-summer"}
+    )["Saturday Service"]
+    assert scoped.confident
+    assert scoped.service_id == "sat-summer"
+    assert derive_block_labels(
+        spec, rows, trips, {"Saturday Service": scoped}
+    ).mapping == (("block-summer", "42-1", 1),)
+
+
+def test_a_wrong_schedule_period_cannot_strand_a_row(tmp_path):
+    """THE SAFETY RULE, EXTENDED TO STEP 2. Scoping applies to the PAIRING,
+    never to the candidate trips. So a date naming a signup this export does
+    not describe can only fail to improve things — it can never turn a row
+    that matches today into an unmatched one."""
+    spec = _spec(tmp_path)
+    trips = [trip("only", "42", 13 * 3600, "block-only", service_id="summer")]
+    rows = [row(1, "42 - 42WD - 13:00", "42-1", service_day="Saturday Service")]
+
+    pairings = pair_service_days(
+        spec, rows, trips, active_service_ids={"a-different-signup"}
+    )
+    result = derive_block_labels(spec, rows, trips, pairings)
+    assert result.counts.get(MATCHED) == 1
+    assert result.counts.get(UNMATCHED, 0) == 0
+    assert result.mapping == (("block-only", "42-1", 1),)

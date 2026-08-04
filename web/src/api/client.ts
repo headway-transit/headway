@@ -1099,18 +1099,33 @@ export interface BlockLabelPreview {
   note: string;
 }
 
-/** POST /admin/block-labels/preview — reports only. Writes nothing. */
-export function previewBlockLabels(file: File): Promise<BlockLabelPreview> {
+function blockLabelForm(file: File, scheduleDate?: string): FormData {
   const form = new FormData();
   form.append("file", file);
-  return request<BlockLabelPreview>("POST", "/admin/block-labels/preview", form);
+  // Optional. A feed carries every signup at once, so naming the period the
+  // export describes is what lets a service-day label pair to one schedule.
+  if (scheduleDate) form.append("schedule_date", scheduleDate);
+  return form;
+}
+
+/** POST /admin/block-labels/preview — reports only. Writes nothing. */
+export function previewBlockLabels(
+  file: File,
+  scheduleDate?: string,
+): Promise<BlockLabelPreview> {
+  return request<BlockLabelPreview>(
+    "POST", "/admin/block-labels/preview", blockLabelForm(file, scheduleDate),
+  );
 }
 
 /** POST /admin/block-labels/load — derives again and writes the mapping. */
-export function loadBlockLabels(file: File): Promise<BlockLabelPreview> {
-  const form = new FormData();
-  form.append("file", file);
-  return request<BlockLabelPreview>("POST", "/admin/block-labels/load", form);
+export function loadBlockLabels(
+  file: File,
+  scheduleDate?: string,
+): Promise<BlockLabelPreview> {
+  return request<BlockLabelPreview>(
+    "POST", "/admin/block-labels/load", blockLabelForm(file, scheduleDate),
+  );
 }
 
 // ---- users admin (handoff 0025, design point 1) ----

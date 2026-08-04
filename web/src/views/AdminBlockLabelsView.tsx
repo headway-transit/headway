@@ -170,6 +170,11 @@ function Result({
         <p>{t.partialNote(result.labels_derived, result.rows_read)}</p>
       )}
 
+      {result.service_days.some((n) => !n.used) && (
+        // Shown only when a period would actually have helped. An always-on
+        // nudge is noise; this one names a problem the reader can see above.
+        <p className="banner">{t.scheduleDateNudge}</p>
+      )}
       <ServiceDays notes={result.service_days} />
 
       {result.conflict_notes.length > 0 && (
@@ -213,10 +218,13 @@ export function AdminBlockLabelsView() {
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<BlockLabelPreview | null>(null);
   const [saved, setSaved] = useState<BlockLabelPreview | null>(null);
+  const [scheduleDate, setScheduleDate] = useState("");
   const [busy, setBusy] = useState<null | "preview" | "load">(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const fileId = useId();
   const fileHintId = useId();
+  const dateId = useId();
+  const dateHintId = useId();
 
   if (!allowed) {
     return (
@@ -253,8 +261,8 @@ export function AdminBlockLabelsView() {
         // from these exact bytes rather than trusting the preview.
         const result =
           which === "preview"
-            ? await previewBlockLabels(file)
-            : await loadBlockLabels(file);
+            ? await previewBlockLabels(file, scheduleDate || undefined)
+            : await loadBlockLabels(file, scheduleDate || undefined);
         if (which === "preview") setPreview(result);
         else setSaved(result);
       } catch (err) {
@@ -307,6 +315,18 @@ export function AdminBlockLabelsView() {
           accept=".csv,text/csv,text/plain"
           aria-describedby={fileHintId}
           onChange={(e) => chooseFile(e.target.files?.[0] ?? null)}
+        />
+
+        <label htmlFor={dateId}>{t.scheduleDateLabel}</label>
+        <p className="field-hint" id={dateHintId}>
+          {t.scheduleDateHint}
+        </p>
+        <input
+          id={dateId}
+          type="date"
+          aria-describedby={dateHintId}
+          value={scheduleDate}
+          onChange={(e) => setScheduleDate(e.target.value)}
         />
 
         {errorMessage && (
