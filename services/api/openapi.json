@@ -2292,6 +2292,90 @@
         }
       }
     },
+    "/admin/block-labels/preview": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Preview Block Labels",
+        "description": "Read the export and report what WOULD happen. Writes nothing.",
+        "operationId": "preview_block_labels_admin_block_labels_preview_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_preview_block_labels_admin_block_labels_preview_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BlockLabelPreview"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/block-labels/load": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Load Block Label Mapping",
+        "description": "Derive again from these exact bytes and write the mapping.\n\nFindings raised BEFORE this load keep the names they were raised with \u2014\nhistory is never rewritten (handoff 0038). Only findings raised afterwards\nread the new names.",
+        "operationId": "load_block_label_mapping_admin_block_labels_load_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_load_block_label_mapping_admin_block_labels_load_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BlockLabelPreview"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/ingest/tides/passenger-events": {
       "post": {
         "tags": [
@@ -5484,6 +5568,91 @@
         ],
         "title": "AuditPage"
       },
+      "BlockLabelPreview": {
+        "properties": {
+          "rows_read": {
+            "type": "integer",
+            "title": "Rows Read"
+          },
+          "matched": {
+            "type": "integer",
+            "title": "Matched"
+          },
+          "ambiguous": {
+            "type": "integer",
+            "title": "Ambiguous"
+          },
+          "unmatched": {
+            "type": "integer",
+            "title": "Unmatched"
+          },
+          "unparseable": {
+            "type": "integer",
+            "title": "Unparseable"
+          },
+          "labels_derived": {
+            "type": "integer",
+            "title": "Labels Derived"
+          },
+          "conflicts": {
+            "type": "integer",
+            "title": "Conflicts"
+          },
+          "ambiguous_examples": {
+            "items": {
+              "$ref": "#/components/schemas/ProblemRow"
+            },
+            "type": "array",
+            "title": "Ambiguous Examples",
+            "default": []
+          },
+          "unmatched_examples": {
+            "items": {
+              "$ref": "#/components/schemas/ProblemRow"
+            },
+            "type": "array",
+            "title": "Unmatched Examples",
+            "default": []
+          },
+          "unparseable_examples": {
+            "items": {
+              "$ref": "#/components/schemas/ProblemRow"
+            },
+            "type": "array",
+            "title": "Unparseable Examples",
+            "default": []
+          },
+          "conflict_notes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Conflict Notes",
+            "default": []
+          },
+          "examples_capped_at": {
+            "type": "integer",
+            "title": "Examples Capped At",
+            "default": 20
+          },
+          "note": {
+            "type": "string",
+            "title": "Note"
+          }
+        },
+        "type": "object",
+        "required": [
+          "rows_read",
+          "matched",
+          "ambiguous",
+          "unmatched",
+          "unparseable",
+          "labels_derived",
+          "conflicts",
+          "note"
+        ],
+        "title": "BlockLabelPreview"
+      },
       "BoardingReview": {
         "properties": {
           "passenger_event_id": {
@@ -5718,6 +5887,34 @@
         ],
         "title": "BoardingReviewPage",
         "description": "One page of the queue, plus the truth about the rest of it."
+      },
+      "Body_load_block_label_mapping_admin_block_labels_load_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream",
+            "title": "File"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_load_block_label_mapping_admin_block_labels_load_post"
+      },
+      "Body_preview_block_labels_admin_block_labels_preview_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream",
+            "title": "File"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_preview_block_labels_admin_block_labels_preview_post"
       },
       "Body_upload_logo_branding_logo_post": {
         "properties": {
@@ -10098,6 +10295,34 @@
         ],
         "title": "PreviewSide",
         "description": "One variant's outcome for one metric: the would-be value (or an\nhonest refusal) plus every would-be finding. Nothing here was written\nanywhere."
+      },
+      "ProblemRow": {
+        "properties": {
+          "line": {
+            "type": "integer",
+            "title": "Line"
+          },
+          "trip_name": {
+            "type": "string",
+            "title": "Trip Name"
+          },
+          "block_name": {
+            "type": "string",
+            "title": "Block Name"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "line",
+          "trip_name",
+          "block_name",
+          "reason"
+        ],
+        "title": "ProblemRow"
       },
       "ProviderConfigResponse": {
         "properties": {
