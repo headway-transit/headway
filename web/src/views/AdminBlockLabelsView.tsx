@@ -180,8 +180,7 @@ export function AdminBlockLabelsView() {
     return (
       <>
         <Breadcrumbs
-          trail={[{ label: copy.admin.heading, to: "/admin" }]}
-          current={t.heading}
+          trail={[{ label: copy.admin.heading, to: "/admin" }, { label: t.heading }]}
         />
         <h1>{t.heading}</h1>
         <p>{t.notAllowed}</p>
@@ -234,8 +233,7 @@ export function AdminBlockLabelsView() {
   return (
     <>
       <Breadcrumbs
-        trail={[{ label: copy.admin.heading, to: "/admin" }]}
-        current={t.heading}
+        trail={[{ label: copy.admin.heading, to: "/admin" }, { label: t.heading }]}
       />
       <h1>{t.heading}</h1>
       <p>{t.intro}</p>
