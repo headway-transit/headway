@@ -222,10 +222,18 @@ def read_mapping_csv(path: Path | str) -> tuple[list[MappingRow], str]:
 #: evidence, it is a hunch, and the rows fall back to the unnarrowed key.
 MIN_PAIRING_COVERAGE = 0.90
 
-#: ...and only when it is a CLEAR winner. If the runner-up is close behind,
-#: two services explain the name about equally well (overlapping signups),
-#: and choosing either would put an invented block name on a finding.
-MIN_PAIRING_MARGIN = 0.20
+#: ...and only when it is a CLEAR winner ON SIMILARITY, not on coverage.
+#:
+#: Coverage alone cannot tell a service from a SUPERSET of it. Measured on
+#: Link Transit 2026-08-04: every one of Sunday's 404 (route, start) keys
+#: also appears in the Saturday service, which has 470. Both therefore cover
+#: the Sunday label 100%, and a coverage contest between them is a tie that
+#: refuses a pairing that is actually obvious.
+#:
+#: Similarity (intersection over union) breaks that tie honestly, because it
+#: also penalises a service for the trips the label does NOT name: Sunday
+#: scores 1.00 against its own service and 0.86 against Saturday's.
+MIN_PAIRING_SIMILARITY_MARGIN = 0.10
 
 
 @dataclass(frozen=True)
@@ -251,6 +259,8 @@ class ServiceDayPairing:
     keys_in_export: int
     keys_explained: int
     coverage: float
+    #: Intersection over union — what actually decides the pairing.
+    similarity: float
     runner_up_coverage: float
     confident: bool
     reason: str
@@ -308,23 +318,31 @@ def pair_service_days(
             continue
         scored = sorted(
             (
-                (len(keys & covered) / len(keys), service_id)
+                (
+                    len(keys & covered) / len(keys | covered),  # similarity
+                    len(keys & covered) / len(keys),            # coverage
+                    service_id,
+                )
                 for service_id, covered in service_keys.items()
             ),
-            key=lambda pair: (-pair[0], pair[1]),
+            key=lambda t: (-t[0], -t[1], t[2]),
         )
-        best_cov, best_id = scored[0] if scored else (0.0, None)
+        if scored:
+            best_sim, best_cov, best_id = scored[0]
+        else:
+            best_sim, best_cov, best_id = 0.0, 0.0, None
         runner_up = scored[1][0] if len(scored) > 1 else 0.0
         confident = (
             best_id is not None
             and best_cov >= MIN_PAIRING_COVERAGE
-            and (best_cov - runner_up) >= MIN_PAIRING_MARGIN
+            and (best_sim - runner_up) >= MIN_PAIRING_SIMILARITY_MARGIN
         )
         if confident:
             reason = (
                 f"service {best_id!r} covers {best_cov:.0%} of the "
-                f"{len(keys)} trips this label names, and the next best "
-                f"service covers only {runner_up:.0%}"
+                f"{len(keys)} trips this label names and matches it most "
+                f"closely ({best_sim:.0%} against {runner_up:.0%} for the "
+                f"next best service)"
             )
         elif best_id is None:
             reason = "the loaded schedule carries no services to compare against"
@@ -336,8 +354,8 @@ def pair_service_days(
             )
         else:
             reason = (
-                f"two services explain this label about equally well "
-                f"({best_cov:.0%} and {runner_up:.0%}) — overlapping "
+                f"two services match this label about equally closely "
+                f"({best_sim:.0%} and {runner_up:.0%}) — overlapping "
                 f"schedule versions, left unpaired rather than chosen between"
             )
         pairings[service_day] = ServiceDayPairing(
@@ -346,6 +364,7 @@ def pair_service_days(
             keys_in_export=len(keys),
             keys_explained=int(round(best_cov * len(keys))),
             coverage=best_cov,
+            similarity=best_sim,
             runner_up_coverage=runner_up,
             confident=confident,
             reason=reason,

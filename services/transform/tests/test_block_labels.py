@@ -507,7 +507,7 @@ def test_two_services_that_explain_a_label_equally_are_refused(tmp_path):
 
     assert not pairing.confident
     assert pairing.service_id is None
-    assert "equally well" in pairing.reason
+    assert "equally closely" in pairing.reason
 
     # And the derivation stays exactly as honest as it was before.
     result = derive_block_labels(spec, rows, trips, {"Saturday Service": pairing})
@@ -541,8 +541,8 @@ def test_narrowing_never_turns_a_match_into_an_unmatched_row(tmp_path):
     bogus = {
         "Weekday": ServiceDayPairing(
             service_day="Weekday", service_id="svc-wk", keys_in_export=1,
-            keys_explained=1, coverage=1.0, runner_up_coverage=0.0,
-            confident=True, reason="fixture",
+            keys_explained=1, coverage=1.0, similarity=1.0,
+            runner_up_coverage=0.0, confident=True, reason="fixture",
         )
     }
     result = derive_block_labels(spec, rows, trips, bogus)
@@ -560,5 +560,37 @@ def test_the_pairing_states_its_evidence(tmp_path):
     pairing = pair_service_days(spec, rows, _two_service_schedule())["Weekday"]
     assert pairing.keys_in_export == 2
     assert pairing.coverage == 1.0
+    assert pairing.similarity == 1.0
     assert "covers 100%" in pairing.reason
-    assert "next best service covers only" in pairing.reason
+    assert "matches it most closely" in pairing.reason
+
+
+def test_a_service_that_is_a_subset_of_another_is_still_identified(tmp_path):
+    """THE BUG A REAL FEED FOUND. Coverage alone cannot tell a service from a
+    SUPERSET of it: on Link Transit every one of Sunday's 404 (route, start)
+    keys also appears in the Saturday service's 470, so both "cover" the
+    Sunday label 100% and a coverage contest ties. The pairing was refused
+    for a label whose service was obvious.
+
+    Similarity breaks the tie honestly by also penalising a service for the
+    trips the label does NOT name.
+    """
+    spec = _spec(tmp_path)
+    # Sunday: one trip. Saturday: that same trip plus two more.
+    trips = [
+        trip("sun", "42", 13 * 3600, "block-sun", service_id="svc-sun"),
+        trip("sat-a", "42", 13 * 3600, "block-sat", service_id="svc-sat"),
+        trip("sat-b", "42", 16 * 3600, "block-sat", service_id="svc-sat"),
+        trip("sat-c", "42", 17 * 3600, "block-sat", service_id="svc-sat"),
+    ]
+    rows = [row(1, "42 - 42WD - 13:00", "42-1", service_day="Sunday Service")]
+    pairing = pair_service_days(spec, rows, trips)["Sunday Service"]
+
+    # Both services cover the label completely — that is the trap.
+    assert pairing.coverage == 1.0
+    # Similarity does not tie: 1/1 against 1/3.
+    assert pairing.confident
+    assert pairing.service_id == "svc-sun"
+
+    result = derive_block_labels(spec, rows, trips, {"Sunday Service": pairing})
+    assert result.mapping == (("block-sun", "42-1", 1),)
