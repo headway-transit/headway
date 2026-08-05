@@ -44,6 +44,8 @@
 
 import { useEffect, useRef } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
+import { CommandRail } from "./CommandRail";
+import { setNavMode, useNavMode } from "../nav-mode";
 import { brandingLogoUrl } from "../api/client";
 import { loadBranding, useBranding } from "../branding";
 import { copy } from "../copy";
@@ -113,6 +115,9 @@ export function Layout() {
   const location = useLocation();
   const branding = useBranding();
   const theme = useTheme();
+  // Opt-in per user (src/nav-mode.ts). Both modes render the same routes and
+  // the same authorisation — only the chrome differs.
+  const navMode = useNavMode();
   const mainRef = useRef<HTMLElement>(null);
   const isFirstRender = useRef(true);
 
@@ -244,6 +249,24 @@ export function Layout() {
                 ? copy.theme.switchToLight
                 : copy.theme.switchToDark}
             </button>
+            {/* Opt-in navigation, placed AFTER the theme control on purpose:
+                the keyboard order of this bar is something people have
+                muscle memory for, and a beta toggle should not jump the
+                queue ahead of a control that has been there for months.
+                Signed-in only — the sign-in page has no nav to speak of. */}
+            {session && (
+              <button
+                type="button"
+                title={copy.nav_mode.railHint}
+                onClick={() =>
+                  setNavMode(navMode === "rail" ? "strip" : "rail")
+                }
+              >
+                {navMode === "rail"
+                  ? copy.nav_mode.switchToStrip
+                  : copy.nav_mode.switchToRail}
+              </button>
+            )}
             {session ? (
               <>
                 <span>
@@ -263,6 +286,9 @@ export function Layout() {
         </div>
 
         {/* ---- row 2: one dense navigation row ---- */}
+        {navMode === "rail" ? (
+          <CommandRail />
+        ) : (
         <nav aria-label="Main" className="nav-strip">
           <ul>
             {/* Authenticated pages are linked only when signed in — UX, not
@@ -413,6 +439,7 @@ export function Layout() {
             </li>
           </ul>
         </nav>
+        )}
       </header>
       <main
         id="main"

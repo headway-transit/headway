@@ -23,8 +23,14 @@
 import { describe, expect, it } from "vitest";
 import { screen } from "@testing-library/react";
 
-import { ADMIN_DESTINATIONS, ADMIN_ROUTES } from "../navigation";
+import {
+  ADMIN_DESTINATIONS,
+  ADMIN_ROUTES,
+  ALL_NAV_DESTINATIONS,
+  NAV_GROUPS,
+} from "../navigation";
 import { mockApi, renderApp, signInAs } from "./helpers";
+import { setNavMode } from "../nav-mode";
 
 const SSO_CONFIG = {
   configured: false,
@@ -135,5 +141,142 @@ describe("admin reachability", () => {
     // by someone refactoring "the admin area".
     expect(ADMIN_ROUTES).toContain("/settings/branding");
     expect(ADMIN_ROUTES.every((r) => r.startsWith("/"))).toBe(true);
+  });
+
+  // -------------------------------------------------------------------------
+  // The whole navigable surface, not just admin. Sampling is as easy to drop
+  // from a redesign as Branding was, and nobody would notice until a
+  // submission needed it.
+  // -------------------------------------------------------------------------
+
+  it("every room a certifying official can see is in the navigation", async () => {
+    signInAs("certifying_official");
+    adminApi();
+    renderApp("/today");
+    await screen.findByRole("navigation", { name: /main/i });
+
+    const nav = screen.getByRole("navigation", { name: /main/i });
+    const hrefs = new Set(
+      Array.from(nav.querySelectorAll("a")).map((a) => a.getAttribute("href")),
+    );
+
+    // A reader-only room is not shown to a certifier — by design, it is a
+    // read-only role's HOME, not a room everyone needs.
+    const expected = ALL_NAV_DESTINATIONS.filter((d) => d.requires !== "reader");
+    const missing = expected.filter((d) => !hrefs.has(d.to)).map((d) => d.to);
+    expect(
+      missing,
+      `these rooms have no link in the navigation: ${missing.join(", ")}`,
+    ).toEqual([]);
+  });
+
+  it("the long tail is grouped exactly as the group map says", () => {
+    // The rail renders from NAV_GROUPS while Layout keeps GROUP_PATHS for its
+    // "which group am I in" highlight. If those two ever disagree, a room is
+    // in one menu and not the other — so they are asserted equal here rather
+    // than kept in step by hand.
+    const expected: Record<string, string[]> = {
+      reports: ["/reports/monthly", "/safety", "/sampling", "/compare"],
+      records: ["/certifications", "/attestations"],
+      tools: ["/calc-runs", "/revenue-review", "/sandbox"],
+    };
+    for (const group of NAV_GROUPS) {
+      expect(
+        group.items.map((i) => i.to),
+        `group "${group.id}" drifted from Layout's GROUP_PATHS`,
+      ).toEqual(expected[group.id]);
+    }
+  });
+
+  it("a viewer sees the rooms their role allows, and not the certifier's", async () => {
+    signInAs("viewer");
+    adminApi();
+    renderApp("/today");
+    await screen.findByRole("navigation", { name: /main/i });
+
+    const nav = screen.getByRole("navigation", { name: /main/i });
+    const hrefs = new Set(
+      Array.from(nav.querySelectorAll("a")).map((a) => a.getAttribute("href")),
+    );
+
+    // Every authenticated room is present...
+    for (const d of ALL_NAV_DESTINATIONS.filter(
+      (x) => x.requires === "authenticated" || x.requires === "public",
+    )) {
+      expect(hrefs.has(d.to), `viewer cannot reach ${d.to}`).toBe(true);
+    }
+    // ...and the certifier's are not shown. UX only: the API enforces it.
+    expect(hrefs.has("/admin")).toBe(false);
+    expect(hrefs.has("/certify")).toBe(false);
+  });
+
+  // -------------------------------------------------------------------------
+  // THE RAIL MUST NOT BE A SECOND PRODUCT.
+  //
+  // Both modes render the same routes, the same components and the same
+  // authorisation — only the chrome differs. The moment a room exists in one
+  // mode and not the other, an operator's access depends on a preference,
+  // which is indefensible. So the SAME inventory is asserted in rail mode.
+  // -------------------------------------------------------------------------
+
+  it("the rail reaches every room the strip reaches", async () => {
+    setNavMode("rail");
+    try {
+      signInAs("certifying_official");
+      adminApi();
+      renderApp("/today");
+      await screen.findByRole("navigation", { name: /main/i });
+
+      const nav = screen.getByRole("navigation", { name: /main/i });
+      // Group flyouts are hidden until opened, so their links are queried
+      // from the DOM rather than by role — hidden is not missing.
+      const hrefs = new Set(
+        Array.from(nav.querySelectorAll("a")).map((a) => a.getAttribute("href")),
+      );
+
+      const expected = ALL_NAV_DESTINATIONS.filter(
+        (d) => d.requires !== "reader",
+      );
+      const missing = expected.filter((d) => !hrefs.has(d.to)).map((d) => d.to);
+      expect(
+        missing,
+        `the rail cannot reach: ${missing.join(", ")}`,
+      ).toEqual([]);
+    } finally {
+      setNavMode("strip");
+    }
+  });
+
+  it("the rail hides the certifier's rooms from a viewer, exactly as the strip does", async () => {
+    setNavMode("rail");
+    try {
+      signInAs("viewer");
+      adminApi();
+      renderApp("/today");
+      await screen.findByRole("navigation", { name: /main/i });
+
+      const nav = screen.getByRole("navigation", { name: /main/i });
+      const hrefs = new Set(
+        Array.from(nav.querySelectorAll("a")).map((a) => a.getAttribute("href")),
+      );
+      expect(hrefs.has("/map")).toBe(true);
+      expect(hrefs.has("/admin")).toBe(false);
+      expect(hrefs.has("/certify")).toBe(false);
+    } finally {
+      setNavMode("strip");
+    }
+  });
+
+  it("the classic strip is untouched when the preference is absent", async () => {
+    // The default must be the navigation people already know. Nobody opts in
+    // by accident, and an operator who never hears about this sees no change.
+    setNavMode("strip");
+    signInAs("certifying_official");
+    adminApi();
+    const { container } = renderApp("/today");
+    await screen.findByRole("navigation", { name: /main/i });
+
+    expect(container.querySelector(".nav-strip")).toBeTruthy();
+    expect(container.querySelector(".command-rail")).toBeNull();
   });
 });

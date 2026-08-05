@@ -225,6 +225,16 @@ export const copy = {
       `The newest ${cap} events are shown. Older events stay on their own pages: the calculation runs room and the data-quality queue.`,
   },
 
+  nav_mode: {
+    // Beta, and labelled as such. An operator trying a new navigation should
+    // know it is new, and know it is one click back — the whole reason this
+    // is a preference rather than a release.
+    switchToRail: "Try the side rail (beta)",
+    switchToStrip: "Back to the top menu",
+    railHint:
+      "Every page is still here — the side rail groups them the same way the top menu does. Your choice is remembered on this browser, and switching back takes one click.",
+  },
+
   theme: {
     /** The label names the action (what pressing it switches TO). */
     switchToDark: "Switch to dark theme",

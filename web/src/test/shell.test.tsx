@@ -300,6 +300,14 @@ describe("the command bar (handoff 0044)", () => {
     expect(
       screen.getByRole("button", { name: copy.theme.switchToDark }),
     ).toHaveFocus();
+    // The opt-in navigation toggle sits AFTER the theme control, deliberately:
+    // the order of this bar is muscle memory, so a beta control joins the end
+    // of the queue rather than displacing something that has been here for
+    // months. Everything below it keeps the position it always had.
+    await user.tab();
+    expect(
+      screen.getByRole("button", { name: copy.nav_mode.switchToRail }),
+    ).toHaveFocus();
     await user.tab();
     expect(screen.getByRole("button", { name: copy.signOut })).toHaveFocus();
     await user.tab();
