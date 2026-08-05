@@ -68,7 +68,7 @@ def envelope_for(feed: gtfs_realtime_pb2.FeedMessage):
     return validate_envelope(make_envelope_dict(feed.SerializeToString()))
 
 
-def test_normalizes_entities_with_one_lineage_edge_per_row() -> None:
+def test_normalizes_entities_with_ONE_batch_lineage_edge() -> None:
     feed = build_feed()
     add_vehicle(feed, "e1", "bus-101")
     add_vehicle(feed, "e2", "bus-202", trip_id=None, route_id=None,
@@ -78,7 +78,16 @@ def test_normalizes_entities_with_one_lineage_edge_per_row() -> None:
     rows, edges, findings = normalize(envelope)
 
     assert len(rows) == 2
-    assert len(edges) == 2  # exactly one edge per canonical row
+    # ONE edge for the batch, not one per row. A per-row edge repeated the
+    # same transform and the same input record once per vehicle on every
+    # poll: 12,257 raw records had produced 19.4 million edges and 22 GB on a
+    # small agency, and nothing ever read them. The edge names the source
+    # record; every ROW still carries source_record_id, so row-level
+    # provenance is unchanged.
+    assert len(edges) == 1
+    assert edges[0].output_id == envelope.record_id
+    assert edges[0].input_id == envelope.record_id
+    assert edges[0].output_kind == "canonical.vehicle_positions"
     assert findings == []
 
     row = rows[0]
@@ -101,15 +110,20 @@ def test_normalizes_entities_with_one_lineage_edge_per_row() -> None:
     assert unassigned.speed_mps is None
     assert unassigned.odometer_m is None
 
-    for row, edge in zip(rows, edges):
-        assert edge.output_kind == "canonical.vehicle_positions"
-        assert edge.output_id == row.output_id
-        assert edge.output_id.endswith(f"|{envelope.record_id}")
-        assert "|" in edge.output_id and "Z|" in edge.output_id
-        assert edge.transform_name == TRANSFORM_NAME == "normalize_gtfs_rt_positions"
-        assert edge.transform_version == TRANSFORM_VERSION == "0.2.0"
-        assert edge.input_kind == "raw.records"
-        assert edge.input_id == envelope.record_id
+    # The ROWS keep their composite natural keys — that is where per-row
+    # provenance lives, and it is unchanged.
+    for row in rows:
+        assert row.output_id.endswith(f"|{envelope.record_id}")
+        assert "|" in row.output_id and "Z|" in row.output_id
+        assert row.source_record_id == envelope.record_id
+
+    # The single batch edge names the transform and the source record.
+    edge = edges[0]
+    assert edge.output_kind == "canonical.vehicle_positions"
+    assert edge.transform_name == TRANSFORM_NAME == "normalize_gtfs_rt_positions"
+    assert edge.transform_version == TRANSFORM_VERSION == "0.2.0"
+    assert edge.input_kind == "raw.records"
+    assert edge.input_id == envelope.record_id
 
 
 def test_output_id_format_is_vehicle_time_record() -> None:
@@ -122,7 +136,10 @@ def test_output_id_format_is_vehicle_time_record() -> None:
         .isoformat()
         .replace("+00:00", "Z")
     )
-    assert edges[0].output_id == f"bus-7|{expected_time}|{envelope.record_id}"
+    # The ROW's natural key, which is what this test was always really about
+    # — it just used to read it off the per-row lineage edge. The row key is
+    # unchanged; only the edge granularity moved.
+    assert rows[0].output_id == f"bus-7|{expected_time}|{envelope.record_id}"
 
 
 def test_missing_entity_timestamp_falls_back_to_header_and_is_noted() -> None:
