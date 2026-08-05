@@ -4428,3 +4428,111 @@ button.figure-button {
     transition: none;
   }
 }
+
+/* =====================================================================
+   MOBILE — the layer this app never had (task #21)
+   =====================================================================
+
+   Before this, 4,400 lines of CSS carried exactly one responsive rule (the
+   map's 60rem collapse). Everything else was sized for a desk. The agency's
+   ITS manager put it plainly: "the menu looks bunched up on mobile."
+
+   He was describing DENSITY, not overflow. The nav row already wraps rather
+   than scrolling — deliberately, see .nav-strip — but its links are padded
+   4px by 8px, which lands around 29px tall. That is comfortably under every
+   published minimum: 44px (WCAG 2.5.5, Apple HIG) and 48dp (Material). Eleven
+   of those, wrapped tight, is exactly what "bunched up" looks and feels like.
+
+   So this layer is mostly about SIZE and BREATHING ROOM, not reflowing:
+   bigger targets, less wasted horizontal padding, a type scale that suits a
+   360px screen, and the two fixed two-column grids collapsing to one.
+
+   What it deliberately does NOT do: put overflow-x on the nav strip. Any
+   non-visible overflow makes the other axis compute to auto (CSS Overflow 3
+   §3.2), which is what clipped the group menus to a 20px sliver on 2026-08-03.
+   ===================================================================== */
+
+@media (max-width: 720px) {
+  /* Reclaim the margins. 1.5rem either side is 48px of a 360px screen —
+     13% of the display spent on nothing. */
+  main {
+    padding: var(--space-3) var(--space-2) var(--space-4);
+  }
+
+  /* Headings sized for a desk wrap awkwardly on a phone; a 1.6rem h1 over
+     two lines pushes the first real content below the fold. */
+  h1 {
+    font-size: 1.3rem;
+    line-height: 1.2;
+  }
+  h2 {
+    font-size: 1.1rem;
+  }
+
+  /* TOUCH TARGETS. The whole complaint, in one rule: every navigation
+     control becomes at least 44px tall with room around it. */
+  .app-header nav a,
+  .nav-group-toggle {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    padding: var(--space-2) var(--space-3);
+    font-size: var(--text-base);
+  }
+  .nav-strip > ul {
+    gap: var(--space-1) var(--space-2);
+    row-gap: var(--space-2);
+  }
+
+  /* Buttons in the command bar and on forms, same floor. A control you have
+     to aim at is a control that gets mis-tapped. */
+  .command-bar button,
+  .command-bar a,
+  button {
+    min-height: 44px;
+  }
+  .command-bar {
+    gap: var(--space-2);
+    padding: var(--space-2);
+  }
+
+  /* The two fixed two-column grids. The map shell asks for a 23rem sidebar
+     beside the canvas; the raw-record label list reserves a 9rem term column
+     before the value even starts. Both are wider than a phone can give. */
+  .map-shell,
+  .raw-record-label {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* Cards lose their outer inset — the screen edge is the card edge. */
+  .card {
+    padding: var(--space-3);
+  }
+
+  /* Tables already scroll inside .table-wrap (never the page), but the wrap
+     itself should not also pay for card padding at this width. */
+  .table-wrap {
+    padding: var(--space-2);
+  }
+
+  /* Any grid built from auto-fit tracks with a desktop minimum collapses
+     honestly rather than forcing a horizontal scroll. */
+  .admin-cards,
+  .block-label-counts {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Very small phones (iPhone SE and down). Only what genuinely breaks. */
+@media (max-width: 380px) {
+  main {
+    padding: var(--space-2) var(--space-2) var(--space-4);
+  }
+  h1 {
+    font-size: 1.15rem;
+  }
+  /* Wordmark and page title compete for one line at this width. */
+  .command-bar {
+    row-gap: var(--space-1);
+  }
+}
