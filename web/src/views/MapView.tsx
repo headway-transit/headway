@@ -222,6 +222,15 @@ const BASEMAP_PATH = "/basemap/region.pmtiles";
 export type BasemapStyle = BasemapStyleId;
 const BASEMAP_STYLE_KEY = "headway-basemap-style";
 
+/** The downloaded archive's own bounding box, once its header has been read. */
+export interface BasemapBounds {
+  west: number;
+  south: number;
+  east: number;
+  north: number;
+}
+
+
 function storedBasemapStyle(): BasemapStyle {
   try {
     const value = window.localStorage.getItem(BASEMAP_STYLE_KEY);
@@ -255,20 +264,62 @@ type BasemapState = "checking" | "absent" | "present" | "unusable";
  * serving stack (PMTiles requires them) and that the bytes are a PMTiles
  * archive (magic "PMTiles"). Same-origin throughout.
  */
-async function detectBasemap(): Promise<Exclude<BasemapState, "checking">> {
+interface BasemapProbe {
+  state: Exclude<BasemapState, "checking">;
+  /** The archive's own extent, when its header could be read. */
+  bounds: BasemapBounds | null;
+}
+
+async function detectBasemap(): Promise<BasemapProbe> {
   try {
     const head = await fetch(BASEMAP_PATH, { method: "HEAD" });
-    if (!head.ok) return "absent";
+    if (!head.ok) return { state: "absent", bounds: null };
     const ranged = await fetch(BASEMAP_PATH, {
-      headers: { Range: "bytes=0-6" },
+      headers: { Range: "bytes=0-126" },
     });
-    if (ranged.status !== 206) return "unusable";
-    const magic = new TextDecoder().decode(await ranged.arrayBuffer());
-    return magic.startsWith("PMTiles") ? "present" : "unusable";
+    if (ranged.status !== 206) return { state: "unusable", bounds: null };
+    const bytes = await ranged.arrayBuffer();
+    const magic = new TextDecoder().decode(bytes.slice(0, 7));
+    if (!magic.startsWith("PMTiles")) return { state: "unusable", bounds: null };
+    return { state: "present", bounds: readPmtilesBounds(bytes) };
   } catch {
     // No answer at all: treated as no basemap — the map never blocks on it.
-    return "absent";
+    return { state: "absent", bounds: null };
   }
+}
+
+/**
+ * The archive's OWN extent, read from its header.
+ *
+ * WHY THIS RATHER THAN A CONSTANT. The first fence guessed: it padded the
+ * stop bounds by 0.08 degrees because the installer pads by 0.10. That works
+ * only while those two numbers agree, and they stopped agreeing the moment
+ * anyone wanted more map — a wider download would have produced a bigger
+ * file that STILL could not be panned, because the fence never heard about
+ * it. Two constants in two languages, kept in step by memory, is a bug
+ * waiting for its trigger.
+ *
+ * The archive already states its extent. PMTiles v3 stores the bounding box
+ * at bytes 102-117 as signed 32-bit integers in degrees x 10^7 (the spec's
+ * E7 encoding). Reading it costs nothing — the header is already being
+ * fetched to check the magic — and it is exact for any agency, any margin,
+ * with nothing to keep in sync.
+ */
+function readPmtilesBounds(header: ArrayBuffer): BasemapBounds | null {
+  if (header.byteLength < 127) return null;
+  const view = new DataView(header);
+  const e7 = (offset: number) => view.getInt32(offset, true) / 10_000_000;
+  const west = e7(102);
+  const south = e7(106);
+  const east = e7(110);
+  const north = e7(114);
+  // A degenerate or absent box is treated as "unknown" rather than trusted:
+  // fencing to garbage would strand the operator somewhere with no tiles.
+  if (![west, south, east, north].every(Number.isFinite)) return null;
+  if (east <= west || north <= south) return null;
+  if (Math.abs(west) > 180 || Math.abs(east) > 180) return null;
+  if (Math.abs(south) > 90 || Math.abs(north) > 90) return null;
+  return { west, south, east, north };
 }
 
 /** Map paint tokens for HEADWAY'S OWN MARKS — the canvas, route lines,
@@ -340,6 +391,10 @@ export function MapView() {
   const mapRef = useRef<MapLibreMap | null>(null);
   const [mapReady, setMapReady] = useState(false);
   const [basemap, setBasemap] = useState<BasemapState>("checking");
+  // The archive's own extent. Component state rather than a module variable:
+  // a module-level cache outlives the component, so a second map (or the
+  // next test) would silently inherit the first one's fence.
+  const [basemapBounds, setBasemapBounds] = useState<BasemapBounds | null>(null);
   /** Street style — the user's own choice, NOT the app theme (see
    *  BasemapStyle). Light by default in both themes. */
   const [basemapStyle, setBasemapStyle] =
@@ -583,8 +638,10 @@ export function MapView() {
   // ---- the self-hosted basemap: detected, never assumed ----
   useEffect(() => {
     let cancelled = false;
-    detectBasemap().then((state) => {
-      if (!cancelled) setBasemap(state);
+    detectBasemap().then((probe) => {
+      if (cancelled) return;
+      setBasemap(probe.state);
+      setBasemapBounds(probe.bounds);
     });
     return () => {
       cancelled = true;
@@ -661,21 +718,31 @@ export function MapView() {
       // service area". The agency's ITS manager raised exactly this: every
       // time he scrolls out he gets the grey margin.
       //
-      // The fence is set from the SAME bounds the framing uses, padded by
-      // slightly less than the installer's margin so the edge of the fence
-      // sits INSIDE the edge of the downloaded data. Whatever the agency,
-      // and whatever their service area, the two stay in step.
-      const FENCE_DEG = 0.08; // < BASEMAP_MARGIN_DEG (0.10) on purpose
-      map.setMaxBounds([
-        [minX - FENCE_DEG, minY - FENCE_DEG],
-        [maxX + FENCE_DEG, maxY + FENCE_DEG],
-      ]);
+      // PREFER THE ARCHIVE'S OWN EXTENT. readPmtilesBounds() has read the
+      // real bounding box out of the PMTiles header, so the fence is the
+      // edge of the data itself rather than a guess about it. Widen the
+      // download and the fence widens with it, automatically.
+      //
+      // The fallback is the old estimate — stop bounds padded by slightly
+      // less than the installer's default margin — used only when there is
+      // no archive to ask (no basemap installed, or an unreadable header).
+      const FALLBACK_FENCE_DEG = 0.08; // < the installer's 0.10 default
+      const fence: [[number, number], [number, number]] = basemapBounds
+        ? [
+            [basemapBounds.west, basemapBounds.south],
+            [basemapBounds.east, basemapBounds.north],
+          ]
+        : [
+            [minX - FALLBACK_FENCE_DEG, minY - FALLBACK_FENCE_DEG],
+            [maxX + FALLBACK_FENCE_DEG, maxY + FALLBACK_FENCE_DEG],
+          ];
+      map.setMaxBounds(fence);
       // ...and no further out than the framing zoom, which is by definition
       // "the whole service area, visible". Zooming past it could only add
       // emptiness. A small allowance keeps it from feeling clamped.
       map.setMinZoom(Math.max(0, map.getZoom() - 0.5));
     }
-  }, [mapReady, stops]);
+  }, [mapReady, stops, basemapBounds]);
 
   useEffect(() => {
     const map = mapRef.current;

@@ -57,7 +57,12 @@ export interface MockedResponse {
    * byte for byte instead of JSON.stringify(body). Pair with `headers`
    * (e.g. Content-Type, Content-Disposition).
    */
-  rawBody?: string;
+  /**
+   * Raw response body. ArrayBuffer is allowed because binary headers are a
+   * real case: the map reads the PMTiles archive's bounding box straight out
+   * of its 127-byte header, and a string double would not survive DataView.
+   */
+  rawBody?: string | ArrayBuffer;
   headers?: Record<string, string>;
 }
 

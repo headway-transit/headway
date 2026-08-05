@@ -284,6 +284,104 @@ function geometryRoutes(): Record<string, RouteHandler> {
 }
 
 describe("/map", () => {
+  it("reads the archive's OWN extent from the PMTiles header and fences to it", async () => {
+    // THE BUG THIS CLOSES. The first fence padded the stop bounds by a
+    // constant chosen to match the installer's margin. Two constants in two
+    // languages, kept in step by memory — so widening the download produced
+    // a bigger file that still could not be panned, because the fence never
+    // heard about it. Daniel asked for more panning room and that is exactly
+    // what he would have failed to get.
+    //
+    // PMTiles v3 stores its bounding box at bytes 102-117 as int32 in
+    // degrees x 10^7. A deliberately GENEROUS box here — far wider than
+    // stop bounds + 0.08 — proves the header won, not the estimate.
+    const WEST = -121.5, SOUTH = 46.9, EAST = -119.2, NORTH = 48.4;
+    const header = new ArrayBuffer(127);
+    const view = new DataView(header);
+    new Uint8Array(header).set(
+      new TextEncoder().encode("PMTiles"), 0,
+    );
+    view.setUint8(7, 3); // spec version
+    view.setInt32(102, Math.round(WEST * 1e7), true);
+    view.setInt32(106, Math.round(SOUTH * 1e7), true);
+    view.setInt32(110, Math.round(EAST * 1e7), true);
+    view.setInt32(114, Math.round(NORTH * 1e7), true);
+
+    signInAs("viewer");
+    mockApi({
+      ...geometryRoutes(),
+      "GET /ops/vehicles/latest": { status: 200, body: vehiclesLive },
+      "HEAD /basemap/region.pmtiles": { status: 200, body: null },
+      "GET /basemap/region.pmtiles": {
+        status: 206,
+        rawBody: header,
+        headers: { "Content-Range": "bytes 0-126/999999" },
+      },
+    });
+    renderApp("/map");
+    await screen.findByRole("heading", { name: /map/i, level: 1 });
+
+    const map = fakeMaps[fakeMaps.length - 1] as unknown as {
+      maxBounds?: number[][];
+    };
+    await waitFor(() => expect(map?.maxBounds).toBeDefined());
+    const [[west, south], [east, north]] = map.maxBounds!;
+
+    expect(west).toBeCloseTo(WEST, 4);
+    expect(south).toBeCloseTo(SOUTH, 4);
+    expect(east).toBeCloseTo(EAST, 4);
+    expect(north).toBeCloseTo(NORTH, 4);
+
+    // And it is genuinely wider than the estimate would have allowed —
+    // otherwise this test could pass on the fallback path.
+    expect(west).toBeLessThan(-71.1 - 0.08);
+  });
+
+  it("refuses a nonsense bounding box and falls back to the estimate", async () => {
+    // A header whose box is degenerate (east at or west of west) is garbage,
+    // whether from a truncated download or a malformed archive. Fencing to
+    // it would strand the operator in a region with no tiles and no way back
+    // — strictly worse than the estimate it replaced. So the guard exists;
+    // this test is why anyone should believe it works.
+    const header = new ArrayBuffer(127);
+    const view = new DataView(header);
+    new Uint8Array(header).set(new TextEncoder().encode("PMTiles"), 0);
+    view.setUint8(7, 3);
+    view.setInt32(102, Math.round(-119.0 * 1e7), true); // west
+    view.setInt32(106, Math.round(48.0 * 1e7), true);   // south
+    view.setInt32(110, Math.round(-121.0 * 1e7), true); // east — WEST of west
+    view.setInt32(114, Math.round(47.0 * 1e7), true);   // north — SOUTH of south
+
+    signInAs("viewer");
+    mockApi({
+      ...geometryRoutes(),
+      "GET /ops/vehicles/latest": { status: 200, body: vehiclesLive },
+      "HEAD /basemap/region.pmtiles": { status: 200, body: null },
+      "GET /basemap/region.pmtiles": {
+        status: 206,
+        rawBody: header,
+        headers: { "Content-Range": "bytes 0-126/999999" },
+      },
+    });
+    renderApp("/map");
+    await screen.findByRole("heading", { name: /map/i, level: 1 });
+
+    const map = fakeMaps[fakeMaps.length - 1] as unknown as {
+      maxBounds?: number[][];
+    };
+    await waitFor(() => expect(map?.maxBounds).toBeDefined());
+    const [[west, south], [east, north]] = map.maxBounds!;
+
+    // The estimate, not the garbage: stop bounds padded by 0.08.
+    expect(west).toBeCloseTo(-71.1 - 0.08, 4);
+    expect(south).toBeCloseTo(42.330957 - 0.08, 4);
+    expect(east).toBeCloseTo(-71.082754 + 0.08, 4);
+    expect(north).toBeCloseTo(42.34 + 0.08, 4);
+    // And a sane box, whatever else happened.
+    expect(east).toBeGreaterThan(west);
+    expect(north).toBeGreaterThan(south);
+  });
+
   it("fences panning and zoom to the basemap that was actually downloaded", async () => {
     // The agency's ITS manager: "every time Tony scrolls out, there is the
     // grayed out margin and it doesn't look visually appealing."
@@ -902,7 +1000,12 @@ describe("/map", () => {
       (c) => c.method === "GET" && c.path === "/basemap/region.pmtiles",
     );
     expect(head).toBeDefined();
-    expect(ranged?.headers["Range"]).toBe("bytes=0-6");
+    // The full 127-byte PMTiles header, not just the 7 magic bytes: the map
+    // reads the archive's own bounding box out of it (bytes 102-117) so the
+    // pan fence is the edge of the real data rather than a guess. Still one
+    // ranged same-origin GET — the security property this test guards is
+    // untouched, only the length changed.
+    expect(ranged?.headers["Range"]).toBe("bytes=0-126");
     // And EVERY request in the log — API, detection, all of it — is a
     // same-origin relative path. Nothing leaves this installation.
     expect(calls.length).toBeGreaterThan(0);
