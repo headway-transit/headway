@@ -641,7 +641,12 @@ export function MapView() {
     detectBasemap().then((probe) => {
       if (cancelled) return;
       setBasemap(probe.state);
-      setBasemapBounds(probe.bounds);
+      // Only when there is something to learn. An unconditional second state
+      // update re-renders even when the answer is "no bounds", and that extra
+      // render arrives between the map being created and its source being
+      // attached — which is exactly how it showed up: the basemap-present
+      // test suddenly found a map with no sources on it.
+      if (probe.bounds) setBasemapBounds(probe.bounds);
     });
     return () => {
       cancelled = true;
