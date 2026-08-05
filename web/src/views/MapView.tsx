@@ -651,6 +651,29 @@ export function MapView() {
         ],
         { padding: 40, duration: 0 }, // initial framing: instant, not motion
       );
+
+      // Fence the map to the basemap we actually downloaded.
+      //
+      // WHY: the installer cuts the basemap to the stops' bounding box plus
+      // BASEMAP_MARGIN_DEG (0.10 degrees, about 7 miles). Beyond that edge
+      // there are no tiles, so panning or zooming out hands the operator a
+      // grey void — which reads as a broken map, not as "you have left the
+      // service area". The agency's ITS manager raised exactly this: every
+      // time he scrolls out he gets the grey margin.
+      //
+      // The fence is set from the SAME bounds the framing uses, padded by
+      // slightly less than the installer's margin so the edge of the fence
+      // sits INSIDE the edge of the downloaded data. Whatever the agency,
+      // and whatever their service area, the two stay in step.
+      const FENCE_DEG = 0.08; // < BASEMAP_MARGIN_DEG (0.10) on purpose
+      map.setMaxBounds([
+        [minX - FENCE_DEG, minY - FENCE_DEG],
+        [maxX + FENCE_DEG, maxY + FENCE_DEG],
+      ]);
+      // ...and no further out than the framing zoom, which is by definition
+      // "the whole service area, visible". Zooming past it could only add
+      // emptiness. A small allowance keeps it from feeling clamped.
+      map.setMinZoom(Math.max(0, map.getZoom() - 0.5));
     }
   }, [mapReady, stops]);
 
