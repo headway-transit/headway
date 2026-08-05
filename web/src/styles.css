@@ -4285,8 +4285,8 @@ button.figure-button {
   flex-direction: column;
   background: var(--color-surface);
   border-right: 1px solid var(--color-border);
-  padding: var(--space-2) 0;
-  min-width: 84px;
+  padding: var(--space-3) 0;
+  min-width: 92px;
 }
 :root[data-nav="rail"] .rail-list {
   list-style: none;
@@ -4303,18 +4303,27 @@ button.figure-button {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: var(--space-1);
+  gap: 5px;
   width: 100%;
-  padding: var(--space-2) var(--space-1);
+  padding: var(--space-3) var(--space-1) var(--space-2);
   border: 0;
   background: none;
   color: var(--color-text-muted);
   text-decoration: none;
-  font-size: 0.6875rem;
-  letter-spacing: 0.04em;
+  /* Micro-labels take the monospace face with open tracking — the typography
+     of a console legend rather than a website menu. At this size a
+     proportional face reads as a cramped afterthought; letterspaced mono
+     reads as deliberate. */
+  font-family: var(--font-mono, ui-monospace, "SF Mono", Menlo, monospace);
+  font-size: 0.625rem;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  line-height: 1.1;
   text-align: center;
   cursor: pointer;
-  transition: color 0.15s ease, background 0.15s ease;
+  transition:
+    color 0.15s ease,
+    background 0.15s ease;
 }
 :root[data-nav="rail"] .rail-glyph {
   width: 20px;
@@ -4344,10 +4353,24 @@ button.figure-button {
   content: "";
   position: absolute;
   left: 0;
-  top: 15%;
-  bottom: 15%;
+  top: 14%;
+  bottom: 14%;
   width: 2px;
+  border-radius: 0 2px 2px 0;
   background: var(--color-accent);
+}
+/* Dark only: the marker reads as a lit channel rather than a painted line.
+   Decorative, and never the sole carrier of state — weight and colour both
+   change too (WCAG AA). */
+:root[data-theme="dark"][data-nav="rail"] .rail-item.active::before,
+:root[data-theme="dark"][data-nav="rail"] .rail-item[aria-current="page"]::before,
+:root[data-theme="dark"][data-nav="rail"] .rail-group-button[data-current]::before {
+  box-shadow: 0 0 10px var(--color-accent);
+}
+/* The glyph carries the state too, so it is legible without reading. */
+:root[data-nav="rail"] .rail-item.active .rail-glyph,
+:root[data-nav="rail"] .rail-item[aria-current="page"] .rail-glyph {
+  stroke-width: 1.9;
 }
 :root[data-nav="rail"] .rail-item:focus-visible {
   outline: 2px solid var(--color-accent);
@@ -4361,7 +4384,7 @@ button.figure-button {
   left: 100%;
   top: 0;
   z-index: 40;
-  min-width: 232px;
+  min-width: 300px;
   padding: var(--space-3);
   background: var(--color-bg);
   border: 1px solid var(--color-border);
@@ -4374,9 +4397,10 @@ button.figure-button {
   clip-path: inset(0 0 0 0);
 }
 :root[data-nav="rail"] .rail-fly-title {
-  margin: 0 0 var(--space-2);
+  margin: 0 0 var(--space-3);
+  font-family: var(--font-mono, ui-monospace, "SF Mono", Menlo, monospace);
   font-size: 0.6875rem;
-  letter-spacing: 0.16em;
+  letter-spacing: 0.2em;
   text-transform: uppercase;
   color: var(--color-accent);
 }
@@ -4386,17 +4410,64 @@ button.figure-button {
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: var(--space-1);
 }
+/* Cards rather than a link list: each says what the room is FOR. */
 :root[data-nav="rail"] .rail-flyout a {
-  display: block;
-  padding: var(--space-2);
-  border-radius: var(--radius-1, 3px);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-2);
+  background: color-mix(in srgb, var(--color-text) 2%, transparent);
   color: var(--color-text);
   text-decoration: none;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease;
 }
-:root[data-nav="rail"] .rail-flyout a:hover {
-  background: var(--color-raised, var(--color-surface));
+:root[data-nav="rail"] .rail-flyout a:hover,
+:root[data-nav="rail"] .rail-flyout a:focus-visible {
+  border-color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 7%, transparent);
+}
+:root[data-nav="rail"] .rail-fly-name {
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+:root[data-nav="rail"] .rail-fly-blurb {
+  font-size: var(--text-sm);
+  line-height: 1.4;
+  color: var(--color-text-muted);
+}
+
+/* The staggered arrival: cards land after the wipe, in reading order. It
+   reads as the panel unpacking itself rather than a block appearing. */
+:root[data-nav="rail"] .rail-flyout a {
+  opacity: 0;
+  transform: translateY(5px);
+}
+:root[data-nav="rail"] .rail-flyout[data-open="true"] a {
+  opacity: 1;
+  transform: none;
+  transition:
+    opacity 0.28s ease,
+    transform 0.28s ease,
+    border-color 0.15s ease,
+    background 0.15s ease;
+}
+:root[data-nav="rail"] .rail-flyout[data-open="true"] li:nth-child(1) a {
+  transition-delay: 0.14s;
+}
+:root[data-nav="rail"] .rail-flyout[data-open="true"] li:nth-child(2) a {
+  transition-delay: 0.19s;
+}
+:root[data-nav="rail"] .rail-flyout[data-open="true"] li:nth-child(3) a {
+  transition-delay: 0.24s;
+}
+:root[data-nav="rail"] .rail-flyout[data-open="true"] li:nth-child(4) a {
+  transition-delay: 0.29s;
 }
 
 /* The shell becomes rail + canvas instead of header + body. */
@@ -4426,6 +4497,12 @@ button.figure-button {
 @media (prefers-reduced-motion: reduce) {
   :root[data-nav="rail"] .rail-flyout {
     transition: none;
+  }
+  :root[data-nav="rail"] .rail-flyout a,
+  :root[data-nav="rail"] .rail-flyout[data-open="true"] a {
+    opacity: 1;
+    transform: none;
+    transition-delay: 0s;
   }
 }
 

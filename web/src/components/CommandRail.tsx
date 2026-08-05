@@ -158,10 +158,19 @@ export function CommandRail() {
                 hidden={!isOpen}
               >
                 <p className="rail-fly-title">{copy.shell.groups[group.id]}</p>
-                <ul>
+                {/* Cards, not a list of names. A menu that only lists rooms
+                    makes you open one to find out whether it was the one you
+                    wanted; a menu that says what each room is FOR answers
+                    before the trip. */}
+                <ul className="rail-fly-cards">
                   {group.items.map((item) => (
                     <li key={item.to}>
-                      <NavLink to={item.to}>{label(item)}</NavLink>
+                      <NavLink to={item.to}>
+                        <span className="rail-fly-name">{label(item)}</span>
+                        {item.blurb && (
+                          <span className="rail-fly-blurb">{item.blurb}</span>
+                        )}
+                      </NavLink>
                     </li>
                   ))}
                 </ul>
