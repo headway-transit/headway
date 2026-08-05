@@ -733,6 +733,29 @@ describe("/map", () => {
       l.id.startsWith("basemap-"),
     ).length;
     expect(streetAddsBefore).toBeGreaterThan(0);
+
+    // WAIT FOR THE OVERLAYS TO SETTLE BEFORE TAKING THE BASELINE.
+    // Routes, stops and vehicles arrive from separate async calls. The
+    // legend text appears as soon as the basemap loads, which is EARLIER
+    // than the last overlay layer being added — so a baseline captured here
+    // could miss overlays that then land after the click and read as
+    // "the style swap touched the overlays". That is a false alarm about
+    // the one property this test exists to protect. It only showed up
+    // under full-suite load, where the async calls resolve later.
+    await waitFor(() => {
+      const n = map.layerAdds.filter((l) => !l.id.startsWith("basemap-")).length;
+      expect(n).toBeGreaterThan(0);
+    });
+    let settled = -1;
+    await waitFor(() => {
+      const n = map.layerAdds.filter((l) => !l.id.startsWith("basemap-")).length;
+      // Two consecutive equal reads: the count has stopped growing.
+      expect(n).toBe(settled);
+      settled = n;
+    }, { interval: 20 }).catch(async () => {
+      settled = map.layerAdds.filter((l) => !l.id.startsWith("basemap-")).length;
+    });
+
     // Headway's OWN marks were added too and must survive a style swap.
     const overlayAddsBefore = map.layerAdds.filter(
       (l) => !l.id.startsWith("basemap-"),
