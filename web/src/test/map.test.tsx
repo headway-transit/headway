@@ -106,7 +106,15 @@ vi.mock("maplibre-gl", () => {
     getCanvas() {
       return this.canvas;
     }
+    maxBounds?: number[][];
+    minZoom?: number;
     fitBounds() {}
+    setMaxBounds(b?: number[][]) {
+      this.maxBounds = b;
+    }
+    setMinZoom(z?: number) {
+      this.minZoom = z;
+    }
     getZoom() {
       return 10;
     }
@@ -129,6 +137,8 @@ interface FakeMapShape {
   paintSets: { id: string; prop: string; value: unknown }[];
   featureStates: { source: string; id: unknown; state: unknown }[];
   sourceData: Record<string, unknown>;
+  maxBounds?: number[][];
+  minZoom?: number;
 }
 
 // ---- fixtures mirroring the live envelopes (handoff 0023 evidence) ----
@@ -274,6 +284,52 @@ function geometryRoutes(): Record<string, RouteHandler> {
 }
 
 describe("/map", () => {
+  it("fences panning and zoom to the basemap that was actually downloaded", async () => {
+    // The agency's ITS manager: "every time Tony scrolls out, there is the
+    // grayed out margin and it doesn't look visually appealing."
+    //
+    // The installer cuts the basemap to the stops' bounding box plus
+    // BASEMAP_MARGIN_DEG (0.10 degrees). Past that edge there are no tiles,
+    // so the map hands back a grey void that reads as broken. The fence has
+    // to sit INSIDE that edge, and it has to be derived from the same stop
+    // bounds — never a hardcoded region, which would break for every other
+    // agency.
+    signInAs("viewer");
+    mockApi({
+      ...geometryRoutes(),
+      "GET /ops/vehicles/latest": { status: 200, body: vehiclesLive },
+    });
+    renderApp("/map");
+    await screen.findByRole("heading", { name: /map/i, level: 1 });
+
+    const map = fakeMaps[fakeMaps.length - 1] as unknown as {
+      maxBounds?: number[][];
+      minZoom?: number;
+    };
+    await waitFor(() => expect(map?.maxBounds).toBeDefined());
+
+    // Stops span lon -71.1..-71.082754, lat 42.330957..42.34.
+    const [[west, south], [east, north]] = map.maxBounds!;
+    const FENCE = 0.08;
+    const MARGIN = 0.10; // what the installer actually downloads
+
+    expect(west).toBeCloseTo(-71.1 - FENCE, 5);
+    expect(south).toBeCloseTo(42.330957 - FENCE, 5);
+    expect(east).toBeCloseTo(-71.082754 + FENCE, 5);
+    expect(north).toBeCloseTo(42.34 + FENCE, 5);
+
+    // THE POINT: the fence is strictly inside the downloaded extent, so the
+    // grey is unreachable rather than merely further away.
+    expect(-71.1 - MARGIN).toBeLessThan(west);
+    expect(42.330957 - MARGIN).toBeLessThan(south);
+    expect(-71.082754 + MARGIN).toBeGreaterThan(east);
+    expect(42.34 + MARGIN).toBeGreaterThan(north);
+
+    // And zooming out past "the whole service area" is blocked.
+    expect(map.minZoom).toBeDefined();
+    expect(map.minZoom).toBeLessThanOrEqual(10);
+  });
+
   it("badges the surface as operations insight, renders the server's ops note and the SCHEMATIC legend note verbatim, and passes axe", async () => {
     signInAs("viewer");
     mockApi({

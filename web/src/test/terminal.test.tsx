@@ -54,7 +54,15 @@ vi.mock("maplibre-gl", () => {
     getCanvas() {
       return this.canvas;
     }
+    maxBounds?: unknown;
+    minZoom?: number;
     fitBounds() {}
+    setMaxBounds(b?: unknown) {
+      this.maxBounds = b;
+    }
+    setMinZoom(z?: number) {
+      this.minZoom = z;
+    }
     getZoom() {
       return 10;
     }
