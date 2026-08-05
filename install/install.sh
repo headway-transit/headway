@@ -92,7 +92,19 @@ PMTILES_SHA256_X86_64="3ed7dbf4ec2e6dfe5e25b6f70d1ffc932729f93c86db353bf514dd710
 PMTILES_SHA256_ARM64="f8bd47e7ea866863489cad588fbaf2f31f42e5821f7a03f009b3769f05801cb1"
 # Margin added around the stops' own bounding box, in degrees (~0.1° is
 # about 7 miles north-south). Stated to the user before anything downloads.
-BASEMAP_MARGIN_DEG="0.10"
+#
+# OVERRIDABLE, because the right answer is geographic. The first agency to
+# use this said the map "doesn't move well outside the service area" — 7
+# miles of context is too tight to get your bearings. But the cost of a wider
+# margin is not uniform: degrees are cheap over rural terrain and expensive
+# over a dense metro, where the same half-degree pulls in millions of
+# buildings. So the default stays conservative and an agency that wants more
+# room asks for it:
+#
+#   HEADWAY_BASEMAP_MARGIN_DEG=0.25 ./install/install.sh --download-basemap
+#
+# 0.10 is about 7 miles, 0.25 about 17, 0.50 about 35.
+BASEMAP_MARGIN_DEG="${HEADWAY_BASEMAP_MARGIN_DEG:-0.10}"
 
 # Network access ("Where will people use Headway from?"), see docs/network-access.md.
 #   local = just this computer (default)   lan = other computers in the office
