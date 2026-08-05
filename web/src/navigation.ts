@@ -130,6 +130,16 @@ export interface NavDestination {
   /** Distinctive fragment of the visible label, for the reachability test. */
   labelMatch: string;
   requires: NavAudience;
+  /**
+   * One line saying what the room is FOR, in the operator's words.
+   *
+   * Shown on the rail's flyout cards. A menu that only lists names makes you
+   * open a room to find out whether it was the one you wanted; a menu that
+   * says what each room does answers before the trip. Only the grouped
+   * rooms need these — the primary rooms are one click away and named
+   * plainly enough.
+   */
+  blurb?: string;
 }
 
 export interface NavGroupSpec {
@@ -155,27 +165,72 @@ export const NAV_GROUPS: readonly NavGroupSpec[] = [
     id: "reports",
     labelMatch: "Reports",
     items: [
-      { to: "/reports/monthly", labelMatch: "Monthly", requires: "authenticated" },
-      { to: "/safety", labelMatch: "Safety", requires: "authenticated" },
-      { to: "/sampling", labelMatch: "Sampling", requires: "authenticated" },
-      { to: "/compare", labelMatch: "Compare", requires: "authenticated" },
+      {
+        to: "/reports/monthly",
+        labelMatch: "Monthly",
+        requires: "authenticated",
+        blurb: "Passenger trips, revenue miles and hours for a reporting month.",
+      },
+      {
+        to: "/safety",
+        labelMatch: "Safety",
+        requires: "authenticated",
+        blurb: "Events, how each was classified, and the rule behind it.",
+      },
+      {
+        to: "/sampling",
+        labelMatch: "Sampling",
+        requires: "authenticated",
+        blurb: "Draw a plan, record measurements, estimate passenger miles.",
+      },
+      {
+        to: "/compare",
+        labelMatch: "Compare",
+        requires: "authenticated",
+        blurb: "One figure against another period, with both receipts.",
+      },
     ],
   },
   {
     id: "records",
     labelMatch: "Records",
     items: [
-      { to: "/certifications", labelMatch: "Certifications", requires: "authenticated" },
-      { to: "/attestations", labelMatch: "Attestations", requires: "authenticated" },
+      {
+        to: "/certifications",
+        labelMatch: "Certifications",
+        requires: "authenticated",
+        blurb: "Every signed submission: who signed, what it covered, when.",
+      },
+      {
+        to: "/attestations",
+        labelMatch: "Attestations",
+        requires: "authenticated",
+        blurb: "The statistician\u2019s record for a sampling plan.",
+      },
     ],
   },
   {
     id: "tools",
     labelMatch: "Tools",
     items: [
-      { to: "/calc-runs", labelMatch: "Calculations", requires: "authenticated" },
-      { to: "/revenue-review", labelMatch: "Revenue", requires: "authenticated" },
-      { to: "/sandbox", labelMatch: "Sandbox", requires: "authenticated" },
+      {
+        to: "/calc-runs",
+        labelMatch: "Calculations",
+        requires: "authenticated",
+        blurb: "Which version produced a figure, and what a run refused to compute.",
+      },
+      {
+        to: "/revenue-review",
+        labelMatch: "Revenue",
+        requires: "authenticated",
+        blurb: "Boardings the calculation would not decide alone.",
+      },
+      {
+        to: "/sandbox",
+        labelMatch: "Sandbox",
+        requires: "authenticated",
+        blurb: "Model a policy change. Nothing here is saved or reported.",
+      },
     ],
   },
 ] as const;
