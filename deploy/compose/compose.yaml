@@ -390,6 +390,10 @@ services:
       SQLSOURCE_VIEW: ${SQLSOURCE_VIEW:-}
       SQLSOURCE_COLUMNS: ${SQLSOURCE_COLUMNS:-}
       SQLSOURCE_CURSOR_COLUMN: ${SQLSOURCE_CURSOR_COLUMN:-}
+      # The cursor value the FIRST read starts after. No default on
+      # purpose: without it the connector would read the whole view,
+      # which against a warehouse table means years of history at once.
+      SQLSOURCE_START_AFTER: ${SQLSOURCE_START_AFTER:-}
       SQLSOURCE_ADAPTER_LABEL: ${SQLSOURCE_ADAPTER_LABEL:-}
       SQLSOURCE_POLL_INTERVAL: ${SQLSOURCE_POLL_INTERVAL:-}
       SQLSOURCE_BATCH_MAX_ROWS: ${SQLSOURCE_BATCH_MAX_ROWS:-}

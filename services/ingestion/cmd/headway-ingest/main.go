@@ -79,6 +79,9 @@
 //	                               adapter's order (mapping.v0.yaml source_format.csv.columns);
 //	                               "*" is refused (ADR-0013 minimization)
 //	SQLSOURCE_CURSOR_COLUMN        monotonic INTEGER keyset column, one of SQLSOURCE_COLUMNS —
+//	SQLSOURCE_START_AFTER          cursor value the FIRST read starts after; REQUIRED,
+//	                               no default — an unbounded first read against a
+//	                               warehouse view lands years of history at once
 //	                               REQUIRED (e.g. the view's warehouse key)
 //	SQLSOURCE_ADAPTER_LABEL        envelope source — REQUIRED, no default (fail closed). Must be
 //	                               the REGISTERED adapter mapping-spec label `<vendor>_<product>`
@@ -536,6 +539,7 @@ func sqlsourceFromEnv(agencyID string, kafka producer.Producer, log *slog.Logger
 		View:         strings.TrimSpace(os.Getenv("SQLSOURCE_VIEW")),
 		Columns:      csvFromEnv("SQLSOURCE_COLUMNS"),
 		CursorColumn: strings.TrimSpace(os.Getenv("SQLSOURCE_CURSOR_COLUMN")),
+		StartAfter:   strings.TrimSpace(os.Getenv("SQLSOURCE_START_AFTER")),
 		Source:       strings.TrimSpace(os.Getenv("SQLSOURCE_ADAPTER_LABEL")),
 		StateDir:     strings.TrimSpace(os.Getenv("SQLSOURCE_STATE_DIR")),
 		AgencyID:     agencyID,
