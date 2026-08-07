@@ -258,10 +258,20 @@ def normalize(
             vehicle_label=(vehicle.vehicle.label or None),
         )
         rows.append(row)
+        # No per-row edge — see the batch edge below.
+
+    # ONE lineage edge for the whole batch. Same reasoning as
+    # trip_updates.normalize: a per-row edge repeated the same transform and
+    # the same input record once per vehicle, on every poll, forever, and
+    # nothing ever read the result. output_id is the source record, so the
+    # edge reads: the canonical.vehicle_positions produced from record R.
+    # Row-level provenance is unaffected — every row carries
+    # source_record_id.
+    if rows:
         edges.append(
             LineageEdge(
                 output_kind=OUTPUT_KIND,
-                output_id=row.output_id,
+                output_id=record_id,
                 transform_name=TRANSFORM_NAME,
                 transform_version=TRANSFORM_VERSION,
                 input_kind=INPUT_KIND,

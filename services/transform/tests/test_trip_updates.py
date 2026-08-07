@@ -94,7 +94,7 @@ def _utc(seconds: int) -> datetime:
     return datetime.fromtimestamp(seconds, tz=timezone.utc)
 
 
-def test_normalizes_stop_time_events_with_one_edge_per_row() -> None:
+def test_normalizes_stop_time_events_with_ONE_batch_edge() -> None:
     feed = build_feed()
     update = add_trip_update(feed, "e1", "trip-1")
     add_stop_time_update(update, stop_id="stop-1", stop_sequence=5)
@@ -108,7 +108,16 @@ def test_normalizes_stop_time_events_with_one_edge_per_row() -> None:
 
     assert findings == []
     assert len(rows) == 2
-    assert len(edges) == 2  # exactly one edge per canonical row
+    # ONE edge for the batch. A GTFS-RT poll carries an update for every
+    # active trip, so a per-row edge meant thousands of identical-transform,
+    # identical-input edges every 30 seconds. On a small agency that reached
+    # 19.4 million edges and 22 GB from 12,257 raw records, and no code path
+    # ever read one: the metric lineage walk goes from computed.metric_values
+    # straight to raw.records, and no reverse lookup by input_id exists.
+    assert len(edges) == 1
+    assert edges[0].output_id == envelope.record_id
+    assert edges[0].input_id == envelope.record_id
+    assert edges[0].output_kind == "canonical.trip_updates"
     first = rows[0]
     assert first.feed_timestamp == _utc(HEADER_TS)
     assert first.trip_id == "trip-1"
@@ -131,7 +140,10 @@ def test_normalizes_stop_time_events_with_one_edge_per_row() -> None:
         assert edge.transform_version == TRANSFORM_VERSION == "0.1.0"
         assert edge.input_kind == "raw.records"
         assert edge.input_id == envelope.record_id
-    assert edges[0].output_id == (
+    # The ROW's natural key. This assertion used to read it off the per-row
+    # lineage edge; the key itself is unchanged, only the edge granularity
+    # moved. Row-level provenance still lives on the row.
+    assert rows[0].output_id == (
         f"trip-1|5|stop-1|2025-10-09T08:53:20Z|{envelope.record_id}"
     )
 

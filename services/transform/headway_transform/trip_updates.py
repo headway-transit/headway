@@ -243,16 +243,7 @@ def normalize(
             return
         seen_keys.add(key)
         rows.append(row)
-        edges.append(
-            LineageEdge(
-                output_kind=OUTPUT_KIND,
-                output_id=row.output_id,
-                transform_name=TRANSFORM_NAME,
-                transform_version=TRANSFORM_VERSION,
-                input_kind=INPUT_KIND,
-                input_id=record_id,
-            )
-        )
+        # NO per-row lineage edge here. See _batch_edge below.
 
     for index, entity in enumerate(feed.entity):
         if not entity.HasField("trip_update"):
@@ -402,5 +393,37 @@ def normalize(
                     source_record_id=record_id,
                 )
             )
+
+    # ONE lineage edge for the whole batch, not one per row.
+    #
+    # This used to append an edge per normalized row, all of them carrying the
+    # SAME transform and the SAME input record and differing only in
+    # output_id. A single GTFS-RT poll carries an update for every active
+    # trip, so one raw record produced thousands of edges, every 30 seconds,
+    # forever. Measured on a small agency: 12,257 raw records had generated
+    # 19.4 million edges and 22 GB — against a raw.records table of 5.9 MB.
+    # On the partner agency it filled a 146 GB disk and stopped their day.
+    #
+    # Nothing ever read them. The metric lineage walk starts at
+    # computed.metric_values and its inputs are raw.records directly, so it
+    # never traverses a canonical edge; and no reverse lookup by input_id
+    # exists anywhere in the API. Nineteen million rows, write-only.
+    #
+    # The batch edge keeps the question that IS worth answering — "which raw
+    # record produced this table's rows?" — and answers it once. output_id is
+    # the source record, so the edge reads: the canonical.trip_updates
+    # produced from record R. Row-level provenance is not lost either: every
+    # row already carries source_record_id.
+    if rows:
+        edges.append(
+            LineageEdge(
+                output_kind=OUTPUT_KIND,
+                output_id=record_id,
+                transform_name=TRANSFORM_NAME,
+                transform_version=TRANSFORM_VERSION,
+                input_kind=INPUT_KIND,
+                input_id=record_id,
+            )
+        )
 
     return rows, edges, findings
