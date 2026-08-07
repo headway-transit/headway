@@ -179,6 +179,22 @@ type Poller struct {
 	Source string
 	// StateDir is where the high-water mark persists. REQUIRED.
 	StateDir string
+	// StartAfter is the cursor value the FIRST poll reads after. REQUIRED on
+	// a first run, and deliberately so.
+	//
+	// This connector used to read from the beginning of the view when no
+	// high-water mark existed. That is fine against a small table and
+	// catastrophic against a real warehouse: the first agency to connect one
+	// pointed it at an APC table of roughly 84 million rows and filled 123 GB
+	// of database before anyone noticed, on a laptop with 1.1 GB left. The
+	// person it lands on is an operator who has just been handed a working
+	// connection and has no reason to expect a silent multi-year backfill.
+	//
+	// So the starting point is now a DECLARED decision rather than a default.
+	// "0" is still allowed — an agency that genuinely wants its whole history
+	// can say so — but it has to say so. Ignored once a state file exists,
+	// because the mark on disk is the truth from then on.
+	StartAfter string
 
 	BatchMaxRows      int
 	QueryTimeout      time.Duration
@@ -330,6 +346,24 @@ func (p *Poller) Check() error {
 				"across restarts so history is never re-read by accident; give "+
 				"the connector a writable directory (the Compose file mounts "+
 				"deploy/compose/sqlsource-state)")
+	}
+
+	if strings.TrimSpace(p.StartAfter) == "" {
+		problems = append(problems,
+			"SQLSOURCE_START_AFTER is not set. It is the "+p.CursorColumn+
+				" value the FIRST read starts after, and it has no default on "+
+				"purpose: without one this connector would read your whole "+
+				"view from the beginning, which on a warehouse table means "+
+				"years of history landing at once. Set it to a recent cursor "+
+				"value to begin near today, or to 0 if you genuinely want the "+
+				"entire history. Ask your database administrator for the "+
+				"current maximum if you are not sure. Once the connector has "+
+				"run, its own saved position takes over and this is ignored")
+	} else if _, err := strconv.ParseInt(strings.TrimSpace(p.StartAfter), 10, 64); err != nil {
+		problems = append(problems,
+			"SQLSOURCE_START_AFTER is "+strconv.Quote(p.StartAfter)+", which is "+
+				"not a whole number. The cursor column is an integer key, so "+
+				"the starting point must be one too")
 	}
 
 	if p.Store == nil {
@@ -723,8 +757,23 @@ func (p *Poller) loadState() error {
 	path := StatePath(p.StateDir, p.Source)
 	raw, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
-		// First run: read from the beginning of the view.
-		p.hwSet = false
+		// FIRST RUN. Start where the operator said to, never at the beginning
+		// of the view — see the StartAfter field for what that cost the first
+		// agency to connect a warehouse. Validation has already refused an
+		// empty or non-integer value, so this parse cannot surprise us.
+		start, perr := strconv.ParseInt(strings.TrimSpace(p.StartAfter), 10, 64)
+		if perr != nil {
+			return fmt.Errorf(
+				"sqlsource: SQLSOURCE_START_AFTER %q is not a whole number; "+
+					"the cursor column is an integer key so the starting "+
+					"point must be one too", p.StartAfter)
+		}
+		p.hw, p.hwSet = start, true
+		if p.Log != nil {
+			p.Log.Info("sqlsource first run: starting after the declared cursor",
+				"view", p.View, "cursor_column", p.CursorColumn,
+				"start_after", start)
+		}
 		return nil
 	}
 	if err != nil {

@@ -60,6 +60,12 @@ func newTestPoller(t *testing.T, results ...fakeResult) (*Poller, *fakeDB, *prod
 		CursorColumn: "VehicleLocationAPCKey",
 		Source:       "tripspark_streets",
 		StateDir:     t.TempDir(),
+		// Every existing test predates SQLSOURCE_START_AFTER and relied on
+		// the old "read from the beginning" default. "0" preserves exactly
+		// that behaviour, so these tests keep testing what they were written
+		// to test — while the DEFAULT is now a refusal rather than a
+		// full-history read. The refusal has its own tests below.
+		StartAfter:   "0",
 		Store:        fakeStore,
 		Producer:     fakeProd,
 		Log:          slog.New(slog.NewTextHandler(testWriter{t}, nil)),
@@ -83,7 +89,11 @@ func TestPollOnceRendersLandsAndProduces(t *testing.T) {
 		t.Fatalf("PollOnce: %v", err)
 	}
 
-	// First-ever poll: no WHERE clause, keyset order, explicit column list.
+	// First-ever poll. There IS a WHERE clause now, and that is the change:
+	// the first read is bounded by the operator's declared SQLSOURCE_START_AFTER
+	// (here "0", preserving this test's original full-view intent) rather than
+	// being unbounded. An unbounded first read is what filled 123 GB of
+	// database against a real 84-million-row warehouse view.
 	queries := fdb.recorded()
 	if len(queries) != 1 {
 		t.Fatalf("recorded %d queries, want 1", len(queries))
@@ -93,7 +103,8 @@ func TestPollOnceRendersLandsAndProduces(t *testing.T) {
 		"[APCSource], [IsTripper], [IsDetour], [TripName], [RouteName], " +
 		"[RouteShortName], [PatternName], [StopName], [StopCode], " +
 		"[PatternPointRank], [DirectionKey], [EventDateISO] " +
-		"FROM [dbo].[vw_headway_apc] ORDER BY [VehicleLocationAPCKey] ASC"
+		"FROM [dbo].[vw_headway_apc] WHERE [VehicleLocationAPCKey] > @p1 " +
+		"ORDER BY [VehicleLocationAPCKey] ASC"
 	if queries[0].query != wantQuery {
 		t.Errorf("query =\n%q\nwant\n%q", queries[0].query, wantQuery)
 	}
@@ -463,5 +474,107 @@ func TestRunPollsPeriodicallyAndStopsOnCancel(t *testing.T) {
 	cancel()
 	if err := <-done; err != context.Canceled {
 		t.Fatalf("Run returned %v, want context.Canceled", err)
+	}
+}
+
+// --- SQLSOURCE_START_AFTER: the bound that was missing -----------------------
+//
+// The first agency to connect a real warehouse pointed this connector at an
+// APC view of roughly 84 million rows. With no high-water mark it read from
+// the beginning of the view, wrote 123 GB into the database, and the operator
+// — who had just been handed a working connection — found out from a
+// low-disk-space notification with 1.1 GB left. Nothing warned him, because
+// nothing knew it was unusual.
+//
+// A starting point is now a declared decision. These tests are the reason to
+// believe it stays one.
+
+func TestFirstRunRefusesWithoutADeclaredStartingPoint(t *testing.T) {
+	p, _, _, _ := newTestPoller(t)
+	p.StartAfter = ""
+
+	err := p.PollOnce(context.Background())
+	if err == nil {
+		t.Fatal("expected a refusal with no SQLSOURCE_START_AFTER, got none")
+	}
+	msg := err.Error()
+	// The refusal has to teach, not just refuse: an operator reading it must
+	// learn what to set and why it has no default.
+	for _, want := range []string{
+		"SQLSOURCE_START_AFTER",
+		"whole view from the beginning",
+		"years of history",
+		"0 if you genuinely want the entire history",
+	} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("refusal does not mention %q:\n%s", want, msg)
+		}
+	}
+}
+
+func TestFirstRunStartsAfterTheDeclaredCursor(t *testing.T) {
+	// THE POINT: a recent cursor value means recent data only. The query is
+	// bounded by what the operator asked for, not by the size of their table.
+	p, fdb, _, _ := newTestPoller(t, fakeResult{cols: tripsparkColumns})
+	p.StartAfter = "84000000"
+
+	if err := p.PollOnce(context.Background()); err != nil {
+		t.Fatalf("PollOnce: %v", err)
+	}
+	queries := fdb.recorded()
+	if len(queries) != 1 {
+		t.Fatalf("recorded %d queries, want 1", len(queries))
+	}
+	if !strings.Contains(queries[0].query, "WHERE [VehicleLocationAPCKey] > @p1") {
+		t.Errorf("first query is not bounded:\n%s", queries[0].query)
+	}
+	if len(queries[0].args) != 1 {
+		t.Fatalf("expected one bound argument, got %d", len(queries[0].args))
+	}
+	if got, ok := queries[0].args[0].Value.(int64); !ok || got != 84000000 {
+		t.Errorf("first read started after %v, want 84000000", queries[0].args[0].Value)
+	}
+}
+
+func TestStartAfterMustBeAWholeNumber(t *testing.T) {
+	// The cursor column is an integer key. A date or a name here would be a
+	// silent full-table read if it were coerced, so it is refused instead.
+	p, _, _, _ := newTestPoller(t)
+	p.StartAfter = "2026-08-01"
+
+	err := p.PollOnce(context.Background())
+	if err == nil {
+		t.Fatal("expected a refusal for a non-integer starting point")
+	}
+	if !strings.Contains(err.Error(), "not a whole number") {
+		t.Errorf("refusal does not explain the problem:\n%s", err)
+	}
+}
+
+func TestSavedPositionOutranksTheDeclaredStartingPoint(t *testing.T) {
+	// Once the connector has run, the mark on disk is the truth. If
+	// StartAfter kept winning, every restart would re-read from it and
+	// duplicate work forever — and an operator who set it low would silently
+	// replay history on every deploy.
+	p, fdb, _, _ := newTestPoller(t, fakeResult{cols: tripsparkColumns}, fakeResult{cols: tripsparkColumns})
+	p.StartAfter = "100"
+
+	if err := p.PollOnce(context.Background()); err != nil {
+		t.Fatalf("first PollOnce: %v", err)
+	}
+	// Advance the mark as a real batch would, then reload from disk.
+	p.hw, p.hwSet, p.hwLoaded = 500, true, true
+	if err := p.saveState(); err != nil {
+		t.Fatalf("saveState: %v", err)
+	}
+	p.hwLoaded, p.hwSet, p.hw = false, false, 0
+
+	if err := p.PollOnce(context.Background()); err != nil {
+		t.Fatalf("second PollOnce: %v", err)
+	}
+	queries := fdb.recorded()
+	last := queries[len(queries)-1]
+	if got, ok := last.args[0].Value.(int64); !ok || got != 500 {
+		t.Errorf("resumed after %v, want the saved 500 — not StartAfter", last.args[0].Value)
 	}
 }

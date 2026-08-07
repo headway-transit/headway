@@ -514,6 +514,16 @@ contact hands over as a ticket):
    Headway remembers the highest key it has read and asks only for newer
    rows — that is what makes frequent polling cheap.
 4. **A firewall path** from the Headway machine to the database port.
+5. **The current maximum of the cursor column**, so you can tell Headway
+   where to start. One number — your DBA can read it in a second:
+   `SELECT MAX(VehicleLocationAPCKey) FROM dbo.vw_headway_apc;`
+
+> **How much history do you want?** Headway will not decide this for you.
+> A warehouse view can hold years of rows, and reading all of it on the
+> first run can fill a disk before anyone notices — that happened to the
+> first agency to connect one. Starting near today and letting history
+> arrive later (or never) is almost always the right answer for a
+> reporting system that only needs the periods you certify.
 
 Then, on the Headway side, in `deploy/compose/.env` (the connector is off
 until you set these; if one is missing it refuses to start and tells you
@@ -527,6 +537,14 @@ SQLSOURCE_VIEW=dbo.vw_headway_apc
 # EXACTLY the adapter's declared columns, in the adapter's order:
 SQLSOURCE_COLUMNS=VehicleLocationAPCKey,VehicleName,TotalCount,BoardCount,AlightCount,UnmodifiedAlightCount,APCSource,IsTripper,IsDetour,TripName,RouteName,RouteShortName,PatternName,StopName,StopCode,PatternPointRank,DirectionKey,EventDateISO
 SQLSOURCE_CURSOR_COLUMN=VehicleLocationAPCKey
+# Where the FIRST read starts. There is no default, on purpose: without
+# this, Headway would read your whole view from the beginning, and on a
+# warehouse table that means years of history landing at once. Ask your
+# DBA for the current maximum of the cursor column and use a value near
+# it to begin with recent data; use 0 only if you genuinely want the
+# entire history. Once the connector has run, its own saved position
+# takes over and this setting is ignored.
+SQLSOURCE_START_AFTER=84000000
 SQLSOURCE_ADAPTER_LABEL=tripspark_streets
 # Optional: how often to ask for new rows (default 5m — this is the
 # "more often than nightly" knob), and the rows-per-batch cap.
