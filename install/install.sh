@@ -92,7 +92,19 @@ PMTILES_SHA256_X86_64="3ed7dbf4ec2e6dfe5e25b6f70d1ffc932729f93c86db353bf514dd710
 PMTILES_SHA256_ARM64="f8bd47e7ea866863489cad588fbaf2f31f42e5821f7a03f009b3769f05801cb1"
 # Margin added around the stops' own bounding box, in degrees (~0.1° is
 # about 7 miles north-south). Stated to the user before anything downloads.
-BASEMAP_MARGIN_DEG="0.10"
+#
+# OVERRIDABLE, because the right answer is geographic. The first agency to
+# use this said the map "doesn't move well outside the service area" — 7
+# miles of context is too tight to get your bearings. But the cost of a wider
+# margin is not uniform: degrees are cheap over rural terrain and expensive
+# over a dense metro, where the same half-degree pulls in millions of
+# buildings. So the default stays conservative and an agency that wants more
+# room asks for it:
+#
+#   HEADWAY_BASEMAP_MARGIN_DEG=0.25 ./install/install.sh --download-basemap
+#
+# 0.10 is about 7 miles, 0.25 about 17, 0.50 about 35.
+BASEMAP_MARGIN_DEG="${HEADWAY_BASEMAP_MARGIN_DEG:-0.10}"
 
 # Network access ("Where will people use Headway from?"), see docs/network-access.md.
 #   local = just this computer (default)   lan = other computers in the office
@@ -1822,16 +1834,41 @@ basemap_choose_area() {
      && is_number "$minlon" && is_number "$minlat" \
      && is_number "$maxlon" && is_number "$maxlat"; then
     # The stops' own box + the stated margin, rounded to 4 decimal places.
-    BM_WEST="$(awk -v v="$minlon" -v m="$BASEMAP_MARGIN_DEG" 'BEGIN { printf "%.4f", v - m }')"
+    #
+    # THE MARGIN IS IN MILES, NOT DEGREES, AND THE TWO ARE NOT THE SAME.
+    # A degree of latitude is ~69 miles everywhere. A degree of longitude is
+    # 69 miles only at the equator and shrinks by cos(latitude) as you go
+    # north — at 47N it is about 46 miles. Adding the same NUMBER OF DEGREES
+    # to both axes therefore buys a third less real distance sideways than it
+    # does vertically, and the map feels pinched east-west while looking
+    # correct north-south. That is exactly how the first agency described it:
+    # vertical room was right, horizontal was not.
+    #
+    # So the east-west margin is divided by cos(mean latitude), which makes
+    # the margin the same DISTANCE on both axes. Clamped at 85 degrees so a
+    # hypothetical arctic agency cannot divide by something near zero and ask
+    # for a planet-sized download.
+    local lon_margin
+    lon_margin="$(awk -v a="$minlat" -v b="$maxlat" -v m="$BASEMAP_MARGIN_DEG" '
+      BEGIN {
+        mid = (a + b) / 2
+        if (mid >  85) mid =  85
+        if (mid < -85) mid = -85
+        c = cos(mid * 3.14159265358979 / 180)
+        if (c < 0.0871557) c = 0.0871557   # cos(85 deg)
+        printf "%.6f", m / c
+      }')"
+    BM_WEST="$(awk -v v="$minlon" -v m="$lon_margin" 'BEGIN { printf "%.4f", v - m }')"
     BM_SOUTH="$(awk -v v="$minlat" -v m="$BASEMAP_MARGIN_DEG" 'BEGIN { printf "%.4f", v - m }')"
-    BM_EAST="$(awk -v v="$maxlon" -v m="$BASEMAP_MARGIN_DEG" 'BEGIN { printf "%.4f", v + m }')"
+    BM_EAST="$(awk -v v="$maxlon" -v m="$lon_margin" 'BEGIN { printf "%.4f", v + m }')"
     BM_NORTH="$(awk -v v="$maxlat" -v m="$BASEMAP_MARGIN_DEG" 'BEGIN { printf "%.4f", v + m }')"
     say ""
     say "Your map area, read from your own data: this installation has"
     say "$count stops with coordinates, spanning"
     say "    longitude $minlon to $maxlon, latitude $minlat to $maxlat."
-    say "With a margin of about 7 miles ($BASEMAP_MARGIN_DEG degrees) around the"
-    say "edge, the map would cover:"
+    say "With an even margin of about $(awk -v m="$BASEMAP_MARGIN_DEG" 'BEGIN{printf "%.0f", m*69}') miles on every side"
+    say "($BASEMAP_MARGIN_DEG degrees north-south, $lon_margin east-west — a degree"
+    say "of longitude is shorter this far north), the map would cover:"
     say "    west $BM_WEST   south $BM_SOUTH   east $BM_EAST   north $BM_NORTH"
     log "basemap area from canonical.stops: $count stops, bbox $BM_WEST,$BM_SOUTH,$BM_EAST,$BM_NORTH"
     local answer
