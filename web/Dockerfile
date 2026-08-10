@@ -9,7 +9,7 @@
 # image is what agencies self-host, so it tracks LTS lines only and moves on
 # LTS boundaries. CI pins the same major (ci.yml node-version, enforced by
 # install/test_installer_static.py).
-FROM node:24-alpine AS build
+FROM node:26-alpine AS build
 WORKDIR /src
 COPY package.json package-lock.json ./
 RUN npm ci
