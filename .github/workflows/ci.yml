@@ -465,7 +465,7 @@ jobs:
           upload-artifact: false
           upload-release-assets: false
       - name: upload SBOM artifact (short retention — CI evidence, not a release)
-        uses: actions/upload-artifact@v7.0.1
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: sbom-source-${{ github.sha }}
           path: headway-source.cdx.json
